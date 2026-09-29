@@ -39,9 +39,18 @@ case "$(basename "$0")" in
     # This one *is* a command — `--list`, `--label`, `--restore` — and the wrapper
     # it execs validates its own flags, so arguments pass straight through.
     TARGET="$REPO/deploy/scangrade-db-snapshot.sh" ;;
+  sgfix)
+    # The recovery lever, and the only installed name that is deliberately short:
+    # it is typed by hand on a provider console where nothing can be pasted, so its
+    # name is part of its interface. Its flags pass through for the same reason the
+    # snapshot's do — the script validates them itself and takes nothing that steers
+    # a release — and it is NOT the deploy name, so the Gate 0 block below does not
+    # apply to it (that gate exists to keep a drifted *runner* from deploying).
+    TARGET="$REPO/deploy/scangrade-recover.sh" ;;
   *)
     echo "!! $(basename "$0"): unknown launcher name." >&2
-    echo "   This file is installed as scangrade-deploy or scangrade-db-snapshot;" >&2
+    echo "   This file is installed as scangrade-deploy, scangrade-db-snapshot or" >&2
+    echo "   sgfix;" >&2
     echo "   it picks its target by its own name." >&2
     exit 64 ;;
 esac

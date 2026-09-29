@@ -102,6 +102,10 @@ PREFLIGHT_DIFF_MARK="[sg: diff truncated at"
 INSTALLED_BIN_DIR="/usr/local/bin"
 INSTALLED_RUNNER="$INSTALLED_BIN_DIR/scangrade-deploy"
 INSTALLED_SNAPSHOT="$INSTALLED_BIN_DIR/scangrade-db-snapshot"
+#: The recovery lever. Short on purpose — it is typed by hand on a provider console
+#: where nothing can be pasted — and refreshed like the other two, so a box that has
+#: released once since this file landed carries it whether or not the installer ran.
+INSTALLED_RECOVER="$INSTALLED_BIN_DIR/sgfix"
 BACKUP_DIR="/var/backups/scangrade"
 BACKUP_KEEP=5
 SNAPSHOT_CMD="$REPO/deploy/db_snapshot.py"
@@ -886,12 +890,16 @@ refresh_launcher() {
   return 0
 }
 
-# Both names the installer installs, because both are rendered from the same
+# Every name the installer installs, because all of them are rendered from the same
 # template and the snapshot command is the one that was silently broken by being
-# a copy (it derived the checkout from its own location).
+# a copy (it derived the checkout from its own location). The recovery lever is in
+# here for a sharper reason: the box that most needs it is the box that cannot
+# release, so the installer is the only thing that can put it there before the first
+# recovery — and after that this refresh keeps it current with no second console run.
 refresh_installed_launchers() {
   LAUNCHER_TARGET="$INSTALLED_RUNNER" LAUNCHER_LABEL="the deploy runner" refresh_launcher
   LAUNCHER_TARGET="$INSTALLED_SNAPSHOT" LAUNCHER_LABEL="the snapshot command" refresh_launcher
+  LAUNCHER_TARGET="$INSTALLED_RECOVER" LAUNCHER_LABEL="the recovery lever" refresh_launcher
 }
 # refresh-launcher-logic:end
 

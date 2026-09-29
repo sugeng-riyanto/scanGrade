@@ -1264,6 +1264,91 @@ The vocabulary is the runner's own — `EXIT_CODES` and `RUN_STEPS` in
 directions: every `RUN_STEP=` assignment and every `exit N` in the script is in
 those tables, and every row in those tables has a sentence in the page.
 
+## One word when a box is stuck: `sgfix`
+
+Everything above is the runner healing itself, and the heal has one property that can
+make it undeliverable: **it travels in a release.** The runner reads the checkout's
+state *before* it fetches, so a box whose tree holds a hand edit is refused by the
+very check the newer commit was written to soften — the box cannot fetch the fix for
+the thing that stops it fetching. A box in that state sits exactly where it is, and
+the only way out used to be a console session on a noVNC window, typing
+`git -C /opt/scangrade …` by hand into a screen with no clipboard.
+
+So the checkout carries a lever, installed by the same installer as
+`scangrade-deploy`:
+
+```bash
+sgfix                 # recover this box, in one word
+sgfix --dry-run       # say why it is stuck and what would be done; change nothing
+```
+
+It is the **only** installed name that is short on purpose: it is typed by hand,
+where the length of the command is part of whether the job gets done. It takes no
+argument that aims it (only `--dry-run` and `--help`) — the same rule the deploy
+runner holds — because this is a thing root runs, not a thing anyone steers.
+
+### What it does, in order
+
+1. says why the box is stuck, read from the runner's **own records** (the quarantine,
+   `refused-before-merge`, `unarmed`, `last-stop`) and the tail of the journal —
+   never a second opinion about the box;
+2. applies the migrations `apply_migration.py --verify` reports as missing, each one
+   after its own rolled-back trial run. Before the release and not after: the schema
+   gate refuses a release whose database is behind its code, so applying them later
+   would only earn that refusal;
+3. runs one release;
+4. if a box-local edit refused it, sets that edit aside — a patch against `HEAD` for
+   a tracked path, the whole file for one `HEAD` has never seen — and runs the
+   release once more;
+5. if the refusal was the **schema** quarantine step 2 just answered, lifts that
+   quarantine for one attempt and runs the release once more;
+6. verifies: the checkout moved, the app answers, and everything it did is in the
+   record.
+
+### What it refuses, deliberately
+
+* it never resets a branch and never pushes — the checkout only ever moves by the
+  runner's own `git merge --ff-only`;
+* it never discards an edit without writing it down first. The record is written
+  **before** the tree is touched, an entry that cannot be recorded is left exactly
+  where it was, and the run says so. A recovery tool that loses a box's only copy of
+  a fix is worse than the console session it replaces;
+* it lifts a quarantine **only** when the record names the schema gate, because that
+  is the one gate it can answer by doing something. A perf, theme, smoke or claims
+  refusal is a statement about the release, and a lever that could clear those would
+  be a bypass with a friendly name;
+* **Gate 0 does not apply to it.** That gate exists to keep a drifted *runner* from
+  deploying from somewhere other than the checkout; the lever runs no gates at all —
+  it starts the unit, which is where the gates live — so requiring the block in it
+  would refuse on a box that is working correctly.
+
+Each run writes `/var/lib/scangrade-deploy/recover/<stamp>.txt` — the reason, what it
+set aside and where the patch is, which migrations it applied, what each release
+attempt did — and keeps the newest five, with each set-aside tree going when its
+record goes. A recovery that cannot be read back afterwards is indistinguishable
+from a box somebody broke by hand.
+
+### A box older than the lever
+
+The lever is installed by `install-auto-deploy.sh`, and a box that is already stuck
+cannot fetch that either. On a box from before it existed, the console steps are the
+plain ones, and only for this once:
+
+```bash
+sudo -i
+cd /opt/scangrade
+git status --porcelain        # what is in the way; read `git diff` before discarding it
+git stash                     # or: git checkout -- <path>, once you have read it
+systemctl start scangrade-deploy.service
+journalctl -u scangrade-deploy.service -n 60 --no-pager
+```
+
+Once that release lands, the checkout carries the runner's own heal and this lever,
+and neither shape needs the console again. `--check` reports the lever separately
+from the gates it is armed for: a missing lever is worth saying out loud and is not a
+reason to hold a release, since folding it in would refuse every release on every box
+installed before the lever existed — including the one that installs it.
+
 ## Why a reload and not a restart
 
 `scangrade.service` carries `ExecReload=/bin/kill -s HUP $MAINPID`. SIGHUP makes
