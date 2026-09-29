@@ -428,7 +428,7 @@
       "frozen": false
     },
     "super_admin/deploy_status.html": {
-      "pairs": 388,
+      "pairs": 390,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false

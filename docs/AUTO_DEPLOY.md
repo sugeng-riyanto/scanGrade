@@ -1459,29 +1459,42 @@ dirty check refuses *before* its own fetch. That runner never learns what
 push can reach it, and the fix for that refusal is carried by the release the refusal
 is holding.
 
-On a box in that state the way out is one line, and it needs no network: it reads the
-lever out of the commit the box has **already fetched** and pipes it into a root bash.
+On a box in that state the way out is one line. It reads the lever out of the commit the
+box has **already fetched**; a fetched ref **older than the lever** — a box that stalled
+before `deploy/scangrade-recover.sh` existed — is the other state, and the same line
+answers it by fetching `origin` itself and reading again. Both are typed, not reasoned
+about: the line is the one thing to remember.
 
 ```bash
-sudo bash -c 'runuser -u scangrade -- git -C /opt/scangrade show origin/main:deploy/scangrade-recover.sh | bash'
+sudo bash -c 'runuser -u scangrade -- git -C /opt/scangrade show origin/main:deploy/scangrade-recover.sh > /tmp/sgfix.sh || { runuser -u scangrade -- git -C /opt/scangrade fetch -q origin && runuser -u scangrade -- git -C /opt/scangrade show origin/main:deploy/scangrade-recover.sh > /tmp/sgfix.sh; } && bash /tmp/sgfix.sh'
 ```
 
-Three things make that the right shape here rather than a trick. `git show` is a read
-of the object store, so it works on the checkouts this section is about — dirty, rolled
-back, refused or quarantined — where a fetch, an install or a merge does not. It asks
-git as the deploy's **own user** (`runuser -u scangrade`), because a root-side read of a
-checkout owned by `scangrade` is the disagreement the note at the end of this section is
-about. And what it runs is the real lever, not a simplified recovery: a box-local edit is
-set aside **with a patch and a record** rather than stashed, the migrations the live
-schema is missing are applied, one release runs, and the run verifies itself and writes
-down everything it did.
+Four things make that the right shape here rather than a trick:
 
-On a console with no clipboard that line has to be typed, so here is the same recovery
-in two shorter lines. They write the lever to a file first, and that is not only about
-length: a lever old enough to still carry the `sudo -E bash "$0"` hop cannot re-run
-itself out of a **pipe** (a piped script has no `$0` — it is the shell's own path), so on
-this class of box the one-line pipe can die with a message about the wrong thing. A file
-gives it one, and run as root the hop is not taken at all.
+* **`git show` is a read of the object store**, so the common case works on the
+  checkouts this section is about — dirty, rolled back, refused or quarantined — where
+  a fetch, an install or a merge does not;
+* **the fetch is a fallback, and only that.** It happens when, and only when, the read
+  came up empty. A box that cannot reach GitHub is exactly the box this line is for, so
+  fetching unconditionally would hang the one case that needed nothing fetched;
+* **every git call is made as the deploy's own user** (`runuser -u scangrade`),
+  including the fetch — that one *writes* refs, into a checkout it does not own, which
+  is the disagreement the note at the end of this section is about;
+* **it writes the lever to a file and runs only what it read.** A file is what an older
+  lever needs: a lever old enough to still carry the `sudo -E bash "$0"` hop cannot
+  re-run itself out of a **pipe** (a piped script has no `$0` — it is the shell's own
+  path), so a one-line pipe can die with a message about the wrong thing. And the `&&`
+  before `bash` is load-bearing: `git show … > /tmp/sgfix.sh` truncates that file before
+  git runs, so running it regardless would execute an empty script, exit `0`, and report
+  a recovery that changed nothing at all.
+
+What it runs is the real lever, not a simplified recovery: a box-local edit is set
+aside **with a patch and a record** rather than stashed, the migrations the live schema
+is missing are applied, one release runs, and the run verifies itself and writes down
+everything it did.
+
+On a console with no clipboard, and when the fetched ref already has the lever, the same
+recovery is two shorter lines:
 
 ```bash
 git -C /opt/scangrade show origin/main:deploy/scangrade-recover.sh > /tmp/f.sh
@@ -1492,25 +1505,15 @@ The lever drops to the checkout's owner itself for every git read and write, so 
 here has to be typed as `scangrade` — and the edit it moves is preserved as a patch under
 `/var/lib/scangrade-deploy/recover/<stamp>/`, named in the record beside it.
 
-Run that lever without root and it refuses, printing this same line — because a piped
-script has nothing to re-run as root. `git show … | bash` leaves `$0` as the shell's own
-path and `BASH_SOURCE` unset (measured: `bash x.sh` sets both to the file), so the hop it
-used to take handed sudo either whatever `bash` meant in the current directory or the
-shell's own binary, and the recovery did not happen either way, under an error about the
-wrong thing. `BASH_SOURCE` is what the hop is keyed on now.
+Run any of these without root and the lever refuses, printing the one line above — a
+file has a `$0`, so the hop it prints is one that works. (The hop used to be keyed on
+`$0` itself, which is the shell's own path for a piped script and `bash`'s meaning in the
+current directory for a bad one; `BASH_SOURCE` is what it is keyed on now.)
 
-If the box can still reach GitHub and you want the very newest lever rather than the one
-it already has, put a fetch in front of it. The `;` is deliberate: a fetch that draws no
-credentials must still leave the extracted copy usable.
-
-```bash
-sudo bash -c 'runuser -u scangrade -- git -C /opt/scangrade fetch -q origin; runuser -u scangrade -- git -C /opt/scangrade show origin/main:deploy/scangrade-recover.sh | bash'
-```
-
-The one case that line cannot answer is a fetched ref **older than the lever** — a box
-that stalled before `deploy/scangrade-recover.sh` existed. Then `git show` says the path
-is not in that commit, nothing runs, and the plain console steps are all that is left,
-for this once:
+The plain console steps below are left for one residual case, and it is narrower than it
+looks: a box whose fetched ref predates the lever **and** that cannot reach GitHub at
+all. There the line has nothing to read and nothing to fetch, and no release could land
+either, so the checkout has to be cleared by hand:
 
 ```bash
 sudo -i
@@ -1564,10 +1567,15 @@ Three decisions make the reading worth trusting, and each is a test:
   checkout past the running process — the one moment the distinction *is* the answer.
   A process that read its own commit from there would report the checkout's `HEAD`
   under the name of the running code;
-* **it is read once per process** and handed out by identity. Re-reading it per request
-  would follow the checkout as it moves, which the checkout reading already does; this
-  one has to be fixed until the process is replaced, because that is the fact the page
-  needs;
+* **it is resolved when the module is imported** and handed out by identity. Re-reading
+  it per request would follow the checkout as it moves, which the checkout reading
+  already does; this one has to be fixed until the process is replaced, because that is
+  the fact the page needs. It is resolved at *import* rather than at first use for a
+  reason that is easy to miss and fatal to the check below: a worker that was never
+  asked before a release merged would take its reading afterwards, and would then report
+  the newly merged commit while running the code it loaded yesterday — and it would go on
+  reporting it, because the memo fills once. At import, python has just loaded these
+  files, so the commit the checkout held then is the commit whose content is in memory;
 * **`unknown` is never a number.** A commit this repository does not have is reported
   as a reason, not as "zero commits away" — those two are opposite answers, and the
   second one reads as reassurance.
@@ -1576,6 +1584,43 @@ The reading sits above `dirty` and `behind` in the verdict order, and below ever
 stop. Those two describe the *arrangement* — what the next tick would do — and this one
 describes what a student is being served right now; a `refused` record or a heal the
 runner performed is a stop, and a stop stays the headline.
+
+### And the deploy asks it too, before it trusts any gate
+
+Everything *below* the reload claims to measure "this release": the smoke test signs
+in as each role, the claims gate re-reads the published table, the perf gate compares
+a reference load with the last release that passed. All three rest on the premise that
+the code answering is the code that was just merged — and a `systemctl reload` that
+quietly did nothing breaks it without breaking any of them.
+
+So the app publishes the commit it is serving on `/health` (`app/__init__.py`,
+`served_commit`, fenced with `served-commit:start`), and
+`deploy/served_commit_gate.py` compares it with the commit the runner just merged. A
+mismatch refuses the release and quarantines it, exactly like a failing gate.
+
+Three things about it are decisions rather than plumbing:
+
+* **One probe is not a verdict.** gunicorn's reload is graceful, so a worker that is
+  finishing an in-flight request can answer the first ask with the old commit. The gate
+  asks five times, two seconds apart, and refuses only when *no* probe reported the
+  merged commit — the perf gate's rule about a divergence no second probe confirmed.
+* **"Could not measure" is not "bad release".** An app that cannot be asked is a box
+  problem, and the health probe already owns reachability. Only a *reading* that
+  contradicts the merge refuses. The gate's refusal exit code is `3`, deliberately not
+  `1`, because python exits `1` on an uncaught exception and a check that crashed must
+  never be read as a check that refused.
+* **Silence is evidence only when this release ships the reading.** A release that
+  ships it can always name its commit, so an app answering without one is not this
+  release — the reload did not take. A release that *predates* the reading cannot be
+  asked, and refusing it would quarantine the very commit that introduces the check.
+  The gate is told which file to ask (`--reporter`) and grep it for the marker, so the
+  two halves cannot drift apart: `tests/unit/test_served_commit_gate.py` reads the
+  marker out of the gate and requires it in the app.
+
+The marker is the one thing here with a source-level coupling, and it is deliberate:
+`REPORTER_MARKER` in the gate and the fence in `app/__init__.py` are the same string,
+held together by that test. If they ever diverge the gate degrades to "cannot measure"
+on every tick — loudly, in the journal, never as a silent pass.
 
 ## Why a reload and not a restart
 

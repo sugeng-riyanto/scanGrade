@@ -124,7 +124,7 @@ Unathenticated requests return 401.
 | GET | /tutorial/guru | No | Teacher tutorial |
 | GET | /tutorial/murid | No | Student tutorial |
 | GET | /tutorial/admin-sekolah | No | Admin tutorial |
-| GET | /health | No | Health check |
+| GET | /health | No | Health check, including the commit this process is serving |
 
 ## Error Response Format
 

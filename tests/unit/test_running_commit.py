@@ -139,6 +139,13 @@ class TestTheProcessKnowsItsOwnCommit:
         snap = build_info.read_commit(ROOT)
         assert snap["repo"] == str(ROOT)
         assert build_info.snapshot()["repo"] == str(ROOT)
+        #: Asked again here rather than only through `snapshot()`, because the
+        #: snapshot's own reading is resolved at import — long before this test can
+        #: point the variable anywhere. `read_own_commit` is the one call that still
+        #: chooses a path at call time, so it is the one this guard has to make.
+        assert build_info.read_own_commit()["repo"] == str(ROOT), (
+            "the reading took its path from SCANGRADE_REPO, which names the checkout "
+            "the deploy is about to touch rather than the one this code came from")
 
     def test_the_module_is_where_the_app_package_is(self):
         assert build_info.CODE_ROOT == ROOT, (
