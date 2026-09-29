@@ -259,6 +259,10 @@ GATE_KEYS = frozenset({
     "python_compileall",
     "app_did_not_construct",
     "app_did_not_come_up_after_the_reload",
+    #: The app answered, but named a commit other than the one this run merged: the
+    #: reload did not take, so the release is not the code being served. Recorded by
+    #: the `served-commit-gate` block in `deploy/scangrade-deploy.sh`.
+    "served_commit",
     "runner_not_armed",
     "theme_gate",
     "smoke_test",
@@ -833,6 +837,10 @@ EXIT_CODES: dict[int, str] = {
 RUN_STEPS = frozenset({
     "start", "lock", "identity", "armament", "checkout", "fetch", "snapshot",
     "merge", "dependencies", "compile", "construct", "theme", "schema", "reload",
+    #: Between the reload and `verify`: the app is asked which commit it is serving,
+    #: so the gates that follow measure a release that provably reloaded. See the
+    #: `served-commit-gate` block in `deploy/scangrade-deploy.sh`.
+    "served",
     "verify", "done",
 })
 

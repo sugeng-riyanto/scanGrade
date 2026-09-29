@@ -1189,6 +1189,7 @@ def test_every_refusal_names_its_gate_and_records_the_commit():
         "runner not armed (the app refused to be deployed by it)",
         "theme gate (exit $THEME_RC)",
         "schema gate (the release names objects no migration applied)",
+        "served commit (the app reports serving a commit other than the one just merged)",
     ):
         assert reason in script, f"no FAIL_REASON for {reason!r} — the runner changed shape"
         at = script.index(reason)

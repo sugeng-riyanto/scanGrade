@@ -12,15 +12,24 @@ from the checkout's: the commit here is the one the code at `CODE_ROOT` was when
 this process imported it. It cannot drift, because it is not read again; it is
 what is being served until the process is replaced.
 
-Two rules, both of them the reason this is not a one-line helper elsewhere:
+Three rules, all of them the reason this is not a one-line helper elsewhere:
 
 * **It reads where this code lives, never `SCANGRADE_REPO`.** That variable names
   the checkout the deploy will act on, and the two agree until a release has moved
   the checkout past the running process — which is the one moment the distinction
   is the whole answer.
-* **It is read once, and a failure is a reason rather than an exception.** A box
-  whose git is missing, or whose code sits outside a checkout, still has to render
-  a page; it says so instead of inventing a sha.
+* **It is resolved when this module is imported, not when it is first asked for.** A
+  reading taken at call time describes the *checkout at that moment*, and a worker
+  that was never asked before a release merged would take it afterwards: it would
+  report the newly merged commit while running the code it loaded yesterday. That is
+  not a nicety — it is the false negative that defeats the deploy's served-commit
+  check, and it is permanent, because the memo is populated once. At import, python
+  has just loaded these files, so the commit the checkout held then is the commit
+  whose content is in memory. (`tests/unit/test_served_commit_gate.py` moves a
+  checkout out from under an imported module and fails if the reading follows.)
+* **`snapshot()` still hands out one object, and a failure is a reason rather than
+  an exception.** A box whose git is missing, or whose code sits outside a checkout,
+  still has to render a page; it says so instead of inventing a sha.
 """
 from __future__ import annotations
 
@@ -111,16 +120,34 @@ def read_commit(repo: pathlib.Path | str = CODE_ROOT) -> dict:
     return out
 
 
+def read_own_commit() -> dict:
+    """The commit whose code is in memory, read from where this code lives.
+
+    Called exactly once, at import, by the line below. It is a named function rather
+    than that call inlined so the two rules above stay testable: a test can call it
+    with `SCANGRADE_REPO` pointed elsewhere and require that it is ignored, which is
+    the guard that stops this reading from quietly becoming "the checkout the deploy
+    is about to touch".
+    """
+    return read_commit(CODE_ROOT)
+
+
+#: Resolved here, at import: see the module docstring. Everything downstream — the
+#: deploy-status card, and the deploy's own served-commit check — is only as true as
+#: this moment.
+_READING_AT_LOAD = read_own_commit()
+
+
 @functools.cache
 def snapshot() -> dict:
-    """This process's own commit, read once and handed out by identity.
+    """This process's own commit, sampled at load and handed out by identity.
 
-    Memoised rather than re-read per request because re-reading it would answer a
-    different question: it would follow the checkout as it moves, which is exactly
-    what the checkout reading already does. This one is fixed until the process is
-    replaced — that is the fact the page needs.
+    Not re-read per request, and not read at all here: re-reading would answer a
+    different question — it would follow the checkout as it moves, which is exactly
+    what the checkout reading already does — and reading it *late* would answer the
+    wrong one, which is worse.
     """
-    out = read_commit(CODE_ROOT)
+    out = dict(_READING_AT_LOAD)
     out["loaded_at"] = _LOADED_AT
     out["pid"] = os.getpid()
     return out

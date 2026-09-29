@@ -16,11 +16,30 @@
 #
 # A box that has no lever *installed* — a runner older than this file, or a checkout
 # that was rolled back before it landed — can still run it. The same one line reads it
-# out of the commit the box has already fetched and pipes it into a root bash: no
-# network, no credentials, nothing to install, and `git show` touches nothing in the
-# tree, so it works on a dirty, rolled-back, refused or quarantined checkout.
+# out of the commit the box has already fetched and runs it: nothing to install, and
+# `git show` touches nothing in the tree, so it works on a dirty, rolled-back, refused
+# or quarantined checkout.
 #
-#     sudo bash -c 'runuser -u scangrade -- git -C /opt/scangrade show origin/main:deploy/scangrade-recover.sh | bash'
+#     sudo bash -c 'runuser -u scangrade -- git -C /opt/scangrade show origin/main:deploy/scangrade-recover.sh > /tmp/sgfix.sh || { runuser -u scangrade -- git -C /opt/scangrade fetch -q origin && runuser -u scangrade -- git -C /opt/scangrade show origin/main:deploy/scangrade-recover.sh > /tmp/sgfix.sh; } && bash /tmp/sgfix.sh'
+#
+# Three things about that line are deliberate, because the box that needs it is the
+# oldest box there is:
+#
+#   * it writes the lever to a file before running it. A *piped* script has no `$0`, so
+#     a lever old enough to still carry the `sudo -E bash` hop — the one keyed on `$0` —
+#     cannot re-run itself out of a pipe; a file gives it one, and run as root the hop is
+#     not taken at all. The file form also lets the line check that it read something;
+#     (the hop is keyed on `BASH_SOURCE` now, and `tests/unit/test_console_recover.py`
+#     refuses the old spelling anywhere in this file — prose included) ;
+#   * **it fetches `origin` itself when the fetched ref has no lever.** A box that
+#     stalled before this file existed has a ref with no such path in it, so `git show`
+#     comes up empty — and that used to be the one case answered only by a console
+#     session and a hand-typed `git stash`. Now the same line fetches, as the deploy's
+#     own user (the fetch writes refs into a checkout it does not own), and reads again;
+#   * it fetches **only** in that case, and runs the file **only** if a read produced
+#     one. `git show x > f` truncates `f` before git runs, so a line that ran the file
+#     regardless would execute an empty script, exit 0 and report a recovery that
+#     changed nothing — which is worse than an error, because nobody looks again.
 #
 # What it does, in order, and nothing else:
 #
@@ -44,8 +63,11 @@
 #     cannot be written it changes nothing about that path;
 #   * it lifts a quarantine only when the record names the *schema* gate, because
 #     that is the one gate this script can answer by doing something. A perf, theme,
-#     smoke or claims refusal is a statement about the release, and a recovery lever
-#     that could clear those would be a bypass with a friendly name;
+#     smoke, claims or served-commit refusal is a statement about the release, and a
+#     recovery lever that could clear those would be a bypass with a friendly name;
+#     (the served-commit one is the closest call of the four — it *is* about this
+#     box's reload — but a release was never served under that commit, so lifting it
+#     would hand a quarantined release the one thing a gate refused to give it);
 #   * it applies a migration only after that file's own trial run passed;
 #   * it takes no argument that steers it (only --dry-run and --help), the same rule
 #     the deploy runner holds: this is a thing root runs, not a thing anyone aims.
@@ -72,13 +94,31 @@ MIGRATE="${SG_MIGRATE:-$REPO/deploy/apply_migration.py}"
 PAUSE_FILE="${SG_PAUSE_FILE:-/etc/scangrade-deploy.pause}"
 
 #: The one line an operator types on a box with no lever installed. It reads this
-#: script out of the commit the box has *already fetched* and pipes it into a root
-#: bash, which is the whole of it: `git show` is a read of the object store, so there
-#: is no fetch, no credentials and nothing to install. Short on purpose, for the same
-#: reason `sgfix` is short — it is typed by hand on a noVNC console with no clipboard.
+#: script out of the commit the box has fetched and runs it, so the whole of it is a
+#: `git show` — a read of the object store, nothing installed and nothing touched in
+#: the tree. Long, for a console with no clipboard, and long on purpose: every word of
+#: it is the difference between a recovery and an error about the wrong thing, and the
+#: one conditional in it exists because the box this line is *for* is the box whose
+#: fetched ref predates this file.
+#:
+#: Read it as four steps:
+#:
+#:   1. read this script out of `origin/$BRANCH` into /tmp/sgfix.sh;
+#:   2. if that failed — a ref from before this file existed — fetch `origin` as the
+#:      deploy user and read it again;
+#:   3. run the file, but *only* if step 1 or 2 produced one;
+#:   4. nothing else: no merge, no checkout, no install. The lever itself is what
+#:      decides the rest.
+#:
+#: Step 3's `&&` is the load-bearing one. `git show … > /tmp/sgfix.sh` truncates the
+#: file before git runs, so a line that ran it regardless would execute an empty
+#: script, exit 0, and report a recovery that changed nothing at all.
+#:
 #: One literal, printed by the refusal below and written in docs/AUTO_DEPLOY.md;
-#: tests/unit/test_console_recover.py fails when the two drift apart.
-GET_LEVER="runuser -u scangrade -- git -C /opt/scangrade show origin/main:deploy/scangrade-recover.sh | bash"
+#: tests/unit/test_console_recover.py fails when the copies drift apart, and runs this
+#: very command — with only the two box-specific paths substituted — against real
+#: repositories to prove both branches.
+GET_LEVER="runuser -u scangrade -- git -C /opt/scangrade show origin/main:deploy/scangrade-recover.sh > /tmp/sgfix.sh || { runuser -u scangrade -- git -C /opt/scangrade fetch -q origin && runuser -u scangrade -- git -C /opt/scangrade show origin/main:deploy/scangrade-recover.sh > /tmp/sgfix.sh; } && bash /tmp/sgfix.sh"
 
 #: What a quarantine record's third line holds when the schema gate earned it. The
 #: runner writes the gate's own name there, and the schema gate's name is the only
@@ -256,8 +296,9 @@ Everything it does is written to $STATE_DIR/recover/<stamp>.txt (default
 without recording it, and lifts a quarantine only when the schema gate earned it.
 
 On a box that has no lever installed yet, this file can be read out of the commit the
-box has already fetched and piped into a root bash — one line, no network; running it
-without root prints that line, and docs/AUTO_DEPLOY.md carries it too.
+box has already fetched and run — one line, which fetches `origin` itself if that
+commit predates the lever and runs nothing at all if it cannot read one. Running this
+script without root prints that line, and docs/AUTO_DEPLOY.md carries it too.
 USAGE
       exit 0 ;;
     *)

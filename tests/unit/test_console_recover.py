@@ -451,10 +451,21 @@ def test_the_documentation_names_the_word():
 # `sgfix` is installed by the installer and refreshed by the runner, and both of those
 # need something a stuck box does not have: a release that landed. What such a box
 # *does* have is the commit it fetched back when it was well — so the way in is one
-# line that reads this script out of `origin/$BRANCH` and pipes it into a root bash.
-# Two properties decide whether that line works at all, and both are behavioural here:
-# the piped script must reach its own end (nothing may consume its stdin), and the
-# command must be one string across the three places it is written down.
+# line that reads this script out of `origin/$BRANCH` and runs it.
+#
+# The line has to answer two states, and they are different boxes:
+#
+# * the fetched ref **has** the lever — `git show` is enough, and the line must not
+#   depend on reaching GitHub, because the box that needs it may not be able to;
+# * the fetched ref **predates** the lever — a box that stalled before this file
+#   existed. Then there is nothing to read, and the line has to fetch `origin` as the
+#   deploy user and read again, or the only way out is a console session.
+#
+# And it must never run an *empty* file: a failed `git show > file` leaves the file
+# truncated, so a line that runs it anyway exits 0 having done nothing — a silent
+# no-op is the one outcome worse than an error. That is why the extract is checked
+# before it is run, and why these are behavioural tests against real repositories
+# rather than readings of the literal.
 
 
 def _literal(name: str) -> str:
@@ -463,6 +474,72 @@ def _literal(name: str) -> str:
         if line.startswith(f"{name}="):
             return line.split("=", 1)[1].strip().strip('"')
     raise AssertionError(f"deploy/scangrade-recover.sh no longer defines {name}")
+
+
+#: The line names the box's checkout and the file it writes; a test replaces those
+#: two and nothing else, so the logic under test is the logic the console gets.
+BOX_REPO_IN_LINE = "/opt/scangrade"
+BOX_FILE_IN_LINE = "/tmp/sgfix.sh"
+
+#: What the fetched lever says when it runs. Two versions, because the interesting
+#: failure is running the *old* one — or the wrong file — and still looking recovered.
+LEVER_NEW = "#!/usr/bin/env bash\necho LEVER-NEW-RAN\n"
+LEVER_NEW_MARK = "LEVER-NEW-RAN"
+
+
+def _seed_origin(tmp_path: pathlib.Path):
+    """A bare origin and a checkout of it, whose fetched truth has no lever yet.
+
+    That is the box's own first state after the lever landed: the checkout has a
+    `main`, an `origin/main` pointing at it, and no `deploy/scangrade-recover.sh` in
+    that commit.
+    """
+    origin = tmp_path / "origin.git"
+    subprocess.run(["git", "-c", "init.defaultBranch=main", "init", "-q", "--bare",
+                    str(origin)], capture_output=True, text=True, check=True)
+    seed = tmp_path / "seed"
+    seed.mkdir()
+    (seed / "README").write_text("the release's line\n", encoding="utf-8")
+    subprocess.run(["git", "-c", "init.defaultBranch=main", "init", "-q", str(seed)],
+                   capture_output=True, text=True, check=True)
+    _git(seed, "add", "-A")
+    _git(seed, "commit", "-q", "-m", "before the lever")
+    _git(seed, "remote", "add", "origin", str(origin))
+    _git(seed, "push", "-q", "-u", "origin", "main")
+    checkout = tmp_path / "checkout"
+    subprocess.run(["git", "clone", "-q", str(origin), str(checkout)],
+                   capture_output=True, text=True, check=True)
+    return origin, seed, checkout
+
+
+def _publish_lever(seed: pathlib.Path, body: str) -> None:
+    """Put the lever on the origin's `main`, after the checkout has already fetched."""
+    (seed / "deploy").mkdir(exist_ok=True)
+    (seed / "deploy" / "scangrade-recover.sh").write_text(body, encoding="utf-8")
+    _git(seed, "add", "-A")
+    _git(seed, "commit", "-q", "-m", "the lever")
+    _git(seed, "push", "-q", "origin", "main")
+
+
+def _line_as_this_box_would_run_it(checkout: pathlib.Path,
+                                   extract_to: pathlib.Path) -> str:
+    """`GET_LEVER` with this box's two paths swapped for the test's own.
+
+    Only the paths change — the checkout the constant names, and the file it writes —
+    because those are the parts that are about *this* box. `runuser` goes too, since
+    the test is already one user. Every substitution is asserted, so an edit to the
+    literal cannot quietly turn these into tests of nothing.
+    """
+    line = _literal("GET_LEVER")
+    assert line.count(BOX_REPO_IN_LINE) == 3, (
+        "the line no longer names the checkout three times (read, fetch, read again): "
+        + line)
+    assert line.count(BOX_FILE_IN_LINE) == 3, line
+    command = (line.replace(BOX_REPO_IN_LINE, checkout.as_posix())
+                   .replace(BOX_FILE_IN_LINE, extract_to.as_posix())
+                   .replace("runuser -u scangrade -- ", ""))
+    assert BOX_REPO_IN_LINE not in command and "runuser" not in command, command
+    return command
 
 
 def _shim_dir(tmp_path: pathlib.Path, **commands: str) -> pathlib.Path:
@@ -607,13 +684,94 @@ class TestTheLeverCanBeReadOutOfTheFetchedCommit:
             "docs/AUTO_DEPLOY.md does not carry the line the refusal prints, so the "
             "documented way back from a rolled-back checkout is a different command")
 
-    def test_the_docs_also_say_how_to_get_the_newest_lever(self):
-        """`git show` only ever returns what the box already fetched, so the one case
-        where a newer lever exists is a box that can still fetch — and the doc has to
-        say so rather than let the line look like it always gets the newest."""
+    def test_the_line_carries_the_fetch_for_a_ref_that_has_no_lever(self):
+        """The case the docs used to hand to a console session, in the line itself.
+
+        A box that stalled before `deploy/scangrade-recover.sh` existed has a fetched
+        ref with no lever in it, so `git show` fails and the old line ran nothing.
+        The line fetches `origin` when — and only when — that read came up empty.
+        """
+        lever = _literal("GET_LEVER")
+        assert "fetch -q origin" in lever, (
+            "the line has no fallback, so a fetched ref older than the lever still ends "
+            "in nothing running and a console session")
+        assert lever.index("show origin/main:deploy/scangrade-recover.sh") < \
+            lever.index("fetch -q origin"), (
+            "the line fetches before it looks, which hangs a box with no network in "
+            "the one case that did not need a fetch")
         doc = _text(DOC)
-        assert "fetch -q origin" in doc, (
-            "the docs do not say how to reach a lever newer than the fetched one")
         assert "older than the lever" in doc, (
-            "the docs do not name the one case the line cannot answer, which is a "
-            "fetched ref from before this script existed")
+            "the docs no longer name the case: a fetched ref from before this script "
+            "existed")
+        assert "cannot reach GitHub" in doc, (
+            "the docs keep a console recipe without saying when it is the only thing "
+            "left, so an operator cannot tell it apart from the case the line answers")
+
+    def test_the_line_fetches_when_the_fetched_commit_has_no_lever(self, tmp_path):
+        """Behavioural, against real repositories: the pre-lever box is answered."""
+        _origin, seed, checkout = _seed_origin(tmp_path)
+        out = tmp_path / "sgfix.sh"
+        line = _line_as_this_box_would_run_it(checkout, out)
+        stale = subprocess.run(["git", "-C", str(checkout), "show",
+                                "origin/main:deploy/scangrade-recover.sh"],
+                               capture_output=True, text=True, check=False)
+        assert stale.returncode != 0, (
+            "the harness is not in the pre-lever state the test is about")
+        # The lever appears on the origin *after* this box last fetched — which is
+        # every box's first state after the lever landed.
+        _publish_lever(seed, LEVER_NEW)
+        run = subprocess.run([BASH, "-c", line], capture_output=True, text=True,
+                             cwd=str(tmp_path), check=False)
+        both = run.stdout + run.stderr
+        assert LEVER_NEW_MARK in both, (
+            "the line did not fetch: a fetched ref older than the lever still ends in "
+            "nothing running\n" + both)
+        assert run.returncode == 0, both
+
+    def test_the_line_runs_a_lever_it_already_has_without_the_network(self, tmp_path):
+        """The fetch is a fallback, not a step: a box that cannot reach GitHub must
+        still be recovered by the lever it already fetched."""
+        _origin, seed, checkout = _seed_origin(tmp_path)
+        _publish_lever(seed, LEVER_NEW)
+        _git(checkout, "fetch", "-q", "origin")   # this box is up to date
+        _git(checkout, "remote", "set-url", "origin", str(tmp_path / "gone"))
+        out = tmp_path / "sgfix.sh"
+        run = subprocess.run([BASH, "-c", _line_as_this_box_would_run_it(checkout, out)],
+                             capture_output=True, text=True, cwd=str(tmp_path), check=False)
+        both = run.stdout + run.stderr
+        assert LEVER_NEW_MARK in both, (
+            "the line fetched unconditionally, so an unreachable origin stopped the "
+            "lever this box already had from running\n" + both)
+
+    def test_the_line_never_runs_an_empty_file(self, tmp_path):
+        """Neither read nor fetch worked: the run must fail, not succeed emptily.
+
+        `git show x > f` truncates `f` *before* git runs, so a line that runs it
+        anyway executes an empty script, exits 0, and reports a recovery that changed
+        nothing. That is the failure this asserts against.
+        """
+        _origin, _seed, checkout = _seed_origin(tmp_path)
+        _git(checkout, "remote", "set-url", "origin", str(tmp_path / "gone"))
+        out = tmp_path / "sgfix.sh"
+        run = subprocess.run([BASH, "-c", _line_as_this_box_would_run_it(checkout, out)],
+                             capture_output=True, text=True, cwd=str(tmp_path), check=False)
+        both = run.stdout + run.stderr
+        assert LEVER_NEW_MARK not in both
+        assert run.returncode != 0, (
+            "a line that neither read nor fetched a lever exited 0, which is "
+            "indistinguishable from a recovery that ran\n" + both)
+        assert not out.exists() or not out.read_text(encoding="utf-8").strip(), (
+            "something was written to the file the line runs")
+
+    def test_the_line_runs_what_it_read_and_not_what_was_there_before(self, tmp_path):
+        """A leftover file from an earlier attempt must not be what runs."""
+        _origin, seed, checkout = _seed_origin(tmp_path)
+        _publish_lever(seed, LEVER_NEW)
+        out = tmp_path / "sgfix.sh"
+        out.write_text("echo STALE-FROM-LAST-TIME\n", encoding="utf-8")
+        run = subprocess.run([BASH, "-c", _line_as_this_box_would_run_it(checkout, out)],
+                             capture_output=True, text=True, cwd=str(tmp_path), check=False)
+        both = run.stdout + run.stderr
+        assert "STALE-FROM-LAST-TIME" not in both, (
+            "the line ran a file left over from an earlier attempt: " + both)
+        assert LEVER_NEW_MARK in both, both

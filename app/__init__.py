@@ -45,6 +45,47 @@ def cache_set(key, value):
     _lru_cache_ttl[key] = time.time()
 
 
+# served-commit:start
+#
+# What this *process* is serving, published so a deploy can ask it.
+#
+# `app/utils/build_info.py` reads the commit the code at this package's root was
+# loaded from, once, and never again — so the value below is fixed until the
+# process is replaced, which is exactly what "the reload took" means. Every other
+# reading the deploy has describes the box (the checkout's `HEAD`, what the runner
+# would do next), and all of them read perfectly well while the process answering
+# is still running the previous release.
+#
+# It is published on `/health` because that is the machine endpoint: no session, no
+# template, and the one path a post-release check can ask. `deploy/
+# served_commit_gate.py` compares this with the commit the runner just merged, and
+# `deploy/scangrade-deploy.sh` refuses (and quarantines) a release whose reload
+# silently did nothing.
+#
+# The projection is deliberately narrower than `build_info.snapshot()`: the sha and
+# when it was loaded are what a machine check needs, and `/health` is reachable
+# without a session, so the commit's *message* — the part that can name unreleased
+# work — is not published. `tests/unit/test_served_commit_gate.py` asserts that set,
+# so a field added here has to be a decision rather than a widening.
+#
+# The fence's name is spelled here and in `deploy/served_commit_gate.py`'s
+# `REPORTER_MARKER`, and the two are held together by that same test: the gate asks
+# a release's own file whether it ships this block, because only then is an app that
+# cannot name a commit evidence that the reload did not take, rather than an older
+# release that simply predates the reading.
+def served_commit():
+    from app.utils import build_info
+    reading = build_info.snapshot()
+    return {
+        "available": bool(reading.get("available")),
+        "reason_key": reading.get("reason_key"),
+        "commit": reading.get("commit"),
+        "full_commit": reading.get("full_commit"),
+        "loaded_at": reading.get("loaded_at"),
+    }
+# served-commit:end
+
+
 def create_app(env=None):
     app = Flask(__name__)
     cfg = get_config(env)
@@ -502,6 +543,11 @@ def create_app(env=None):
             "workers": os.environ.get("GUNICORN_WORKERS", "1"),
             "cache_size": len(_lru_cache),
             "uptime_ms": int((time.time() - app._start_time) * 1000) if hasattr(app, '_start_time') else 0,
+            # The commit this process is serving — see `served_commit` above. The
+            # post-release check in `deploy/scangrade-deploy.sh` compares it with the
+            # commit it just merged, so a reload that silently did nothing is refused
+            # instead of serving stale code behind gates that describe the wrong release.
+            "commit": served_commit(),
         })
 
     @app.route("/monitor")

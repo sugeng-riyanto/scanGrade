@@ -1984,6 +1984,72 @@ if systemctl is-active --quiet "$SERVICE" && probe_app; then
   FAIL_REASON=""
 fi
 
+# ── Did the reload actually take? Ask the app which commit it is serving ──────
+#
+# The probe above says gunicorn answers. It cannot say *whose code* answers, and
+# every gate below rests on that: the smoke test signs in as each role against
+# "this release", the claims gate re-reads the published table for "this release",
+# the perf gate compares "this release" with the last one that passed. `systemctl
+# reload` sends SIGHUP and gunicorn is expected to re-exec; when that quietly does
+# nothing, all three go on measuring the previous release and report on a release
+# nobody is being served. That is not hypothetical — this box was found four
+# commits behind with 28 hours of uptime, every page answering and nothing saying
+# so, which is why the served commit is now a reading the app publishes and a
+# question this runner asks.
+#
+# Two design points, both in `deploy/served_commit_gate.py`:
+#
+# * **A graceful reload makes one probe ambiguous.** A worker retiring mid-request
+#   can answer the first ask with the old commit, so the gate asks several times and
+#   refuses only when *no* probe reported the merged commit — the perf gate's rule
+#   about a divergence no second probe confirmed.
+# * **Exit codes are chosen so a crash cannot mimic a refusal.** python exits 1 on
+#   an uncaught exception, so the gate's refusal is 3 and everything else is "could
+#   not measure". Rolling a healthy release back because a check crashed is the
+#   false positive that would make this gate worse than none.
+#
+# Nothing here quarantines by itself: a refusal sets HEALTHY=0 and names the gate,
+# and the shared rollback path at the end of the script writes the record, puts
+# $BEFORE back and reloads it. The gate's own lines go in FAIL_DETAIL, because the
+# record is what an operator without a shell reads.
+# served-commit-gate:start
+RUN_STEP="served"
+if [ "$HEALTHY" != "1" ]; then
+  : # already unhealthy; the rollback path owns it
+else
+  SERVED_OUT=$(as_owner "$REPO/.venv/bin/python" "$REPO/deploy/served_commit_gate.py" \
+      --base "http://127.0.0.1:$APP_PORT" --commit "$AFTER_FULL" \
+      --reporter "$REPO/app/__init__.py" 2>&1)
+  SERVED_RC=$?
+  # The gate's own verdict lines, or — when it produced none — the tail of its
+  # output, because a traceback is the finding when there is no verdict.
+  served_detail() {
+    local detail
+    detail=$(printf '%s\n' "$SERVED_OUT" | grep -E '^served commit:')
+    [ -z "$detail" ] && detail=$(printf '%s\n' "$SERVED_OUT" | grep -vE '^[[:space:]]*$' | tail -n 6)
+    printf '%s\n' "$detail"
+  }
+  case "$SERVED_RC" in
+    0)
+      log "$(printf '%s\n' "$SERVED_OUT" | grep -m1 '^served commit: OK' || echo 'served commit: OK')" ;;
+    3)
+      log "the app is serving a commit other than the one this run merged:"
+      served_detail | sed 's/^/    /'
+      log "    the reload did not take, so every gate below would report on the"
+      log "    previous release — rolling back to $BEFORE"
+      HEALTHY=0
+      FAIL_REASON="served commit (the app reports serving a commit other than the one just merged)"
+      FAIL_DETAIL=$(served_detail) ;;
+    *)
+      log "served-commit check COULD NOT MEASURE (exit $SERVED_RC) — this release is"
+      log "    NOT confirmed as the code being served:"
+      served_detail | sed 's/^/    /'
+      log "    not rolling back: an app that cannot be asked is a property of the box,"
+      log "    and the health probe above owns whether it answers at all." ;;
+  esac
+fi
+# served-commit-gate:end
+
 # ── Gate 4: sign in as each role and open the pages that matter ──────────────
 # The port answering 200 only says gunicorn is up. It says nothing about whether
 # login still works, whether a page 500s for one role, or whether an RBAC guard
