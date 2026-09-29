@@ -40,7 +40,7 @@ from app.services.school_reset import (
 )
 from app.services import subscription_plans as plan_cfg
 from app.utils.req_cache import invalidate, invalidate_school, ttl
-from app.utils import lock_health
+from app.utils import failure, lock_health
 
 super_bp = Blueprint("super_admin", __name__, url_prefix="/super-admin")
 
@@ -790,7 +790,7 @@ def plan_delete(plan_id):
             flash("Paket dinonaktifkan — riwayat langganan dan pembayarannya tidak "
                   "tersentuh", "success")
         except Exception as e:
-            flash(f"Gagal menonaktifkan: {str(e)[:60]}", "error")
+            flash(f"Gagal menonaktifkan: {failure.sentence(e)}", "error")
         return redirect("/super-admin/plans")
 
     usage = plan_cfg.plan_usage(supabase, plan_id)
@@ -854,7 +854,7 @@ def trial_settings():
         except ValueError as e:
             # The bounds are named in the refusal, because "gagal" on its own
             # leaves an operator guessing what the field accepts.
-            flash(f"Gagal: {e}. Masukkan angka antara "
+            flash(f"Gagal: {failure.sentence(e)}. Masukkan angka antara "
                   f"{trial_cfg.MIN_TRIAL_DAYS} dan {trial_cfg.MAX_TRIAL_DAYS} hari.", "error")
             return redirect("/super-admin/trial-settings")
         try:
@@ -863,7 +863,7 @@ def trial_settings():
                          new_data={"trial_days": days}, user_id=g.user_id)
             flash(f"Masa trial diubah ke {days} hari", "success")
         except Exception as e:
-            flash(f"Gagal: {str(e)[:60]}", "error")
+            flash(f"Gagal: {failure.sentence(e)}", "error")
         return redirect("/super-admin/trial-settings")
 
     return render_template(
@@ -926,7 +926,7 @@ def payment_fee_settings():
             log_activity("update", "payment_fee_settings", "1", new_data=cfg, user_id=g.user_id)
             flash("Pengaturan biaya admin berhasil disimpan", "success")
         except Exception as e:
-            flash(f"Gagal: {str(e)[:60]}", "error")
+            flash(f"Gagal: {failure.sentence(e)}", "error")
         return redirect("/super-admin/payment-fee-settings")
 
     fee_config = {"fee_flat": 4000, "fee_percent": 0, "fee_note": "Biaya admin Rp 4.000 (transfer bank)"}
@@ -962,7 +962,7 @@ def pricing_settings():
             log_activity("update", "pricing_settings", "1", new_data=config, user_id=g.user_id)
             flash("Pengaturan pricing berhasil disimpan", "success")
         except Exception as e:
-            flash(f"Gagal: {str(e)[:60]}", "error")
+            flash(f"Gagal: {failure.sentence(e)}", "error")
         return redirect("/super-admin/pricing-settings")
 
     config = {"model": "flat", "tiers": []}
@@ -1025,7 +1025,7 @@ def regenerate_activation_code(school_id):
         log_activity("regenerate_activation_code", "school", school_id, new_data={"code": code}, user_id=g.user_id)
         flash(f"Kode aktivasi baru: {code}", "success")
     except Exception as e:
-        flash(f"Gagal: {str(e)[:60]}", "error")
+        flash(f"Gagal: {failure.sentence(e)}", "error")
     return redirect("/super-admin/activation-codes")
 
 
@@ -1063,7 +1063,7 @@ def send_activation_code(school_id):
             code = generate_activation_code()
             flash(f"Kode aktivasi (cadangan): {code}", "info")
     except Exception as e:
-        flash(f"Gagal: {str(e)[:60]}", "error")
+        flash(f"Gagal: {failure.sentence(e)}", "error")
     return redirect("/super-admin/activation-codes")
 
 
@@ -1141,7 +1141,7 @@ def activate_cash(school_id):
         log_activity("activate_cash", "school", school_id, new_data={"code": code}, user_id=g.user_id)
         flash(f"✅ Cash aktif! Kode: {code}", "success")
     except Exception as e:
-        flash(f"Gagal cash aktivasi: {str(e)[:80]}", "error")
+        flash(f"Gagal cash aktivasi: {failure.sentence(e)}", "error")
     return redirect("/super-admin/activation-codes")
 
 
@@ -1242,7 +1242,7 @@ def reset_school_data():
 
         except Exception as e:
             current_app.logger.error(f"Reset school data error: {e}")
-            flash(f"Gagal: {str(e)[:80]}", "error")
+            flash(f"Gagal: {failure.sentence(e)}", "error")
             return redirect("/super-admin/reset-school-data")
 
     return render_template("super_admin/reset_school_data.html", school=school)
@@ -1263,7 +1263,7 @@ def whatsapp_settings():
             log_activity("update", "whatsapp_settings", "1", new_data={"number": number}, user_id=g.user_id)
             flash("Nomor WhatsApp berhasil disimpan", "success")
         except Exception as e:
-            flash(f"Gagal: {str(e)[:60]}", "error")
+            flash(f"Gagal: {failure.sentence(e)}", "error")
         return redirect("/super-admin/whatsapp-settings")
 
     number = ""
@@ -1439,7 +1439,7 @@ def file_management():
                             pass
                 flash(f"✅ {deleted} file dihapus dari Supabase Storage", "success")
             except Exception as e:
-                flash(f"Error: {e}", "error")
+                flash(f"Error: {failure.sentence(e)}", "error")
             return redirect("/super-admin/file-management")
 
         # Reset one school's exam history — chosen by NPSN, like reset-school-data.

@@ -9,6 +9,7 @@ from flask import Blueprint, jsonify, render_template, request, redirect, url_fo
 from app.utils.auth import (teacher_or_admin_required, teacher_required, get_supabase,
                             login_required, role_required, subscription_write_required)
 from app.utils.cache import cache_get, cache_set, cache_delete
+from app.utils import failure
 from app.utils.helpers import read_with_retry, row_or_none
 from app.decorators.security import require_school_access
 from app.decorators.subscription import require_subscription
@@ -1671,7 +1672,7 @@ def duplicate_exam(exam_id):
         flash("Ujian berhasil digandakan. Silakan edit sesuai kebutuhan.", "success")
         return redirect(f"/teacher/exams/{new_id}")
     except Exception as e:
-        flash(f"Gagal menggandakan: {str(e)[:60]}", "error")
+        flash(f"Gagal menggandakan: {failure.sentence(e)}", "error")
         return redirect("/teacher/exams")
 
 
@@ -2957,7 +2958,7 @@ def grade_detail(submission_id):
                                violation_events=violation_events)
     except Exception as e:
         current_app.logger.error("grade_detail error: %s", str(e), exc_info=True)
-        flash(f"Terjadi kesalahan: {str(e)[:100]}", "error")
+        flash(f"Terjadi kesalahan: {failure.sentence(e)}", "error")
         return redirect("/teacher/grading")
 
 
@@ -4397,7 +4398,7 @@ def teacher_subject_create():
         log_activity("create", "subject", name, new_data={"name": name}, user_id=g.user_id)
         flash("Mapel berhasil ditambahkan", "success")
     except Exception as e:
-        flash(f"Gagal: {e}", "error")
+        flash(f"Gagal: {failure.sentence(e)}", "error")
     return redirect("/teacher/subjects")
 
 
@@ -4429,7 +4430,7 @@ def teacher_subject_delete(subject_id):
         invalidate_school(g.get("user_school_id"))
         flash("Mapel berhasil dihapus", "success")
     except Exception as e:
-        flash(f"Gagal menghapus: {e}", "error")
+        flash(f"Gagal menghapus: {failure.sentence(e)}", "error")
     return redirect("/teacher/subjects")
 
 
