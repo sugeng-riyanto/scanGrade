@@ -9,6 +9,11 @@ Two real incidents are pinned here:
 2. ``notification_service.send_email`` read ``SMTP_USER``/``SMTP_PASS`` while the
    project stores ``SMTP_EMAIL``/``SMTP_PASSWORD`` — approval emails were
    silently never delivered.
+
+The transport tests below patch ``smtp_settings.smtplib``, not the notification
+service's: there is now exactly **one** sender, and `notification_service.send_email`
+delegates to it. Patching the old address would prove nothing about the connection
+that actually opens.
 """
 
 from unittest.mock import patch
@@ -63,7 +68,7 @@ class TestEmailTransport:
 
         app.config["SMTP_PASSWORD"] = "app-password"
         with app.app_context():
-            with patch("app.services.notification_service.smtplib.SMTP_SSL") as ssl_mock:
+            with patch("app.services.smtp_settings.smtplib.SMTP_SSL") as ssl_mock:
                 ok = send_email("kepsek@example.com", "Aktivasi", "<p>kode</p>")
 
         assert ok is True
@@ -82,7 +87,7 @@ class TestEmailTransport:
         app.config["SMTP_PASSWORD"] = "app-password"
         app.config["SMTP_PORT"] = 587
         with app.app_context():
-            with patch("app.services.notification_service.smtplib.SMTP") as smtp_mock:
+            with patch("app.services.smtp_settings.smtplib.SMTP") as smtp_mock:
                 ok = send_email("guru@example.com", "Halo", "<p>hi</p>")
 
         assert ok is True
@@ -93,10 +98,12 @@ class TestEmailTransport:
 
         app.config["SMTP_PASSWORD"] = ""
         app.config["SMTP_EMAIL"] = ""
-        monkeypatch.delenv("SMTP_PASSWORD", raising=False)
-        monkeypatch.delenv("SMTP_EMAIL", raising=False)
+        from app.config import SMTP_PASSWORD_NAMES
+
+        for name in (*SMTP_PASSWORD_NAMES, "SMTP_EMAIL"):
+            monkeypatch.delenv(name, raising=False)
         with app.app_context():
-            with patch("app.services.notification_service.smtplib.SMTP_SSL") as ssl_mock:
+            with patch("app.services.smtp_settings.smtplib.SMTP_SSL") as ssl_mock:
                 ok = send_email("guru@example.com", "Halo", "<p>hi</p>")
 
         assert ok is False

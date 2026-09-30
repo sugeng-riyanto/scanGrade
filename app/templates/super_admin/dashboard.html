@@ -31,6 +31,40 @@
         </div>
     </div>
 
+    {# The mail path an operator never opens the settings page to check. `broken` is the
+       *most recent* attempt: a box whose last mail failed is the one quietly locking
+       people out of their accounts, and a dashboard that only ever shows green teaches
+       nobody to look. Only a broken path draws anything — a mail path that failed this
+       morning and has worked since is not broken, and a banner that is always there
+       stops being a signal. #}
+    {% if mail and mail.broken %}
+    <div class="card p-5 border border-red-200 bg-red-50/60" id="mail-alert" data-mail-alert="broken">
+        <div class="flex items-start gap-4">
+            <i class="fas fa-envelope-circle-check text-red-600 text-2xl mt-0.5"></i>
+            <div class="min-w-0 flex-1">
+                <h3 class="font-extrabold text-red-700" x-text="t('Email tidak terkirim','Email is not being delivered')"></h3>
+                <p class="text-sm text-red-700 mt-1 leading-relaxed">
+                    <span x-text="t('Percobaan pengiriman terakhir gagal, jadi pengguna yang lupa kata sandi tidak menerima kodenya.','The last delivery attempt failed, so a user who has forgotten their password is not receiving their code.')"></span>
+                </p>
+                {% if mail.last %}
+                <p class="text-xs text-red-700 mt-2 font-mono break-all">
+                    {{ mail.last.to }}{% if mail.last.detail %} · {{ mail.last.detail }}{% endif %}
+                </p>
+                {% endif %}
+                <p class="text-xs text-red-700 mt-1">
+                    <span x-text="t('Sejak','Since')"></span>
+                    <span class="font-mono">{{ mail.since or '-' }}</span>
+                    · <span x-text="t('Percobaan gagal','Failed attempts')"></span>
+                    <span class="font-mono">{{ mail.failures }}</span>
+                </p>
+                <a href="/super-admin/email-settings" class="inline-flex items-center gap-2 mt-3 px-4 py-2 bg-red-600 text-white rounded-xl text-xs font-bold hover:bg-red-700 transition">
+                    <i class="fas fa-wrench"></i><span x-text="t('Buka pengaturan email','Open email settings')"></span>
+                </a>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <!-- Registration Requests -->
         <div class="card">

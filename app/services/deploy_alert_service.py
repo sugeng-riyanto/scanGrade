@@ -364,10 +364,16 @@ def recipients(*, supabase=None, settings=None) -> dict:
 
 
 def _smtp_account() -> str | None:
-    from app.services.notification_service import _smtp_settings
+    """The sending mailbox, from the one resolver that decides it.
 
-    _, _, user, _password, _sender, _reply_to = _smtp_settings()
-    return (user or "").strip() or None
+    It used to borrow `notification_service._smtp_settings`, which was a second
+    wrapper over the same resolver — one more place to keep in step with the alias
+    names an app password may arrive under, for a value that is the sender's own
+    address.
+    """
+    from app.services import smtp_settings
+
+    return (smtp_settings.resolve().get("user") or "").strip() or None
 
 
 #: How long a resolved recipient list is reused. Five minutes: long enough that a

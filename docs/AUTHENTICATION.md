@@ -192,7 +192,16 @@ login doors, logout, `/static/`, and `/api/` (a school reprints cards whenever i
 mid-sitting, and blocking an autosave would lose real answered work for a rule about what the reader
 *sees*, not what they save).
 
-`/auth/change-password` proves the **current** password rather than trusting the open session, writes
+`/auth/change-password` is the one page reached **with** a session, and `base.html` chooses its
+layout from `{% if g.user_id %}`: the authenticated branch renders `{% block content %}`, the other
+`{% block content_noauth %}`. This page therefore fills **both**, out of one `body()` macro — it used
+to fill only `content_noauth`, so the reader it exists for (signed in, password still the printed
+one) was handed the chrome over an empty `main`: no form, nothing to submit, and no sentence saying
+why. Reported as "masih kosong dan belum berhasil"; guarded in `tests/unit/test_change_password_page.py`
+by rendering the real template with a request context, plus a sweep that every view behind a
+`*_required` decorator fills `content` in a page that extends `base.html`.
+
+It proves the **current** password rather than trusting the open session, writes
 the new one through the admin API, records `must_change_password = false` and `password_changed_at`,
 then destroys the session and lands the reader on their own login door — nothing else in the app can
 prove the new password works, so a fresh sign-in is the only honest end of the flow. Both writes are
@@ -200,6 +209,18 @@ deliberately not one try block: the password is the change, the record only *say
 database that cannot hold the record must not report a landed change as failed. `password_change_record()`
 in `app/utils/auth.py` is the one place that record is written, and both routes (this page and the
 reset by code) share it.
+
+The page is now **reachable from the chrome every role shares**: `base.html` carries it once in the
+sidebar's `<!-- User -->` block (a key icon, with a translated tooltip) and once in the top-right
+account menu (a translated label), so all six roles — `super_admin`, `admin_sekolah`, `principal`,
+`vice_principal`, `guru`, `murid` — find it in one click in the language they are reading. It was not
+linked anywhere before: route, template and rule all existed, and the only way in was typing the URL,
+which is how a page that works gets reported as a page that does not exist. The guard is
+`tests/unit/test_password_change_reachable.py`: the two doors, their translated labels, that the route
+carries `@login_required` alone (a role decorator would lock one role out of its own credential), and
+that a change made by each of the six roles writes `profiles.id` for the **session's own**
+`g.user_id` through Supabase's admin API — one code path and one `where` clause, so one role's change
+cannot land on another's row.
 
 `/auth/login-user` admits `guru`, `murid`, `principal` and `vice_principal`; `/auth/login` admits the two
 admin roles. A reset by code — `/auth/forgot-password` → `/auth/verify-reset-code` →
@@ -232,6 +253,74 @@ mail client answer the sending mailbox, which nobody watches. An operator can ov
 `/super-admin/email-settings`. The credential itself is *not* in the repository — it must be a Gmail
 App Password stored on that page (or in `SMTP_PASSWORD`), and the page's "Send a test" action is how
 the path is proven before a user relies on it.
+
+The **body** is one module for every user-facing mail (`app/services/email_bodies.py`),
+and it was not: the reset code was a bare string with the code framed in box-drawing
+characters (`┌─────┐`), a super-admin password reset and a payment receipt were bare
+paragraphs, and the school-activation mail was its own orange HTML blob. Each body now
+carries an Indonesian section and an English one, ships a complete HTML document **and**
+a plain-text alternative in one `multipart/alternative` (so a client that refuses HTML
+still reads the code, and a one-part HTML mail is what spam filters score highest), and
+escapes the name and the code rather than concatenating them into the layout — a name
+comes from an import sheet, so `<b>Budi</b>` is a name. One sender does the sending
+(`smtp_settings.send`): `notification_service.send_email` used to open its own
+`smtplib` connection with its own `From`/`Reply-To`, which is a second answer to every
+question the resolver answers, and only one of them was receiving fixes.
+
+The **headers below the body** are what decide whether any of it is read
+(`smtp_settings.send`): `Date` and a `Message-ID` whose domain belongs to the sending mailbox, so a
+filter can age the message and does not read it as forged or replayed; `Auto-Submitted:
+auto-generated` and `X-Auto-Response-Suppress: All` (RFC 3834), the standard way to say
+"transactional, no human wrote it", which keeps a reset code out of the *bulk* folder and stops
+vacation responders answering it; and `Importance: high` + `X-Priority` on the mails whose reader
+cannot wait — a reset code, an activation code, a new password from super admin, a payment receipt
+(`important=True` at those four call sites) while the internal deploy alerts stay unmarked, because a
+flag every mail carries means nothing. `Precedence: bulk` is deliberately **never** set: it is the
+header people add believing it means "bulk mail", and it is what routes a transactional message to
+the bulk tab. None of this is visible in a rendered preview, which is why it was missing; the guard
+is `tests/unit/test_email_delivery_headers.py`, and `.freebuff/mutate_email_delivery.py` injects
+each absence and each misuse to prove it bites.
+
+The password is read under either name a `.env` carries it in: `SMTP_PASSWORD`, or the spelling
+Google's own page produces — `APP_PASSWORD_GMAIL` / `app_password_gmail`. A checkout was found with
+`app_password_gmail=…` filled in and `SMTP_PASSWORD` commented out, and the mail path looked up the
+second name only: the box held the right secret and reported itself unable to send anything, so every
+reset email was skipped with a warning nobody read. The two Gmail names also have their whitespace
+squeezed, because Google prints an app password in four groups (`abcd efgh ijkl mnop`) and the grouped
+string authenticates as garbage; `SMTP_PASSWORD` is left exactly as written, since an ordinary SMTP
+password may contain a space as a character. One helper decides this (`config.env_password`), and the
+mail path, the settings page and the deploy alerts all resolve through it.
+
+### What the mailbox actually did
+
+`configured` is `bool(user and password)` — an *intention*. A box holding the wrong app password is
+configured and unable to send a single reset, and until this existed the only trace was a
+`logger.warning` in a journal that needs a shell to read: the first person to find out was the pupil
+who could not get back into their account. So the sender records what happened.
+
+`app/services/mail_ledger.py` keeps the outcome of the last twelve attempts in one `system_settings`
+row (`mail_delivery`), written and read by `smtp_settings.send` — the one function every mail path
+already goes through (reset code, school activation, super-admin reset, payment receipt, test send,
+and any path added later). Three states, not two: `sent`, `failed` (the relay refused, and its own
+words are kept, truncated) and `skipped` (there is no credential at all). They have different fixes,
+and an operator who reads one as the other changes the wrong thing. `since` is the timestamp of the
+first failure in the current run, kept across further attempts and cleared by the first success, so a
+path broken since breakfast does not read like one that broke a minute ago.
+
+The record is built from an allow-list of keys — outcome, recipient, subject, the relay's words, the
+time — and **never the body and never a code**: a reset code in a settings row is a credential in a
+place nobody audits, and the suite asserts what was *persisted* is that allow-list rather than
+trusting the construction. Every function in the module swallows its own failures, deliberately: a
+store that cannot be reached yields `unknown`, and a send whose ledger write fails still returns what
+the relay said. A reporting feature that turns a working reset into a 500 is worse than no reporting.
+
+Two pages read it: `/super-admin/email-settings` shows the observed state beside the credential, and
+the super-admin **dashboard** carries a card only when the most recent attempt did not go out — an
+operator who never opens the mail settings page is not told nothing, and a healthy box is not given a
+banner, because one that is always there stops being a signal. The one failure neither page can see
+without help is a reset whose body could not even be built (the exception happens before the sender
+is reached); `auth.py` records that case itself. Guards: `tests/unit/test_mail_ledger.py` (21) and
+`.freebuff/mutate_mail_ledger.py` (16/16 injected defects caught).
 
 ## 10. Login Throttling
 
