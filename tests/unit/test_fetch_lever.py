@@ -51,6 +51,10 @@ LEVER_START = "# fetch-lever-logic:start"
 LEVER_END = "# fetch-lever-logic:end"
 REFRESH_START = "# refresh-launcher-logic:start"
 REFRESH_END = "# refresh-launcher-logic:end"
+#: The read that runs the materialiser before every arrangement refusal, so a box
+#: stuck ahead of its own fetch still obtains the lever.
+BRANCH_FIRST_START = "# branch-first-logic:start"
+BRANCH_FIRST_END = "# branch-first-logic:end"
 
 #: The lever origin carries and the checkout does not, and the sentinel that tells
 #: origin's `entrypoint.sh` apart from the checkout's. A materialiser that read the
@@ -339,10 +343,18 @@ def test_it_runs_after_the_fetch_and_before_anything_is_decided():
     """The position *is* the feature: after the fetch, because only then does
     `origin/$BRANCH` name anything; before the nothing-new exit, because an
     up-to-date box whose lever is missing is exactly a box that needs one; and long
-    before the merge, which is the step a stuck box cannot reach."""
+    before the merge, which is the step a stuck box cannot reach.
+
+    Two call sites now: the main one inside that window, and the one in
+    `branch_read_refs`, which materialises from a fetch that happens before every
+    arrangement refusal. That second site is the whole point of branch-first-logic —
+    a box whose runner refuses before its own fetch still ends up holding the newest
+    lever — and it necessarily sits *before* the release's fetch.
+    """
     script = _text(RUNNER)
-    assert script.count("materialise_lever_from_origin") == 2, (
-        "expected the definition and exactly one call site")
+    assert script.count("materialise_lever_from_origin") == 3, (
+        "expected the definition and exactly two call sites (the branch read and "
+        "the release's own)")
     fetch = script.index('RUN_STEP="fetch"')
     call = script.index("\nmaterialise_lever_from_origin\n")
     nothing_new = script.index('if [ "$BEFORE" = "$AFTER" ]; then')
@@ -350,6 +362,12 @@ def test_it_runs_after_the_fetch_and_before_anything_is_decided():
     assert fetch < call < nothing_new < merge, (
         "the lever is materialised outside the window that makes it reachable on a "
         "box whose release is refused")
+    # And the branch read's copy, ahead of the release fetch it is meant to survive.
+    branch_call = script.index("  materialise_lever_from_origin\n",
+                               script.index(BRANCH_FIRST_START))
+    assert branch_call < script.index("REFUSING") < fetch, (
+        "the branch read does not materialise before the arrangement refusals, so a "
+        "box stuck before its own fetch still never receives the lever")
 
 
 def test_the_installed_name_is_rendered_against_the_fetched_tree():

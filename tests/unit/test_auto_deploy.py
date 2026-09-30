@@ -724,7 +724,12 @@ def test_the_deploy_refuses_a_copy_before_it_touches_anything():
         "still leave the log line, and the message, in place"
     )
     refusal = script.index("REFUSING")
-    for later in ('fetch --quiet origin', "merge --ff-only"):
+    # The *release* fetch, not the branch read. `branch_read_refs` now fetches refs
+    # before every arrangement refusal (see branch-first-logic), so the first
+    # `fetch --quiet origin` in the file is that read, by design. What the copy
+    # check must stay in front of is the fetch that stages a release — the one whose
+    # result `AFTER` names.
+    for later in ("AFTER=$(as_owner git", "merge --ff-only"):
         assert refusal < script.index(later), (
             f"the copy check runs after {later!r} — by then the checkout has moved "
             "and a stale runner has already deployed with old logic"
@@ -736,13 +741,26 @@ def test_the_deploy_refuses_a_copy_before_it_touches_anything():
 IDENTITY_START = "# runner-identity:start"
 IDENTITY_END = "# runner-identity:end"
 
+BRANCH_FIRST_START = "# branch-first-logic:start"
+BRANCH_FIRST_END = "# branch-first-logic:end"
+
+
+def _branch_first_block() -> str:
+    """The read that precedes every arrangement refusal. Both harnesses below
+    compose it, because the refusal each one exercises now calls it."""
+    script = DEPLOY_SH.read_text(encoding="utf-8")
+    return script.split(BRANCH_FIRST_START, 1)[1].split(BRANCH_FIRST_END, 1)[0]
+
 
 def _identity_harness(repo: Path) -> str:
-    """Gate 0, lifted out of the script and given the two things it needs: the
-    checkout path and a log(). It is run with $0 set by the caller."""
+    """Gate 0, lifted out of the script and given the three things it needs: the
+    checkout path, a log(), and the branch read it now calls before refusing. It is
+    run with $0 set by the caller."""
     script = DEPLOY_SH.read_text(encoding="utf-8")
     block = script.split(IDENTITY_START, 1)[1].split(IDENTITY_END, 1)[0]
-    return f'set -uo pipefail\nREPO="{repo}"\nlog() {{ echo "$*"; }}\n{block}\necho REACHED_END\n'
+    return (f'set -uo pipefail\nREPO="{repo}"\nlog() {{ echo "$*"; }}\n'
+            'as_owner() { "$@"; }\n'
+            + _branch_first_block() + block + "\necho REACHED_END\n")
 
 
 @pytest.mark.skipif(BASH is None, reason="needs a bash to run the guard")
@@ -923,8 +941,9 @@ def test_env_bool_reads_the_usual_spellings(name):
 # the smoke gate without its conf, the claims and performance gates without a
 # roster. A box in that state deploys every commit while checking almost none of
 # them — the site stays green and "the gates ran" quietly stops being true. So the
-# armament is judged once, before anything is fetched, and a missing check refuses
-# the run outright. These tests hold the two ends of that: it runs *first*, and it
+# armament is judged once, before any release is staged, and a missing check
+# refuses the run outright. (The branch read that precedes every arrangement
+# refusal is not a release — see branch-first-logic.) These tests hold the two ends of that: it runs *first*, and it
 # is a refusal to deploy rather than a rollback of a commit.
 
 PREFLIGHT_START = "armament_preflight() {"
@@ -952,7 +971,8 @@ def _preflight_harness(repo: Path, state_dir: Path) -> str:
         f'STATE_DIR="{state_dir}"\n'
         f'UNARMED_FILE="{state_dir}/unarmed"\n'
         'log() { echo "$*"; }\n'
-        + block + tail + "\necho REACHED\n"
+        'as_owner() { "$@"; }\n'
+        + _branch_first_block() + block + tail + "\necho REACHED\n"
     )
 
 
@@ -962,10 +982,13 @@ def _stub_checker(repo: Path, code: int, text: str) -> None:
         f'#!/usr/bin/env bash\necho "{text}"\nexit {code}\n', encoding="utf-8")
 
 
-def test_the_armament_is_judged_before_anything_is_fetched():
+def test_the_armament_is_judged_before_any_release_is_staged():
     script = DEPLOY_SH.read_text(encoding="utf-8")
     judged = script.index("if ! armament_preflight; then")
-    for later in ("fetch --quiet origin", "merge --ff-only", "CONSTRUCT_OUT="):
+    # The release's own fetch, not the branch read: `branch_read_refs` fetches refs
+    # before every arrangement refusal by design (see branch-first-logic), and it
+    # stages nothing. `AFTER` names the release fetch's result.
+    for later in ("AFTER=$(as_owner git", "merge --ff-only", "CONSTRUCT_OUT="):
         assert judged < script.index(later), (
             f"the armament is judged after {later!r}, so a release is already in "
             "flight by the time the box says it cannot check one")
