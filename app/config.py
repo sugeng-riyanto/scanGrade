@@ -49,6 +49,33 @@ def env_bool(name, default=False):
     return raw.strip().lower() in ("1", "true", "yes", "on")
 
 
+#: Every name an SMTP app password may arrive under. `SMTP_PASSWORD` is what the
+#: installer writes and what this app has always read; the Gmail spelling is what
+#: the provider's own page produces and what people therefore put in `.env` — and a
+#: box holding the right secret under the other name reported itself unable to send
+#: mail at all. Measured on this checkout: `.env` carried `app_password_gmail=`
+#: while `SMTP_PASSWORD` was commented out, and every reset email was skipped with a
+#: warning nobody was reading.
+SMTP_PASSWORD_NAMES = ("SMTP_PASSWORD", "APP_PASSWORD_GMAIL", "app_password_gmail")
+
+#: The names whose value is *squeezed* — Google prints an app password in four
+#: groups of four (`abcd efgh ijkl mnop`) and that grouped string authenticates as
+#: garbage. `SMTP_PASSWORD` is deliberately not here: an ordinary SMTP password may
+#: contain a space as a character, and this helper must never be the reason a box
+#: that was sending mail stops.
+SMTP_PASSWORD_SQUEEZED = ("APP_PASSWORD_GMAIL", "app_password_gmail")
+
+
+def env_password():
+    """The app password, under any name it may arrive in, or "" when there is none."""
+    for name in SMTP_PASSWORD_NAMES:
+        raw = env_str(name, "")
+        if not raw:
+            continue
+        return "".join(raw.split()) if name in SMTP_PASSWORD_SQUEEZED else raw
+    return ""
+
+
 class Config:
     SECRET_KEY = env_str("FLASK_SECRET_KEY", "dev-secret-change-me")
     SUPABASE_URL = env_str("SUPABASE_URL", "")
@@ -65,7 +92,7 @@ class Config:
     FONNTE_API_KEY = env_key("FONNTE_API_KEY", "")
     # Email is the active notification channel (WhatsApp/Fonnte is not used).
     SMTP_EMAIL = env_str("SMTP_EMAIL", "scangrade9@gmail.com")
-    SMTP_PASSWORD = env_str("SMTP_PASSWORD", "")
+    SMTP_PASSWORD = env_password()
     SMTP_HOST = env_str("SMTP_HOST", "smtp.gmail.com")
     SMTP_PORT = env_int("SMTP_PORT", 465)
     SMTP_FROM = env_str("SMTP_FROM", "") or env_str("SMTP_EMAIL", "scangrade9@gmail.com")

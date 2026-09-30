@@ -274,25 +274,21 @@ def _activate_subscription(school_id, plan_id, order_id, supabase):
             recovery_email = admin[0].get("phone", "")
             recipient = recovery_email if "@" in recovery_email else admin_email
             if recipient:
-                body = f"""Yth. {admin[0].get('full_name', 'Admin Sekolah')},
+                # One body for every user-facing mail (`app/services/email_bodies.py`).
+                # The receipt used to be a bare paragraph with the activation code
+                # buried in prose; it is the one mail a school may forward to its own
+                # finance office, so it is laid out like a receipt and bilingual.
+                from app.services import email_bodies
 
-Selamat! Pembayaran langganan ScanGrade Anda telah berhasil dikonfirmasi.
-
-Kode Aktivasi: {code}
-
-Akun sekolah Anda sekarang sudah aktif. Silakan login dan mulai menggunakan ScanGrade.
-
-Detail:
-- Paket: {plan.get('name', 'Langganan') if plan else 'Langganan'}
-- Masa Aktif: {now.strftime('%d %B %Y')} - {sub_end.strftime('%d %B %Y') if sub_end else 'Selamanya'}
-
-Link Login: https://scangrade.web.id/admin-sekolah/dashboard
-
-Hormat kami,
-Tim ScanGrade
-https://scangrade.web.id"""
+                mail = email_bodies.payment_success(
+                    name=admin[0].get("full_name") or "Admin Sekolah",
+                    plan_name=(plan.get("name") if plan else None) or "Langganan",
+                    starts=now.strftime("%d %B %Y"),
+                    ends=sub_end.strftime("%d %B %Y") if sub_end else "Selamanya",
+                    login_url="https://scangrade.web.id/admin-sekolah/dashboard")
                 ok, err = smtp_settings.send(
-                    recipient, "🎉 ScanGrade — Pembayaran Berhasil! Akun Aktif", body)
+                    recipient, mail["subject"], mail["html"], html=True,
+                    text=mail["text"], important=True)
                 if ok:
                     current_app.logger.info(f"Activation email sent to {recipient}")
                 else:

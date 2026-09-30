@@ -30,6 +30,31 @@ auth_bp = Blueprint("auth", __name__)
 
 # ─── REGISTER (Admin sekolah) ────────────────────────
 
+#: What the position `<select>` submits when the school's role is not on the list,
+#: so it can type its own. The sentinel is never stored and never shown: an operator
+#: reading `requester_position` on the approval screen must see the school's own
+#: words, not this.
+POSITION_OTHER = "other"
+
+#: Longest position this field will carry into the approval queue and the profile.
+#: A free-typed field is a *label*, and an operator-facing one: a paragraph pasted
+#: into it would follow the registration through every screen that names the person.
+POSITION_MAX_LENGTH = 80
+
+
+def _resolve_position(form) -> str:
+    """The position the school actually named: the list's value, or its own typing.
+
+    One function so the stored value, the profile's `full_name` and the email's
+    greeting cannot disagree — they were three separate reads of the raw field, and
+    the form is about to gain a second field that can carry the real answer.
+    """
+    chosen = (form.get("position") or "").strip()
+    if chosen == POSITION_OTHER:
+        chosen = (form.get("position_other") or "").strip()
+    return chosen[:POSITION_MAX_LENGTH]
+
+
 @auth_bp.route("/register", methods=["GET", "POST"])
 def register():
     if request.method == "GET":
@@ -40,7 +65,7 @@ def register():
     wa = request.form.get("wa", "").strip()
     email = request.form.get("email", "").strip().lower()
     password = request.form.get("password", "")
-    position = request.form.get("position", "")
+    position = _resolve_position(request.form)
 
     if not all([npsn, school_name, wa, email, password, position]):
         return render_template("auth/register.html", error=auth_error("all_required"))
@@ -157,6 +182,23 @@ def register():
         log_activity("register", "user", uid, new_data={"email": email, "school_name": school_name, "role": "admin_sekolah", "status": "pending"})
     except Exception:
         pass
+
+    # ── The acknowledgement, best-effort ──
+    # The account, the profile and the request row already exist, so this mail is a
+    # courtesy *after* the registration and never a condition of it. A relay that
+    # refuses — or a body that cannot be built — must not turn a registration that
+    # happened into an error page: the school would retry, and the retry would be
+    # refused as a duplicate account for a request already on file. The sender is the
+    # one place every mail in this app goes through (`smtp_settings.send`), so it is
+    # also the one place the outcome is written down for the operator (mail_ledger).
+    try:
+        from app.services import email_bodies
+
+        mail = email_bodies.registration_received(name=position, school_name=school_name,
+                                                  npsn=npsn, position=position)
+        _send_email(email, mail["subject"], mail["html"], html=True, text=mail["text"])
+    except Exception as e:
+        logger.warning("Registration acknowledgement to %s not sent: %s", email, e)
 
     return render_template("auth/register_success.html", email=email)
 
@@ -562,7 +604,14 @@ def login_user():
 
 _RESET_CODES = {}  # fallback: in-memory (single worker)
 
-def _store_reset_code(email: str, code: str, ttl: int = 600):
+#: How long a reset code lives. The mail tells the reader this in minutes
+#: (`email_bodies.reset_code`), derived from this one value — a sentence that says ten
+#: minutes over a fifteen-minute expiry is a lie the reader cannot check, and the two
+#: numbers drifting is exactly what a second constant would cause.
+RESET_CODE_TTL_SECONDS = 600
+
+
+def _store_reset_code(email: str, code: str, ttl: int = RESET_CODE_TTL_SECONDS):
     """Store reset code in Redis (or memory fallback)."""
     try:
         from redis import Redis
@@ -602,7 +651,8 @@ def _delete_reset_code(email: str):
     _RESET_CODES.pop(email, None)
 
 
-def _send_email(to_email: str, subject: str, body: str) -> bool:
+def _send_email(to_email: str, subject: str, body: str, html: bool = False,
+                text: str | None = None, important: bool = False) -> bool:
     """Send email via SMTP (scangrade9@gmail.com). ``True`` when it went out.
 
     It used to return ``None`` — and, on a box with no ``SMTP_PASSWORD``, log
@@ -619,7 +669,8 @@ def _send_email(to_email: str, subject: str, body: str) -> bool:
     # path. When this function read `config.SMTP_PASSWORD` directly it saw only the
     # environment, which on a hosted box is an empty `SMTP_PASSWORD=` line — the
     # reset email then failed no matter what the operator had configured.
-    ok, error = smtp_settings.send(to_email, subject, body)
+    ok, error = smtp_settings.send(to_email, subject, body, html=html, text=text,
+                                   important=important)
     if not ok:
         current_app.logger.warning(
             "Could not send to %s: %s", to_email, error or "not configured")
@@ -748,30 +799,29 @@ def forgot_password():
     name = user_data.get("full_name", "Pengguna")
     sent = False
     try:
-        sent = _send_email(
-            target_email,
-            "🔐 ScanGrade — Kode Verifikasi Reset Password",
-            f"""Yth. {name},
+        # One body, from `app/services/email_bodies.py`: bilingual, escaped, and a
+        # plain-text part beside the HTML one. The reset mail used to be a bare string
+        # with the code framed in box-drawing characters — legible in a terminal and
+        # monospaced garbage in every mail client.
+        from app.services import email_bodies
 
-Kami menerima permintaan reset password untuk akun ScanGrade Anda.
-
-Kode verifikasi Anda (6 digit):
-┌─────────────────────┐
-│     {code}     │
-└─────────────────────┘
-
-Kode ini berlaku selama 10 menit.
-
-Masukkan kode di atas pada halaman verifikasi untuk membuat password baru.
-
-Jika Anda tidak merasa melakukan permintaan ini, abaikan email ini.
-
-Hormat kami,
-Tim ScanGrade
-https://scangrade.web.id"""
-        )
+        mail = email_bodies.reset_code(name=name, code=code,
+                                       minutes=RESET_CODE_TTL_SECONDS // 60)
+        # `important=True`: a one-time credential is urgent to its reader, and the
+        # header is the half of deliverability a body cannot carry.
+        sent = _send_email(target_email, mail["subject"], mail["html"],
+                           html=True, text=mail["text"], important=True)
     except Exception as e:
         current_app.logger.error(f"Failed to send reset code: {e}")
+        # Recorded here because this attempt never reached the sender: the body could
+        # not be built, so `smtp_settings.send` was never called and the ledger would
+        # otherwise show the *previous* outcome — or nothing at all — while the visitor
+        # is told their code could not be emailed. This is the one failure an operator
+        # could not see anywhere, and it matters most on a fresh box with no history.
+        from app.services import mail_ledger
+        mail_ledger.record(state=mail_ledger.STATE_FAILED, to=target_email,
+                           subject="password reset code",
+                           detail=f"the message could not be built: {e}")
         sent = False
     if not sent:
         return render_template("auth/forgot_password.html", error=auth_error("forgot_email_failed"))

@@ -97,6 +97,11 @@ def _safe_select(supabase, table, columns="*", limit=20, order_col="created_at",
 @_sa_required
 def dashboard():
     supabase = get_supabase()
+    # Read here as well as on the email-settings page, because the operator who has to
+    # act on a broken mailbox is not necessarily the one who opens its settings page:
+    # a school that cannot receive reset codes has to be visible on the page they do
+    # open, before a locked-out user is the one who reports it.
+    from app.services import mail_ledger
 
     total_schools = _safe_count(supabase, "schools")
     total_users = _safe_count(supabase, "profiles")
@@ -122,6 +127,7 @@ def dashboard():
         total_exams=total_exams, total_subs=total_subs,
         pending_requests=pending_requests,
         schools=schools, recent_logs=recent_logs, requests=requests,
+        mail=mail_ledger.snapshot(),
     )
 
 
@@ -222,31 +228,20 @@ def api_reset_admin_pw(school_id):
         return jsonify({"error": "Admin not found"}), 404
     new_pw = secrets.token_hex(8)
     supabase.auth.admin.update_user_by_id(admin[0]["id"], {"password": new_pw})
-    # Send email via the one resolver, so the panel's credential reaches this path.
-    from app.services import smtp_settings
+    # Send email via the one resolver, so the panel's credential reaches this path,
+    # with the body every other user-facing mail wears (`app/services/email_bodies.py`):
+    # bilingual, escaped, and with a plain-text half beside the HTML one.
+    from app.services import email_bodies, smtp_settings
     admin_email = None
     email_sent = False
     try:
         admin_email = supabase.auth.admin.get_user_by_id(admin[0]["id"]).user.email
         if admin_email:
-            body = f"""Yth. Bpk/Ibu {admin[0].get('full_name', 'Admin Sekolah')},
-
-Dengan hormat,
-
-Kami informasikan bahwa kata sandi akun ScanGrade Anda telah berhasil diatur ulang oleh Super Admin.
-
-Berikut adalah kata sandi baru Anda:
-{new_pw}
-
-Untuk keamanan, silakan masuk menggunakan kata sandi di atas dan segera ubah kata sandi Anda setelah berhasil login.
-
-Jika ada pertanyaan, jangan ragu untuk menghubungi tim dukungan kami.
-
-Hormat kami,
-Tim ScanGrade
-https://scangrade.web.id"""
+            mail = email_bodies.password_reset_by_admin(
+                name=admin[0].get("full_name") or "Admin Sekolah", new_password=new_pw)
             email_sent, _err = smtp_settings.send(
-                admin_email, "🔐 ScanGrade — Kata Sandi Berhasil Diatur Ulang", body)
+                admin_email, mail["subject"], mail["html"], html=True,
+                text=mail["text"], important=True)
     except Exception:  # noqa: BLE001 — email is best-effort; the password is returned either way
         pass
     return jsonify({"success": True, "password": new_pw, "email_sent": email_sent})
@@ -2090,6 +2085,8 @@ def email_settings():
         flash("smtp_saved", "success")
         return redirect("/super-admin/email-settings")
 
+    from app.services import mail_ledger
+
     store = smtp_settings.load()
     resolved = smtp_settings.resolve()
     return render_template(
@@ -2098,6 +2095,11 @@ def email_settings():
         configured=resolved["configured"],
         source=resolved["source"],
         password_set=bool((store.get("smtp_password") or "").strip()),
+        # What the mailbox *did*, beside what it is configured with. `configured` is
+        # `bool(user and password)`: a box holding the wrong app password is configured
+        # and broken, and until this card read the ledger that state was invisible to
+        # everyone until a user could not get back into their account.
+        mail=mail_ledger.snapshot(),
     )
 
 

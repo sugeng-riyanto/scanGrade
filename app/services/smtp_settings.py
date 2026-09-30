@@ -24,6 +24,10 @@ import smtplib
 import ssl
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from email.utils import formatdate, make_msgid
+
+from app import config as app_config
+from app.services import mail_ledger
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +126,14 @@ def resolve() -> dict:
     except (TypeError, ValueError):
         port = 465
     user = (store.get("smtp_user") or "").strip() or _env("SMTP_EMAIL", "")
-    password = stored_password or _env("SMTP_PASSWORD", "")
+    # `_env` answers from the app config first, which is the alias-aware value —
+    # but it can be the value as it was at *import*, and a `.env` edited since then
+    # is exactly the case here. So the environment is asked last, and it is asked
+    # under every name the password may carry (see `config.env_password`); a box
+    # with the right secret under Gmail's own spelling must not report itself
+    # unable to send mail.
+    password = (stored_password or _env("SMTP_PASSWORD", "")
+                or app_config.env_password())
     sender = _with_display_name(
         (store.get("smtp_from") or "").strip() or _env("SMTP_FROM", "") or user)
     reply_to = (
@@ -169,25 +180,67 @@ def save(data: dict) -> list:
     return saved
 
 
-def send(to_email: str, subject: str, body: str, html: bool = False):
+def _message_id_domain(sender: str) -> str:
+    """The domain a `Message-ID` should be minted under: the sender's own.
+
+    An id whose domain disagrees with `From` is one of the small inconsistencies a
+    filter scores, and a placeholder (`localhost`, an empty domain) is worse than
+    none at all.
+    """
+    address = (sender or "").rsplit("<", 1)[-1].strip("> ").strip()
+    return address.split("@", 1)[1] if "@" in address else "scangrade.web.id"
+
+
+def send(to_email: str, subject: str, body: str, html: bool = False,
+         text: str | None = None, important: bool = False):
     """Send one message through the resolved mailbox. Returns ``(ok, error)``.
 
     A tuple rather than a bare bool because "it failed" and "it failed because the
     relay said 535" are different facts, and the settings page has to be able to
     show the second one.
+
+    ``text`` is the plain-text alternative for an HTML ``body``, and it is not
+    decoration: a client that refuses HTML must still be able to read a reset code,
+    and a one-part HTML mail is the shape spam filters score highest. The two parts
+    travel in one ``multipart/alternative``, plain first — the order is the client's
+    preference hint, and the plain half is what a text-only reader is shown.
+
+    The **headers below the body** are what decide whether any of it is read. A
+    message `smtplib` builds by hand arrives with no `Date` and no `Message-ID` and
+    with nothing saying it is machine-generated, and those absences are among the
+    first things a filter scores — invisible in every rendered preview, which is why
+    they were missing. `Auto-Submitted`/`X-Auto-Response-Suppress` are RFC 3834's way
+    of saying "transactional, do not auto-answer", `important` marks a one-time
+    credential as urgent, and `Precedence: bulk` is deliberately **never** set: it is
+    the header that routes a transactional message to the bulk tab.
     """
     settings = resolve()
     if not settings["configured"]:
         logger.warning("SMTP not configured — email to %s skipped", to_email)
+        # Written down, not only logged: this is the case a locked-out user discovers
+        # first, and a warning in a journal needs a shell to read. See mail_ledger.
+        mail_ledger.record(state=mail_ledger.STATE_SKIPPED, to=to_email,
+                           subject=subject, detail="no SMTP credential is set")
         return False, "not configured"
 
     if html:
         msg = MIMEMultipart("alternative")
+        if text:
+            msg.attach(MIMEText(text, "plain", "utf-8"))
         msg.attach(MIMEText(body, "html", "utf-8"))
     else:
         msg = MIMEText(body, "plain", "utf-8")
     msg["Subject"] = subject
     msg["From"] = settings["sender"]
+    # A message with no date cannot be aged (nor shown with a sent time), and one
+    # with no id looks replayed. Both are minted here rather than left to the relay.
+    msg["Date"] = formatdate(localtime=True)
+    msg["Message-ID"] = make_msgid(domain=_message_id_domain(settings["sender"]))
+    msg["Auto-Submitted"] = "auto-generated"
+    msg["X-Auto-Response-Suppress"] = "All"
+    if important:
+        msg["Importance"] = "high"
+        msg["X-Priority"] = "1 (Highest)"
     # A reset code is one-way: the sending mailbox is not watched, so a reply must not
     # land in it. Set unconditionally, because a null header is what makes a mail
     # client answer the address in `From`.
@@ -207,8 +260,15 @@ def send(to_email: str, subject: str, body: str, html: bool = False):
                 server.sendmail(settings["user"], [to_email], msg.as_string())
     except Exception as exc:  # noqa: BLE001 — reported to the operator, not raised
         logger.error("SMTP send failed to %s: %s", to_email, exc)
+        mail_ledger.record(state=mail_ledger.STATE_FAILED, to=to_email,
+                           subject=subject, detail=str(exc))
         return False, str(exc)
     logger.info("Email sent to %s (%s)", to_email, subject)
+    # The success is recorded too, and it is not bookkeeping: it is what clears the
+    # alarm on the status pages. A ledger of failures alone can only ever say "broken"
+    # once and never "fixed", so an operator who has just proved the path works would
+    # still be looking at a red card.
+    mail_ledger.record(state=mail_ledger.STATE_SENT, to=to_email, subject=subject)
     return True, None
 
 

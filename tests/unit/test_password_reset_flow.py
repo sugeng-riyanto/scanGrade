@@ -302,10 +302,23 @@ def test_a_visitor_is_not_told_a_code_was_sent_when_it_was_not(monkeypatch):
     assert "Gagal mengirim email" in body
 
 
-def test_send_email_reports_failure_instead_of_nothing(app_ctx):
+def test_send_email_reports_failure_instead_of_nothing(app_ctx, monkeypatch):
+    """No credential *anywhere*, said explicitly.
+
+    Clearing the config used to be enough, because the environment was the only
+    other source and this checkout's `.env` had none. It now carries a real app
+    password (under the Gmail spelling `app_password_gmail`), and `resolve()`
+    deliberately falls through to the environment when the config value is empty —
+    so a test about an unconfigured relay has to clear the names it may arrive
+    under, or it measures a box that can send mail.
+    """
+    from app import config as app_config
+
     app = app_instance()
     app.config["SMTP_EMAIL"] = "scangrade9@gmail.com"
     app.config["SMTP_PASSWORD"] = ""
+    for name in app_config.SMTP_PASSWORD_NAMES:
+        monkeypatch.delenv(name, raising=False)
     assert mod._send_email("someone@school.id", "subject", "body") is False, (
         "an unconfigured relay must answer False, not None: the caller treats a "
         "truthy answer as 'sent'")

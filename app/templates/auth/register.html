@@ -28,7 +28,7 @@
             <p class="mt-1 text-surface-500 font-medium" x-text="t('Isi data berikut. Akun akan diaktifkan setelah verifikasi admin.','Fill in the details below. The account is activated once an admin verifies it.')"></p>
         </div>
 
-        <div x-data="{ loading: false, pw: '', pwStrength: 0, pwColor: '' }" x-init="$watch('pw', val => {
+        <div x-data="{ loading: false, position: '', pw: '', pwStrength: 0, pwColor: '' }" x-init="$watch('pw', val => {
             let s = 0;
             if (val.length > 0) s += 1;
             if (val.length >= 6) s += 1;
@@ -68,14 +68,28 @@
                         </div>
                         <div class="input-icon">
                             <i class="fas fa-user-tie"></i>
-                            <select name="position" required class="w-full px-4 py-3 pl-10 border border-surface-200 rounded-xl focus:ring-2 focus:ring-primary-500 text-surface-700 font-medium bg-white transition">
+                            {# The list holds the common answers; `other` opens a field, so a
+                               school whose contact is none of them can still name the role its
+                               approval screen and profile will carry. The sentinel never gets
+                               stored — the route resolves it into what was typed. #}
+                            <select name="position" x-model="position" required class="w-full px-4 py-3 pl-10 border border-surface-200 rounded-xl focus:ring-2 focus:ring-primary-500 text-surface-700 font-medium bg-white transition">
                                 <option value="" disabled selected x-text="t('Jabatan','Position')"></option>
                                 <option value="Kepala Sekolah" x-text="t('Kepala Sekolah','Principal')"></option>
                                 <option value="Wakil Kepala Sekolah" x-text="t('Wakil Kepala Sekolah','Vice Principal')"></option>
+                                <option value="Guru" x-text="t('Guru','Teacher')"></option>
                                 <option value="Pengurus Yayasan" x-text="t('Pengurus Yayasan','Foundation Board Member')"></option>
                                 <option value="Admin Operator" x-text="t('Admin Operator','Administrative Operator')"></option>
+                                <option value="other" x-text="t('Lainnya — ketik sendiri','Other — type it in')"></option>
                             </select>
                         </div>
+                    </div>
+                    <div x-show="position === 'other'" x-cloak class="input-icon">
+                        <i class="fas fa-pen"></i>
+                        <input type="text" name="position_other" maxlength="80" autocomplete="off"
+                               :placeholder="t('Tulis jabatan Anda di sini','Type your position here')"
+                               class="w-full px-4 py-3 pl-10 border border-surface-200 rounded-xl focus:ring-2 focus:ring-primary-500 text-surface-700 font-medium placeholder:text-surface-300 transition">
+                        <p class="mt-1 text-xs text-surface-400 font-medium"
+                           x-text="t('Jabatan ini yang akan dibaca admin saat menyetujui.','This is the position the admin reads when approving.')"></p>
                     </div>
                     <div class="input-icon">
                         <i class="fas fa-envelope"></i>

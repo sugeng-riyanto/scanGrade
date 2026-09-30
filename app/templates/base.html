@@ -441,6 +441,11 @@ window.sgSavePrefs = function (patch) {
                     <p class="text-sm font-semibold text-white truncate">{{ g.user_name or g.user_email[:20] }}</p>
                     <p class="text-[10px] font-medium text-white/40 uppercase tracking-wider"><span x-text="'{{ g.user_role|replace('_', ' ') }}'"></span></p>
                 </div>
+                {# Every authenticated role reads this block, so this is the one place a
+                   change-password door belongs: the page has always existed and nothing
+                   linked to it, which is what "cannot change my password" means from the
+                   outside. #}
+                <a href="/auth/change-password" class="tap-44 text-white/30 hover:text-primary-300 transition rounded-lg hover:bg-white/5" :title="t('Ubah Password','Change password')"><i class="fas fa-key"></i></a>
                 <a href="/auth/logout" class="tap-44 text-white/30 hover:text-red-400 transition rounded-lg hover:bg-white/5" title="Logout"><i class="fas fa-sign-out-alt"></i></a>
             </div>
         </div>
@@ -661,6 +666,9 @@ window.sgSavePrefs = function (patch) {
                             <p class="text-sm font-bold text-surface-800 truncate">{{ g.user_name or g.user_email }}</p>
                             <p class="text-[10px] font-medium text-surface-400 uppercase tracking-wider"><span x-text="'{{ g.user_role|replace('_', ' ') }}'"></span></p>
                         </div>
+                        <a href="/auth/change-password" class="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-surface-700 hover:bg-surface-50 transition">
+                            <i class="fas fa-key text-xs"></i> <span x-text="t('Ubah Password','Change Password')"></span>
+                        </a>
                         <a href="/auth/logout" class="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-red-600 hover:bg-red-50 transition">
                             <i class="fas fa-sign-out-alt text-xs"></i> Logout
                         </a>

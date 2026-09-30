@@ -1,27 +1,9 @@
 import os
 import logging
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 
 import requests
 
 logger = logging.getLogger(__name__)
-
-
-def _smtp_settings():
-    """Resolve SMTP settings the same way the rest of the app does.
-
-    The project stores Gmail credentials as SMTP_EMAIL / SMTP_PASSWORD
-    (app.config.Config). Reading SMTP_USER / SMTP_PASS here — as this module
-    used to — silently produced "SMTP not configured" and no email was ever
-    delivered.
-    """
-    from app.services import smtp_settings
-
-    resolved = smtp_settings.resolve()
-    return (resolved["host"], resolved["port"], resolved["user"],
-            resolved["password"], resolved["sender"], resolved["reply_to"])
 
 
 def send_whatsapp(phone: str, message: str):
@@ -46,72 +28,40 @@ def send_whatsapp(phone: str, message: str):
         return False
 
 
-def send_email(to_email: str, subject: str, body_html: str):
-    """Send email via the configured SMTP account. Returns True on success."""
-    (smtp_host, smtp_port, smtp_user, smtp_pass, from_email,
-     reply_to) = _smtp_settings()
+def send_email(to_email: str, subject: str, body_html: str, text: str | None = None,
+               important: bool = False):
+    """Send one HTML mail through **the one sender**. Returns True on success.
 
-    if not smtp_user or not smtp_pass:
-        logger.warning("SMTP not configured (SMTP_EMAIL/SMTP_PASSWORD missing); email to %s skipped", to_email)
-        return False
-
-    try:
-        msg = MIMEMultipart("alternative")
-        msg["From"] = from_email
-        # A notification is one-way too, so a reply is pointed away from the sending
-        # mailbox rather than left to default to it (see smtp_settings.resolve).
-        msg["Reply-To"] = reply_to
-        msg["To"] = to_email
-        msg["Subject"] = subject
-        msg.attach(MIMEText(body_html, "html"))
-
-        if smtp_port == 465:
-            import ssl
-            context = ssl.create_default_context()
-            with smtplib.SMTP_SSL(smtp_host, smtp_port, context=context) as server:
-                server.login(smtp_user, smtp_pass)
-                server.sendmail(from_email, [to_email], msg.as_string())
-        else:
-            with smtplib.SMTP(smtp_host, smtp_port) as server:
-                server.starttls()
-                server.login(smtp_user, smtp_pass)
-                server.sendmail(from_email, [to_email], msg.as_string())
-        logger.info("Email sent to %s (%s)", to_email, subject)
-        return True
-    except Exception as e:
-        logger.error(f"SMTP send failed to {to_email}: {e}")
-        return False
-
-
-def notify_approval(email: str, phone: str, school_name: str, code: str, expires_at_str: str):
-    """Send approval notification via email and WhatsApp."""
-    subject = f"Aktivasi Akun ScanGrade - {school_name}"
-    body_html = f"""
-    <div style="font-family:Inter,sans-serif;max-width:560px;margin:0 auto;padding:24px;background:#f8fafc;border-radius:16px;">
-        <div style="text-align:center;padding:24px 0;">
-            <div style="width:48px;height:48px;margin:0 auto;background:linear-gradient(135deg,#f97316,#f59e0b);border-radius:12px;display:flex;align-items:center;justify-content:center;">
-                <svg width="24" height="24" fill="white" viewBox="0 0 24 24"><path d="M12 2L2 7v10l10 5 10-5V7L12 2z"/></svg>
-            </div>
-            <h1 style="color:#1e293b;font-size:24px;font-weight:800;margin:16px 0 4px;">Aktivasi Akun ScanGrade</h1>
-            <p style="color:#64748b;font-size:14px;">Sekolah <strong>{school_name}</strong> telah disetujui</p>
-        </div>
-        <div style="background:white;border-radius:16px;padding:24px;border:1px solid #e2e8f0;">
-            <p style="color:#1e293b;font-size:14px;font-weight:600;">Kode Aktivasi Anda:</p>
-            <div style="background:#f8fafc;border:2px dashed #f97316;border-radius:12px;padding:16px;text-align:center;margin:12px 0;">
-                <span style="font-size:32px;font-weight:800;letter-spacing:8px;color:#ea580c;">{code}</span>
-            </div>
-            <p style="color:#64748b;font-size:13px;">Gunakan kode di atas untuk mengaktifkan akun Anda.</p>
-            <p style="color:#64748b;font-size:13px;">Berlaku hingga: <strong>{expires_at_str}</strong></p>
-            <div style="margin-top:16px;text-align:center;">
-                <a href="{os.getenv('APP_URL', 'http://localhost:5000')}/auth/activate"
-                   style="display:inline-block;background:linear-gradient(135deg,#f97316,#f59e0b);color:white;padding:12px 32px;border-radius:12px;text-decoration:none;font-weight:700;font-size:14px;">
-                    Aktivasi Sekarang
-                </a>
-            </div>
-        </div>
-    </div>
+    This used to open its own `smtplib` connection with its own `From`/`Reply-To`, a
+    second implementation of everything `app/services/smtp_settings.py` decides: the
+    credential resolver, the alias names an app password may arrive under, the display
+    name, and the reply address. Two clients is two answers to one question, and only
+    one of them was getting the fixes. So it delegates, and `text` is the plain-text
+    alternative that rides along in the same `multipart/alternative`.
     """
-    sent = send_email(email, subject, body_html)
+    from app.services import smtp_settings
+
+    ok, error = smtp_settings.send(to_email, subject, body_html, html=True, text=text,
+                                   important=important)
+    if not ok:
+        logger.warning("Email to %s not sent: %s", to_email, error or "not configured")
+    return bool(ok)
+
+
+def notify_approval(email: str, phone: str, school_name: str, code: str, expires_at_str: str,
+                    name: str = "Bapak/Ibu Admin Sekolah"):
+    """Send approval notification via email and WhatsApp.
+
+    The body comes from `app/services/email_bodies.py` like every other user-facing
+    mail: bilingual, escaped (a school name is typed into a registration form), and
+    with a plain-text half so a client that refuses HTML still reads the code.
+    """
+    from app.services import email_bodies
+
+    mail = email_bodies.activation_code(name=name, school_name=school_name, code=code,
+                                        expires_at=expires_at_str)
+    sent = send_email(email, mail["subject"], mail["html"], text=mail["text"],
+                      important=True)
     if not sent:
         logger.warning("Activation code for %s could not be emailed; code=%s", email, code)
 
