@@ -795,6 +795,18 @@ BOX_EDITS_KEPT=""
 BOX_EDITS_RECORD=""
 BOX_EDITS_PATCH=""
 BOX_EDITS_MOVED=""
+#: Set by `box_edits_unfiltered` when *this* run had to write the override. Empty when
+#: the path already read without a filter, which is the difference between "the box
+#: was changed now" and "it was changed on an earlier tick".
+BOX_EDITS_ATTRIBUTE_ADDED=""
+#: The path the unreproducible-blob helpers are working on, a scratch file for HEAD's
+#: bytes, the line `box_edits_note` should append, and the paths the verbatim restore
+#: is asked about (one per line). Globals rather than arguments for the reason
+#: `$BOX_EDITS_CAUSE` is: no helper in this block takes a positional parameter.
+BOX_EDITS_PATH=""
+BOX_EDITS_BLOB_TMP="${TMPDIR:-/tmp}/scangrade-blob-$$"
+BOX_EDITS_NOTE_LINE=""
+BOX_EDITS_VERBATIM_PATHS=""
 BOX_EDITS_BASE=""
 #: The paths in this run's dirty set that are stale — older than the threshold, as a
 #: newline list. Set beside `$BOX_EDITS_OVERLAP`, and recorded separately from it so
@@ -933,6 +945,155 @@ box_edits_prune() {
     rm -f "$f" "${f%.txt}.patch" 2>/dev/null || true
     rm -rf "${f%.txt}.files" 2>/dev/null || true
   done
+}
+
+# ── A blob a checkout cannot reproduce ───────────────────────────────────────
+#
+# `git checkout HEAD -- <path>` writes *through* the filters, and the comparison that
+# decides whether a path is still modified does not read both sides the same way: the
+# worktree is normalised (`text` turns CRLF into LF before comparing) while the blob is
+# compared as stored. A blob committed *around* the filters therefore reads as modified
+# however many times it is restored, and git will not fast-forward onto a tree it reads
+# as dirty — so the box refuses every tick while the heal reports success.
+#
+# Measured on this project's own box, 2026-09-30: commit `0afc68e` carries 108 carriage
+# returns in `app/routes/admin_sekolah.py`, a file the repo's `.gitattributes` promises
+# is LF. The box sat on that commit, refused every two minutes for hours, 12 commits
+# behind, with `app/routes/admin_sekolah.py is set aside` in its own journal.
+#
+# The way out cannot be another checkout, so it is the blob's own bytes — and, only if
+# that is still not enough, one line telling git not to read that one path through the
+# filters. Both are local: the bytes are HEAD's, and the line goes in this checkout's
+# own `info/attributes`, which is not committed, is not what a merge brings, and
+# changes no other clone. The record names both, because a local override an operator
+# cannot see is the next thing that strands a box.
+
+#: The checkout's own git directory. Asked of git, like `lock_path` does for the index
+#: lock, because a linked worktree keeps `.git` as a *file* and its `info/` beside that
+#: file rather than inside it.
+box_edits_git_dir() {
+  local dir
+  dir=$(as_owner git -C "$REPO" rev-parse --absolute-git-dir 2>/dev/null)
+  [ -n "$dir" ] || dir="$REPO/.git"
+  printf '%s\n' "$dir"
+}
+
+#: Where a checkout's own, uncommitted attributes live.
+box_edits_attributes_file() {
+  printf '%s/info/attributes\n' "$(box_edits_git_dir)"
+}
+
+#: Is the path in `$BOX_EDITS_PATH` still modified? Asked per path and not for the
+#: tree: one unreproducible blob must not be read as a dirty checkout that has nothing
+#: to do with it.
+box_edits_path_is_dirty() {
+  [ -n "$(as_owner git -C "$REPO" status --porcelain -- "$BOX_EDITS_PATH" 2>/dev/null)" ]
+}
+
+#: HEAD's own bytes for `$BOX_EDITS_PATH`, written into the worktree by the path's
+#: owner.
+#:
+#: `cat-file blob` prints the stored bytes with no smudge filter; the bytes are staged
+#: in a scratch file root may write, then `cp` writes the checkout's file as its owner.
+#: That two-step is the whole point: what a checkout cannot reproduce is a file, and a
+#: root-owned file dropped into the tree is a breakage of its own.
+box_edits_write_blob_bytes() {
+  as_owner git -C "$REPO" cat-file blob "HEAD:$BOX_EDITS_PATH" > "$BOX_EDITS_BLOB_TMP" 2>/dev/null || return 1
+  as_owner cp -f -- "$BOX_EDITS_BLOB_TMP" "$REPO/$BOX_EDITS_PATH" 2>/dev/null
+  rm -f -- "$BOX_EDITS_BLOB_TMP" 2>/dev/null || true
+}
+
+#: Does git read `$BOX_EDITS_PATH` without the filters? Asked of git rather than
+#: grepped out of the file, because `check-attr` is the reader that decides — and it
+#: answers for a line an earlier tick wrote as well as for one written now.
+box_edits_attribute_unset() {
+  case "$(as_owner git -C "$REPO" check-attr text -- "$BOX_EDITS_PATH" 2>/dev/null)" in
+    *"text: unset") return 0 ;;
+  esac
+  return 1
+}
+
+#: Make git read one path byte for byte, by putting `-text` in this checkout's own
+#: attributes file. Idempotent, and quoted: in an attributes file a path with a space, a
+#: `#` or a quote only matches itself when it is, and git's own quoting is C-style. Sets
+#: `BOX_EDITS_ATTRIBUTE_ADDED` only when this run is the one that wrote the line.
+box_edits_unfiltered() {
+  local attrs pattern line
+  box_edits_attribute_unset && return 0
+  attrs=$(box_edits_attributes_file)
+  pattern=$(printf '%s' "$BOX_EDITS_PATH" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')
+  line="\"$pattern\" -text"
+  if ! grep -Fxq -- "$line" "$attrs" 2>/dev/null; then
+    as_owner mkdir -p "$(dirname "$attrs")" 2>/dev/null || true
+    printf '%s\n' "$line" | as_owner tee -a "$attrs" >/dev/null || return 1
+    BOX_EDITS_ATTRIBUTE_ADDED="$line"
+  fi
+  box_edits_attribute_unset
+}
+
+#: One more line on this run's record, for a fact that can only be known *after* the
+#: paths are restored. The record is a set of kinds and a reader partitions them, so
+#: appending keeps it readable — and nothing loss-critical is written here: what the box
+#: had is in the patch, which is written before anything moves.
+box_edits_note() {
+  [ -n "${BOX_EDITS_RECORD:-}" ] || return 0
+  [ -f "$BOX_EDITS_RECORD" ] || return 0
+  printf '%s\n' "$BOX_EDITS_NOTE_LINE" >> "$BOX_EDITS_RECORD" 2>/dev/null || true
+}
+
+#: The restore a checkout cannot make, for the paths in `$BOX_EDITS_VERBATIM_PATHS`
+#: that HEAD has. Called after the ordinary restore and after the record, and it
+#: refuses rather than moving on to a merge over a tree it could not clean — the rule
+#: every other refusal here follows.
+box_edits_restore_verbatim() {
+  local path verbatim=0 attributed="" added="" attrs
+  # Resolved once, up here, because the closing log names it for a path this run did
+  # not have to touch — the override an earlier tick wrote is still in force, and the
+  # record must say so. Left to the dirty branch it would be unset on that tick.
+  attrs=$(box_edits_attributes_file)
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    BOX_EDITS_PATH="$path"
+    if box_edits_path_is_dirty; then
+      if ! box_edits_write_blob_bytes; then
+        BOX_EDITS_REASON="$path is still modified, and writing HEAD's own bytes into it failed, so the release is not attempted over a tree it would clobber"
+        box_edits_refuse
+      fi
+      verbatim=$((verbatim + 1))
+      BOX_EDITS_NOTE_LINE="verbatim $path"
+      box_edits_note
+      if box_edits_path_is_dirty; then
+        # HEAD's bytes are in the file and it is *still* modified: what differs is the
+        # filter, not the file. `text` normalises the worktree and leaves the blob as
+        # it is stored, so a blob committed around the filters can never be matched —
+        # and that is the state that made this box refuse for hours.
+        BOX_EDITS_ATTRIBUTE_ADDED=""
+        if ! box_edits_unfiltered; then
+          BOX_EDITS_REASON="$path still differs with HEAD's own bytes in it, and $attrs could not be told to read it without the filter, so the release is not attempted over a tree it would clobber"
+          box_edits_refuse
+        fi
+        [ -z "$BOX_EDITS_ATTRIBUTE_ADDED" ] || added="${added}${BOX_EDITS_ATTRIBUTE_ADDED}"$'\n'
+      fi
+      if box_edits_path_is_dirty; then
+        BOX_EDITS_REASON="$path still differs with HEAD's own bytes in it and $attrs reading it without the filter, so the release is not attempted over a tree it would clobber"
+        box_edits_refuse
+      fi
+    fi
+    # A path git reads without the filters is a local override in force, whether this
+    # run wrote it or an earlier one did — and the newest record is the only one the
+    # page shows, so it must be named whenever a heal leaned on it.
+    if box_edits_attribute_unset; then
+      BOX_EDITS_NOTE_LINE="attribute $path"
+      box_edits_note
+      attributed="${attributed}${path} "
+    fi
+  done <<< "$BOX_EDITS_VERBATIM_PATHS"
+  [ "$verbatim" = 0 ] || log "HEAD's own bytes were written into $verbatim path(s) a checkout cannot reproduce: the blob is what it is, and the filters are what made it differ (the patch kept for those paths is a diff against that same blob, so it carries the filter's differences as well as the box's)"
+  [ -z "$attributed" ] || {
+    log "$attrs reads ${attributed% } without those filters — a local line, not a committed one:"
+    [ -z "$added" ] || printf '%s' "$added" | sed '/^$/d; s/^/    /'
+    log "    it changes nothing a merge brings and no other checkout; undoing it is that line, removed"
+  }
 }
 
 local_edits_heal() {
@@ -1083,6 +1244,10 @@ local_edits_heal() {
       box_edits_refuse
     fi
     log "set aside ${touched[*]} (kept in $BOX_EDITS_PATCH) and restored them, so the release can merge"
+    # A checkout writes through the filters, so for a blob those filters cannot
+    # reproduce, that restore is not the end of it.
+    BOX_EDITS_VERBATIM_PATHS="$(printf '%s\n' "${touched[@]}")"
+    box_edits_restore_verbatim
   fi
   if [ "${#moved[@]}" -gt 0 ]; then
     log "moved ${moved[*]} into $BOX_EDITS_MOVED, so the release can merge"

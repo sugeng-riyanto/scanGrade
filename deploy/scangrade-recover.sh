@@ -171,6 +171,42 @@ recover_reason() {
   printf 'behind\n'
 }
 
+recover_make_reproducible() {
+  # A checkout writes *through* the filters, and the comparison that decides whether a
+  # path is modified does not read both sides the same way: the worktree is normalised
+  # (`text` turns CRLF into LF before comparing) while the blob is compared as stored.
+  # A blob committed *around* the filters therefore reads as modified however many
+  # times it is restored, and `git merge --ff-only` refuses for exactly that reason —
+  # which is what made this box answer "NOT MOVED" while the restore reported success.
+  #
+  # Measured on the live box, 2026-09-30: commit `0afc68e` carries 108 carriage returns
+  # in `app/routes/admin_sekolah.py`, a file the repo's `.gitattributes` promises is LF;
+  # the box refused every two minutes for hours, twelve commits behind. The way out is
+  # not another checkout, so it is the blob's own bytes — and, only if that is still
+  # not enough, one line telling git not to read that one path through the filters.
+  # Both are local: the bytes are HEAD's, and the line goes in this checkout's own
+  # `info/attributes`, which is not committed and changes no other clone.
+  #
+  # Returns non-zero only when the path cannot be made clean; the caller records that
+  # and leaves the file where it is, the same rule every other restore here follows.
+  local path dir attr pattern line
+  path="$1"
+  [ -n "$(gitdo status --porcelain -- "$path" 2>/dev/null)" ] || return 0
+  as_owner sh -c 'git -C "$1" cat-file blob "HEAD:$2" > "$1/$2"' _ "$REPO" "$path" 2>/dev/null \
+    || return 1
+  printf 'VERBATIM %s\n' "$path" >> "$RECORD"
+  [ -n "$(gitdo status --porcelain -- "$path" 2>/dev/null)" ] || return 0
+  dir="$(gitdo rev-parse --absolute-git-dir 2>/dev/null)"
+  [ -n "$dir" ] || dir="$REPO/.git"
+  attr="$dir/info/attributes"
+  pattern="$(printf '%s' "$path" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')"
+  line="\"$pattern\" -text"
+  as_owner sh -c 'grep -Fxq -- "$2" "$1" 2>/dev/null || printf "%s\n" "$2" >> "$1"' \
+    _ "$attr" "$line" 2>/dev/null || return 1
+  printf 'ATTRIBUTE %s\n' "$path" >> "$RECORD"
+  [ -z "$(gitdo status --porcelain -- "$path" 2>/dev/null)" ]
+}
+
 recover_set_aside() {
   # Reads `git status --porcelain` lines and takes each entry out of the tree, in an
   # order that makes loss impossible at every step:
@@ -229,6 +265,17 @@ recover_set_aside() {
         printf 'FAILED  %s (recorded, but it could not be restored)\n' \
           "$path" >> "$RECORD"
         printf '   recorded %s but could not restore it — left in place\n' "$path"
+        ok=1
+        continue
+      fi
+      # A checkout writes through the filters, so for a blob those filters cannot
+      # reproduce, that restore is not the end of it. This is the case the box was
+      # actually stuck on, and it is why the lever used to report NOT MOVED with a
+      # clean restore: the merge was still refused, on the same file.
+      if ! recover_make_reproducible "$path"; then
+        printf 'UNREPRODUCIBLE %s (recorded, but a checkout cannot match its blob)\n' \
+          "$path" >> "$RECORD"
+        printf '   recorded %s but could not make it reproducible — left in place\n' "$path"
         ok=1
         continue
       fi

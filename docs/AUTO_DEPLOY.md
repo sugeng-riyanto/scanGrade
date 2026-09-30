@@ -1349,10 +1349,18 @@ treated alike:
   `git stash` all leave the same ` M`, and `git merge --ff-only` answers `Your local
   changes to the following files would be overwritten by merge`.
 
-**That last line is why no release can rescue this box.** `local_edits_heal` (and
-`sgfix`'s set-aside) preserve and restore an edit with `git checkout HEAD -- <path>`
-— the one operation that cannot clear this class. The healer runs, reports success,
-and the tree is dirty again.
+**That last line is why no release could rescue this box**: `local_edits_heal` (and
+`sgfix`'s set-aside) preserved an edit with `git checkout HEAD -- <path>` — the one
+operation that cannot clear this class — so the healer ran, reported success, and the
+tree was dirty again. **Both healers now close this class themselves**, after the
+ordinary restore and only when it is still not enough: HEAD's own bytes are written
+into the worktree (staged where root may write, then copied as the checkout's owner),
+and if the filters still make the path differ, one `"<path>" -text` line is added to
+that checkout's own `info/attributes` — which wins over `.gitattributes`, is not
+committed and changes no other clone. A path that is still different after both is a
+refusal, never a merge over a tree that could not be cleaned. The record names
+`verbatim <path>` and `attribute <path>` for each, so a local override an operator
+cannot see is never the next thing that strands a box.
 
 Such a blob is born from a commit built *around* the filters, which is what a
 scripted commit does: `git hash-object -w --no-filters <path>` followed by
@@ -1374,7 +1382,10 @@ printf 'app/routes/admin_sekolah.py -text\n' >> /opt/scangrade/.git/info/attribu
 cd /opt/scangrade && runuser -u scangrade -- sh -c 'git cat-file blob HEAD:app/routes/admin_sekolah.py > app/routes/admin_sekolah.py'
 ```
 
-The next tick then fetches, merges and runs every gate normally. After that release
+**This is now what both healers do by themselves**, so these two lines are only for a
+box whose runner and lever predate the heal — every later box is healed by `sgfix`, or
+by the release the runner fetches once its own heal has cleaned the tree. The next
+tick then fetches, merges and runs every gate normally. After that release
 the blob is CR-free and the attribute is no longer needed (`rm -f
 /opt/scangrade/.git/info/attributes` is safe). The shape is deliberate — it makes
 the commit the box is *on* reproducible, so if a gate refuses and the runner runs
