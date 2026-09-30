@@ -153,6 +153,67 @@
         </div>
     </div>
 
+    <!-- ── will it clear itself, or does it need a person? ──────────────── -->
+    {#
+        The one question every record above leaves open: does the operator have to
+        do anything? A fetch that could not reach GitHub and a gate that rejected
+        the code both leave "nothing is deploying" with the previous release
+        serving, and the correct response is opposite. The runner decides which it
+        is — it is the only thing that knows the step and the exit code together —
+        and writes it down (`deploy/scangrade-deploy.sh`, `situation-logic`); this
+        card only reports it.
+
+        When a page request can end it, the card carries exactly one button, and
+        the quarantine card's own request forms are suppressed while it shows —
+        one place to press, not two that do the same thing. When nothing here can
+        end it (`wait` is the runner's own retry; `console` needs the installer),
+        the card says so rather than offering a button that cannot help.
+    #}
+    {# `is defined` for the same reason the lock card uses it: a caller may render this
+       template with a partial report (its own page, a download, a future JSON view),
+       and a missing key must fall back rather than raise. #}
+    {% if status.situation is defined and status.situation.key == 'present' %}
+    <div class="card p-5 border {{ 'bg-amber-50 border-amber-200' if status.situation.disposition_key == 'self' else 'bg-rose-50 border-rose-200' }}">
+        <div class="flex items-start gap-4">
+            <i class="fas {{ 'fa-hourglass-half text-amber-700' if status.situation.disposition_key == 'self' else 'fa-user-gear text-rose-700' }} text-2xl mt-0.5"></i>
+            <div class="min-w-0 flex-1">
+                {% if status.situation.disposition_key == 'self' %}
+                <h2 class="font-extrabold text-amber-700" x-text="t('Ini selesai sendiri — tidak perlu Anda','This clears itself — nothing for you to do')"></h2>
+                <p class="text-sm text-surface-600 mt-1 leading-relaxed" x-text="t('Runner akan mencobanya lagi pada tick berikutnya (tiap dua menit). Tidak ada tombol di sini karena memang tidak ada yang perlu ditekan.','The runner retries on the next tick (every two minutes). There is no button here because there is genuinely nothing to press.')"></p>
+                {% elif status.situation.disposition_key == 'human' %}
+                <h2 class="font-extrabold text-rose-700" x-text="t('Butuh Anda — tidak akan selesai sendiri','Needs you — it will not clear itself')"></h2>
+                <p class="text-sm text-surface-600 mt-1 leading-relaxed" x-text="t('Tidak ada tick berikutnya yang menyelesaikannya. Satu tindakan di bawah menutup keadaan ini.','No next tick ends it. The single action below closes it out.')"></p>
+                {% else %}
+                <h2 class="font-extrabold text-surface-700" x-text="t('Keadaan ini tidak bisa dibaca','This situation cannot be read')"></h2>
+                <p class="text-sm text-surface-600 mt-1 leading-relaxed" x-text="t('Runner menulis catatan yang tidak dikenali halaman ini (runner yang lebih baru?). Isi mentahnya ada di bawah.','The runner wrote a record this page does not recognise (a newer runner?). The raw fields are below.')"></p>
+                {% endif %}
+                {% if status.situation.gate %}
+                <p class="text-xs text-surface-500 mt-2"><span x-text="t('Langkah yang menolak:','The step that refused:')"></span> <code class="font-mono break-all">{{ status.situation.gate }}</code></p>
+                {% endif %}
+                {% if status.situation.action_key == 'release' %}
+                <form method="POST" action="/super-admin/deploy-status/release" class="mt-4">
+                    <button type="submit" class="bg-primary-600 hover:bg-primary-700 text-white px-4 py-2 rounded-xl font-bold text-sm transition shadow-lg shadow-primary-600/20">
+                        <i class="fas fa-rotate-right mr-1"></i>
+                        <span x-text="t('Rilis ulang commit ini (satu percobaan)','Retry this exact commit (one attempt)')"></span>
+                    </button>
+                    <span class="block text-xs text-surface-500 mt-2" x-text="t('Satu percobaan terhadap commit yang ditahan; kalau gate menolak lagi, ia dikarantina lagi.','One attempt at the held commit; if a gate refuses it again it is held again.')"></span>
+                </form>
+                {% elif status.situation.action_key == 'rebaseline' %}
+                <form method="POST" action="/super-admin/deploy-status/rebaseline" class="mt-4">
+                    <button type="submit" class="bg-surface-700 hover:bg-surface-800 text-white px-4 py-2 rounded-xl font-bold text-sm transition">
+                        <i class="fas fa-gauge-high mr-1"></i>
+                        <span x-text="t('Ukur ulang kotak ini lalu rilis (satu percobaan)','Re-measure this box, then release (one attempt)')"></span>
+                    </button>
+                    <span class="block text-xs text-surface-500 mt-2" x-text="t('Menulis ulang baseline kinerja dari kotak sebagaimana adanya sekarang, lalu mencoba commit yang ditahan sekali lagi — karena yang melambat adalah kotaknya, bukan kodenya.','Rewrites the performance baseline from the box as it is now, then retries the held commit once — because the box, not the code, is what got slower.')"></span>
+                </form>
+                {% elif status.situation.action_key == 'console' %}
+                <p class="text-xs text-rose-700 mt-3 leading-relaxed" x-text="t('Tidak ada yang bisa diselesaikan dari halaman ini: ini butuh installer atau konsol, bukan permintaan rilis.','Nothing on this page can end it: this one needs the installer or a console, not a release request.')"></p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
     <!-- ── the refusal that is about the box, not about a commit ────────── -->
     {#
         A refusal the operator cannot otherwise see. When this box is not armed to
@@ -702,6 +763,7 @@
                 </div>
                 {% endif %}
 
+                {% if status.situation is not defined or status.situation.key != 'present' %}
                 <div class="mt-4 pt-4 border-t border-surface-200">
                     {% if status.request_pending or status.release_file_present or status.rebaseline_pending %}
                     <p class="text-xs text-emerald-700" x-text="t('Permintaan sudah menunggu — runner akan menghormatinya pada tick berikutnya (tiap dua menit).','A request is already waiting — the runner honours it on the next tick (every two minutes).')"></p>
@@ -726,6 +788,7 @@
                     </form>
                     {% endif %}
                 </div>
+                {% endif %}
                 {% endif %}
 
                 <div class="mt-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 text-xs">

@@ -146,7 +146,7 @@
       "frozen": true
     },
     "admin_sekolah/students.html": {
-      "pairs": 47,
+      "pairs": 49,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -165,7 +165,7 @@
     },
     "admin_sekolah/teachers.html": {
       "pairs": 0,
-      "leftovers": 27,
+      "leftovers": 28,
       "coverage": 0.0,
       "frozen": false
     },
@@ -254,7 +254,7 @@
       "frozen": false
     },
     "base.html": {
-      "pairs": 167,
+      "pairs": 168,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -428,7 +428,7 @@
       "frozen": false
     },
     "super_admin/deploy_status.html": {
-      "pairs": 392,
+      "pairs": 404,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false

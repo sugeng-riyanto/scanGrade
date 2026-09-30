@@ -326,6 +326,11 @@ window.sgSavePrefs = function (patch) {
             <a href="/admin-sekolah/officials" class="nav-item {% if request.path == '/admin-sekolah/officials' %}active{% endif %}"><i class="fas fa-user-tie"></i><span x-text="t('Pejabat Sekolah','School Officials')"></span></a>
             <div class="nav-section-title pt-2"><span x-text="t('Data','Data')"></span></div>
             <a href="/admin-sekolah/import" class="nav-item {% if request.path == '/admin-sekolah/import' %}active{% endif %}"><i class="fas fa-upload"></i><span x-text="t('Import Excel','Import Excel')"></span></a>
+            {# The batch half of the accounts: the email an account is reached at, and
+               the count still on an issued password. The page had no entry point at
+               all — reachable only by typing its URL — so a school reported it as a
+               feature that does not exist. #}
+            <a href="/admin-sekolah/accounts" class="nav-item {% if request.path == '/admin-sekolah/accounts' %}active{% endif %}"><i class="fas fa-envelope-circle-check"></i><span x-text="t('Email &amp; Aktivasi','Email &amp; Activation')"></span></a>
             <div class="nav-section-title pt-2"><span x-text="t('Akademik','Academic')"></span></div>
             <a href="/admin-sekolah/subjects" class="nav-item {% if request.path == '/admin-sekolah/subjects' %}active{% endif %}"><i class="fas fa-book"></i><span x-text="t('Mata Pelajaran','Subjects')"></span></a>
             {# The school's own reports, at the school's own address. Both pages
