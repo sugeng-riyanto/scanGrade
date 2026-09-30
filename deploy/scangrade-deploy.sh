@@ -418,6 +418,120 @@ preflight_diff() {
 }
 # preflight-logic:end
 
+# ── Will this clear itself, or does it need a person? ────────────────────────
+# situation-logic:start
+# Every record above answers a version of *what* refused a release. None of them
+# answers the question an operator actually opens the page with: **do I have to do
+# anything?** The two answers look identical from the outside. A fetch that could not
+# reach GitHub and a gate that rejected the code both leave the previous release
+# serving and nothing new deploying, and the shape of the right response is
+# opposite — one is patience, the other is work. Reading it off the exit code is not
+# possible either: `4` is a box edit this runner heals *and* a checkout it cannot
+# read, and those are opposite answers.
+#
+# The runner is the only thing that knows both the step and the code, so it decides
+# here and writes the decision down beside the records it already keeps:
+#
+#     line 1  how it resolves          self | human
+#     line 2  what refused             preflight | quarantine | dependencies | …
+#     line 3  the gate, when named     a pre-merge step, or `perf_gate`
+#     line 4  the one action           wait | release | rebaseline | console
+#     line 5  when it was written       ISO
+#
+# The disposition is taken from the *step* a pre-merge refusal names, not from its
+# exit code, and the two steps above are therefore two lists rather than a range.
+# Only an action the page can actually carry out is offered as a button: `wait` is
+# the runner's own retry, and `console` is the set of refusals nothing but a shell
+# or the installer can end (a box that is not armed, an installed copy that drifted,
+# a run that is not root). A button that cannot help is worse than no button.
+#
+# Written by the exit trap, where the step and the code are both still in scope, and
+# cleared by a run that finishes or by `preflight_forget` — a merge is the moment a
+# pre-merge refusal stopped being true. So its presence means the last tick stopped,
+# the same contract `last-stop` has, and a box that has moved on does not keep
+# reading as one that is stuck.
+#
+# Two lists to read, two to keep correct: `SITUATION_SELF_GATES` is what the next
+# tick clears on its own — the world's fault (a fetch that could not reach GitHub, a
+# database that would not answer), a stale lock, a merge that could not happen, a box
+# edit the heal sets aside. `SITUATION_HUMAN_GATES` is what no tick clears, because
+# the condition is static. `tests/unit/test_deploy_situation.py` lifts every
+# `PREFLIGHT_GATE=` out of this file and fails if one lands in neither list, so a
+# refusal added later cannot arrive as neither answer.
+SITUATION_FILE="$STATE_DIR/situation"
+SITUATION_SELF_GATES=" fetch_failed snapshot_refused lock_refused merge_refused dirty_checkout "
+SITUATION_HUMAN_GATES=" not_root no_checkout no_virtualenv checkout_unreadable "
+
+#: Set by `situation_classify` and read by `situation_write`. Globals rather than
+#: arguments for the same reason every other helper here uses them: this script takes
+#: no arguments at any level (`test_deploy_script_takes_no_arguments`).
+SITUATION_DISPOSITION=""
+SITUATION_SOURCE=""
+SITUATION_GATE=""
+SITUATION_ACTION=""
+
+situation_clear() { rm -f "$SITUATION_FILE" 2>/dev/null || true; }
+
+#: How this refusal resolves, from the step that made it. The safe default is a
+#: person: an exit this block does not recognise must never be promised a fix the
+#: runner may not make.
+situation_classify() {
+  SITUATION_DISPOSITION="human"
+  SITUATION_SOURCE="unknown"
+  SITUATION_GATE=""
+  SITUATION_ACTION="console"
+  if [ -n "${PREFLIGHT_GATE:-}" ]; then
+    SITUATION_SOURCE="preflight"
+    SITUATION_GATE="$PREFLIGHT_GATE"
+    case "$SITUATION_SELF_GATES" in
+      *" $PREFLIGHT_GATE "*)
+        SITUATION_DISPOSITION="self"
+        SITUATION_ACTION="wait" ;;
+    esac
+    return 0
+  fi
+  case "${LAST_STOP_CODE:-}" in
+    7)
+      # Dependencies: usually the network, and this code deliberately does not
+      # quarantine, so the next tick retries it.
+      SITUATION_SOURCE="dependencies"
+      SITUATION_DISPOSITION="self"
+      SITUATION_ACTION="wait" ;;
+    8|9|10|13|16|18)
+      # A gate refused the commit and it is quarantined: nothing but a decision ends
+      # it. The perf gate gets the re-baseline, because retrying against a yardstick
+      # that no longer describes the box re-refuses it. The runner-not-armed word is
+      # its own case: it quarantines, but only the installer ends it.
+      SITUATION_SOURCE="quarantine"
+      case "${FAIL_REASON:-}" in
+        perf\ gate*)
+          SITUATION_GATE="perf_gate"
+          SITUATION_ACTION="rebaseline" ;;
+        runner\ not\ armed*)
+          : ;;
+        '')
+          : ;;
+        *)
+          SITUATION_ACTION="release" ;;
+      esac ;;
+    11) SITUATION_SOURCE="unhealthy" ;;
+    14) SITUATION_SOURCE="runner_copy" ;;
+    15) SITUATION_SOURCE="unarmed" ;;
+    *) : ;;
+  esac
+}
+
+situation_write() {
+  mkdir -p "$STATE_DIR" 2>/dev/null || true
+  {
+    printf '%s\n%s\n%s\n%s\n%s\n' "$SITUATION_DISPOSITION" "$SITUATION_SOURCE" \
+      "$SITUATION_GATE" "$SITUATION_ACTION" "$(date -Is)"
+  } > "$SITUATION_FILE" 2>/dev/null || true
+  # Readable by the app (the status page shows this) and owned by root.
+  chmod 0644 "$SITUATION_FILE" 2>/dev/null || true
+}
+# situation-logic:end
+
 # ── The step a run stopped at, whatever stopped it ───────────────────────────
 # last-stop-logic:start
 # Everything above records the refusals somebody thought of. That is the right
@@ -469,10 +583,17 @@ last_stop_clear() { rm -f "$LAST_STOP_FILE" 2>/dev/null || true; }
 on_exit() {
   LAST_STOP_CODE="$?"
   if [ "$LAST_STOP_CODE" -eq 0 ]; then
-    [ "$RUN_STEP" = "done" ] && last_stop_clear
+    if [ "$RUN_STEP" = "done" ]; then
+      last_stop_clear
+      situation_clear
+    fi
     return 0
   fi
   last_stop_write
+  # Whether this refusal clears on its own or needs a person, decided where the step
+  # and the code are both still in scope, and written beside the record above.
+  situation_classify
+  situation_write
 }
 trap on_exit EXIT
 # last-stop-logic:end
@@ -1978,6 +2099,10 @@ fi
 # Merged: every pre-merge check passed, so a record of a refusal to get this far is
 # stale, and leaving it would report a box that is deploying as one that is not.
 preflight_forget
+# The situation record is about the same refusal, so it is cleared here rather than
+# inside `preflight_forget`: the two blocks are run on their own by their tests, and
+# a call across them would be a coupling neither can see. This is the one call site.
+situation_clear
 log "pulled; $(echo "$CHANGED" | wc -l) file(s) changed"
 
 # ── Gate 0 survives the release, or the release does not happen ─────────────

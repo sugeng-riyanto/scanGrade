@@ -9,7 +9,8 @@
             <strong x-text="t('Penting:','Important:')"></strong> <span x-text="t('NISN adalah ID unik siswa (8-12 digit). Email bersifat','NISN is the unique student ID (8-12 digits). The email is')"></span> <strong>read-only</strong> <span x-text="t('setelah dibuat.','once created.')"></span>
             <span x-text="t('Gunakan NISN untuk login selain email.','Students log in with the NISN, not the email.')"></span>
             <button @click="showForm=true" class="ml-1 text-blue-600 font-bold hover:underline" x-text="t('Tambah Murid','Add Student')"></button> <span x-text="t('atau','or')"></span>
-            <a href="/admin-sekolah/import" class="text-blue-600 font-bold hover:underline" x-text="t('Import Excel','Import Excel')"></a>.
+            <a href="/admin-sekolah/import" class="text-blue-600 font-bold hover:underline" x-text="t('Import Excel','Import Excel')"></a> <span x-text="t('atau','or')"></span>
+            <a href="/admin-sekolah/accounts" class="text-blue-600 font-bold hover:underline" x-text="t('Email & aktivasi akun','Account emails & activation')"></a>.
         </div>
     </div>
     {% with messages = get_flashed_messages(with_categories=true) %}

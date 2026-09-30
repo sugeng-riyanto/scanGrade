@@ -1436,6 +1436,59 @@ The vocabulary is the runner's own — `EXIT_CODES` and `RUN_STEPS` in
 directions: every `RUN_STEP=` assignment and every `exit N` in the script is in
 those tables, and every row in those tables has a sentence in the page.
 
+### Whether it clears itself, or needs you
+
+The records above answer *what* refused a release. They do not answer the question
+an operator actually opens the page with — **do I have to do anything?** — and the two
+answers look identical from the outside: a fetch that cannot reach GitHub and a gate
+that rejected the code both leave the previous release serving and nothing new
+deploying, while the shape of the right response is opposite. The exit code cannot
+tell them apart either, because `4` is a box edit the runner heals *and* a checkout it
+cannot read, and those are opposite answers.
+
+So the runner, which alone knows the step and the code together, decides and writes it
+beside the records it already keeps:
+
+```
+/var/lib/scangrade-deploy/situation
+```
+
+Five positional lines: the disposition (`self` or `human`), what refused
+(`preflight`, `quarantine`, `dependencies`, `unarmed`, `unhealthy`, `runner_copy`),
+the gate when one is named, the one action that ends it
+(`wait` | `release` | `rebaseline` | `console`), and when.
+
+Two lists decide the pre-merge half, and they are lists rather than a range because
+the disposition is read from the *step* that refused, never from the code:
+
+* `SITUATION_SELF_GATES` — the next tick clears it: `fetch_failed`,
+  `snapshot_refused`, `lock_refused`, `merge_refused`, `dirty_checkout`;
+* `SITUATION_HUMAN_GATES` — static, so no tick ends it: `not_root`, `no_checkout`,
+  `no_virtualenv`, `checkout_unreadable`.
+
+A post-merge refusal is classified by its code: a failed dependency install retries
+itself (exit 7 — it deliberately does not quarantine); a quarantined commit needs a
+decision, and the *perf* gate gets `rebaseline` because retrying it against a yardstick
+that no longer describes the box only re-refuses it; `runner not armed`, a drifted copy
+and an unhealthy rollback are `console`, because no release request ends them.
+
+The file is written by the `EXIT` trap (where the step and code are both in scope) and
+cleared by a run that finishes and at the one `preflight_forget` call site — so its
+presence means the last tick stopped, the same contract `last-stop` has.
+
+`/super-admin/deploy-status` renders one card from it. A `self` departure says plainly
+that the runner will retry and offers **no button** — waiting is not an action — while a
+`human` one carries **exactly one** button, and the quarantine card's own request forms
+are suppressed while that card is up so there is one place to press. The button is
+offered only while a commit is actually held (`situation_state(..., held=...)` is handed
+that answer by the quarantine, rather than deriving its own), and a refusal nothing here
+can end says so instead of offering a button that cannot help.
+
+`SITUATION_*` — the disposition and action vocabulary — lives in
+`app/services/deploy_status_service.py`, and `tests/unit/test_deploy_situation.py` holds
+the two lists against every `PREFLIGHT_GATE=` in the runner and against the page's own
+`PREFLIGHT_GATES`, so a refusal added later cannot arrive as neither answer.
+
 ## One word when a box is stuck: `sgfix`
 
 Everything above is the runner healing itself, and the heal has one property that can

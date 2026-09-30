@@ -143,6 +143,11 @@ DEFAULT_PREFLIGHT_DIFF_FILE = DEFAULT_STATE_DIR + "/refused-before-merge.diff"
 #: path nobody has written yet — which is why the trap names the *step* as well as
 #: the code: "exit 7" answers nothing on its own.
 DEFAULT_LAST_STOP_FILE = DEFAULT_STATE_DIR + "/last-stop"
+#: The runner's judgement, written on every non-zero exit and cleared by a run that
+#: finishes: whether what stopped it clears on its own or needs a person, and the one
+#: action that ends it. Beside `last-stop` because it is read for the same question
+#: and follows the same life cycle — present means the last tick stopped.
+DEFAULT_SITUATION_FILE = DEFAULT_STATE_DIR + "/situation"
 #: What the *performance* gate measured, in its own words. `deploy/perf_gate.py`
 #: appends one JSON line per judgement to the history file — the commit under
 #: judgement, the verdict, every number, and on a regression the `reasons` it
@@ -864,6 +869,48 @@ LAST_STOP_MALFORMED = "malformed"
 LAST_STOP_KEYS = frozenset({LAST_STOP_NONE, LAST_STOP_PRESENT,
                             LAST_STOP_UNREADABLE, LAST_STOP_MALFORMED})
 
+#: The runner's own judgement about whether what is blocking a deploy will clear
+#: itself or needs a person. Every record above says *what* refused; none of them
+#: answers the operator's actual question, and the two answers look identical on a
+#: page — a fetch that could not reach GitHub and a gate that rejected the code both
+#: leave "nothing is deploying" with the previous release serving. So the runner,
+#: which alone knows the step and the exit code together, writes the answer down and
+#: the page reads it rather than guessing from an exit code (`4` is both a box edit
+#: it heals and a checkout it cannot read).
+SITUATION_NONE = "none"
+SITUATION_PRESENT = "present"
+SITUATION_UNREADABLE = "unreadable"
+SITUATION_MALFORMED = "malformed"
+SITUATION_KEYS = frozenset({SITUATION_NONE, SITUATION_PRESENT,
+                            SITUATION_UNREADABLE, SITUATION_MALFORMED})
+
+#: The two dispositions. `self` means the next tick can clear it — the runner
+#: retries it by design. `human` means no tick will: a person has to act, whether by
+#: clicking the one button below or by reaching a console.
+SITUATION_SELF = "self"
+SITUATION_HUMAN = "human"
+SITUATION_DISPOSITIONS = frozenset({SITUATION_SELF, SITUATION_HUMAN})
+
+#: What refused, in the runner's vocabulary. A source this page does not know is
+#: reported as `unknown` rather than dropped, the same rule the gate keys follow.
+SITUATION_SOURCES = frozenset({"preflight", "quarantine", "dependencies",
+                               "unarmed", "unhealthy", "runner_copy"})
+SITUATION_UNKNOWN_SOURCE = "unknown"
+
+#: The single thing that ends the situation. `wait` and `console` are the two the
+#: page cannot act on, and they are exactly the two for which it offers no button —
+#: a button that cannot help is worse than none.
+SITUATION_WAIT = "wait"
+SITUATION_RELEASE = "release"
+SITUATION_REBASELINE = "rebaseline"
+SITUATION_CONSOLE = "console"
+SITUATION_ACTIONS = frozenset({SITUATION_WAIT, SITUATION_RELEASE,
+                               SITUATION_REBASELINE, SITUATION_CONSOLE})
+#: The actions a page request can carry. `release` writes `requests/release` and
+#: `rebaseline` writes `requests/rebaseline`; both mean something to the runner, and
+#: both are only offered while a commit is actually held for them to act on.
+SITUATION_BUTTON_ACTIONS = frozenset({SITUATION_RELEASE, SITUATION_REBASELINE})
+
 #: The performance gate's reading, named the same way the three records above are.
 PERF_NONE = "none"
 PERF_PRESENT = "present"
@@ -1070,6 +1117,62 @@ def last_stop_state(path: pathlib.Path, *, now: _dt.datetime) -> dict:
     if re.fullmatch(r"[0-9a-fA-F]{40}", commit):
         state["commit"] = commit.lower()
         state["short"] = commit[:7]
+    return state
+
+
+def situation_state(path: pathlib.Path, *, now: _dt.datetime,
+                    held: bool = False) -> dict:
+    """Whether what is blocking a deploy will clear itself, as the runner judged.
+
+    Five positional lines: the disposition (`self` or `human`), what refused, the
+    gate when one is named, the one action that ends it, and when. A value outside
+    the vocabulary is `malformed` rather than guessed at — "I could not tell" must
+    never be dressed up as "it is fine", which is the rule every record here follows.
+
+    `held` is whether a commit is actually under quarantine *right now*. The button
+    is offered only when it is: a release or re-baseline request is written for a
+    commit that is held, and a button offered with nothing to act on would leave a
+    file that releases whatever the next tick happens to find.
+    """
+    state: dict = {
+        "path": str(path), "present": False, "key": SITUATION_NONE,
+        "disposition": None, "disposition_key": None,
+        "source": None, "source_key": None, "gate": None, "gate_key": None,
+        "action": None, "action_key": None, "button": None,
+        "at": None, "age_seconds": None, "reason": None,
+    }
+    text, why = _read(path)
+    if text is None:
+        if why != "absent":
+            state["key"] = SITUATION_UNREADABLE
+            state["reason"] = why
+        return state
+
+    lines = text.splitlines()
+    disposition = lines[0].strip() if lines else ""
+    source = lines[1].strip() if len(lines) > 1 else ""
+    gate = lines[2].strip() if len(lines) > 2 else ""
+    action = lines[3].strip() if len(lines) > 3 else ""
+    when = lines[4].strip() if len(lines) > 4 else ""
+    if disposition not in SITUATION_DISPOSITIONS or action not in SITUATION_ACTIONS:
+        state["key"] = SITUATION_MALFORMED
+        state["reason"] = " ".join(part for part in (disposition, action) if part) or None
+        return state
+
+    state["present"] = True
+    state["key"] = SITUATION_PRESENT
+    state["disposition"] = disposition
+    state["disposition_key"] = disposition
+    state["source"] = source or None
+    state["source_key"] = source if source in SITUATION_SOURCES else SITUATION_UNKNOWN_SOURCE
+    state["gate"] = gate or None
+    state["gate_key"] = gate or None
+    state["action"] = action
+    state["action_key"] = action
+    state["at"] = when or None
+    state["age_seconds"] = _age_seconds(when or None, now)
+    if action in SITUATION_BUTTON_ACTIONS and held:
+        state["button"] = action
     return state
 
 
@@ -2439,7 +2542,8 @@ REASON_KEYS = frozenset({
 def report(*, repo=None, runner=None, snapshot_runner=None, pause_file=None,
            quarantine_file=None, unarmed_file=None, preflight_file=None,
            preflight_diff_file=None,
-           last_stop_file=None, request_dir=None, release_request=None,
+           last_stop_file=None, situation_file=None, request_dir=None,
+           release_request=None,
            perf_history_file=None, perf_baseline_file=None, refusals_dir=None,
            box_edits_dir=None, running: dict | None = None,
            now: _dt.datetime | None = None) -> dict:
@@ -2489,6 +2593,13 @@ def report(*, repo=None, runner=None, snapshot_runner=None, pause_file=None,
     # Read once: `perf_state` needs the held sha to look up the refusal's own
     # numbers, and the quarantine card below needs the same record.
     quarantine = quarantine_state(quarantine_file, repo, now=now)
+    # Read after the quarantine because the button it may carry is only honest while
+    # a commit is held: `situation_state` is handed that answer rather than asked to
+    # find its own, so the two cards cannot disagree about whether anything is held.
+    situation_file = pathlib.Path(
+        situation_file or os.environ.get("SCANGRADE_SITUATION_FILE")
+        or DEFAULT_SITUATION_FILE)
+    situation = situation_state(situation_file, now=now, held=quarantine["held"])
     perf = perf_state(perf_history_file, baseline_path=perf_baseline_file,
                       repo=repo, now=now, held_commit=quarantine["sha"])
     refusals_dir = pathlib.Path(
@@ -2564,6 +2675,12 @@ def report(*, repo=None, runner=None, snapshot_runner=None, pause_file=None,
         "run_steps": RUN_STEPS,
         "last_stop": last_stop,
         "last_stop_file": str(last_stop_file),
+        # Whether what is blocking the deploy clears itself, as the runner judged it,
+        # and the one action that ends it — the reading this page was missing.
+        "situation": situation,
+        "situation_file": str(situation_file),
+        "situation_dispositions": SITUATION_DISPOSITIONS,
+        "situation_actions": SITUATION_ACTIONS,
         # The perf gate's own last judgement: what it measured, against which
         # release, and — when it refused one — the lines it refused on.
         "perf": perf,
