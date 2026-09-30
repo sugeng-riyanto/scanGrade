@@ -486,10 +486,27 @@ class TestTheNewControlsAreTappable:
             assert padding in cls, f"{marker} lost its {padding}: {cls[:90]}"
 
     def test_the_floor_is_defined_for_a_finger(self):
+        r"""Asked of the block that defines `.tap-44`, not of the *first* one.
+
+        `@media (pointer: coarse) \{(.*?)\n\s*\}` is positional: it reads the first
+        block in the file and stops, so it answers about whichever rule happened to
+        be written first. It broke the day a second coarse block was added above
+        this one (the exam builder's), reporting that `.tap-44` had no floor while
+        its own block was untouched a few lines below.
+        """
         theme = (APP / "static" / "css" / "theme.css").read_text(encoding="utf-8")
-        block = re.search(r"@media \(pointer: coarse\)\s*\{(.*?)\n\s*\}", theme, re.S)
-        assert block, "theme.css no longer defines the coarse-pointer block"
-        rule = re.search(r"\.tap-44\s*\{([^}]*)\}", block.group(1))
+        blocks = [m for m in re.finditer(r"@media \(pointer: coarse\)\s*\{([^}]*)\}",
+                                        theme, re.S)]
+        assert blocks, "theme.css no longer defines any coarse-pointer block"
+        rule = None
+        for block in blocks:
+            # The whole match, not the captured body: with `[^}]*` the capture
+            # stops at the block's *first* closing brace, which is the rule being
+            # looked for when it is the first thing inside the block.
+            found = re.search(r"\.tap-44\s*\{([^}]*)\}", block.group(0))
+            if found:
+                rule = found
+                break
         assert rule, "`.tap-44` is not defined under `(pointer: coarse)`"
         assert "min-width: 44px" in rule.group(1) and "min-height: 44px" in rule.group(1), rule.group(1)
 

@@ -5,7 +5,13 @@
    show. The visible heading below is the one that follows the language. #}
 {% block page_title %}{{ 'Edit' if exam else 'Create' }} Exam{% endblock %}
 {% block content %}
-<div class="max-w-7xl mx-auto teacher-content">
+{# `sg-exam-builder` is the hook theme.css's `pointer: coarse` rule names. This page
+   is the densest form in the app — a type select, a level select and a media toggle
+   per question, plus the PGK keys — and on a tablet every one of them is a finger:
+   measured at 820x1180 (iPad Air 4 portrait), 1024x768, 1112x834 and 768x1024, 42
+   controls painted under 40px while nothing overflowed. Named here rather than
+   inferred from `.teacher-content`, so the rule says which page it is about. #}
+<div class="max-w-7xl mx-auto teacher-content sg-exam-builder">
     <div class="flex items-center gap-3 mb-6">
         <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center shadow-lg shadow-primary-500/20"><i class="fas fa-file-pen text-white text-lg"></i></div>
         <div>
@@ -54,8 +60,18 @@
                 </button>
             </div>
 
-            <!-- PDF Upload Card -->
-            <div class="card p-5 mb-6 overflow-hidden" x-data="pdfUpload()">
+            <!-- PDF Upload Card.
+                 This wrapper used to declare `x-data="pdfUpload()"` as well, one
+                 level above the card that actually has the drop zone. Two nested
+                 copies of the same component, and the inner one's
+                 `parentElement.closest('[x-data]')` resolved the outer — so the AI
+                 toggle and language picker, which live on the page's scope above
+                 both, were never read. Measured: with AI mode switched on the
+                 request still carried `ai_mode=false`, and the endpoint answers 0
+                 questions for that against 5 for the same paper with `ai_mode=true`.
+                 The banner below needs none of that state; it reads `aiMode` from
+                 the page scope, which is what its own name said all along. -->
+            <div class="card p-5 mb-6 overflow-hidden">
                 <!-- AI Mode Info Banner (outside pdfUpload scope) -->
             <div x-show="aiMode" class="mb-5 p-4 rounded-xl bg-gradient-to-r from-primary-50 to-blue-50 border border-primary-200">
                 <div class="flex items-start gap-3">
@@ -202,7 +218,7 @@
                             </div>
                             <div class="flex items-center gap-2 p-2.5 rounded-lg bg-white border border-primary-100">
                                 <span class="w-6 h-6 rounded-full bg-primary-600 text-white text-[10px] font-extrabold flex items-center justify-center shrink-0">2</span>
-                                <span class="text-[10px] font-bold text-surface-700" x-text="t('Klik “Terapkan ke Formulir”','Click “Apply to form”')"></span>
+                                <span class="text-[10px] font-bold text-surface-700" x-text="t('Soal langsung diterapkan ke formulir','The questions are applied to the form for you')"></span>
                             </div>
                             <div class="flex items-center gap-2 p-2.5 rounded-lg bg-white border border-primary-100">
                                 <span class="w-6 h-6 rounded-full bg-primary-600 text-white text-[10px] font-extrabold flex items-center justify-center shrink-0">3</span>
@@ -213,15 +229,20 @@
 
                     <!-- Actions -->
                     <div class="flex flex-wrap gap-2">
-                        <template x-if="!applied">
-                            <button @click="applyToForm()"
-                                    class="inline-flex items-center gap-1.5 px-5 py-2.5 bg-primary-600 hover:bg-primary-700 text-white rounded-xl text-xs font-extrabold shadow-lg shadow-primary-300/30 transition-all active:scale-95">
-                                <i class="fas fa-check-circle"></i> <span x-text="t('Terapkan Ke Formulir','Apply to Form')"></span>
-                            </button>
-                        </template>
+                        {# Applying is what an upload does now, so the button is not how a
+                           teacher gets their paper — it is how they get it *back* after
+                           editing or deleting the detected questions. Deliberate, and
+                           labelled as such: it replaces the list with the parse. #}
+                        <button @click="applyToForm()"
+                                class="inline-flex items-center gap-1.5 px-4 py-2.5 border-2 border-primary-200 text-primary-700 hover:bg-primary-50 rounded-xl text-xs font-extrabold transition-all active:scale-95"
+                                :title="t('Ganti daftar soal di formulir dengan hasil deteksi PDF','Replace the form questions with what the PDF detected')">
+                            <i class="fas fa-rotate"></i> <span x-text="t('Terapkan ulang dari PDF','Apply again from the PDF')"></span>
+                        </button>
                         <template x-if="applied">
-                            <span class="inline-flex items-center gap-1.5 px-5 py-2.5 bg-emerald-100 text-emerald-700 rounded-xl text-xs font-extrabold border border-emerald-200">
-                                <i class="fas fa-check-circle"></i> <span x-text="t('Sudah diterapkan ke formulir','Applied to the form')"></span>
+                            <span class="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-xs font-extrabold border"
+                                  :class="appliedCount > 0 ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-700 border-amber-200'">
+                                <i class="fas" :class="appliedCount > 0 ? 'fa-check-circle' : 'fa-circle-info'"></i>
+                                <span x-text="appliedNote"></span>
                             </span>
                         </template>
                         <button @click="downloadMarkdown('md')"
@@ -371,6 +392,22 @@
             function pdfUpload() {
                 return {
                     loading: false, preview: '', questions: [], mcqCount: 0, essayCount: 0, pdfUrl: '', pdfId: '', errorMsg: '', applied: false,
+                    // What applying the paper actually did, so the badge can say it
+                    // rather than turning green unconditionally. `appliedCount` is
+                    // the number the question list took; `replacedCount` is how many
+                    // questions that displaced, which is the half a teacher needs to
+                    // know before saving.
+                    appliedCount: 0, replacedCount: 0,
+                    get appliedNote() {
+                        if (!this.applied) return '';
+                        if (!this.appliedCount) {
+                            return sgT('Tidak ada soal yang terdeteksi di PDF ini — tambahkan manual',
+                                       'No questions were detected in this PDF — add them by hand');
+                        }
+                        const applied = this.appliedCount + ' ' + sgT('soal', 'question(s)') + ' ' + sgT('diterapkan otomatis', 'applied automatically');
+                        if (!this.replacedCount) return applied;
+                        return applied + ' — ' + this.replacedCount + ' ' + sgT('soal sebelumnya diganti', 'earlier question(s) replaced');
+                    },
                     loadingText: sgT('AI sedang memproses PDF...', 'AI is processing the PDF...'),
                     loadingStep: 0, loadingTime: 0, loadingProgress: 0, _timer: null,
                     useVision: false,
@@ -387,9 +424,13 @@
                             this.loadingProgress = Math.min(95, this.loadingProgress + 0.5 + Math.random() * 1.5);
                         }, 1000);
                         const fd = new FormData(); fd.append('pdf', file);
-                        // Get AI language and mode from parent scope
-                        const parentEl = this.$el.parentElement?.closest('[x-data]');
-                        const pd = parentEl?.__x?.$data || {};
+                        // The AI toggle and the language picker live on the page's own
+                        // scope, several levels up. Walked rather than read from the
+                        // *nearest* `x-data`, because the nearest one is a scope whose
+                        // data has no `aiMode` at all — and reading it answered `false`
+                        // for a page with AI switched on, silently, since a missing key
+                        // and a switched-off toggle look identical from here.
+                        const pd = sgNearestScope(this.$el, 'aiMode');
                         const lang = pd.aiLang || 'en';
                         const aiMode = pd.aiMode || false;
                         fd.append('use_vision', this.useVision ? 'true' : 'false');
@@ -438,39 +479,13 @@
                                 lang: d.lang || lang,
                             };
                             window.dispatchEvent(new CustomEvent('pdf-uploaded', { detail: _scanData }));
-                            // Auto-save PDF URL to form (always)
-                            if (d.pdf_url) {
-                                let pi = document.querySelector('input[name="pdf_preview_url"]');
-                                if (!pi) {
-                                    pi = document.createElement('input');
-                                    pi.type = 'hidden'; pi.name = 'pdf_preview_url';
-                                    document.querySelector('form').appendChild(pi);
-                                }
-                                pi.value = d.pdf_url;
-                            }
-                            // Auto-set question_types and count if available
-                            if (d.questions && d.questions.length > 0) {
-                                const tq = document.querySelector('input[name="total_questions"]');
-                                if (tq) tq.value = d.questions.length;
-                                const qtypes = {};
-                                d.questions.forEach(q => { qtypes[q.number - 1] = q.type; });
-                                let qi = document.querySelector('input[name="question_types"]');
-                                if (!qi) {
-                                    qi = document.createElement('input');
-                                    qi.type = 'hidden'; qi.name = 'question_types';
-                                    document.querySelector('form').appendChild(qi);
-                                }
-                                qi.value = JSON.stringify(qtypes);
-                                const qtxt = {};
-                                d.questions.forEach(q => { qtxt[q.number - 1] = q.text; });
-                                let qs = document.querySelector('input[name="question_texts"]');
-                                if (!qs) {
-                                    qs = document.createElement('input');
-                                    qs.type = 'hidden'; qs.name = 'question_texts';
-                                    document.querySelector('form').appendChild(qs);
-                                }
-                                qs.value = JSON.stringify(qtxt);
-                            }
+                            // Apply it. This is the default now: a teacher who uploads a
+                            // paper gets a form that already describes it, and the
+                            // button above is only for putting the detected set back
+                            // after editing. Applying writes no hidden input but the
+                            // PDF link — everything else the save route reads is
+                            // derived from the question list (see onPdfApplied).
+                            this.applyToForm();
                             // Fire answer key event only in AI mode
                             if (_scanData.aiClassified) {
                                 window.dispatchEvent(new CustomEvent(
@@ -485,34 +500,32 @@
                         if (this._timer) { clearInterval(this._timer); this._timer = null; }
                         this.preview = ''; this.questions = []; this.mcqCount = 0; this.essayCount = 0;
                         this.pdfUrl = ''; this.applied = false; this.errorMsg = '';
+                        this.appliedCount = 0; this.replacedCount = 0;
                         window.dispatchEvent(new CustomEvent('pdf-reset'));
                     },
-                    // Apply to form
-                    applied: false,
+                    // Apply the detected paper to the form.
+                    //
+                    // This used to write `question_types` / `total_questions` /
+                    // `question_texts` straight into the DOM — and the first two of
+                    // those inputs carry `:value`, so Alpine re-derived them on the
+                    // teacher's next click and the applied paper was silently gone.
+                    // Measured before the change: wrote
+                    // `{"0":"complex_multiple_choice","1":"true_false"}`, clicked
+                    // "Add Multiple choice" once, read back
+                    // `{"0":"mcq",…,"4":"true_false","5":"mcq"}`.
+                    //
+                    // Now it hands the parsed questions to the question list, which is
+                    // the form's single source of truth for every one of those inputs,
+                    // and the list reports back what it took and what it displaced.
+                    // `dispatchEvent` is synchronous, so the write-back is readable on
+                    // the next line — one event, one handshake, no polling.
                     applyToForm() {
-                        const total = this.questions.length;
-                        const tq = document.querySelector('input[name="total_questions"]');
-                        if (tq) tq.value = total;
-                        const qtypes = {};
-                        const qtexts = {};
-                        this.questions.forEach(q => {
-                            qtypes[q.number - 1] = q.type;
-                            qtexts[q.number - 1] = q.text;
-                        });
-                        let qtInput = document.querySelector('input[name="question_types"]');
-                        if (!qtInput) {
-                            qtInput = document.createElement('input');
-                            qtInput.type = 'hidden'; qtInput.name = 'question_types';
-                            document.querySelector('form').appendChild(qtInput);
-                        }
-                        qtInput.value = JSON.stringify(qtypes);
-                        let qsInput = document.querySelector('input[name="question_texts"]');
-                        if (!qsInput) {
-                            qsInput = document.createElement('input');
-                            qsInput.type = 'hidden'; qsInput.name = 'question_texts';
-                            document.querySelector('form').appendChild(qsInput);
-                        }
-                        qsInput.value = JSON.stringify(qtexts);
+                        const detail = {questions: this.questions || [], adopted: 0, replaced: 0};
+                        window.dispatchEvent(new CustomEvent('pdf-applied', {detail: detail}));
+                        this.appliedCount = detail.adopted || 0;
+                        this.replacedCount = detail.replaced || 0;
+                        // The one field nothing derives: the paper a pupil reads. A
+                        // plain hidden input, so a plain write is the right kind.
                         if (this.pdfUrl) {
                             let pdfInput = document.querySelector('input[name="pdf_preview_url"]');
                             if (!pdfInput) {
@@ -523,6 +536,7 @@
                             pdfInput.value = this.pdfUrl;
                         }
                         this.applied = true;
+                        return detail.adopted || 0;
                     },
                 };
             }
@@ -720,7 +734,14 @@
                     </div>
                 </div>
 
-                <div class="card p-6" x-data="questionManager()">
+                {# The listener side of the upload's `pdf-applied`: the parsed paper
+                   becomes this form's questions (see adoptParsed). It is an event
+                   rather than a direct call because the two scopes are siblings —
+                   the uploader is a card above this one, and reaching into another
+                   Alpine scope's internals is how a page ends up depending on
+                   `_x_dataStack`. #}
+                <div class="card p-6" x-data="questionManager()"
+                     x-init="window.addEventListener('pdf-applied', e => onPdfApplied(e.detail))">
                     <div class="flex items-center justify-between mb-4">
                         <h2 class="text-lg font-extrabold text-slate-800" x-text="t('Soal & Kunci Jawaban','Questions & Answer Key')"></h2>
                         <div class="flex items-center gap-2 px-3 py-1.5 rounded-xl text-sm font-extrabold"
@@ -1486,6 +1507,45 @@ function sgSameList(a, b) {
     a = a || []; b = b || [];
     return a.length === b.length && a.every(function (x, i) { return x === b[i]; });
 }
+
+// ── the default wording of a new statement and of a new matching pair ────────
+//
+// A new question used to be an empty grid: three blank statements with a key that
+// looked unset, and a matching pair with nothing in either column. The shape of an
+// unfinished question was something a teacher had to work out, and for a complex
+// multiple choice question a blank statement is worse than ugly — `keyFor` keeps
+// statement text unfiltered so the key stays aligned with it, which means one
+// unfilled statement makes the whole key unreadable rather than shifting every
+// later judgement onto the wrong row.
+//
+// Both labels are *content* a pupil reads, so they are written in the page's
+// language at the moment the question is created rather than translated at render
+// time — the same rule the PGK presets follow. `n` is the row's own number rather
+// than a fixed word, and for matching that is load-bearing: the pupil's option list
+// is deduplicated (`question_types.match_options`), so three pairs whose right-hand
+// side all read "Matches" would collapse into one choice and mark two of the three
+// wrong. Every value here is a default in an editable input, never an answer.
+function sgStatementLabel(n) { return sgT('Kalimat', 'Statement') + ' ' + n; }
+function sgMatchLabel(n) { return sgT('Sesuai', 'Matches') + ' ' + n; }
+
+// The nearest Alpine scope that actually *declares* `key`, walking upwards.
+//
+// Not `parentElement.closest('[x-data]')`: that answers with the nearest scope of
+// any kind, and a scope with no such key is indistinguishable from one that has it
+// switched off. Measured on this page — the uploader card was nested inside a second
+// `pdfUpload()` card, so the AI toggle was never read and an AI upload posted
+// `ai_mode=false`. Alpine keeps every ancestor's data on `_x_dataStack`, so the
+// lookup is by key rather than by depth.
+function sgNearestScope(el, key) {
+    for (let node = el; node; node = node.parentElement) {
+        if (!node.getAttribute || !node.getAttribute('x-data')) continue;
+        const stack = node._x_dataStack || [];
+        for (let i = 0; i < stack.length; i++) {
+            if (stack[i] && key in stack[i]) return stack[i];
+        }
+    }
+    return {};
+}
 function sgPct(score) { return Math.round((+score || 0) * 100) + '%'; }
 
 // ── the mark scheme, as a preview ─────────────────────────────────────────────
@@ -1609,7 +1669,10 @@ function questionManager() {
                         // to work out from scratch.
                         if (!q.pgkStatements.length || !q.pgkCategories.length ||
                             q.pgkKey.length !== q.pgkStatements.length) {
-                            q.pgkStatements = ['', '', ''];
+                            // The same defaults a brand-new question gets, so a
+                            // question opened from storage is never blanker than one
+                            // just added.
+                            q.pgkStatements = [sgStatementLabel(1), sgStatementLabel(2), sgStatementLabel(3)];
                             q.pgkCategories = PGK_PRESETS[0].map(function (p) { return p[0]; });
                             q.pgkKey = [0, 0, 0];
                         }
@@ -1821,16 +1884,22 @@ function questionManager() {
             const kind = this.kindOf(q);
             if (kind === 'choice') { q.answers = ['A']; q.bonus = false; }
             if (kind === 'truefalse') { q.tf = 'true'; }
-            if (kind === 'match') { q.pairs = [{l:'', r:''}]; q.extra = []; q._extraInput = ''; }
+            if (kind === 'match') { q.pairs = [this.newPair(1)]; q.extra = []; q._extraInput = ''; }
             if (kind === 'dragdrop' || kind === 'ordering') { q.order = ['']; q.extra = []; q._extraInput = ''; }
             if (kind === 'pgk') this.seedPgk(q);
             return q;
         },
+        // One matching row, both columns filled: a half-filled pair is dropped on
+        // save (`keyFor` filters on both sides), so a pair with only a left-hand
+        // side would leave the question with no key at all.
+        newPair(n) { return {l: sgStatementLabel(n), r: sgMatchLabel(n)}; },
         // The AKM minimum, two-option preset, and every statement keyed to the first
-        // category: a brand-new question a teacher can read and change rather than an
-        // empty grid whose shape they have to discover.
+        // category — which is the affirmative one in all three presets, so the
+        // default judgement is True, Yes or Matches: a brand-new question a teacher
+        // can read and change rather than an empty grid whose shape they have to
+        // discover.
         seedPgk(q) {
-            q.pgkStatements = ['', '', ''];
+            q.pgkStatements = [sgStatementLabel(1), sgStatementLabel(2), sgStatementLabel(3)];
             q.pgkCategories = this.pgkPresetNames(PGK_PRESETS[0]);
             q.pgkKey = [0, 0, 0];
         },
@@ -1853,7 +1922,61 @@ function questionManager() {
             if (idx > -1) q.answers.splice(idx, 1); else q.answers.push(opt);
             if (q.answers.length === 0) q.answers.push(opt);
         },
-        addPair(i) { this.questions[i].pairs.push({l:'', r:''}); },
+        addPair(i) {
+            const q = this.questions[i];
+            q.pairs.push(this.newPair((q.pairs || []).length + 1));
+        },
+        // ── the paper a PDF upload detected ─────────────────────────────────
+        //
+        // Applying a PDF makes the parsed questions *this* form's questions. The
+        // save route reads `question_types`, `total_questions` and `question_pages`
+        // from hidden inputs that are all derived from this list, so this is the
+        // only way an applied paper survives: the previous version wrote those
+        // inputs directly, and Alpine re-derived them on the teacher's next click.
+        //
+        // The parse replaces the list rather than being dropped when one already
+        // exists. The alternative — keep whichever list is non-empty — has a sharp
+        // edge that is worse: one question added by hand would silently discard the
+        // forty the PDF had just supplied. What it displaced is reported back, so a
+        // replacement is visible in the badge instead of silent.
+        adoptParsed(list) {
+            const parsed = list || [];
+            const replaced = this.questions.length;
+            const self = this;
+            this.questions = parsed.map(function (row, i) {
+                // Through `blankQuestion`, so an adopted question is a *new* question
+                // with its own type's defaults — not a second shape that has to be
+                // kept in step with the one the Add buttons produce.
+                const q = self.blankQuestion(row.type || SG_QT.default);
+                q.pages = row.pages || (row.page ? String(row.page) : '');
+                q._pageAuto = !!q.pages;
+                q._pdfNumber = row.number || (i + 1);
+                return q;
+            });
+            return {adopted: this.questions.length, replaced: replaced};
+        },
+        // The listener side of `pdf-applied`. It writes its answer back into the
+        // event's own detail object, which is how the uploader learns what happened
+        // without a second event or a read of Alpine's internals.
+        //
+        // An empty parse changes nothing, and that is a guard rather than a
+        // convenience. Manual mode does not classify questions at all — measured on
+        // the running box, the same one-page paper returned `questions: 0` with
+        // `ai_mode=false` and `questions: 5` with `ai_mode=true`, from the same
+        // markdown — so "apply nothing" is the ordinary outcome of the default
+        // mode. Acting on it replaced the form's question list with an empty one:
+        // measured on the edit page, a manual upload left `question_types` = `{}`
+        // and the builder showing no questions.
+        onPdfApplied(detail) {
+            const parsed = (detail && detail.questions) || [];
+            if (!parsed.length) {
+                if (detail) { detail.adopted = 0; detail.replaced = 0; }
+                return 0;
+            }
+            const out = this.adoptParsed(parsed);
+            if (detail) { detail.adopted = out.adopted; detail.replaced = out.replaced; }
+            return out.adopted;
+        },
         addChip(i) { this.questions[i].order.push(''); },
         moveChip(i, wi, delta) {
             const arr = this.questions[i].order;
@@ -1875,7 +1998,7 @@ function questionManager() {
             const q = this.questions[i];
             if (!q.pgkStatements) q.pgkStatements = [];
             if (q.pgkStatements.length >= PGK_MAX) return;
-            q.pgkStatements.push('');
+            q.pgkStatements.push(sgStatementLabel(q.pgkStatements.length + 1));
             if (!q.pgkKey) q.pgkKey = [];
             q.pgkKey.push(0);
             this.pgkSimulate(i);
@@ -1989,7 +2112,7 @@ function questionManager() {
             q.bonus = kind === 'choice' ? !!q.bonus : false;
             if (kind === 'choice' && (!q.answers || !q.answers.length)) q.answers = ['A'];
             if (kind === 'truefalse' && !q.tf) q.tf = 'true';
-            if (kind === 'match' && (!q.pairs || !q.pairs.length)) q.pairs = [{l:'', r:''}];
+            if (kind === 'match' && (!q.pairs || !q.pairs.length)) q.pairs = [this.newPair(1)];
             if ((kind === 'dragdrop' || kind === 'ordering') && (!q.order || !q.order.length)) q.order = [''];
             if (kind === 'pgk' && (!q.pgkStatements || !q.pgkStatements.length)) this.seedPgk(q);
             if (kind !== 'choice') q.answers = [];
