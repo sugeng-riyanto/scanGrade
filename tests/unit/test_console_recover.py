@@ -90,6 +90,12 @@ GAPS_HEADER=__GAPS__
 MISSING_MARK=__MISSING__
 SCHEMA_GATE_WORD=__SCHEMA__
 gitdo() { git -C "$REPO" "$@"; }
+# The runner's real script defines this as `runuser -u <owner> -- env …`; here the
+# block already runs as the checkout's owner, so it is the identity — and it must be
+# defined, because `recover_make_reproducible` writes through it rather than through a
+# plain redirect, so the box's file does not change hands (root writing into a repo
+# owned by scangrade is how a recovery breaks the app it just restored).
+as_owner() { "$@"; }
 note() { printf '   %s\\n' "$*"; }
 """
 
@@ -197,6 +203,115 @@ def test_a_clean_tree_is_a_no_op(tmp_path):
     assert "RC 0" in run.stdout
     record = (state / "recover" / "r.txt").read_text(encoding="utf-8")
     assert "SET ASIDE 0 path(s)" in record
+
+
+# ── 1b. the blob a checkout cannot reproduce, which is why it said NOT MOVED ──
+#
+# The case the box was actually stuck on: `git checkout HEAD -- <path>` writes through
+# the filters, so a blob committed *around* them (a scripted commit's
+# `hash-object --no-filters`) reads as modified however many times it is restored, and
+# `git merge --ff-only` refuses for that reason. The lever reported a clean restore and
+# the checkout did not move.
+
+TARGET = "app/routes/admin_sekolah.py"
+
+
+def _repo_with_the_rule(tmp_path: pathlib.Path) -> pathlib.Path:
+    """The checkout, with the repo's own `*.py text eol=lf` committed.
+
+    Without that rule a carriage return is harmless here and the difference that
+    stranded the box cannot be reproduced at all — so the rule is part of the fixture
+    rather than scenery.
+    """
+    repo = _repo(tmp_path)
+    (repo / ".gitattributes").write_bytes(b"*.py text eol=lf\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "the attributes the real repo carries")
+    return repo
+
+
+def _plant_blob(repo: pathlib.Path, raw: bytes, rel: str = TARGET) -> bytes:
+    """Commit *raw* as the path's blob, around the filters, and return the blob.
+
+    `git add` normalises a CR away, so a blob like this can only reach the index the
+    way it reached the box's: `hash-object --no-filters` then `update-index
+    --cacheinfo`. Measured: `0afc68e` committed 108 carriage returns into a file whose
+    attribute promises LF.
+    """
+    path = repo / rel
+    path.write_bytes(raw)
+    blob = subprocess.run(["git", "-C", str(repo), "hash-object", "-w", "--no-filters",
+                           str(path)], capture_output=True, text=True).stdout.strip()
+    assert blob, "git hash-object produced no blob"
+    assert _git(repo, "update-index", "--cacheinfo", f"100644,{blob},{rel}").returncode == 0
+    assert _git(repo, "commit", "-q", "-m", "the blob a box is stuck on").returncode == 0
+    return subprocess.run(["git", "-C", str(repo), "cat-file", "blob", f"HEAD:{rel}"],
+                          capture_output=True).stdout
+
+
+def test_a_blob_a_checkout_cannot_reproduce_is_restored_from_head(tmp_path):
+    """The box's real state, and the reason its own lever said NOT MOVED."""
+    repo, state = _repo_with_the_rule(tmp_path), tmp_path / "state"
+    target = repo / TARGET
+    blob = _plant_blob(repo, b"the release's line\r\n")
+    target.write_bytes(b"the box's hotfix\n")
+
+    run = _run_logic(tmp_path, repo, state,
+                     'git -C "$REPO" status --porcelain | recover_set_aside\n'
+                     "printf 'RC %s\\n' \"$?\"\n")
+
+    assert "RC 0" in run.stdout, run.stdout + run.stderr
+    assert target.read_bytes() == blob, (
+        "the worktree does not hold HEAD's own bytes, so the merge is refused for "
+        "exactly the reason the box was stuck")
+    assert _git(repo, "status", "--porcelain").stdout.strip() == "", (
+        "the tree is still dirty, so the lever would report NOT MOVED again")
+    record = (state / "recover" / "r.txt").read_text(encoding="utf-8")
+    assert f"SET     {TARGET}" in record, record
+    assert f"VERBATIM {TARGET}" in record, (
+        f"the record does not say those bytes came from the commit: {record}")
+    assert f"ATTRIBUTE {TARGET}" in record, (
+        f"the record does not say a local override holds that path: {record}")
+    # The one thing this must never trade away: the box's own version still exists.
+    patch = state / "recover" / "r" / "files" / (TARGET + ".patch")
+    assert "the box's hotfix" in patch.read_text(encoding="utf-8"), (
+        "the lever replaced the box's bytes without keeping them")
+
+
+def test_the_local_override_is_one_line_and_survives_a_second_heal(tmp_path):
+    """A second tick must not grow the attributes file, and must still say what holds."""
+    repo, state = _repo_with_the_rule(tmp_path), tmp_path / "state"
+    target = repo / TARGET
+    _plant_blob(repo, b"the release's line\r\n")
+    target.write_bytes(b"the box's hotfix\n")
+    tail = ('git -C "$REPO" status --porcelain | recover_set_aside\n'
+            "printf 'RC %s\\n' \"$?\"\n")
+    assert "RC 0" in _run_logic(tmp_path, repo, state, tail).stdout
+    attributes = repo / ".git" / "info" / "attributes"
+    first = attributes.read_text(encoding="utf-8")
+    assert first.count("-text") == 1, f"the override is not one line: {first!r}"
+
+    target.write_bytes(b"the box's second hotfix\n")
+    assert "RC 0" in _run_logic(tmp_path, repo, state, tail).stdout
+    assert attributes.read_text(encoding="utf-8") == first, (
+        "the attributes file grew on a tick that had nothing to add")
+
+
+def test_an_ordinary_edit_is_not_given_a_local_override(tmp_path):
+    """The escalation is for the unreproducible class, not for every hand edit."""
+    repo, state = _repo_with_the_rule(tmp_path), tmp_path / "state"
+    (repo / TARGET).write_text("the box's hotfix\n", encoding="utf-8")
+
+    run = _run_logic(tmp_path, repo, state,
+                     'git -C "$REPO" status --porcelain | recover_set_aside\n'
+                     "printf 'RC %s\\n' \"$?\"\n")
+
+    assert "RC 0" in run.stdout, run.stdout + run.stderr
+    assert not (repo / ".git" / "info" / "attributes").exists(), (
+        "an ordinary restore wrote a local override, which changes how every later "
+        "comparison reads that path")
+    record = (state / "recover" / "r.txt").read_text(encoding="utf-8")
+    assert "VERBATIM" not in record and "ATTRIBUTE" not in record, record
 
 
 # ── 2. the reason comes from the runner's own records ────────────────────────

@@ -32,9 +32,23 @@ written to a file rather than passed to `bash -c`, which is both how the runner 
 actually started and the only form that survives Windows' command-line quoting for a
 script this long.
 
-The last few checks are source guards, for the two properties a single run cannot
-show: that the heal happens after the release's file list is known, and that the
-record is written before anything is restored.
+A fourth case was added after the box that this block was written for went on
+refusing anyway — `M app/routes/admin_sekolah.py` every tick for hours, with the heal
+reporting success:
+
+* **a path whose *blob* a checkout cannot reproduce** — `git checkout` writes through
+the filters, so a blob committed *around* them (a scripted commit's
+`hash-object --no-filters`; this project's `0afc68e` carries 108 carriage returns in
+a file whose attribute promises `eol=lf`) reads as modified however many times it is
+restored, and `git merge --ff-only` refuses for that reason. HEAD's own bytes are
+written into the worktree instead, and if the filters still make the path differ, git
+is told not to read that one path through them — a local `info/attributes` line,
+which is not committed and changes nobody else's checkout.
+
+The last few checks are source guards, for the properties a single run cannot show:
+that the heal happens after the release's file list is known, that the record is
+written before anything is restored, and that the unreproducible-blob restore runs
+after the box's own version has been written down.
 """
 import os
 import re
@@ -523,7 +537,171 @@ def test_the_staleness_threshold_is_one_declared_constant():
     assert re.search(r"\$BOX_EDITS_STALE_SECONDS", block), "the constant is never read"
 
 
-# ── 2. the two properties a single run cannot show ──────────────────────────
+# ── 1b. a blob a checkout cannot reproduce ───────────────────────────────
+
+TARGET = "app/routes/admin_sekolah.py"
+
+
+def _repo_with_the_rule(tmp_path: Path) -> Path:
+    """The same checkout, with the repo's own `*.py text eol=lf` committed.
+
+    Without that rule a carriage return in a blob is harmless here and the difference
+    that stranded the box cannot be reproduced at all — so the rule is part of the
+    fixture rather than scenery.
+    """
+    repo = _repo(tmp_path)
+    (repo / ".gitattributes").write_bytes(b"*.py text eol=lf\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "the attributes the real repo carries")
+    return repo
+
+
+def _plant_blob(repo: Path, raw: bytes, rel: str = TARGET) -> bytes:
+    """Commit *raw* as the path's blob, around the filters, and return the blob.
+
+    `git add` normalises a CR away, so a blob like this can only reach the index the
+    way it reached the box's: `hash-object --no-filters` then
+    `update-index --cacheinfo`. Measured: `0afc68e` committed 108 carriage returns
+    into a file whose attribute promises LF, and the box then refused every tick for
+    hours while the heal reported success.
+    """
+    path = repo / rel
+    path.write_bytes(raw)
+    blob = _git(repo, "hash-object", "-w", "--no-filters", str(path)).stdout.strip()
+    assert blob, "git hash-object produced no blob"
+    assert _git(repo, "update-index", "--cacheinfo", f"100644,{blob},{rel}").returncode == 0, \
+        "git update-index refused the planted blob"
+    assert _git(repo, "commit", "-q", "-m", "the blob a box is stuck on").returncode == 0
+    return subprocess.run(["git", "-C", str(repo), "cat-file", "blob", f"HEAD:{rel}"],
+                          capture_output=True).stdout
+
+
+def _new_record(state: Path, before: set[Path]) -> Path:
+    """The record this run wrote. By set difference rather than by sorting the names:
+    two heals inside one second share a stamp, and `[-1]` would be a guess."""
+    fresh = set(_records(state)) - before
+    assert len(fresh) == 1, f"the run wrote {len(fresh)} records, not one: {sorted(fresh)}"
+    return fresh.pop()
+
+
+def test_a_blob_a_checkout_cannot_reproduce_is_written_out_of_head(tmp_path):
+    """The box's real state: a hand edit *and* a blob no checkout can reproduce."""
+    repo, state = _repo_with_the_rule(tmp_path), tmp_path / "state"
+    state.mkdir()
+    target = repo / TARGET
+    blob = _plant_blob(repo, b"the release's line\r\n")
+    target.write_bytes(b"the box's hotfix\n")
+
+    done = _run(tmp_path, repo, state, [TARGET])
+
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "FINISHED" in done.stdout, \
+        f"the heal refused a case it can complete: {done.stdout}"
+    assert _git(repo, "status", "--porcelain").stdout.strip() == "", (
+        "the tree is still dirty, so the merge this heal exists to allow is refused "
+        "for the same reason as before")
+    assert target.read_bytes() == blob, (
+        "the worktree does not hold HEAD's own bytes, so the next restore differs the "
+        "same way")
+
+    record = _new_record(state, set()).read_text(encoding="utf-8")
+    assert f"set-aside {TARGET}" in record, record
+    assert f"verbatim {TARGET}" in record, (
+        f"the record does not say those bytes came from the commit: {record}")
+    assert f"attribute {TARGET}" in record, (
+        f"the record does not say a local override holds that path: {record}")
+    # And the box's own version is still there, which is the one thing this must never
+    # trade away: the patch is written before anything is restored.
+    patch = _new_record(state, set()).with_suffix(".patch")
+    assert "the box's hotfix" in patch.read_text(encoding="utf-8"), (
+        "the heal replaced the box's bytes without keeping them")
+
+
+def test_the_local_override_is_one_line_and_survives_a_second_heal(tmp_path):
+    """A second tick must not grow the attributes file, and must still say what holds."""
+    repo, state = _repo_with_the_rule(tmp_path), tmp_path / "state"
+    state.mkdir()
+    target = repo / TARGET
+    _plant_blob(repo, b"the release's line\r\n")
+    target.write_bytes(b"the box's hotfix\n")
+    assert _run(tmp_path, repo, state, [TARGET]).returncode == 0
+    attributes = repo / ".git" / "info" / "attributes"
+    first = attributes.read_text(encoding="utf-8")
+    assert first.count("-text") == 1, f"the override is not one line: {first!r}"
+
+    # The same box, a tick later, with another hand edit on the same path.
+    target.write_bytes(b"the box's second hotfix\n")
+    before = set(_records(state))
+    assert _run(tmp_path, repo, state, [TARGET]).returncode == 0
+
+    assert attributes.read_text(encoding="utf-8") == first, (
+        "the attributes file grew on a tick that had nothing to add")
+    # The override is what makes the ordinary restore reproduce the blob, so this tick
+    # needs no verbatim write — and must still say the override is what holds the path,
+    # because the newest record is the only one the page shows.
+    later = _new_record(state, before).read_text(encoding="utf-8")
+    assert f"attribute {TARGET}" in later, (
+        f"the newest record does not name the local override in force: {later}")
+    assert f"verbatim {TARGET}" not in later, (
+        "a tick whose checkout could reproduce the blob recorded a verbatim write")
+
+
+def test_a_path_a_checkout_can_reproduce_is_not_given_a_local_override(tmp_path):
+    """The escalation is for the unreproducible class, not for every hand edit."""
+    repo, state = _repo_with_the_rule(tmp_path), tmp_path / "state"
+    state.mkdir()
+    target = repo / TARGET
+    target.write_text("the box's hotfix\n", encoding="utf-8")
+
+    done = _run(tmp_path, repo, state, [TARGET])
+
+    assert done.returncode == 0 and "FINISHED" in done.stdout, done.stdout
+    assert target.read_text(encoding="utf-8") == "the release's line\n"
+    assert not (repo / ".git" / "info" / "attributes").exists(), (
+        "an ordinary restore wrote a local override, which changes how every later "
+        "comparison reads that path")
+    record = _records(state)[0].read_text(encoding="utf-8")
+    assert "verbatim" not in record and "attribute" not in record, record
+
+
+def test_a_carriage_return_the_filters_leave_alone_needs_no_override(tmp_path):
+    """`text` strips a CR only before an LF, so a lone CR is reproducible by bytes."""
+    repo, state = _repo_with_the_rule(tmp_path), tmp_path / "state"
+    state.mkdir()
+    target = repo / TARGET
+    _plant_blob(repo, b"one\rtwo\n")
+    target.write_bytes(b"the box's hotfix\n")
+
+    done = _run(tmp_path, repo, state, [TARGET])
+
+    assert done.returncode == 0 and "FINISHED" in done.stdout, done.stdout
+    assert _git(repo, "status", "--porcelain").stdout.strip() == ""
+    assert not (repo / ".git" / "info" / "attributes").exists(), (
+        "the override was reached for before the cheaper step was tried")
+    record = _records(state)[0].read_text(encoding="utf-8")
+    assert "verbatim" not in record and "attribute" not in record, record
+
+
+def test_an_override_that_cannot_be_written_refuses_without_losing_the_edit(tmp_path):
+    """The one refusal this path can still make, and what it costs: nothing."""
+    repo, state = _repo_with_the_rule(tmp_path), tmp_path / "state"
+    state.mkdir()
+    target = repo / TARGET
+    _plant_blob(repo, b"the release's line\r\n")
+    target.write_bytes(b"the box's hotfix\n")
+    (repo / ".git" / "info" / "attributes").mkdir()      # the append has nowhere to go
+
+    done = _run(tmp_path, repo, state, [TARGET])
+
+    assert done.returncode == 4, done.stdout
+    assert "FINISHED" not in done.stdout, "it refused and then merged anyway"
+    assert (state / "preflight-gate").read_text(encoding="utf-8").strip() == "dirty_checkout"
+    patch = _new_record(state, set()).with_suffix(".patch")
+    assert "the box's hotfix" in patch.read_text(encoding="utf-8"), (
+        "the refusal lost the box's own version")
+
+
+# ── 2. the properties a single run cannot show ─────────────────────────────
 
 
 def test_the_heal_runs_after_the_release_s_file_list_is_known():
@@ -566,6 +744,17 @@ def test_the_record_is_written_before_anything_is_restored():
     assert not late, (
         "a record is written after the paths are restored, so a checkout that fails "
         "in between fails with nothing on disk saying what was set aside")
+
+
+def test_the_unreproducible_restore_runs_after_the_box_s_version_is_written_down():
+    """Writing HEAD's bytes first would delete the very thing the patch is for."""
+    block = _box_block()
+    preserved = block.index('git -C "$REPO" diff --no-color --no-ext-diff --no-textconv HEAD')
+    call = re.search(r"^\s+box_edits_restore_verbatim\b", block, re.M)
+    assert call, "the heal never restores a blob a checkout cannot reproduce"
+    assert call.start() > preserved, (
+        "the unreproducible-blob restore can run before the box's own version is "
+        "written down, so the edit it replaces is lost")
 
 
 def test_the_section_is_its_own_delimited_block():
