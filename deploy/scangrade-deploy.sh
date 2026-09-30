@@ -1640,6 +1640,54 @@ materialise_lever_from_origin() {
 }
 # fetch-lever-logic:end
 
+# ── The branch is read before the box refuses ────────────────────────────────
+# branch-first-logic:start
+# The lever materialiser above can only hand a stuck box its lever if the fetch
+# has already happened — and a box whose runner refuses *before* it fetches
+# therefore never gets one. Measured on this box: 25 commits behind, refusing on the
+# same hand edit every tick, with `origin/$BRANCH` frozen on a revision from days
+# earlier. The commit that fixed the refusal, and the lever that fixed it without a
+# console, both travelled in releases that this very refusal was holding.
+#
+# So every arrangement refusal reads the branch *first*. The read is the one step
+# with the property needed: `git fetch` writes refs and FETCH_HEAD and touches
+# neither the working tree nor the index, so it succeeds on a checkout that is dirty,
+# rolled back, held by a quarantine, or about to be refused — and whatever
+# `origin/$BRANCH` then names can be read out of without merging anything. What the
+# box gains is the current lever, which is the one thing that can move it without a
+# console.
+#
+# Where it may not run, and why: not before the root check (the fetch drops to the
+# owner with `runuser`, which needs root), and not behind the pause file (a frozen
+# box is a freeze somebody asked for, and a frozen box fetches nothing today). It is
+# also silent and weightless on the two questions the surrounding refusals answer:
+#
+#   * **it writes no record and takes no code of its own.** The refusal that follows
+#     *is* the reason the box is not deploying; a record about the read would replace
+#     the sentence an operator needs with a footnote, and a code chosen here would
+#     pre-empt the refusal's own, along with its preflight line;
+#   * **it cannot make anything worse.** It moves no revision, reloads nothing and
+#     stages no release, so the state the following guard judges is the state it
+#     found — only now with a current lever beside it;
+#   * **it fails open.** A fetch that cannot reach GitHub (network, credentials) logs
+#     its reason and returns; the refusal that follows still fires, with the same code
+#     it always had. A box with no checkout at all returns before running anything.
+#
+# One global for the same reason the block above takes none: no helper in this script
+# reads a positional parameter, which is what keeps it unsteerable.
+branch_read_refs() {
+  [ -d "$REPO/.git" ] || return 0
+  local out
+  if ! out=$(as_owner git -C "$REPO" fetch --quiet origin "$BRANCH" 2>&1); then
+    log "branch read: git fetch failed (network or credentials) — the next tick will try again"
+    [ -n "$out" ] && printf '%s\n' "$out" | sed 's/^/    /'
+    return 0
+  fi
+  materialise_lever_from_origin
+  return 0
+}
+# branch-first-logic:end
+
 # ── Serialise runs ───────────────────────────────────────────────────────────
 # The timer already skips while the unit is active, but a manual run can overlap
 # a timer run. Exiting 0 keeps a skipped run from looking like a failed one.
@@ -1768,6 +1816,24 @@ if [ -e "$PAUSE_FILE" ]; then
   exit 0
 fi
 
+# ── Act as whoever owns the checkout ─────────────────────────────────────────
+# Hoisted above every arrangement refusal, because the branch is now read *before*
+# this box refuses (see branch-first-logic) and that read runs git as the owner.
+# Kept where it is otherwise: git and pip must never hit "dubious ownership", and
+# root must never leave root-owned files in a tree another user has to use.
+OWNER=$(stat -c '%U' "$REPO" 2>/dev/null)
+# An absent checkout has no owner to read; `branch_read_refs` returns before it
+# would use one, and the guard below names that case itself, so a fallback here is
+# belt-and-braces rather than a second decision.
+[ -n "$OWNER" ] || OWNER=root
+# HOME must be the owner's real home, not the repo: git finds its credentials
+# there, and pip puts its download cache there. Pointing HOME at $REPO made pip
+# create $REPO/.cache, which showed up as an untracked file and then tripped this
+# script's own "checkout has local changes" guard on every later run.
+OWNER_HOME=$(getent passwd "$OWNER" | cut -d: -f6)
+[ -n "$OWNER_HOME" ] || OWNER_HOME=/tmp
+as_owner() { runuser -u "$OWNER" -- env HOME="$OWNER_HOME" GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/bin/true "$@"; }
+
 # runner-identity:start
 # /usr/local/bin/scangrade-deploy is a launcher that execs this file, so what
 # runs is always the commit the checkout is on. It used to be an installed
@@ -1783,8 +1849,8 @@ fi
 # is a deploy about to run yesterday's logic.
 #
 # The comparison is against the checkout as it stands now, before anything is
-# fetched or merged, so an ordinary update to this very file cannot look like a
-# mismatch. (Exec'ing it in place is safe even when the pull rewrites it: bash
+# merged, so an ordinary update to this very file cannot look like a mismatch
+# (the branch read above touches refs only, never this file or the tree). (Exec'ing it in place is safe even when the pull rewrites it: bash
 # reads a script file into its buffer up front — measured on a 28 KB script that
 # was replaced, and shrunk to 75 bytes, mid-run: all 120 iterations executed, no
 # mixed lines — so there is no need to stage a private copy, which would only add
@@ -1804,6 +1870,9 @@ if [ "$SELF" != "$REPO_RUNNER" ] && ! cmp -s "$SELF" "$REPO_RUNNER"; then
   log "    would keep deploying with the logic of an older commit — including"
   log "    gates that have since been added or corrected."
   log "    fix once, as root:  bash $REPO/deploy/install-auto-deploy.sh"
+  # Read the branch before refusing, so the crate this box actually needs — the
+  # newest lever — is installed from it. See branch-first-logic.
+  branch_read_refs
   exit 14
 fi
 # runner-identity:end
@@ -1819,9 +1888,10 @@ fi
 # quietly stops being true. That is an unarmed box, and it is exactly the state
 # that must not ship code no gate has looked at.
 #
-# So the armament is checked once, before anything is fetched, and a missing check
-# refuses the run outright: nothing is pulled, nothing is reloaded, no release is
-# staged. It is a refusal to *deploy*, not a rollback — no release is under
+# So the armament is checked once, before any release is staged, and a missing
+# check refuses the run outright: no revision is pulled, nothing is reloaded, no
+# release enters flight. (The branch read above moves refs and a lever, never a
+# revision — see branch-first-logic.) It is a refusal to *deploy*, not a rollback — no release is under
 # judgement here, the box is — which is why it has its own exit code and why it is
 # NOT quarantined: a quarantine is a record about a commit, and the next tick
 # should re-check (cheaply) and say so again rather than stay silent.
@@ -1847,9 +1917,12 @@ ARMAMENT_OUT=""
 if ! armament_preflight; then
   log "UNARMED — REFUSING TO DEPLOY: this box is not set up to check a release"
   printf '%s\n' "$ARMAMENT_OUT" | sed 's/^/    /'
-  log "    Nothing was fetched and nothing was reloaded. Deploying from this state"
+  log "    Nothing was merged and nothing was reloaded. Deploying from this state"
   log "    would ship code that no gate has looked at."
   log "    arm it once, as root:  bash $REPO/deploy/arm-auto-deploy.sh"
+  # The branch is read before this refusal, so the lever can still reach a box that
+  # cannot release. See branch-first-logic.
+  branch_read_refs
   mkdir -p "$STATE_DIR" 2>/dev/null || true
   {
     date -Is
@@ -1870,22 +1943,12 @@ rm -f "$UNARMED_FILE" 2>/dev/null || true
 }
 [ -x "$REPO/.venv/bin/gunicorn" ] || {
   log "no virtualenv at $REPO/.venv — refusing"
+  branch_read_refs
   PREFLIGHT_GATE=no_virtualenv PREFLIGHT_EXIT=3 \
     PREFLIGHT_DETAIL="no gunicorn at $REPO/.venv/bin, so nothing here could serve a release" \
     preflight_write
   exit 3
 }
-
-# Act as whoever owns the checkout, so git and pip never hit "dubious ownership"
-# and never leave root-owned files behind in a tree another user has to use.
-OWNER=$(stat -c '%U' "$REPO")
-# HOME must be the owner's real home, not the repo: git finds its credentials
-# there, and pip puts its download cache there. Pointing HOME at $REPO made pip
-# create $REPO/.cache, which showed up as an untracked file and then tripped this
-# script's own "checkout has local changes" guard on every later run.
-OWNER_HOME=$(getent passwd "$OWNER" | cut -d: -f6)
-[ -n "$OWNER_HOME" ] || OWNER_HOME=/tmp
-as_owner() { runuser -u "$OWNER" -- env HOME="$OWNER_HOME" GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/bin/true "$@"; }
 
 cd "$REPO" || {
   log "cannot enter $REPO — refusing"
@@ -1924,6 +1987,7 @@ DIRTY=""
 if ! DIRTY=$(as_owner git -C "$REPO" status --porcelain 2>&1); then
   log "could not read the checkout's state — NOT deploying:"
   printf '%s\n' "$DIRTY" | sed 's/^/    /'
+  branch_read_refs
   PREFLIGHT_GATE=checkout_unreadable PREFLIGHT_EXIT=4 \
     PREFLIGHT_DETAIL="${DIRTY:-git status exited non-zero with no output}" preflight_write
   exit 4

@@ -1492,12 +1492,29 @@ the two lists against every `PREFLIGHT_GATE=` in the runner and against the page
 ## One word when a box is stuck: `sgfix`
 
 Everything above is the runner healing itself, and the heal has one property that can
-make it undeliverable: **it travels in a release.** The runner reads the checkout's
-state *before* it fetches, so a box whose tree holds a hand edit is refused by the
-very check the newer commit was written to soften — the box cannot fetch the fix for
-the thing that stops it fetching. A box in that state sits exactly where it is, and
-the only way out used to be a console session on a noVNC window, typing
+make it undeliverable: **it travels in a release.** Several of the runner's refusals
+are about the box's *arrangement* rather than about a release — a drifted copy of the
+runner, an unarmed one, a missing virtualenv, a checkout git cannot read — and each of
+them used to exit before the runner had fetched anything. So the box could not fetch
+the fix for the thing that stopped it fetching, and it sat exactly where it was; the
+only way out used to be a console session on a noVNC window, typing
 `git -C /opt/scangrade …` by hand into a screen with no clipboard.
+
+### The branch is read before the box refuses
+
+Every arrangement refusal now reads the branch **first** (`branch-first-logic`). A
+`git fetch` writes refs and `FETCH_HEAD` and touches neither the working tree nor the
+index, so it succeeds on a checkout that is dirty, rolled back, held by a quarantine or
+about to be refused — and whatever `origin/main` then names can be read without
+merging anything. A box that cannot land a release therefore still obtains the current
+lever, which is what ends the circle.
+
+The read is deliberately weightless: it writes no record and takes no code of its own
+(the refusal that follows *is* the reason the box is not deploying), it moves no
+revision and reloads nothing, and a fetch that cannot reach GitHub logs its reason and
+returns rather than changing the refusal that follows. It does not run where it cannot:
+not before the root check (the fetch drops to the checkout's owner with `runuser`, which
+needs root) and not behind the pause file (a freeze somebody asked for).
 
 So the checkout carries a lever, installed by the same installer as
 `scangrade-deploy`:
