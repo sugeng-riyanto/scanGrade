@@ -294,3 +294,76 @@ def test_forgot_password_sends_with_the_stored_password(monkeypatch):
 
     assert ok is True, "the reset email did not send using the stored credentials"
     assert logins and logins[0] == ("scangrade9@gmail.com", "stored-secret")
+
+
+# ── the identity the message wears ───────────────────────────────────────────
+#
+# `From: scangrade9@gmail.com` with no display name is the shape a school's filter
+# reads as bulk mail, and a reset code is a one-way message: with no `Reply-To` a
+# reader who answers it writes to the sending mailbox, which nobody watches.
+
+def test_a_bare_address_wears_the_display_name_and_a_reply_to(monkeypatch):
+    from app.services import smtp_settings
+
+    _clear_cache()
+    monkeypatch.setattr(smtp_settings, "get_supabase", lambda: _FakeSupabase())
+    monkeypatch.setenv("SMTP_EMAIL", "scangrade9@gmail.com")
+    monkeypatch.setenv("SMTP_PASSWORD", "pw")
+    monkeypatch.setenv("SMTP_FROM", "")
+    monkeypatch.setenv("SMTP_REPLY_TO", "")
+
+    got = smtp_settings.resolve()
+    assert got["sender"] == "ScanGrade <scangrade9@gmail.com>", (
+        "a bare address reaches the From header with no name on it")
+    assert got["reply_to"] == "noreply@scangrade.web.id"
+
+
+def test_a_sender_the_operator_wrote_is_left_exactly_as_written(monkeypatch):
+    """The panel decides the identity; this only fills in what was left blank."""
+    from app.services import smtp_settings
+
+    _clear_cache()
+    supabase = _FakeSupabase({
+        "smtp_from": "Kepala Sekolah <kepsek@sekolah.id>",
+        "smtp_reply_to": "halo@sekolah.id",
+    })
+    monkeypatch.setattr(smtp_settings, "get_supabase", lambda: supabase)
+
+    got = smtp_settings.resolve()
+    assert got["sender"] == "Kepala Sekolah <kepsek@sekolah.id>"
+    assert got["reply_to"] == "halo@sekolah.id"
+
+
+def test_the_sent_message_carries_from_and_reply_to(monkeypatch):
+    from app.services import smtp_settings
+
+    _clear_cache()
+    supabase = _FakeSupabase({
+        "smtp_user": "scangrade9@gmail.com", "smtp_password": "pw",
+        "smtp_host": "smtp.gmail.com", "smtp_port": "465",
+    })
+    monkeypatch.setattr(smtp_settings, "get_supabase", lambda: supabase)
+    monkeypatch.setenv("SMTP_FROM", "")
+    monkeypatch.setenv("SMTP_REPLY_TO", "")
+    sent = {}
+
+    class _Smtp:
+        def __init__(self, *a, **k):
+            pass
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+        def login(self, *a):
+            pass
+        def sendmail(self, frm, to, msg):
+            sent["from"] = frm
+            sent["msg"] = msg
+            return {}
+
+    monkeypatch.setattr(smtp_settings.smtplib, "SMTP_SSL", _Smtp)
+
+    ok, error = smtp_settings.send("parent@sekolah.id", "Kode", "123456")
+    assert ok is True, error
+    assert "From: ScanGrade <scangrade9@gmail.com>" in sent["msg"], sent["msg"]
+    assert "Reply-To: noreply@scangrade.web.id" in sent["msg"], sent["msg"]

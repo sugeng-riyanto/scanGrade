@@ -206,7 +206,7 @@
       "frozen": false
     },
     "auth/login_user.html": {
-      "pairs": 17,
+      "pairs": 18,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -434,7 +434,7 @@
       "frozen": false
     },
     "super_admin/email_settings.html": {
-      "pairs": 29,
+      "pairs": 32,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false

@@ -692,7 +692,31 @@ def forgot_password():
             except Exception:
                 pass
 
-    # 3. Search by auth email directly
+    # 3. Search the profile mirror by the address itself. `profiles.email`
+    # (migration 040) is a derived copy of the auth address readable in one scoped
+    # query, and it is the only lookup that covers *every* role: a principal or a
+    # vice principal has no `students`/`teachers` row, so before this the two
+    # oversight roles could reset only by typing their auth address — which the
+    # school hands out on a card and nobody memorises.
+    if not user_data:
+        try:
+            p = row_or_none(
+                supabase.table("profiles").select("id, phone, full_name, role")
+                .eq("email", email).maybe_single().execute()
+            )
+            if p:
+                target_email = email
+                user_data = {
+                    "auth_email": email,
+                    "recovery_email": email,
+                    "user_id": p["id"],
+                    "role": p.get("role", "murid"),
+                    "full_name": p.get("full_name", ""),
+                }
+        except Exception:
+            pass
+
+    # 4. Search by auth email directly (the paged walk — kept as the last resort)
     if not user_data:
         u = find_auth_user_by_email(email)
         if u:

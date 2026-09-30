@@ -21,7 +21,7 @@ def _smtp_settings():
 
     resolved = smtp_settings.resolve()
     return (resolved["host"], resolved["port"], resolved["user"],
-            resolved["password"], resolved["sender"])
+            resolved["password"], resolved["sender"], resolved["reply_to"])
 
 
 def send_whatsapp(phone: str, message: str):
@@ -48,7 +48,8 @@ def send_whatsapp(phone: str, message: str):
 
 def send_email(to_email: str, subject: str, body_html: str):
     """Send email via the configured SMTP account. Returns True on success."""
-    smtp_host, smtp_port, smtp_user, smtp_pass, from_email = _smtp_settings()
+    (smtp_host, smtp_port, smtp_user, smtp_pass, from_email,
+     reply_to) = _smtp_settings()
 
     if not smtp_user or not smtp_pass:
         logger.warning("SMTP not configured (SMTP_EMAIL/SMTP_PASSWORD missing); email to %s skipped", to_email)
@@ -57,6 +58,9 @@ def send_email(to_email: str, subject: str, body_html: str):
     try:
         msg = MIMEMultipart("alternative")
         msg["From"] = from_email
+        # A notification is one-way too, so a reply is pointed away from the sending
+        # mailbox rather than left to default to it (see smtp_settings.resolve).
+        msg["Reply-To"] = reply_to
         msg["To"] = to_email
         msg["Subject"] = subject
         msg.attach(MIMEText(body_html, "html"))
