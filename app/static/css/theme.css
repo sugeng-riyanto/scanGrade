@@ -136,6 +136,46 @@ html { transition: background-color .3s, color .3s; }
 .teacher-content .w-10 { width: 3rem; }
 .teacher-content .h-10 { height: 3rem; }
 @media (max-width:640px) { .teacher-content { font-size: 110%; } }
+
+/* ── The exam builder on a finger ─────────────────────────────────────────────
+   The page a teacher writes a paper on, and the densest form in the app: a type
+   select, a cognitive-level select and a media toggle per question, a key per PGK
+   statement, and the mark-scheme rows. Measured on the running page as a demo
+   teacher in headless Chrome with `pointer: coarse`, at 820x1180 (iPad Air 4
+   portrait), 1180x820, 800x1280 (Galaxy Tab portrait), 1280x800, 1024x768 and
+   768x1024: **42 controls under 40px** at every one of those widths, and **no
+   horizontal overflow at any of them**. The layout was never the problem; the hit
+   areas were. The smallest of the 42 were the mark-scheme rows at 16px, the type
+   and level selects at 30px, the PGK category keys at 30px and the media toggle
+   at 32px.
+
+   Asked as `pointer: coarse` and not as a width, for the reason the chrome's own
+   rule gives: a 768px tablet is as much a finger as a 375px phone, while a 768px
+   window on a mouse desktop is not — and `max-width` gets both of them wrong in
+   the same direction. `min-width` as well as `min-height`, because some of these
+   are icon-only: that is the axis the sidebar's 12x24px close button needed.
+
+   This does not shrink anything. Every control it touches is under 44px on a
+   finger today, so a 44px floor can only grow it, and the measured widths at
+   which that growth could overflow (820/768 portrait) have 700px of card to
+   spend. The one place it changes a layout is inside the question header, whose
+   row already wraps. Measured after: the count went from **42 to 0** at every
+   width above — the last three were the action card's block links (670-926px
+   wide, 36px tall), which `a[href]` catches and an inline link cannot, since
+   `min-height` does not apply to an inline box. */
+@media (pointer: coarse) {
+    .sg-exam-builder select,
+    .sg-exam-builder input[type="text"],
+    .sg-exam-builder input[type="url"],
+    .sg-exam-builder input[type="number"],
+    .sg-exam-builder input[type="search"],
+    .sg-exam-builder textarea,
+    .sg-exam-builder button,
+    .sg-exam-builder a[href] {
+        min-height: 44px;
+        min-width: 44px;
+    }
+}
         .nav-item { display: flex; align-items: center; gap: 0.75rem; padding: 0.625rem 0.875rem; border-radius: 0.75rem; font-weight: 600; font-size: 0.875rem; transition: all .15s; color: #94a3b8; }
         /* The finger, not the width. The chrome's icon-only controls sized
            themselves to their glyph — the sidebar's close button measured 12x24
