@@ -1551,13 +1551,27 @@ of that file is only the fallback on a box that has not ticked yet.
    gate refuses a release whose database is behind its code, so applying them later
    would only earn that refusal;
 3. runs one release;
-4. if a box-local edit refused it, sets that edit aside — a patch against `HEAD` for
-   a tracked path, the whole file for one `HEAD` has never seen — and runs the
-   release once more;
-5. if the refusal was the **schema** quarantine step 2 just answered, lifts that
-   quarantine for one attempt and runs the release once more;
+4. answers the two refusals it can, and runs the release once more after each: a
+   **box-local edit** is set aside — a patch against `HEAD` for a tracked path, the
+   whole file for one `HEAD` has never seen — and the **schema** quarantine step 2
+   just answered is lifted for one attempt. The **perf** gate is answered instead by
+   writing the same re-measurement request the status page's button writes, so the
+   release is judged against a baseline re-taken from the box as it is now;
+5. whenever the checkout *still* did not move, names the gate that refused — read
+   from the runner's own quarantine or `refused-before-merge` record, *after* the
+   attempt, so a retry a gate stops is reported as that gate rather than as "nothing
+   happened";
 6. verifies: the checkout moved, the app answers, and everything it did is in the
    record.
+
+The naming in step 5 is not decoration. Measured on this box (2026-09-30): the lever
+set aside `app/routes/admin_sekolah.py`, ran the release a second time, and printed
+only `the checkout did not move` — while the runner had already written
+`perf gate (p50 1359 ms vs 374 ms)` into its own quarantine file. `NOT MOVED` reads
+as "nothing is happening"; the gate's name is what sends an operator to the re-baseline
+button. A refusal record from the *first* attempt is never quoted as a second's: the
+reader only trusts a `refused-before-merge` whose bytes differ from the ones already
+there when the retry began.
 
 ### What it refuses, deliberately
 
@@ -1567,10 +1581,13 @@ of that file is only the fallback on a box that has not ticked yet.
   **before** the tree is touched, an entry that cannot be recorded is left exactly
   where it was, and the run says so. A recovery tool that loses a box's only copy of
   a fix is worse than the console session it replaces;
-* it lifts a quarantine **only** when the record names the schema gate, because that
-  is the one gate it can answer by doing something. A perf, theme, smoke or claims
-  refusal is a statement about the release, and a lever that could clear those would
-  be a bypass with a friendly name;
+* it answers **only two** refusals, and both by doing the thing the gate named rather
+  than by clearing it: the schema gate is answered by applying the migrations it
+  wants (step 2) and retrying; the perf gate by asking the runner to re-measure the
+  box, exactly as the status page's re-baseline button does. Neither is a bypass — the
+  gate runs again and can still refuse a release that is genuinely slower. A theme,
+  smoke or claims refusal is a statement about the release with no action this lever
+  can take, so it is named and the run stops;
 * **Gate 0 does not apply to it.** That gate exists to keep a drifted *runner* from
   deploying from somewhere other than the checkout; the lever runs no gates at all —
   it starts the unit, which is where the gates live — so requiring the block in it
