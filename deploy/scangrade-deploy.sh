@@ -2317,6 +2317,68 @@ else
 fi
 # served-commit-gate:end
 
+# ── Is the worker running this release too? ──────────────────────────────────
+#
+# The check above proves gunicorn holds the merged code. The Celery worker is the
+# other process in this checkout, and it is the one that imports its task modules
+# once and keeps them: a release that reloads the app and leaves the worker on the
+# previous revision is a half-deployed release. It has already happened here —
+# `page_index` was added to the OMR task and its caller in one commit, gunicorn was
+# reloaded alone, and every scan then failed with `process_omr_scan() got an
+# unexpected keyword argument 'page_index'`, while the box reported success.
+#
+# The worker answers over the broker (`app/celery_app.py` registers a `served_commit`
+# control command returning `build_info.snapshot()`), and `deploy/worker_commit_gate.py`
+# broadcasts it. One thing is deliberately different from the app gate: **silence is
+# never a refusal here.** The app always has an HTTP surface, so a release that ships
+# the reading can always name its commit and a body without one means the answering
+# code is not this release. A worker that is *down* and a worker *built before the
+# reading* both answer nothing, and from the client they are indistinguishable — so
+# no answer is exit 2, and only a worker that **answers with another commit** is a
+# refusal. Exit 3, never 1, for the same reason as the app gate: a crashed check must
+# not read as a refusal.
+# worker-commit-gate:start
+RUN_STEP="worker"
+if [ "$HEALTHY" != "1" ]; then
+  : # already unhealthy; the rollback path owns it
+elif ! systemctl cat "$WORKER_UNIT" >/dev/null 2>&1; then
+  # Async OMR simply queues; a box with no worker has nothing to be stale.
+  log "$WORKER_UNIT is not installed — no worker to ask which commit it runs"
+else
+  WORKER_OUT=$(as_owner "$REPO/.venv/bin/python" "$REPO/deploy/worker_commit_gate.py" \
+      --repo "$REPO" --commit "$AFTER_FULL" \
+      --reporter "$REPO/app/celery_app.py" 2>&1)
+  WORKER_RC=$?
+  # The gate's own verdict lines, or — when it produced none — the tail of its
+  # output, because a traceback is the finding when there is no verdict.
+  worker_detail() {
+    local detail
+    detail=$(printf '%s\n' "$WORKER_OUT" | grep -E '^worker commit:')
+    [ -z "$detail" ] && detail=$(printf '%s\n' "$WORKER_OUT" | grep -vE '^[[:space:]]*$' | tail -n 6)
+    printf '%s\n' "$detail"
+  }
+  case "$WORKER_RC" in
+    0)
+      log "$(printf '%s\n' "$WORKER_OUT" | grep -m1 '^worker commit: OK' || echo 'worker commit: OK')" ;;
+    3)
+      log "the Celery worker is running a commit other than the one this run merged:"
+      worker_detail | sed 's/^/    /'
+      log "    a new app with an old worker is a half-deployed release — the caller"
+      log "    sends a task the worker's code cannot accept, which is how every OMR"
+      log "    scan failed once already — rolling back to $BEFORE"
+      HEALTHY=0
+      FAIL_REASON="worker commit (the worker is running a commit other than the one just merged)"
+      FAIL_DETAIL=$(worker_detail) ;;
+    *)
+      log "worker-commit check COULD NOT MEASURE (exit $WORKER_RC) — this release is"
+      log "    NOT confirmed as the code the worker runs:"
+      worker_detail | sed 's/^/    /'
+      log "    not rolling back: a worker that cannot be asked is a property of the"
+      log "    box, and whether $WORKER_UNIT came back at all is the restart line above." ;;
+  esac
+fi
+# worker-commit-gate:end
+
 # ── Gate 4: sign in as each role and open the pages that matter ──────────────
 # The port answering 200 only says gunicorn is up. It says nothing about whether
 # login still works, whether a page 500s for one role, or whether an RBAC guard
