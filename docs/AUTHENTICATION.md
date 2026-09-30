@@ -205,7 +205,33 @@ reset by code) share it.
 admin roles. A reset by code — `/auth/forgot-password` → `/auth/verify-reset-code` →
 `/auth/set-new-password` — is a password change like any other and clears the same flag, and the
 lookup is role-agnostic: it recognises an account by recovery phone, then NISN (pupil) or
-`employee_id` (teacher), then the address itself, so all six roles can reset without assistance.
+`employee_id` (teacher), then the `profiles.email` mirror, then the paged auth listing as a last
+resort. The mirror is the one that matters for the two oversight roles: a principal or vice
+principal has no `students`/`teachers` row, and the issued address on their card is all they usually
+know. Both login doors link to `/auth/forgot-password` — the pupil/teacher door served four of the
+six roles and, until it carried the link, those four could reset only by typing the URL.
+
+### Saving the new password (the browser's side)
+
+`/auth/change-password` carries **no** `autocomplete="off"` — that attribute is the signal that
+suppresses the browser's "save this password?" offer, and the one change the page exists to make is
+exactly the credential a browser should remember. Its three fields are marked `current-password`
+and `new-password` so the browser can tell which one to store; `/auth/set-new-password`,
+`/auth/reset-password` and `/auth/register` mark their fields `new-password` for the same reason.
+Guarded in `tests/unit/test_password_onboarding.py`, which reads the form and input tags rather than
+the file — the page's own comment explains the attribute it removed.
+
+### The identity the mail wears
+
+Every outbound message resolves through one place (`app/services/smtp_settings.py`): the stored
+mailbox first, the environment as fallback, and a blank `smtp_from` becomes
+`ScanGrade <scangrade9@gmail.com>` so the `From` header is not a bare Gmail address, which is the
+shape a school's filter reads as bulk mail. A `Reply-To` is set unconditionally, defaulting to
+`noreply@scangrade.web.id`: a reset code is a one-way message, and leaving the header empty makes a
+mail client answer the sending mailbox, which nobody watches. An operator can override both on
+`/super-admin/email-settings`. The credential itself is *not* in the repository — it must be a Gmail
+App Password stored on that page (or in `SMTP_PASSWORD`), and the page's "Send a test" action is how
+the path is proven before a user relies on it.
 
 ## 10. Login Throttling
 

@@ -85,7 +85,7 @@
                     <div>
                         <div class="input-icon">
                             <i class="fas fa-lock"></i>
-                            <input type="password" name="password" required minlength="6" :placeholder="t('Password (min. 6 karakter)','Password (min. 6 characters)')" x-model="pw"
+                            <input type="password" name="password" required minlength="6" autocomplete="new-password" :placeholder="t('Password (min. 6 karakter)','Password (min. 6 characters)')" x-model="pw"
                                    class="w-full px-4 py-3 pl-10 border border-surface-200 rounded-xl focus:ring-2 focus:ring-primary-500 text-surface-700 font-medium placeholder:text-surface-300 transition">
                         </div>
                         <div class="mt-2" x-show="pw.length > 0">

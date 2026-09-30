@@ -272,6 +272,27 @@ def test_forgot_password_still_reports_an_address_that_is_not_on_file(monkeypatc
     assert "tidak ditemukan" in body
 
 
+def test_an_official_is_found_through_the_email_mirror(monkeypatch):
+    """A principal has no `students`/`teachers` row, so the mirror is the only
+    lookup that can find the two oversight roles — and they are users too.
+
+    The address on the card is all they have; the auth listing is paged and they sit
+    deep in it, so before this a principal could only reset by walking the whole
+    listing for an account they could not name.
+    """
+    officer = {"id": "kep-1", "email": "kepsek@scan-grade.app", "phone": "",
+               "role": "principal", "full_name": "Kepala Sekolah"}
+    body = _render_forgot(
+        "kepsek@scan-grade.app", monkeypatch,
+        # No auth user carries that address on any page: only the mirror does.
+        _Admin([_user("someone.else@scan-grade.app", "x-1")]),
+        profiles=[officer],
+    )
+    assert "verify-reset-code" in body, (
+        "a principal could not reset a password: the one address they know lives on "
+        "the profile mirror, and nothing read it")
+
+
 def test_a_visitor_is_not_told_a_code_was_sent_when_it_was_not(monkeypatch):
     """`_send_email` returning None read as success, and the code never arrived."""
     body = _render_forgot("admin_smp@scan-grade.app", monkeypatch,

@@ -366,7 +366,7 @@ def recipients(*, supabase=None, settings=None) -> dict:
 def _smtp_account() -> str | None:
     from app.services.notification_service import _smtp_settings
 
-    _, _, user, _password, _sender = _smtp_settings()
+    _, _, user, _password, _sender, _reply_to = _smtp_settings()
     return (user or "").strip() or None
 
 

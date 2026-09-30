@@ -28,7 +28,33 @@ from email.mime.text import MIMEText
 logger = logging.getLogger(__name__)
 
 #: The keys this module owns in ``system_settings``. Anything else is not SMTP.
-ALLOWED_KEYS = ("smtp_host", "smtp_port", "smtp_user", "smtp_password", "smtp_from")
+ALLOWED_KEYS = ("smtp_host", "smtp_port", "smtp_user", "smtp_password",
+                "smtp_from", "smtp_reply_to")
+
+#: The name this app's mail wears when the operator leaves ``smtp_from`` blank.
+#: A bare Gmail address in the ``From`` header is the shape a school's mail server
+#: reads as bulk mail; the display name is the difference between "ScanGrade" and a
+#: string of letters in an inbox.
+DEFAULT_SENDER_NAME = "ScanGrade"
+
+#: Where a reply goes. A reset code is a one-way message, and the sending mailbox
+#: (``scangrade9@gmail.com``) is not watched: letting ``Reply-To`` default to it
+#: invites a reply that nobody reads. An operator can override this on the settings
+#: page, and ``SMTP_REPLY_TO`` is the environment fallback.
+DEFAULT_REPLY_TO = "noreply@scangrade.web.id"
+
+
+def _with_display_name(addr: str) -> str:
+    """Give a bare address the display name this app's mail wears.
+
+    A value the operator wrote with a name of its own — ``ScanGrade <a@b>`` — is left
+    exactly as written, so the panel stays the place the identity is decided; only a
+    naked address is wrapped, and only once.
+    """
+    addr = (addr or "").strip()
+    if not addr or "<" in addr:
+        return addr
+    return f"{DEFAULT_SENDER_NAME} <{addr}>"
 
 
 def get_supabase():
@@ -97,7 +123,13 @@ def resolve() -> dict:
         port = 465
     user = (store.get("smtp_user") or "").strip() or _env("SMTP_EMAIL", "")
     password = stored_password or _env("SMTP_PASSWORD", "")
-    sender = (store.get("smtp_from") or "").strip() or _env("SMTP_FROM", "") or user
+    sender = _with_display_name(
+        (store.get("smtp_from") or "").strip() or _env("SMTP_FROM", "") or user)
+    reply_to = (
+        (store.get("smtp_reply_to") or "").strip()
+        or _env("SMTP_REPLY_TO", "")
+        or DEFAULT_REPLY_TO
+    )
 
     return {
         "host": host,
@@ -105,6 +137,7 @@ def resolve() -> dict:
         "user": user,
         "password": password,
         "sender": sender,
+        "reply_to": reply_to,
         "source": "database" if stored_password else "environment",
         "configured": bool(user and password),
     }
@@ -155,6 +188,10 @@ def send(to_email: str, subject: str, body: str, html: bool = False):
         msg = MIMEText(body, "plain", "utf-8")
     msg["Subject"] = subject
     msg["From"] = settings["sender"]
+    # A reset code is one-way: the sending mailbox is not watched, so a reply must not
+    # land in it. Set unconditionally, because a null header is what makes a mail
+    # client answer the address in `From`.
+    msg["Reply-To"] = settings["reply_to"]
     msg["To"] = to_email
 
     try:
