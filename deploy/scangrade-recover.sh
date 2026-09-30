@@ -87,6 +87,10 @@ STATE_DIR="${SG_STATE_DIR:-/var/lib/scangrade-deploy}"
 RECOVER_DIR="$STATE_DIR/recover"
 KEEP="${SG_RECOVER_KEEP:-5}"
 RELEASE_FILE="${SG_RELEASE_FILE:-/etc/scangrade-deploy.release}"
+#: The one-shot ask the status page's re-baseline button writes. Consulted here so a
+#: stale-baseline refusal can be answered from a console with no browser and no shell
+#: step: the runner re-measures the box, keeps that baseline, and retries once.
+REBASELINE_REQUEST="${SG_REBASELINE_REQUEST:-$STATE_DIR/requests/rebaseline}"
 HEALTH="${SG_HEALTH_URL:-http://127.0.0.1:8000/health}"
 LEDGER="${SG_MIGRATION_LEDGER:-/var/lib/scangrade-migrations}"
 PY="${SG_PYTHON:-$REPO/.venv/bin/python}"
@@ -122,8 +126,15 @@ GET_LEVER="runuser -u scangrade -- git -C /opt/scangrade show origin/main:deploy
 
 #: What a quarantine record's third line holds when the schema gate earned it. The
 #: runner writes the gate's own name there, and the schema gate's name is the only
-#: one this script is allowed to answer.
+#: one this script may *lift*.
 SCHEMA_GATE_WORD="schema gate"
+
+#: The other gate that names an action. A perf refusal means the box's *baseline* was
+#: measured before the box drifted, not that the code regressed — and the runner
+#: already accepts a re-measurement request (the status page's own button) that makes
+#: it measure the box again and judge the release against that. Asking for it is not a
+#: bypass: the gate still runs, and still refuses a release that is genuinely slower.
+PERF_GATE_WORD="perf gate"
 
 #: The two pieces of the verifier's own text this reader stands on. Named once, and
 #: held by a guard in tests/unit/test_console_recover.py: a reader whose markers no
@@ -322,6 +333,56 @@ recover_may_lift() {
   esac
   return 1
 }
+
+recover_may_rebaseline() {
+  # Reads a quarantine record and answers whether this is the perf gate's refusal.
+  # Separate from `recover_may_lift` on purpose: the two do different things and one
+  # of them is not a lift. The schema gate is answered by *doing the migration* the
+  # release needs; the perf gate is answered by asking it to measure the box again.
+  # Neither clears a refusal the gate would still make — the gate re-runs both times.
+  local reason
+  reason="$(sed -n '3p' 2>/dev/null)"
+  case "$reason" in
+    *"$PERF_GATE_WORD"*) return 0 ;;
+  esac
+  return 1
+}
+
+recover_name_refusal() {
+  # Names whatever the runner wrote down when a release did not move. Read *after*
+  # the attempt, never at the top of the run: a refusal is a statement about one
+  # release, so a record from an earlier attempt names a gate that did not refuse
+  # this one.
+  #
+  # This is the defect that made the lever useless on the live box (2026-09-30):
+  # it set aside `app/routes/admin_sekolah.py`, ran the release a second time, and
+  # printed only "the checkout did not move" — while the runner had already written
+  # `perf gate (… p50 …)` into its own quarantine file. An operator reads NOT MOVED
+  # as "nothing is happening", which is the opposite of "a gate measured the box and
+  # said no": the first sentence sends them to the journal, the second to the
+  # re-baseline button. The lift policy is unchanged — this only *says* what refused.
+  #
+  # The two records are the runner's shapes: a quarantine holds the gate's *name* on
+  # line 3 (after the commit and its timestamp), and a pre-merge refusal holds the
+  # refusing step's key on line 1. A preflight record is only this attempt's when it
+  # differs from the one already there when the attempt started — otherwise a stale
+  # `dirty_checkout` from the first attempt would be quoted as the second's reason.
+  local gate now
+  if [ -f "$STATE_DIR/quarantined" ]; then
+    gate="$(sed -n '3p' "$STATE_DIR/quarantined" 2>/dev/null)"
+    note "a gate is holding this commit: $gate"
+    printf 'quarantine %s\n' "$gate" >> "$RECORD"
+    return 0
+  fi
+  now="$(cat "$STATE_DIR/refused-before-merge" 2>/dev/null || true)"
+  if [ -n "$now" ] && [ "$now" != "${PREFLIGHT_BEFORE:-}" ]; then
+    gate="$(printf '%s\n' "$now" | sed -n '1p')"
+    note "the release refused before it merged: $gate"
+    printf 'preflight %s\n' "$gate" >> "$RECORD"
+    return 0
+  fi
+  return 1
+}
 # recover-logic:end
 
 # ── arguments: enough to look before you leap, not enough to aim ─────────────
@@ -499,6 +560,29 @@ release_once() {
 
 new_head() { gitdo rev-parse --short HEAD 2>/dev/null; }
 
+recover_try_again() {
+  # One more release, then the runner's own answer when it *still* does not move.
+  #
+  # Two things about the read are deliberate. It happens *after* the attempt, so it
+  # describes this release rather than the one before it. And it is only trusted for
+  # a record this attempt wrote: `PREFLIGHT_BEFORE` is what `refused-before-merge`
+  # already held, so a first attempt's `dirty_checkout` cannot be quoted as the
+  # second attempt's reason. Naming the gate is the whole point — the live box's run
+  # stopped at NOT MOVED while `perf gate (…)` sat unread in the quarantine file.
+  PREFLIGHT_BEFORE="$(cat "$STATE_DIR/refused-before-merge" 2>/dev/null || true)"
+  release_once
+  AFTER="$(new_head)"
+  if [ -n "$AFTER" ] && [ "$AFTER" != "$BEFORE" ]; then
+    note "the checkout moved: $BEFORE -> $AFTER"
+    printf 'release moved %s -> %s\n' "$BEFORE" "$AFTER" >> "$RECORD"
+    return 0
+  fi
+  note "$1"
+  recover_name_refusal \
+    || note "    and the runner wrote no record — the journal above is where it says so"
+  return 1
+}
+
 say "3/6  a release"
 release_once
 AFTER="$(new_head)"
@@ -516,20 +600,32 @@ else
     note "a gate is holding this commit:"
     sed -n '1,3p' "$STATE_DIR/quarantined" 2>/dev/null | sed 's/^/   | /'
     if recover_may_lift < "$STATE_DIR/quarantined"; then
-      # The one gate this script can answer. It lifts the quarantine for exactly one
-      # attempt — the runner consumes the file itself — so a second refusal re-arms it.
+      # The schema gate names an action and this script performs it: the migrations
+      # it wants are applied above, so asking for one retry is what remains. The
+      # runner consumes the file itself, so a second refusal re-arms the quarantine.
       say "4/6  the schema quarantine this run just answered"
       : > "$RELEASE_FILE" 2>/dev/null || die "could not ask the runner to retry ($RELEASE_FILE)" 1
       note "asked for one retry via $RELEASE_FILE"
       printf 'lifted the schema quarantine once\n' >> "$RECORD"
-      release_once
-      AFTER="$(new_head)"
+      recover_try_again "the retry did not move the checkout:"
+    elif recover_may_rebaseline < "$STATE_DIR/quarantined"; then
+      # The perf gate names an action too, and it is the one the status page offers:
+      # re-measure the box, keep that baseline, and judge this release against it.
+      # Not a bypass — the gate runs again and can still refuse a slower release —
+      # but a stale baseline is not a code regression, and this is how the runner
+      # already knows to tell them apart.
+      say "4/6  the perf quarantine this run answers by re-measuring the box"
+      : > "$REBASELINE_REQUEST" 2>/dev/null \
+        || die "could not ask the runner to re-measure ($REBASELINE_REQUEST)" 1
+      note "asked for one re-measurement via $REBASELINE_REQUEST"
+      printf 'asked for a perf re-measurement\n' >> "$RECORD"
+      recover_try_again "the re-measured box still did not let the release through:"
     else
       printf 'REFUSED another gate holds it: %s\n' "$(sed -n '3p' "$STATE_DIR/quarantined" 2>/dev/null)" >> "$RECORD"
       say "refusing"
       note "the gate holding this release is $(sed -n '3p' "$STATE_DIR/quarantined" 2>/dev/null)"
-      note "that is a statement about the release, not about this box — this lever only"
-      note "answers the schema gate, which names an action. Read the journal above."
+      note "that is a statement about the release, not about this box — this lever can"
+      note "answer only a missing migration and a stale perf baseline. Read the journal."
       exit 1
     fi
   elif [ -n "$PORCELAIN" ]; then
@@ -541,11 +637,11 @@ else
       note "at least one path could not be recorded and was left untouched"
     fi
     say "5/6  a release, on the restored tree"
-    release_once
-    AFTER="$(new_head)"
+    recover_try_again "the set-aside worked, but the checkout still did not move:"
   else
     note "no quarantine and no box-local edit — the refusal is something else,"
     note "and the journal above is where it says so"
+    recover_name_refusal || true
     printf 'NOT MOVED: no quarantine, clean tree\n' >> "$RECORD"
     say "refusing"
     note "this lever answers two shapes: a box-local edit, and a schema quarantine."

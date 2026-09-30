@@ -89,6 +89,7 @@ HOLD=__HOLD__
 GAPS_HEADER=__GAPS__
 MISSING_MARK=__MISSING__
 SCHEMA_GATE_WORD=__SCHEMA__
+PERF_GATE_WORD=__PERF__
 gitdo() { git -C "$REPO" "$@"; }
 # The runner's real script defines this as `runuser -u <owner> -- env …`; here the
 # block already runs as the checkout's owner, so it is the identity — and it must be
@@ -114,7 +115,8 @@ def _run_logic(tmp_path: pathlib.Path, repo: pathlib.Path, state: pathlib.Path,
               .replace("__HOLD__", shlex.quote(hold.as_posix()))
               .replace("__GAPS__", shlex.quote(_constant("GAPS_HEADER")))
               .replace("__MISSING__", shlex.quote(_constant("MISSING_MARK")))
-              .replace("__SCHEMA__", shlex.quote(_constant("SCHEMA_GATE_WORD"))))
+              .replace("__SCHEMA__", shlex.quote(_constant("SCHEMA_GATE_WORD")))
+              .replace("__PERF__", shlex.quote(_constant("PERF_GATE_WORD"))))
     script = tmp_path / "harness.sh"
     script.write_text(header + _logic_block() + tail, encoding="utf-8", newline="\n")
     return subprocess.run([BASH, str(script)], capture_output=True, text=True,
@@ -412,6 +414,178 @@ def test_only_the_schema_gate_earned_quarantine_may_be_lifted(tmp_path):
                      "printf 'RC %s\\n' \"$?\"\n")
     assert "RC 0" in run.stdout, (
         "the schema gate names an action and this script performs exactly it")
+
+
+# ── 3b. naming the gate that refused, not only that nothing moved ────────────
+#
+# The live box's own run, 2026-09-30: `sgfix` set aside `app/routes/admin_sekolah.py`,
+# ran the release a second time, and printed only "the checkout did not move" — while
+# the runner had already written `perf gate (p50 … vs …)` into its quarantine file.
+# `NOT MOVED` reads as "nothing is happening"; the gate's name sends the operator to
+# the re-baseline button. These hold the read that turns one into the other, and the
+# staleness rule that keeps a first attempt's record from being quoted as a second's.
+
+def test_a_refusal_after_a_retry_is_named_from_the_runners_own_record(tmp_path):
+    repo, state = _repo(tmp_path), tmp_path / "state"
+    state.mkdir(parents=True)
+    reason = "perf gate (p50 1359 ms vs 374 ms, slower than the last release)"
+    (state / "quarantined").write_text(
+        f"abc123\n2026-09-30T11:36:07+00:00\n{reason}\n", encoding="utf-8")
+    run = _run_logic(tmp_path, repo, state,
+                     "\nrecover_name_refusal\nprintf 'RC %s\\n' \"$?\"\n")
+    assert "RC 0" in run.stdout, run.stdout + run.stderr
+    assert reason in run.stdout, (
+        "a quarantine the runner wrote is not quoted — the operator gets no gate name")
+    assert f"quarantine {reason}" in (state / "recover" / "r.txt").read_text(
+        encoding="utf-8"), "the gate's name never reached the recovery record"
+
+
+def test_a_preflight_from_the_first_attempt_is_not_quoted_as_the_seconds(tmp_path):
+    """The first attempt refused at `dirty_checkout`; the second refused elsewhere.
+
+    A reader that trusts any file it finds quotes the first attempt's key for the
+    second, which names the wrong step and hides the gate that actually said no.
+    """
+    repo, state = _repo(tmp_path), tmp_path / "state"
+    state.mkdir(parents=True)
+    (state / "refused-before-merge").write_text(
+        "dirty_checkout\n2026-09-30T11:30:00+00:00\n4\n\n", encoding="utf-8")
+    run = _run_logic(tmp_path, repo, state,
+                     "\nPREFLIGHT_BEFORE=\"$(cat \"$STATE_DIR/refused-before-merge\")\"\n"
+                     "recover_name_refusal\nprintf 'RC %s\\n' \"$?\"\n")
+    assert "RC 1" in run.stdout, run.stdout + run.stderr
+    assert "dirty_checkout" not in run.stdout, (
+        "the first attempt's refusal was quoted as the second's — it names a step "
+        "that did not refuse again")
+    record = state / "recover" / "r.txt"
+    left = record.read_text(encoding="utf-8") if record.exists() else ""
+    assert "dirty_checkout" not in left, (
+        "the stale first-attempt refusal was written into the record as if this "
+        "attempt had produced it")
+
+
+def test_a_preflight_written_by_this_attempt_is_named(tmp_path):
+    repo, state = _repo(tmp_path), tmp_path / "state"
+    state.mkdir(parents=True)
+    (state / "refused-before-merge").write_text(
+        "merge_refused\n2026-09-30T11:36:07+00:00\n6\n\nnot a fast-forward\n",
+        encoding="utf-8")
+    run = _run_logic(tmp_path, repo, state,
+                     "\nPREFLIGHT_BEFORE=\"an older attempt\"\n"
+                     "recover_name_refusal\nprintf 'RC %s\\n' \"$?\"\n")
+    assert "RC 0" in run.stdout, run.stdout + run.stderr
+    assert "merge_refused" in run.stdout
+    assert "preflight merge_refused" in (state / "recover" / "r.txt").read_text(
+        encoding="utf-8")
+
+
+def test_the_ladder_reads_the_refusal_after_the_second_release_too():
+    """The retry is where the box's own run stopped, so the read has to be on it.
+
+    The read now lives in `recover_try_again`, which every retry rung calls, so this
+    holds both halves: the set-aside rung reaches the helper, and the helper reads the
+    runner's record and names the gate.
+    """
+    source = _text(RECOVER)
+    after_step5 = source[source.index("a release, on the restored tree"):]
+    assert "recover_try_again" in after_step5, (
+        "the second release does not go through the retry helper, so a gate that "
+        "refuses after the set-aside is never named")
+    helper = source.index("recover_try_again() {")
+    body = source[helper:source.index("\n}", helper)]
+    assert "recover_name_refusal" in body, (
+        "the retry helper never reads the runner's refusal — it reports the move and "
+        "nothing else")
+
+
+def test_only_the_perf_gate_may_be_re_measured(tmp_path):
+    """The schema gate is answered by *doing the migration*; the perf gate by asking
+    it to measure the box again. A reader that answers anything else turns the lever
+    into a bypass, so this pins both halves of the distinction."""
+    state = tmp_path / "state"
+    state.mkdir(parents=True)
+    record = tmp_path / "quarantine"
+    record.write_text("abc123\n2026-09-30T11:36:07+00:00\n"
+                      "perf gate (p50 1359 ms vs 374 ms)\n", encoding="utf-8")
+    run = _run_logic(tmp_path, tmp_path / "repo", state,
+                     f'recover_may_rebaseline < {shlex.quote(record.as_posix())}\n'
+                     "printf 'REBASELINE %s\\n' \"$?\"\n"
+                     f'recover_may_lift < {shlex.quote(record.as_posix())}\n'
+                     "printf 'LIFT %s\\n' \"$?\"\n")
+    assert "REBASELINE 0" in run.stdout and "LIFT 1" in run.stdout, (
+        "a perf refusal is named for a re-measurement and never for a lift, which is "
+        "what keeps this from being a bypass:\n" + run.stdout + run.stderr)
+
+    record.write_text("abc123\n2026-09-30T11:36:07+00:00\n"
+                      "theme gate (exit 1)\n", encoding="utf-8")
+    run = _run_logic(tmp_path, tmp_path / "repo", state,
+                     f'recover_may_rebaseline < {shlex.quote(record.as_posix())}\n'
+                     "printf 'REBASELINE %s\\n' \"$?\"\n")
+    assert "REBASELINE 1" in run.stdout, (
+        "a theme refusal was treated as re-measurable — only the perf gate names a "
+        "measurement this lever can ask for")
+
+
+def test_a_perf_quarantine_is_answered_by_re_measuring_not_by_a_lift(tmp_path):
+    repo = _repo(tmp_path)
+    state = tmp_path / "state"
+    state.mkdir()
+    reason = "perf gate (p50 1359 ms vs 374 ms, slower than the last release)"
+    (state / "quarantined").write_text(
+        f"abc123\n2026-09-30T11:36:07+00:00\n{reason}\n", encoding="utf-8")
+    rebaseline = state / "rebaseline-request"
+    release = state / "release-request"
+    shim = _shim_dir(tmp_path, id=AS_ROOT, stat="echo root", journalctl="exit 0",
+                     runuser="exit 0", curl="exit 0", systemctl="exit 0")
+    env = _shimmed_env(tmp_path, shim)
+    env["SG_REBASELINE_REQUEST"] = str(rebaseline)
+    env["SG_RELEASE_FILE"] = str(release)
+    run = subprocess.run([BASH, str(RECOVER)], capture_output=True, text=True,
+                         cwd=str(repo), env=env)
+    both = run.stdout + run.stderr
+    assert rebaseline.exists(), (
+        "a perf quarantine was not answered by a re-measurement request:\n" + both)
+    assert not release.exists(), (
+        "a perf quarantine was answered by a plain release request — a lift, not a "
+        "re-measurement, which is the bypass this distinction exists to prevent")
+    assert reason in both, both
+
+
+def test_the_lever_names_the_gate_that_refused_the_second_release(tmp_path):
+    """End to end, as the box runs it: a dirty tree, a first release that moves
+    nothing, a successful set-aside, and a second release a gate quarantines."""
+    repo = _repo(tmp_path)
+    (repo / "app" / "routes" / "admin_sekolah.py").write_text(
+        "a hand edit the release writes\n", encoding="utf-8")
+    state = tmp_path / "state"
+    state.mkdir()
+    counter = (state / "count").as_posix()
+    quarantine = (state / "quarantined").as_posix()
+    reason = "perf gate (p50 1359 ms vs 374 ms, slower than the last release)"
+    systemctl = ("case \"$1\" in\n"
+                 "  start)\n"
+                 f"    n=$(cat {shlex.quote(counter)} 2>/dev/null || echo 0)\n"
+                 "    n=$((n + 1))\n"
+                 f"    echo \"$n\" > {shlex.quote(counter)}\n"
+                 "    if [ \"$n\" -ge 2 ]; then\n"
+                 f"      printf '%s\\n%s\\n%s\\n' deadbeef 2026-09-30T11:36:07+00:00 "
+                 f"{shlex.quote(reason)} > {shlex.quote(quarantine)}\n"
+                 "    fi ;;\n"
+                 "esac\n"
+                 "exit 0")
+    shim = _shim_dir(tmp_path, id=AS_ROOT, stat="echo root", journalctl="exit 0",
+                     runuser="exit 0", curl="exit 0", systemctl=systemctl)
+    run = subprocess.run([BASH, str(RECOVER)], capture_output=True, text=True,
+                         cwd=str(repo), env=_shimmed_env(tmp_path, shim))
+    both = run.stdout + run.stderr
+    assert run.returncode == 4, both
+    assert reason in both, (
+        "the lever stopped at NOT MOVED without naming the gate that refused the "
+        "second release, which is the whole complaint against it:\n" + both)
+    records = list((state / "recover").glob("*.txt"))
+    assert records, "the run wrote no recovery record"
+    assert reason in records[0].read_text(encoding="utf-8"), (
+        "the gate's name is not in the record the run leaves behind")
 
 
 # ── 4. the order of the run, read from the script ────────────────────────────
