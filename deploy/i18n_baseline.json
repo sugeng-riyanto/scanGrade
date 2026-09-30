@@ -212,7 +212,7 @@
       "frozen": false
     },
     "auth/register.html": {
-      "pairs": 34,
+      "pairs": 38,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -254,7 +254,7 @@
       "frozen": false
     },
     "base.html": {
-      "pairs": 168,
+      "pairs": 170,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -416,7 +416,7 @@
       "frozen": false
     },
     "super_admin/dashboard.html": {
-      "pairs": 31,
+      "pairs": 36,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -428,13 +428,13 @@
       "frozen": false
     },
     "super_admin/deploy_status.html": {
-      "pairs": 404,
+      "pairs": 410,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
     },
     "super_admin/email_settings.html": {
-      "pairs": 32,
+      "pairs": 38,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -602,7 +602,7 @@
       "frozen": false
     },
     "teacher/exam_form.html": {
-      "pairs": 214,
+      "pairs": 220,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
