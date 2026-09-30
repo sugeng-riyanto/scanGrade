@@ -263,6 +263,10 @@ GATE_KEYS = frozenset({
     #: reload did not take, so the release is not the code being served. Recorded by
     #: the `served-commit-gate` block in `deploy/scangrade-deploy.sh`.
     "served_commit",
+    #: The Celery worker answered the broker and named a commit other than the one
+    #: this run merged: a half-deployed release, the caller new and the worker old.
+    #: Recorded by the `worker-commit-gate` block in `deploy/scangrade-deploy.sh`.
+    "worker_commit",
     "runner_not_armed",
     "theme_gate",
     "smoke_test",
@@ -841,6 +845,10 @@ RUN_STEPS = frozenset({
     #: so the gates that follow measure a release that provably reloaded. See the
     #: `served-commit-gate` block in `deploy/scangrade-deploy.sh`.
     "served",
+    #: Between `served` and `verify`: the *other* process in this checkout is asked
+    #: which commit it runs, so a new app with an old Celery worker fails the release
+    #: instead of breaking scans silently. See the `worker-commit-gate` block.
+    "worker",
     "verify", "done",
 })
 

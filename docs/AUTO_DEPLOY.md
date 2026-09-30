@@ -1701,6 +1701,44 @@ The marker is the one thing here with a source-level coupling, and it is deliber
 held together by that test. If they ever diverge the gate degrades to "cannot measure"
 on every tick — loudly, in the journal, never as a silent pass.
 
+### The other process in the checkout: the Celery worker
+
+Gunicorn is not the only process holding this release. The Celery worker imports its
+task modules once, at start-up, and keeps them in memory for the life of the process,
+so reloading the app leaves it answering with the previous release. That is a
+**half-deployed release**, and it has already bitten this box: `page_index` was added
+to the OMR task's signature and to its caller in one commit, `systemctl reload`
+touched gunicorn alone, and every scan then failed with
+
+```
+process_omr_scan() got an unexpected keyword argument 'page_index'
+```
+
+— the caller new, the worker old, and the box reporting a successful release.
+
+So the worker answers the same question, on the broker it already uses.
+`app/celery_app.py` registers a `served_commit` control command (fenced with
+`worker-commit:start`) that returns `build_info.snapshot()` — the commit whose code
+the worker loaded, resolved at import — and `deploy/worker_commit_gate.py` broadcasts
+it and compares the replies with the merged commit. It runs between the served-commit
+check and the smoke gate, and a mismatch refuses and quarantines the release exactly
+like a failing gate.
+
+Three differences from the app gate, each of them a decision:
+
+* **Silence is never a refusal here.** The app always has an HTTP surface, so a
+  release shipping the reading can always name its commit when asked. The worker has
+  no such floor: a worker that is *down* and a worker *built before the reading* both
+  answer nothing over the broker, and from the client they are indistinguishable. So
+  "no worker answered" is exit `2` (never a rollback), and only a worker that
+  **answers and names a different commit** is exit `3`.
+* **It is asked, not the CLI.** `celery inspect <command>` cannot see a custom
+  command: its argument parser collects the command names when Celery is imported,
+  before an application has registered anything. The gate therefore imports the
+  worker's own app and uses `control.broadcast`, which reaches the registered command.
+* **A box with no worker unit is not a failure.** `scangrade-celery` missing means
+  async OMR simply queues; the block logs that and moves on.
+
 ## The way in: the box installs its own key
 
 Every section above assumes something can reach the box. A runner that refuses
