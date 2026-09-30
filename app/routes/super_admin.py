@@ -489,18 +489,34 @@ def reset_demo_passwords():
     all_users = [DEMO_USERS["super_admin"]]
     for s in DEMO_SCHOOLS:
         all_users.append(s["admin"])
+        # The school officials are seeded like every other account, so the repair
+        # button has to know they exist — leaving them out is how a principal's
+        # demo login keeps failing while the page offers it.
+        all_users.extend(s.get("officials", []))
         all_users.extend(s.get("teachers", []))
         all_users.extend(s.get("students", []))
+
+    # One paged walk for the whole run. `list_users()` answers with a **page** — 50
+    # by default — and the demo accounts are nowhere near the front of 800+, so the
+    # old loop-per-account found nothing, updated nothing, and still answered
+    # `{"total": 0, "ok": 0}`: a repair button that reports success by doing
+    # nothing is worse than one that fails. `list_all_auth_users` walks every page.
+    try:
+        by_email = {u.email: u.id for u in list_all_auth_users() if u.email}
+    except Exception as e:
+        return jsonify({"error": f"could not list auth users: {str(e)[:80]}",
+                        "results": [], "total": 0, "ok": 0}), 502
 
     for user in all_users:
         email = user["email"]
         password = user["password"]
+        uid = by_email.get(email)
+        if not uid:
+            results.append({"email": email, "error": "no such auth user"})
+            continue
         try:
-            for u in supabase.auth.admin.list_users():
-                if u.email == email:
-                    supabase.auth.admin.update_user_by_id(u.id, {"password": password})
-                    results.append({"email": email, "password": password, "success": True})
-                    break
+            supabase.auth.admin.update_user_by_id(uid, {"password": password})
+            results.append({"email": email, "password": password, "success": True})
         except Exception as e:
             results.append({"email": email, "error": str(e)[:60]})
 
