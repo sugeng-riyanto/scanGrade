@@ -97,6 +97,32 @@ class TestTeacherSheetReadByHeader:
         adm._import_teachers(ws, "S1", _Sb(), {"errors": []})
         assert captured["teachers"][0]["employee_id"] == "19870101"
 
+    def test_a_sheet_without_a_nip_column_still_imports(self, captured):
+        """The header names the person; the employee number is not what makes a
+        teacher. Measured live: a Guru sheet with a name/email/subject header but
+        no NIP column reported "29 baris terbaca tetapi tidak ada yang dikenali"
+        while the officials sheet beside it imported, because this reader demanded
+        a NIP *column* before it would read the header at all."""
+        ws = _sheet("Guru", [
+            ["Nama Lengkap", "Email", "Mata Pelajaran", "No. HP"],
+            ["Budi Santoso", "budi@sekolah.id", "Matematika", "0812"],
+        ])
+        adm._import_teachers(ws, "S1", _Sb(), {"errors": []})
+        assert len(captured["teachers"]) == 1, captured["teachers"]
+        call = captured["teachers"][0]
+        assert call["full_name"] == "Budi Santoso"
+        assert call["email"] == "budi@sekolah.id"
+        assert not call["employee_id"], (
+            "no NIP column means no NIP, not the name or the subject read as one")
+
+    def test_a_header_row_whose_nip_cells_are_blank_still_imports(self, captured):
+        ws = _sheet("Guru", [
+            ["NIP", "Nama Lengkap", "Email"],
+            ["", "Siti Rahma", "siti@sekolah.id"],
+        ])
+        adm._import_teachers(ws, "S1", _Sb(), {"errors": []})
+        assert [c["full_name"] for c in captured["teachers"]] == ["Siti Rahma"]
+
     def test_a_generated_email_is_used_when_the_column_is_blank(self, captured):
         ws = _sheet("Guru", [
             ["NIP", "Nama Lengkap", "Email"],

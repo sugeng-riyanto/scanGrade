@@ -53,8 +53,9 @@ def _gen_password(length=12) -> str:
 # templates). The aliases are the header spellings this repo has shipped across
 # the student/teacher/officials templates and the `/export` workbook.
 _IMPORT_ALIASES = {
-    "nip": ("nip", "nomorpegawai", "nopegawai", "nomorindukpegawai", "employeeid",
-            "employeenumber", "npk", "nik", "nomorinduk"),
+    "nip": ("nip", "nipnuptk", "nomorpegawai", "nopegawai",
+            "nomorindukpegawai", "employeeid", "employeenumber", "npk", "nik",
+            "nomorinduk"),
     "nuptk": ("nuptk",),
     "name": ("namalengkap", "nama", "name", "fullname", "namaguru", "namamurid",
              "namapejabat"),
@@ -788,8 +789,14 @@ def _import_teachers(ws, sid, supabase, results):
         seen += 1
         try:
             cols = [str(c or "").strip() for c in row]
-            if (columns.get("name") is not None
-                    and (columns.get("nip") is not None or columns.get("nuptk") is not None)):
+            # A header row is understood when it *names a person*. The employee
+            # number is optional: many schools do not hold every teacher's NIP,
+            # and demanding a NIP *column* before reading the header dropped the
+            # whole sheet to the positional reader and made it vanish -- the live
+            # report was "Sheet 'Guru': 29 baris terbaca tetapi tidak ada yang
+            # dikenali" while the officials sheet beside it imported fine.
+            by_header = columns.get("name") is not None
+            if by_header:
                 # Header row understood. This is what fixes the alphanumeric NIP:
                 # the subject column is read as the subject, not as the email.
                 nip = _cell(row, columns, "nip") or _cell(row, columns, "nuptk")
@@ -820,7 +827,12 @@ def _import_teachers(ws, sid, supabase, results):
                     nip = cols[0]; nama = cols[1]; mapels = [cols[2]] if len(cols) > 2 and cols[2] else []
                     email = cols[3] if len(cols) > 3 else ""; hp = cols[4] if len(cols) > 4 else ""; recovery_email = ""
 
-            if not nip or not nama:
+            # A header-driven row needs a name, and nothing more: a blank NIP is
+            # written as an empty employee id, not read as a reason to skip the
+            # row. Only the positional fallback still needs an employee number,
+            # because there it is the token that tells a teacher row from a
+            # student one.
+            if not nama or (not by_header and not nip):
                 continue
 
             # Resolve subject_id (use first mapel from the list)
@@ -865,7 +877,8 @@ def _import_teachers(ws, sid, supabase, results):
             and len(results["errors"]) == errors_before:
         results["errors"].append(
             f"Sheet '{ws.title}': {seen} baris terbaca tetapi tidak ada yang dikenali. "
-            "Pastikan baris pertama adalah header (NIP, Nama Lengkap, Email, Mata Pelajaran)."
+            "Pastikan baris pertama adalah header, minimal 'Nama Lengkap'. "
+            "Kolom 'NIP' opsional; 'Email' dan 'Mata Pelajaran' dipakai bila ada."
         )
 
 
