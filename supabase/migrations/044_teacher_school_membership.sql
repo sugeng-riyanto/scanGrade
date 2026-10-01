@@ -43,15 +43,14 @@
 -- Sengaja TANPA `BEGIN;`/`COMMIT;`: `deploy/apply_migration.py` yang memiliki
 -- transaksinya.
 
--- ── 1. helper: sekolah-sekolah yang dianggotai pemanggil ─────────────────────
-
-CREATE OR REPLACE FUNCTION public._user_school_ids()
-RETURNS SETOF UUID AS $$
-    SELECT school_id FROM public.teacher_school_membership
-    WHERE user_id = auth.uid() AND status = 'active';
-$$ LANGUAGE sql STABLE SECURITY DEFINER;
-
--- ── 2. tabel keanggotaan ─────────────────────────────────────────────────────
+-- ── 1. tabel keanggotaan ─────────────────────────────────────────────────────
+--
+-- The helper function that reads this table is created *after* it, not before:
+-- a `LANGUAGE sql` body is validated at CREATE time (check_function_bodies is on
+-- by default), so creating the function first fails with `relation
+-- "public.teacher_school_membership" does not exist` before the table exists.
+-- Measured against the live project: this migration could never apply until the
+-- order was flipped.
 
 CREATE TABLE IF NOT EXISTS public.teacher_school_membership (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -80,6 +79,16 @@ CREATE INDEX IF NOT EXISTS idx_teacher_school_membership_user
     ON public.teacher_school_membership(user_id, status);
 CREATE INDEX IF NOT EXISTS idx_teacher_school_membership_school
     ON public.teacher_school_membership(school_id, status);
+
+-- ── 2. helper: sekolah-sekolah yang dianggotai pemanggil ─────────────────────
+-- Dibuat setelah tabelnya ada, karena body `LANGUAGE sql` divalidasi saat
+-- CREATE (lihat catatan di atas).
+
+CREATE OR REPLACE FUNCTION public._user_school_ids()
+RETURNS SETOF UUID AS $$
+    SELECT school_id FROM public.teacher_school_membership
+    WHERE user_id = auth.uid() AND status = 'active';
+$$ LANGUAGE sql STABLE SECURITY DEFINER;
 
 -- ── 3. backfill: setiap guru/pengurus yang sudah ada menjadi anggota aktif ────
 -- Hanya tiga peran yang bisa lintas sekolah. Murid dan admin sekolah tetap satu
