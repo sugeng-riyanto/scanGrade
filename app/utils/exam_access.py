@@ -33,6 +33,13 @@ def result_released(submission) -> bool:
     return bool(submission.get("is_published")) or submission.get("status") == "published"
 
 
+#: The roles that may hold a paper of their own. A head of school and their
+#: deputy teach a subject sometimes, so they are owners of the papers they build —
+#: and of **nothing else**. Being named here is what grants a principal a paper
+#: without granting them a colleague's, which is the boundary the school chose.
+OWN_PAPER_ROLES = ("guru", "principal", "vice_principal")
+
+
 def can_manage_exam(user_id, user_role, user_school_id, exam) -> bool:
     """May this staff member act on this exam at all?
 
@@ -48,6 +55,12 @@ def can_manage_exam(user_id, user_role, user_school_id, exam) -> bool:
     and overwrite each other's marks, and a missing guard allowed it across
     schools entirely.
 
+    A head of school or their deputy is an owner only, never "the admin of the
+    school" here: the school may assign them a subject to teach, and teaching is
+    their own papers. Their oversight of the rest is a *read* (`can_read_exam`),
+    so an assigned official cannot unpublish or overwrite a colleague's marks —
+    which is exactly the line between teaching and supervising.
+
     Fails closed: an unknown role, or an admin with no school on file, is refused.
     """
     if not exam:
@@ -56,14 +69,20 @@ def can_manage_exam(user_id, user_role, user_school_id, exam) -> bool:
         return True
     if user_role == "admin_sekolah":
         return bool(user_school_id) and str(exam.get("school_id") or "") == str(user_school_id)
-    if user_role == "guru":
-        return bool(user_id) and str(exam.get("teacher_id") or "") == str(user_id)
+    if user_role in OWN_PAPER_ROLES:
+        # Owner *and* same school: the owner branch used to test the teacher id
+        # alone, which an id from a session with no school could match on the
+        # empty string. An owner with no school on file owns nothing.
+        return (bool(user_id) and bool(user_school_id)
+                and str(exam.get("teacher_id") or "") == str(user_id)
+                and str(exam.get("school_id") or "") == str(user_school_id))
     return False
 
 
-#: The roles whose job is oversight of a whole school and whose door is read-only.
-#: Named rather than inferred so a fourth role cannot inherit the school's data by
-#: being added to some list elsewhere.
+#: The two school officials, whose *oversight* of the school is read-only. Named
+#: rather than inferred so a fourth role cannot inherit the school's data by being
+#: added to some list elsewhere. They may still own papers they built themselves —
+#: that is `can_manage_exam`'s owner branch, not this list.
 OFFICIAL_READ_ROLES = ("principal", "vice_principal")
 
 
@@ -71,9 +90,10 @@ def can_read_exam(user_id, user_role, user_school_id, exam) -> bool:
     """May this caller *read* this exam's report?
 
     Everything `can_manage_exam` allows, plus the two school officials — who see
-    the whole school and change none of it. The split is the point: an oversight
-    role must not become able to unpublish, recalculate or overwrite a paper
-    because a shared predicate was widened for the convenience of a report page.
+    the whole school and change none of it *except the papers they built* (see
+    `can_manage_exam`). The split is the point: an oversight role must not become
+    able to unpublish, recalculate or overwrite a colleague's paper because a
+    shared predicate was widened for the convenience of a report page.
 
     Read-only is enforced by the blueprint (the official routes are GETs behind
     `school_official_required`), which is why this predicate is safe to hand to

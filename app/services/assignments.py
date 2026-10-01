@@ -26,7 +26,12 @@ logger = logging.getLogger(__name__)
 
 #: Roles whose writes are limited to the pairs they hold. Named, not inferred, so
 #: adding a role elsewhere cannot silently widen the school.
-SCOPED_ROLES = ("guru", "teacher")
+#:
+#: The two oversight roles are here on purpose: a head of school or their deputy
+#: may be assigned a subject — the request was explicit — and once assigned they
+#: must be held to the *same* pair rule as a guru. Being scoped is what keeps the
+#: oversight role from becoming the power to write for the whole school.
+SCOPED_ROLES = ("guru", "teacher", "principal", "vice_principal")
 
 
 def is_scoped_role(role) -> bool:

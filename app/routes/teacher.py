@@ -1872,6 +1872,14 @@ def retraction_requests():
 @open_year_required("submission_id")
 def approve_retraction(submission_id):
     supabase = get_supabase()
+    # Own paper only: `require_school_access` above proves the row is this
+    # school's, not that it is yours. Without this a colleague's retraction could
+    # be approved by anyone in the school — and an official assigned to teach is
+    # held to the very same line as a guru.
+    _, err = _guard_submission(supabase, submission_id, as_json=_wants_json(),
+                               redirect_to="/teacher/retractions")
+    if err:
+        return err
     sub = supabase.table("submissions").select("answers").eq("id", submission_id).single().execute().data
     if not sub:
         flash("Submission tidak ditemukan", "error")
@@ -1901,6 +1909,10 @@ def approve_retraction(submission_id):
 @open_year_required("submission_id")
 def reject_retraction(submission_id):
     supabase = get_supabase()
+    _, err = _guard_submission(supabase, submission_id, as_json=_wants_json(),
+                               redirect_to="/teacher/retractions")
+    if err:
+        return err
     sub = supabase.table("submissions").select("answers").eq("id", submission_id).single().execute().data
     if not sub:
         flash("Submission tidak ditemukan", "error")
@@ -3050,6 +3062,11 @@ def grade_detail(submission_id):
 @require_school_access("submissions", "submission_id", ("exam_id", "exams"))
 @open_year_required("submission_id")
 def override_score(submission_id):
+    # The guard runs before anything is read: `require_school_access` says the row
+    # is this school's, and this says it is the caller's to grade.
+    _gb, _gerr = _guard_submission(get_supabase(), submission_id, as_json=_wants_json())
+    if _gerr:
+        return _gerr
     if request.is_json:
         data = request.get_json()
         new_score = data.get("final_score")
@@ -3121,6 +3138,10 @@ def penalty_appeals():
 @open_year_required("submission_id")
 def api_penalty_appeal_handle(submission_id):
     """Teacher approves/rejects a penalty appeal."""
+    _gsb = get_supabase()
+    _gsb_sub, _gsb_err = _guard_submission(_gsb, submission_id, as_json=True)
+    if _gsb_err:
+        return _gsb_err
     data = request.get_json(silent=True) or {}
     action = data.get("action")
     reduction_type = data.get("reduction_type")

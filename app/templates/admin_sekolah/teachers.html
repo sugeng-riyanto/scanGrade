@@ -238,7 +238,21 @@
                 <tbody class="divide-y divide-stone-50" x-data="{ editing: false }">
                     <tr class="hover:bg-stone-50 transition" :class="selected.includes('{{ t.id }}') ? 'bg-amber-50/50' : ''">
                         <td class="px-2 py-3"><input type="checkbox" :checked="selected.includes('{{ t.id }}')" @click="selected.includes('{{ t.id }}') ? selected = selected.filter(x => x !== '{{ t.id }}') : selected.push('{{ t.id }}')" class="w-4 h-4"></td>
-                        <td class="px-4 py-3 font-bold text-stone-700">{{ t.name }}</td>
+                        <td class="px-4 py-3 font-bold text-stone-700">
+                            {{ t.name }}
+                            {# A head of school or their deputy teaches here as a subject
+                               teacher; naming the role keeps the admin from mistaking them
+                               for a guru on a roster that now holds both. #}
+                            {% if t.is_official %}
+                            {% set official_id_label = {'principal': 'Kepala Sekolah', 'vice_principal': 'Wakil Kepala Sekolah'} %}
+                            {% set official_en_label = {'principal': 'Principal', 'vice_principal': 'Vice Principal'} %}
+                            <span class="ml-1 badge bg-sky-50 text-sky-700 border border-sky-200"
+                                  data-lang-id="{{ official_id_label.get(t.role, t.role) }}"
+                                  data-lang-en="{{ official_en_label.get(t.role, t.role) }}">
+                                {{ official_id_label.get(t.role, t.role) }}
+                            </span>
+                            {% endif %}
+                        </td>
                         <td class="px-4 py-3 text-stone-500">{{ t.employee_number or '-' }}</td>
                         <td class="px-4 py-3 text-stone-500">{{ t.email }}</td>
                         <td class="px-4 py-3">
@@ -280,9 +294,18 @@
                                 <button type="button"
                                         @click="fetch('/admin-sekolah/teachers/{{ t.id }}/reset-password',{method:'POST'}).then(r=>r.json()).then(d=>{ if(d.password){ generatedPassword=d.password; pwTitle='Password baru'; pwNote='Berikan password ini ke guru.'; showPassword=true } else { alert(d.error || 'Gagal mereset password') } }).catch(()=>alert('Gagal mereset password'))"
                                         class="px-2.5 py-1.5 text-xs font-bold bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition border border-blue-200">Reset PW</button>
+                                {# An official is deleted from /admin-sekolah/officials, where the
+                                   two-role vocabulary and its guards live — the delete route here
+                                   is for a `teachers` row. Point the admin there instead. #}
+                                {% if t.is_official %}
+                                <a href="/admin-sekolah/officials"
+                                   title="Kelola akun pejabat sekolah"
+                                   class="px-2.5 py-1.5 text-xs font-bold bg-stone-100 text-stone-600 rounded-lg hover:bg-stone-50 transition border border-stone-200">Pejabat</a>
+                                {% else %}
                                 <button type="button"
                                         @click="if(confirm('Hapus guru {{ t.name }}?')) fetch('/admin-sekolah/teachers/{{ t.id }}/delete',{method:'POST'}).then(r=>{ if(r.ok) location.reload(); else alert('Gagal menghapus') }).catch(()=>alert('Gagal menghapus'))"
                                         class="px-2.5 py-1.5 text-xs font-bold bg-red-50 text-red-700 rounded-lg hover:bg-red-100 transition border border-red-200">Hapus</button>
+                                {% endif %}
                             </div>
                         </td>
                     </tr>
@@ -293,8 +316,10 @@
                             <form method="POST" action="/admin-sekolah/teachers/{{ t.id }}/edit" class="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4 bg-white border border-stone-200 rounded-xl">
                                 <input type="text" name="name" value="{{ t.name }}"
                                        class="px-3 py-2 border border-stone-200 rounded-lg text-sm font-medium">
+                                {% if not t.is_official %}
                                 <input type="text" name="employee_number" value="{{ t.employee_number or '' }}"
                                        class="px-3 py-2 border border-stone-200 rounded-lg text-sm font-medium">
+                                {% endif %}
                                 <span class="px-3 py-2 text-stone-500 text-sm flex items-center">{{ t.email }}</span>
                                 {{ assignment_picker(subjects, classes, t.assign_pairs) }}
                                 <button type="submit" class="col-span-full px-3 py-2 bg-emerald-100 text-emerald-700 rounded-lg font-bold text-sm hover:bg-emerald-200 transition">Simpan</button>

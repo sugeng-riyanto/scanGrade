@@ -117,8 +117,13 @@ def test_no_classes_means_nothing_to_check():
 def test_admin_roles_are_not_scoped():
     for role in ("admin_sekolah", "super_admin", "admin"):
         assert not assignments.is_scoped_role(role), role
-    for role in ("guru", "teacher"):
+    # `principal` and `vice_principal` joined the scoped set when the school asked
+    # for its officials to be assignable as subject teachers: a head of school who
+    # teaches is held to the same pair rule as a guru, not exempted from it.
+    for role in ("guru", "teacher", "principal", "vice_principal"):
         assert assignments.is_scoped_role(role), role
+    for role in ("murid", "admin_sekolah", "super_admin"):
+        assert not assignments.is_scoped_role(role), role
 
 
 # ── the wiring ───────────────────────────────────────────────────────────────
