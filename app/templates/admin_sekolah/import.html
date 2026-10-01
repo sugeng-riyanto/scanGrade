@@ -21,7 +21,8 @@
                 <h3 class="font-extrabold text-stone-800" x-text="t('Panduan Import Data','Import Guide')"></h3>
                 <ul class="mt-2 text-sm text-stone-600 space-y-1.5">
                     <li><i class="fas fa-check text-emerald-500 mr-1.5"></i><strong x-text="t('Murid:','Students:')"></strong> <span x-text="t('Import memakai','Import using')"></span> <strong>NISN</strong> <span x-text="t('sebagai ID unik. NISN harus 8-12 digit angka.','as the unique ID. NISN must be 8-12 digits.')"></span></li>
-                    <li><i class="fas fa-check text-emerald-500 mr-1.5"></i><strong x-text="t('Guru:','Teachers:')"></strong> <span x-text="t('Import memakai','Import using')"></span> <strong x-text="t('Nomor Pegawai','Employee Number')"></strong> <span x-text="t('sebagai ID unik per sekolah.','as the unique ID within the school.')"></span></li>
+                    <li><i class="fas fa-check text-emerald-500 mr-1.5"></i><strong x-text="t('Guru:','Teachers:')"></strong> <span x-text="t('Import memakai','Import using')"></span> <strong x-text="t('Nomor Pegawai','Employee Number')"></strong> <span x-text="t('sebagai ID unik per sekolah. Boleh angka maupun huruf (contoh: GT-001).','as the unique ID within the school. May be digits or letters (e.g. GT-001).')"></span></li>
+                    <li><i class="fas fa-check text-emerald-500 mr-1.5"></i><strong x-text="t('Kepala Sekolah & Wakil:','Principal & Vice Principal:')"></strong> <span x-text="t('Satu sheet','One sheet')"></span> <strong x-text="t('Pejabat','Officials')"></strong> <span x-text="t('dengan kolom Jabatan, atau dua sheet terpisah bernama Kepala Sekolah dan Wakil Kepala Sekolah.','with a Role column, or two separate sheets named Kepala Sekolah and Wakil Kepala Sekolah.')"></span></li>
                     <li><i class="fas fa-check text-emerald-500 mr-1.5"></i><strong>Email:</strong> <span x-text="t('Bersifat','It is')"></span> <strong>read-only</strong> <span x-text="t('setelah dibuat. Untuk keamanan, email tidak bisa diubah dari dashboard. Hubungi Super Admin jika perlu ganti email.','once created. For security, the email cannot be changed from the dashboard. Contact the Super Admin to change it.')"></span></li>
                     <li><i class="fas fa-check text-emerald-500 mr-1.5"></i><strong>Password:</strong> <span x-text="t('Password default akan digenerate otomatis (12 karakter). User bisa ganti password setelah login.','A default password is generated automatically (12 characters). Users can change it after logging in.')"></span></li>
                     <li><i class="fas fa-check text-emerald-500 mr-1.5"></i><strong x-text="t('Sekolah:','School:')"></strong> <span x-text="t('Semua data terikat dengan NPSN sekolah Anda. Data dari sekolah lain tidak akan tercampur.','All data is tied to your school NPSN. Data from other schools never mixes in.')"></span></li>
@@ -32,7 +33,7 @@
 
     <div class="card p-6 lg:p-8">
         <h3 class="font-extrabold text-stone-800 mb-2" x-text="t('Upload File Excel','Upload Excel File')"></h3>
-        <p class="text-sm text-stone-500 font-medium mb-6"><span x-text="t('File Excel dengan 3 sheet:','Excel file with 3 sheets:')"></span> <strong x-text="t('Murid','Students')"></strong>, <strong x-text="t('Guru','Teachers')"></strong>, <span x-text="t('dan','and')"></span> <strong x-text="t('Mata Pelajaran','Subjects')"></strong>.</p>
+        <p class="text-sm text-stone-500 font-medium mb-6"><span x-text="t('File Excel dengan sheet:','Excel file with sheets:')"></span> <strong x-text="t('Murid','Students')"></strong>, <strong x-text="t('Guru','Teachers')"></strong>, <strong x-text="t('Pejabat','Officials')"></strong> <span x-text="t('(kepala & wakil kepala sekolah), dan','(principal & vice principal), and')"></span> <strong x-text="t('Mata Pelajaran','Subjects')"></strong>. <span x-text="t('Hanya sheet yang ada yang diproses.','Only the sheets present are processed.')"></span></p>
 
         <form method="POST" enctype="multipart/form-data" class="space-y-6"
               x-data="{ dragging: false, file: null }"
@@ -48,7 +49,7 @@
             </div>
 
             <!-- Format per Sheet -->
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div class="bg-white rounded-xl p-4 border border-stone-200">
                     <div class="flex items-center gap-2 mb-3">
                         <div class="w-8 h-8 rounded-lg bg-amber-100 flex items-center justify-center"><i class="fas fa-user-graduate text-amber-600 text-sm"></i></div>
@@ -72,6 +73,19 @@
                         <p><code class="bg-stone-100 px-1.5 py-0.5 rounded text-stone-700 font-bold" x-text="t('Nomor Pegawai','Employee Number')"></code> <span x-text="t('— Unik per sekolah','— Unique per school')"></span></p>
                         <p><code class="bg-stone-100 px-1.5 py-0.5 rounded text-stone-700 font-bold" x-text="t('Nama','Name')"></code> <span x-text="t('— Nama lengkap','— Full name')"></span></p>
                         <p><code class="bg-stone-100 px-1.5 py-0.5 rounded text-stone-700 font-bold" x-text="t('Mapel','Subject')"></code> <span x-text="t('— Nama mata pelajaran','— Subject name')"></span></p>
+                        <p><code class="bg-stone-100 px-1.5 py-0.5 rounded text-stone-400">Email</code> <span x-text="t('— Opsional, jika kosong akan digenerate','— Optional, generated when blank')"></span></p>
+                        <p><code class="bg-stone-100 px-1.5 py-0.5 rounded text-stone-400">No HP</code> <span x-text="t('— Opsional','— Optional')"></span></p>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-xl p-4 border border-stone-200">
+                    <div class="flex items-center gap-2 mb-3">
+                        <div class="w-8 h-8 rounded-lg bg-sky-100 flex items-center justify-center"><i class="fas fa-user-tie text-sky-600 text-sm"></i></div>
+                        <span class="font-bold text-sm text-stone-800" x-text="t('Sheet: Pejabat','Sheet: Officials')"></span>
+                    </div>
+                    <div class="space-y-1 text-xs text-stone-500">
+                        <p><code class="bg-stone-100 px-1.5 py-0.5 rounded text-stone-700 font-bold" x-text="t('Jabatan','Role')"></code> <span x-text="t('— Kepala Sekolah / Wakil Kepala Sekolah','— Principal / Vice Principal')"></span></p>
+                        <p><code class="bg-stone-100 px-1.5 py-0.5 rounded text-stone-700 font-bold" x-text="t('Nama','Name')"></code> <span x-text="t('— Nama lengkap','— Full name')"></span></p>
                         <p><code class="bg-stone-100 px-1.5 py-0.5 rounded text-stone-400">Email</code> <span x-text="t('— Opsional, jika kosong akan digenerate','— Optional, generated when blank')"></span></p>
                         <p><code class="bg-stone-100 px-1.5 py-0.5 rounded text-stone-400">No HP</code> <span x-text="t('— Opsional','— Optional')"></span></p>
                     </div>
@@ -107,6 +121,10 @@
             <a href="/admin-sekolah/download-template/guru"
                class="inline-flex items-center gap-2 px-4 py-2.5 bg-emerald-50 text-emerald-700 rounded-xl font-bold text-sm hover:bg-emerald-100 transition border border-emerald-200">
                 <i class="fas fa-download"></i><span x-text="t('Template Guru','Teacher Template')"></span>
+            </a>
+            <a href="/admin-sekolah/download-template/pejabat"
+               class="inline-flex items-center gap-2 px-4 py-2.5 bg-sky-50 text-sky-700 rounded-xl font-bold text-sm hover:bg-sky-100 transition border border-sky-200">
+                <i class="fas fa-download"></i><span x-text="t('Template Pejabat','Officials Template')"></span>
             </a>
             <a href="/admin-sekolah/export"
                class="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-50 text-blue-700 rounded-xl font-bold text-sm hover:bg-blue-100 transition border border-blue-200">
