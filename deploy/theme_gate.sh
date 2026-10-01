@@ -310,6 +310,12 @@ The check names every offender, and the fix depends on which rule failed:
     is never rewritten by a deploy: a gate that raises its own floor while a
     release is passing makes the regression the new yardstick.
 
+  note: a release that adds bilingual copy, or a page, is *not* this failure. The
+  deploy raises the box's own floors for it before this gate runs
+  (`deploy/i18n_coverage.py --adopt`, box-local, only ever raised), so the gap
+  between the committed file and today's tree never quarantines a release. Only a
+  page below a floor it was already held to is refused.
+
 Do not skip this: neither failure is visible to any other check. The app still
 compiles, every page still answers 200, and nothing in the console complains.
 

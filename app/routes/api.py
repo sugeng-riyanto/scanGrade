@@ -14,6 +14,7 @@ from app.utils import exam_window
 from app.utils import denials
 from app.utils import lock_health
 from app.decorators.security import require_role, STAFF_ROLES
+from app.decorators.subscription import require_subscription
 from app.services.anti_cheat_service import validate_violation_log
 from app.services.question_types import (
     complete_weights, earned_points, grade_answer, is_objective, objective_result,
@@ -1992,6 +1993,7 @@ def _generate_report_excel(exam, students, stats):
 
 @api_bp.route("/ai/grade-essay", methods=["POST"])
 @login_required
+@require_subscription("ai_grading")
 def ai_grade_essay():
     """Grade a single essay answer."""
     if g.get("user_role") not in ("guru", "admin_sekolah", "super_admin"):
@@ -2031,6 +2033,7 @@ def ai_grade_essay():
 
 @api_bp.route("/ai/grade-bulk", methods=["POST"])
 @login_required
+@require_subscription("ai_grading")
 def ai_grade_bulk():
     """Grade all pending essay questions for an exam or submission list."""
     if g.get("user_role") not in ("guru", "admin_sekolah", "super_admin"):

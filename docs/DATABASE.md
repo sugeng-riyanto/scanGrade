@@ -81,12 +81,54 @@ fails if one comes back.
 
 ### Related Tables
 
-- **classes**: name, school_id, grade_level
+- **classes**: name, school_id, grade_level, school_year_id (007), teacher_id (wali kelas), created_by
 - **subjects**: name, code, school_id
 - **teachers**: id (FK profiles), school_id, employee_id, subject_id
-- **students**: id (FK profiles), school_id, class_id, nisn
-- **teacher_assignments**: teacher_id, class_id, subject_id, school_id
-- **school_years**: name, school_id, start/end date, is_active
+- **students**: id (FK profiles), school_id, class_id, nisn, status (active/alumni/dropped)
+- **teacher_assignments**: teacher_id, class_id, subject_id, school_id, school_year (TEXT, 045), school_year_id (FK, 046), status (active/inactive)
+- **school_years**: name, school_id, start/end date, is_active, status (draft/active/closed, 047) — one school year; one active at a time; a closed year is read-only
+- **student_enrollment** (046): school_id, student_id, class_id, school_year_id, status (aktif/naik/tinggal_kelas/pindah/lulus), note — one row per pupil per year, UNIQUE(student_id, school_year_id)
+
+### Tahun ajaran and where a pupil was
+
+`school_years` (007) and `classes.school_year_id` already made a class *able* to be
+one year's rombongan belajar; `student_enrollment` (046) makes a pupil's membership
+in it a stored fact rather than a pointer that promotion overwrites. Read it through
+`app/services/enrollment.py` — `history()` for the oldest-first series, `record()`
+to write one year, `default_outcome()` for the lulus-vs-naik rule. `classes.academic_year`
+(TEXT, 002) is legacy and no longer read; `classes.school_year_id` is the year.
+
+A pupil's class also lives on `students.class_id` **and** `profiles.class_id`; on the
+live project they disagree (598 of 806 `students` rows versus 305 of 821 `profiles`).
+`deploy/backfill_enrollment.py` merges the two pointers, names the conflicts, and
+refuses to invent a year — dry run by default, `--apply` to write.
+
+### Closing a year (`/admin-sekolah/school-years/close`)
+
+One screen does the three things that belong together: it closes the old year
+(read-only afterwards), creates the new one as a **draft** (real, but not running),
+and gives every pupil an outcome (`naik`/`tinggal_kelas`/`lulus`/`pindah`) recorded
+in `student_enrollment`. `app/services/academic_year.py` holds the lifecycle
+(`close_year`, `create_draft_year`, `activate_year`, `editable`) and the plan
+(`plan_close` decides and never writes; `apply_close` writes and returns a per-row
+report). The route records the pupils **before** it closes the year, so a failure
+halfway cannot leave a closed year with nobody enrolled.
+
+### Read-only is enforced where the request is, not in the service
+
+A closed year is read-only at every write door. `app/decorators/year_lock.py`
+exposes `@open_year_required("exam_id")` / `("submission_id")`, which resolves the
+year from the resource (`academic_year.year_of_exam`, preferring
+`exams.school_year_id` and falling back to the classes the paper is attached to;
+`year_of_submission` for a pupil's paper) and refuses with `403` (JSON) or a flash
++ redirect (form). It sits next to the route rather than in the service because a
+service cannot tell a write from a read, and locking reads would hide a pupil's own
+results. It is applied to the grading, exam-edit and score-recalculation routes in
+`app/routes/teacher.py`, and to promotion into a year in
+`app/routes/admin_sekolah.py`. `tests/unit/test_year_lock.py` **sweeps every
+mutating teacher route** and fails unless each one carries the decorator or appears
+in an explicit `EXEMPT` list with a reason — so a new write route cannot quietly
+skip the lock.
 - **violation_logs**: exam_id, user_id, violation_type, metadata
 - **exam_access_codes**: exam_id, code, student_id, is_used
 - **teacher_ai_keys**: teacher_id, provider, api_key (encrypted)

@@ -35,19 +35,42 @@ Exit codes follow the other gates in this directory:
        about (a new page's floor has to be written deliberately, in the same
        spirit as the exact count in `test_the_translated_list_only_grows_with_intent`)
 
-`--write-baseline` is how progress is recorded. It is deliberately *not* run by
-the deploy: a gate that rewrites its own floor while a release is passing turns
-a regression into the new yardstick, and writing inside the checkout mid-deploy
-would leave the tree dirty for the next `git pull`.
+`--write-baseline` is how progress is recorded *in the repository*. It is
+deliberately *not* run by the deploy: a gate that rewrites its own floor while a
+release is passing turns a regression into the new yardstick, and writing inside
+the checkout mid-deploy would leave the tree dirty for the next `git pull`.
+
+That left one class of release quarantined over nothing: a page a release *adds*
+has no committed floor, and a page that gains bilingual copy is measured above a
+floor the repository cannot have recorded yet. So the box keeps its own floors
+(`--adopt`), and they are only ever **raised**:
+
+  * a page the committed baseline knows is always judged by the committed floor,
+    so an adopted file can never loosen a repository's floor;
+  * an adopted floor is `max(previous, measured)`, because a release may not hand
+    itself a weaker floor than the last one it passed — which is the whole safety
+    argument the committed file is never rewritten by a deploy;
+  * a page with no bilingual copy is *not* adoptable: it measures `0 pairs / 0%`
+    however it is read, a floor of zero protects nothing, and "the number quietly
+    starts at zero" is the one thing recording floors exists to prevent. Such a
+    page still needs the deliberate act.
+
+Measured 2026-10-01: one added `t('…','…')` pair anywhere in the tree made the
+committed file "stale" and the release was refused by the readability gate over a
+JSON file. `tests/unit/test_i18n_coverage.py` holds both directions.
 
 Usage:
     python deploy/i18n_coverage.py                  # report + check
     python deploy/i18n_coverage.py --all            # list every page, not the worst
     python deploy/i18n_coverage.py --json out.json  # the whole table
-    python deploy/i18n_coverage.py --write-baseline # record the floors
+    python deploy/i18n_coverage.py --write-baseline # record the floors in the repo
+    python deploy/i18n_coverage.py --adopt          # raise this box's own floors to
+                                                    # what this release measures
+                                                    # (box-local, $SCANGRADE_I18N_FLOORS)
 """
 import argparse
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -55,6 +78,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATES = ROOT / "app" / "templates"
 BASELINE = ROOT / "deploy" / "i18n_baseline.json"
+
+#: Where a *box* keeps the floors it has adopted for itself. It is deliberately
+#: not the committed baseline: the deploy runs inside the checkout, and writing a
+#: tracked file there is a dirty tree — which stops the next merge, for a fix that
+#: is about a JSON floor. The repository's file stays the record; this one stops a
+#: release being refused over a floor nobody could have written yet.
+ADOPTED_ENV = "SCANGRADE_I18N_FLOORS"
 
 # Percentage points a page may fall before it counts as a regression. One new
 # untranslated string on a page with 200 units moves this by 0.5 pp.
@@ -292,6 +322,107 @@ def load_baseline() -> dict:
     return data.get("pages", {})
 
 
+def adopted_floors() -> dict:
+    """The floors this box has raised for itself, read from the environment.
+
+    The deploy exports `SCANGRADE_I18N_FLOORS` before the gate runs, so the same
+    file answers the tool and the guard assertion in
+    `tests/unit/test_i18n_coverage.py`. Unset (a developer's machine, the
+    pre-commit hook) means no box floors at all, which is the committed file
+    alone — exactly the behaviour before this existed.
+    """
+    return load_adopted(os.environ.get(ADOPTED_ENV))
+
+
+def load_adopted(path) -> dict:
+    """The floors a box has adopted, in the baseline's own shape.
+
+    An unreadable file is `{}` rather than an error, for the reason the baseline
+    reader is: a floor nobody can read is a floor nobody has, and this file is
+    only ever a *raise* on the repository's — so losing it cannot make a release
+    pass that the committed baseline would have refused.
+    """
+    if not path:
+        return {}
+    p = Path(path)
+    if not p.is_file():
+        return {}
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except (ValueError, OSError):
+        return {}
+    if not isinstance(data, dict) or not isinstance(data.get("pages"), dict):
+        return {}
+    return data["pages"]
+
+
+def adoptable(row: dict) -> bool:
+    """Whether a machine may record this page's floor at all.
+
+    It has to carry bilingual copy. A page with none measures zero pairs and 0%
+    however it is read, so its floor would be a floor of nothing — and the
+    promise this whole file exists to keep is that no page's number starts at
+    zero unnoticed. Those pages stay a deliberate act.
+    """
+    return (not row["standalone"]) and row["pairs"] > 0
+
+
+def adopt(rows: dict, committed: dict, adopted: dict) -> dict:
+    """The adopted floors this scan justifies — a ratchet that only rises.
+
+    A page the committed baseline knows is dropped rather than kept: the
+    repository's floor is the one that judges it, and two floors for one page is
+    a disagreement waiting to happen. A page the scan did not measure at all is
+    dropped too — a deleted template has nothing left to protect.
+    """
+    out: dict = {}
+    for rel, row in rows.items():
+        if rel in committed or not adoptable(row):
+            continue
+        previous = adopted.get(rel) or {}
+        out[rel] = {
+            "pairs": max(int(previous.get("pairs", 0)), row["pairs"]),
+            "coverage": max(float(previous.get("coverage", 0.0)), row["coverage"]),
+            "leftovers": row["leftovers"],
+            "frozen": row["frozen"],
+        }
+    return out
+
+
+def effective_floors(committed: dict, adopted: dict) -> dict:
+    """The repository's floor where it has one, the box's where it does not."""
+    merged = dict(adopted)
+    merged.update(committed)
+    return merged
+
+
+def save_adopted(path, pages: dict) -> bool:
+    """Write the adopted floors, or say that this box could not.
+
+    `newline="\n"` for the reason the committed file uses it: the file is read
+    by another process on another platform, and a CRLF rewrite shows up as a
+    whole-file change in a diff nobody wants to read.
+    """
+    if not path:
+        return False
+    p = Path(path)
+    payload = {
+        "note": ("floors this box raised for itself: pages the committed baseline "
+                 "does not know, at the level measured on the release that added "
+                 "them. Only ever raised. The committed baseline is the record; "
+                 "run deploy/i18n_coverage.py --write-baseline to move these into "
+                 "the repository."),
+        "pages": pages,
+    }
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8",
+                     newline="\n")
+    except OSError:
+        return False
+    return True
+
+
 def check(rows: dict, floors: dict) -> tuple:
     """(regressions, unmeasurable) — two lists of human-readable lines."""
     regressed, unknown = [], []
@@ -377,6 +508,12 @@ def main(argv=None) -> int:
     parser.add_argument("--json", metavar="PATH", help="write the whole table here")
     parser.add_argument("--write-baseline", action="store_true",
                         help="record today's numbers as the floors")
+    parser.add_argument("--adopt", nargs="?", const="", metavar="PATH",
+                        help="raise this box's own floors to cover what this "
+                             "release adds. Box-local: never lowers a floor, "
+                             "never touches the committed file, and writes "
+                             f"nothing when the release is a real regression. "
+                             f"PATH defaults to ${ADOPTED_ENV}")
     parser.add_argument("--show", action="append", metavar="TEMPLATE", default=None,
                         help="print the leftover strings of a template (repeatable); "
                              "`--show all` prints every leftover in the tree")
@@ -421,7 +558,47 @@ def main(argv=None) -> int:
                                        encoding="utf-8", newline="\n")
         return 0
 
-    floors = load_baseline()
+    committed = load_baseline()
+    adopted = adopted_floors()
+    floors = effective_floors(committed, adopted)
+
+    # `--adopt` runs *before* the gate, as a pipeline step, and not from inside
+    # the gate: a gate that rewrites its own floor while a release is passing is
+    # the thing the committed file's `--write-baseline` is deliberately kept out
+    # of. It only ever raises, and it writes nothing when the release measures
+    # below a floor it is already held to — that is a regression, and it stays the
+    # gate's to refuse.
+    if args.adopt is not None:
+        target = args.adopt or os.environ.get(ADOPTED_ENV)
+        if not target:
+            print("i18n coverage: --adopt needs a path to write the box's floors "
+                  f"to (pass one, or set ${ADOPTED_ENV}).", file=sys.stderr)
+            return 2
+        if not committed:
+            print("i18n coverage: no baseline - cannot adopt. "
+                  f"Run `python deploy/i18n_coverage.py --write-baseline`.",
+                  file=sys.stderr)
+            return 2
+        regressed, _ = check(rows, floors)
+        if regressed:
+            print("i18n coverage: NOT adopting - this release translates less "
+                  "than the floor it is measured against, so raising it here is "
+                  "how the regression becomes the new yardstick:", file=sys.stderr)
+            for line in regressed:
+                print(f"  {line}", file=sys.stderr)
+            return 1
+        raised = adopt(rows, committed, adopted)
+        if not save_adopted(target, raised):
+            print(f"i18n coverage: could not write the box's floors to {target}; "
+                  "this box cannot raise them, so it judges with the committed "
+                  "file alone.", file=sys.stderr)
+            return 2
+        gained = sorted(set(raised) - set(adopted))
+        print(f"i18n coverage: adopted {len(raised)} box-local floor(s) into "
+              f"{target}" + (f" ({len(gained)} new)" if gained else ""))
+        adopted = raised
+        floors = effective_floors(committed, adopted)
+
     print(report(rows, floors, args.all, args.limit))
     if args.json:
         Path(args.json).write_text(
@@ -431,7 +608,7 @@ def main(argv=None) -> int:
     if args.report_only:
         return 0
 
-    if not floors:
+    if not committed:
         print("i18n coverage: no baseline - cannot measure. "
               f"Run `python deploy/i18n_coverage.py --write-baseline`.", file=sys.stderr)
         return 2

@@ -234,10 +234,12 @@ def _test_key_internal(key):
                 return {"error": rest_err}
         if "VALIDATION_ERROR" in err or "API_KEY_INVALID" in err:
             return {"error": "❌ API Key tidak valid. Ikuti langkah Enable di panduan langkah 3."}
-        return {"error": f"❌ Gagal: {err[:150]}"}
+        # The quota message used to sit *after* the generic return, so a
+        # rate-limited key reported "Gagal" and the "tunggu beberapa saat" advice
+        # it was written for never reached anyone.
         if "quota" in err.lower() or "rate" in err.lower():
             return {"error": "❌ Kuota API habis. Tunggu beberapa saat atau gunakan key lain."}
-        return {"error": f"❌ Gagal: {err[:120]}"}
+        return {"error": f"❌ Gagal: {err[:150]}"}
 
 
 def _save_log(teacher_id, submission_id, question_index, provider, score, feedback, prompt, raw, tokens):

@@ -23,6 +23,9 @@ numpy==2.2.4
 PyMuPDF==1.25.5
 # sentence-transformers & torch removed — replaced with API-based embeddings
 requests==2.32.3
+# The touch gate (deploy/touch_gate.py) drives headless Chrome over CDP, which
+# needs a websocket client alongside requests.
+websockets==15.0.1
 xhtml2pdf==0.2.17
 pytest==8.3.5
 pytest-env==1.1.5

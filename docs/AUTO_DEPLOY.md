@@ -686,6 +686,8 @@ SMOKE_BASE_URL="https://scangrade.web.id"
 SMOKE_ENFORCE="true"
 SMOKE_SUPER_ADMIN="superadmin@scan-grade.app:superadmin123"
 SMOKE_ADMIN_SEKOLAH="admin_smp@scan-grade.app:demo123"
+SMOKE_PRINCIPAL="principal_smp@scan-grade.app:demo123"
+SMOKE_VICE_PRINCIPAL="vice_principal_smp@scan-grade.app:demo123"
 SMOKE_GURU="guru_mtk_smp@scan-grade.app:demo123"
 SMOKE_MURID="siswa2_smp@scan-grade.app:demo123"
 ```
@@ -693,6 +695,11 @@ SMOKE_MURID="siswa2_smp@scan-grade.app:demo123"
 Each value is `email:password` (split on the *first* colon). `SMOKE_BASE_URL`
 must be `https://`: production sets `SESSION_COOKIE_SECURE`, so over plain HTTP
 the session cookie is dropped and every login would look broken.
+
+Six roles, and the gate checks all six. A `SMOKE_<ROLE>` that is **absent** is
+allowed (the box keeps deploying and the run says which role it did not check),
+but one that is **present and wrong** is a failure, and a malformed one is a
+failure too — it would otherwise drop the role from the run without saying so.
 
 Check a change without deploying anything:
 
@@ -704,15 +711,18 @@ set -a; . /etc/scangrade-smoke.conf; set +a
 ### What it will and will not roll back
 
 `SMOKE_ENFORCE=true` arms the rollback, and the installer only sets it after
-proving that **every** configured account signs in — a config with a stale
-password must never be able to reject a good release. Once armed:
+proving that **every one of the six roles** signs in — a config with a stale
+password must never be able to reject a good release, and arming refuses a config
+that is missing a role. Once armed:
 
 | Result | Outcome |
 |---|---|
 | a page returns `5xx` after a successful login | roll back |
 | a role can open another role's area | roll back |
-| **no** role can sign in | roll back — one changed password cannot explain four |
-| one role cannot sign in | warn only; the others still gate the release |
+| **no** role can sign in | roll back — one changed password cannot explain six |
+| any configured role cannot sign in | roll back — the role would otherwise go unchecked |
+| a `SMOKE_<ROLE>` is present but malformed | roll back — the role would be dropped silently |
+| a role has no `SMOKE_<ROLE>` at all | keep the release, and say which role was not checked |
 | nothing was testable (exit 2) | roll back — no role could sign in against this release |
 | no `/etc/scangrade-smoke.conf`, or a conf that does not parse | roll back — the release was never signed in against |
 
@@ -721,6 +731,46 @@ stale credential in the conf is evidence about the box, so with `SMOKE_ENFORCE` 
 `true` a failed run keeps the release, while a conf that is missing or unreadable is
 a gate that did not run — and that rolls back. The armament preflight refuses the run
 before it starts when the conf is absent, so the last row is the mid-release race.
+
+## The finger floor of the exam builder, on a real browser
+
+Every gate above reads the code or the box; none of them *lays a page out*. The
+exam builder is the densest form in the app and its controls are a teacher's
+thumb. The floor is a stylesheet rule — the `@media (pointer: coarse)` block in
+`app/static/css/theme.css` that gives every control inside `.sg-exam-builder` a
+44px minimum in both axes — and it was written after a measurement: **42 controls
+under 40px** at every tablet width the page was opened at, **0** after the rule.
+
+That measurement was made once, by hand, in headless Chrome. A rule about
+laid-out geometry cannot be kept by a grep, so `deploy/touch_gate.py` measures it
+again on every release. It signs in as the teacher the smoke test already uses,
+opens `/teacher/exams/new`, emulates a finger (`pointer: coarse`, the media query
+the rule is asked as), and at each documented tablet width — portrait and
+landscape — measures every control the rule names. It runs right after the smoke
+gate, because it reads that gate's own base URL and credentials; there is no
+second conf.
+
+It measures the way the rule can be enforced: a control whose computed `display`
+is `inline` is skipped, because `min-height`/`min-width` do not apply to a
+non-replaced inline box — the rule cannot raise one, so flagging it would be a
+finding no release could fix. Hidden controls are skipped for the same reason.
+
+| Result | Outcome |
+|---|---|
+| every control at least 44px, at every width (exit 0) | log one line |
+| a control under the floor (exit 1), `TOUCH_ENFORCE=true` | roll back, quoting the controls |
+| a control under the floor (exit 1), not armed | keep the release, but say so |
+| no browser, the account refused, the page did not render (exit 2) | keep the release, and say loudly it was **not measured** |
+
+Exit 2 is deliberately not a rollback: a box without a browser (this project's
+box has none by default) must not refuse every good release over a tool it does
+not have. It is said in the journal as a skip, never passed off as a pass. The
+finding arm is armed with `TOUCH_ENFORCE=true` in `/etc/scangrade-smoke.conf`, so
+a browser that produces a false positive cannot take the site down on its own.
+
+To make it *measure* on a box, give it a browser: `apt-get install -y chromium`
+(or point `SG_CHROME` at any Chrome/Chromium binary) and arm it. Unarmed, the gate
+still runs and still reports; it is the rollback it withholds.
 
 ## An unarmed box deploys nothing
 

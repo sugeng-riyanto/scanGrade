@@ -132,27 +132,56 @@ def create_snap_transaction(school_id, plan_id, school_name, school_email):
     }, None
 
 
+#: Fields `handle_payment_notification` reads off a parsed Midtrans status. The
+#: simulation path builds a status with exactly these, so both paths hand the rest
+#: of the function the same shape.
+_STATUS_FIELDS = ("order_id", "transaction_status", "fraud_status", "payment_type",
+                  "transaction_time", "settlement_time", "va_numbers",
+                  "permata_va_number", "bill_key", "biller_code", "store",
+                  "payment_code")
+
+
+def _simulation_enabled():
+    """True only where a payment may be faked: tests and staging. Never here —
+    ``ProductionConfig`` sets ``PAYMENT_SIMULATION = False`` as a class attribute,
+    so no `.env` on a live box can turn it on."""
+    return bool(current_app.config.get("PAYMENT_SIMULATION"))
+
+
+def _simulated_status(notification_dict):
+    """A parsed-notification status built from the callback itself.
+
+    A real Midtrans notification carries the same fields the parse returns, so
+    simulation only replaces the network round-trip, not the decisions taken on
+    its result.
+    """
+    return {key: notification_dict.get(key) for key in _STATUS_FIELDS}
+
+
 def handle_payment_notification(notification_dict):
-    if not _HAS_MIDTRANS:
-        current_app.logger.error("midtransclient not installed")
-        return False
+    if _simulation_enabled():
+        status = _simulated_status(notification_dict)
+    else:
+        if not _HAS_MIDTRANS:
+            current_app.logger.error("midtransclient not installed")
+            return False
 
-    cfg = _load_midtrans_config()
-    if not cfg or not cfg.get("server_key"):
-        current_app.logger.error("Midtrans not configured for notification handling")
-        return False
+        cfg = _load_midtrans_config()
+        if not cfg or not cfg.get("server_key"):
+            current_app.logger.error("Midtrans not configured for notification handling")
+            return False
 
-    snap = midtransclient.Snap(
-        is_production=cfg.get("is_production", False),
-        server_key=cfg["server_key"],
-        client_key=cfg.get("client_key", ""),
-    )
+        snap = midtransclient.Snap(
+            is_production=cfg.get("is_production", False),
+            server_key=cfg["server_key"],
+            client_key=cfg.get("client_key", ""),
+        )
 
-    try:
-        status = snap.transaction.notification(notification_dict)
-    except Exception as e:
-        current_app.logger.error(f"Midtrans notification parse error: {e}")
-        return False
+        try:
+            status = snap.transaction.notification(notification_dict)
+        except Exception as e:
+            current_app.logger.error(f"Midtrans notification parse error: {e}")
+            return False
 
     order_id = status.get("order_id", "")
     transaction_status = status.get("transaction_status", "")
@@ -174,6 +203,13 @@ def handle_payment_notification(notification_dict):
     is_success = (transaction_status == "settlement" or transaction_status == "capture") and fraud_status != "deny"
     is_expired = transaction_status == "expire"
     is_failed = transaction_status in ("deny", "cancel", "failure")
+
+    # Midtrans retries a notification until it is acknowledged, so the same
+    # settlement can arrive more than once. Activating again would retire the just-made
+    # subscription (`status='replaced'`), write a second invoice and mint a second
+    # activation code — for one payment. The transaction's own prior status is the
+    # idempotency key, read before this notification overwrites it.
+    already_settled = tx.get("status") == "success"
 
     # Store payment details (VA numbers, etc.)
     details = {}
@@ -214,8 +250,11 @@ def handle_payment_notification(notification_dict):
 
     supabase.table("payment_transactions").update(update_data).eq("id", tx["id"]).execute()
 
-    if is_success:
+    if is_success and not already_settled:
         _activate_subscription(tx["school_id"], tx["plan_id"], order_id, supabase)
+    elif is_success and already_settled:
+        current_app.logger.info(
+            "Duplicate settlement for order %s ignored - already activated", order_id)
 
     return True
 
@@ -225,13 +264,22 @@ def _activate_subscription(school_id, plan_id, order_id, supabase):
     code = generate_activation_code()
     now = datetime.now(timezone.utc)
 
-    if plan:
-        duration_days = plan.get("duration_days", 0)
-        sub_end = None if duration_days == 0 else now + timedelta(days=duration_days)
-    else:
-        # Cash payment or plan not specified: default 1 year
-        duration_days = 365
-        sub_end = now + timedelta(days=duration_days)
+    # What the school bought, written down rather than left for the next reader to
+    # guess. Without this the row carries `plan_id=None`/`tier='trial'` and
+    # `get_tier_for_school` caps a paying school at the free trial's 5 exams.
+    from app.services.subscription_service import (CASH_DEFAULT_DAYS,
+                                                   subscription_end,
+                                                   tier_for_duration_days,
+                                                   tier_for_manual_activation)
+
+    # One expiry rule for both write paths (`subscription_service.subscription_end`):
+    # the plan's own length, the documented year for an activation that named no
+    # plan, and no end at all for `0` (Selamanya).
+    plan_days = plan.get("duration_days") if plan else None
+    duration_days = plan_days if plan_days is not None else CASH_DEFAULT_DAYS
+    sub_end = subscription_end(now, plan_days)
+    tier = (tier_for_duration_days(plan_days) if plan_days is not None
+            else tier_for_manual_activation())
 
     # Update payment transaction with activation code
     supabase.table("payment_transactions").update({
@@ -247,6 +295,7 @@ def _activate_subscription(school_id, plan_id, order_id, supabase):
     sub_res = supabase.table("school_subscriptions").insert({
         "school_id": school_id,
         "plan_id": plan_id,
+        "tier": tier,
         "status": "active",
         "subscription_start": now.isoformat(),
         "subscription_end": sub_end.isoformat() if sub_end else None,
@@ -296,15 +345,20 @@ def _activate_subscription(school_id, plan_id, order_id, supabase):
     except Exception as e:
         current_app.logger.error(f"Failed to send activation email: {e}")
 
-    return code
-
-    # Generate invoice
+    # The receipt and the log line are side effects of the activation, and both
+    # used to sit *after* `return code` — so no activation ever left one behind.
+    # Production held three invoices, all demo fixtures; a school that paid could
+    # not show its finance office what it paid for. The invoice is written here,
+    # before the return, and a failure to write it is logged, never raised: the
+    # school is already activated and must not be rolled back over a receipt.
     try:
         _generate_invoice(supabase, school_id, plan_id, order_id, now, duration_days)
     except Exception as e:
         current_app.logger.error(f"Invoice creation error: {e}")
 
     current_app.logger.info(f"Subscription activated for school {school_id}, plan={plan_id}, code={code}")
+
+    return code
 
 
 def _generate_invoice(supabase, school_id, plan_id, order_id, now, duration_days):

@@ -451,7 +451,7 @@ class TestWhereTheCheckoutIs:
 
 class TestWhatItAddsUpTo:
     def _report(self, tmp_path, *, installed=None, dirty=False, ahead=False,
-                paused=False):
+                paused=False, box_edits_dir=None):
         repo = checkout(tmp_path)
         if dirty:
             (repo / "scribble.txt").write_text("x\n", encoding="utf-8")
@@ -464,7 +464,7 @@ class TestWhatItAddsUpTo:
             pause_file.write_text("", encoding="utf-8")
         return status.report(repo=repo, runner=runner,
                              snapshot_runner=install(tmp_path, "snap", launcher_for(repo)),
-                             pause_file=pause_file)
+                             pause_file=pause_file, box_edits_dir=box_edits_dir)
 
     @needs_git
     def test_fresh_when_everything_agrees(self, tmp_path):
@@ -497,6 +497,31 @@ class TestWhatItAddsUpTo:
         assert report["verdict"]["key"] == "dirty", (
             "the deploy refuses a dirty checkout, so 'nothing deployed' has to be "
             "answerable from the page")
+
+    @needs_git
+    def test_a_dirty_checkout_shows_its_kind_even_beside_a_heal(self, app, tmp_path):
+        """A heal is an event; a dirty tree is the fact the page just read.
+
+        Measured on the live box, 2026-10-01: a heal record from the day before held
+        the verdict at `box_edits` while the checkout was genuinely dirty, so the
+        page never rendered which *kind* of dirty it was holding — the card this
+        whole reading exists for. The heal is still named on its own card.
+        """
+        directory = tmp_path / "set-aside"
+        directory.mkdir()
+        (directory / "20260926T050001Z-aaaaaaaaaaaa-1.txt").write_text(
+            "2026-09-26T05:00:00+00:00\n" + "a" * 40 + "\npatch \nfiles \n"
+            "set-aside app/routes/admin_sekolah.py\n", encoding="utf-8")
+        report = self._report(tmp_path, dirty=True, box_edits_dir=str(directory))
+        assert report["verdict"]["key"] == "dirty", (
+            "a checkout dirty right now must be the verdict, not a heal from before "
+            "it")
+        html = render_status(app, report)
+        assert "This is a hand edit" in html, (
+            "the page measured a hand edit and then said nothing about which kind of "
+            "dirty it is holding")
+        assert "A Local Change Set Aside" in html, (
+            "the heal must still be named: the verdict moved, the record did not")
 
     @needs_git
     def test_a_paused_box_is_a_frozen_schedule_not_a_broken_runner(self, tmp_path):

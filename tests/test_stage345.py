@@ -52,13 +52,23 @@ class TestCSVValidation:
 # ── Stage 4: Subscription Tier Tests ─────────────────────────
 
 class TestTierLimits:
-    def test_plan_id_to_tier_mapping(self):
-        from app.services.subscription_service import _plan_id_to_tier
-        assert _plan_id_to_tier(None) == "trial"
-        assert _plan_id_to_tier(1) == "trial"
-        assert _plan_id_to_tier(2) == "basic"
-        assert _plan_id_to_tier(5) == "pro"
-        assert _plan_id_to_tier(10) == "enterprise"
+    def test_a_plan_resolves_through_its_duration(self):
+        """Phase 1: the plan is read by relation, not from a hardcoded id map.
+
+        The live catalogue's own durations (012_subscription_system.sql). Plan 1
+        is the paid `1 Bulan` (Rp59.000); the old hardcoded map called it
+        `"trial"`, which is how a school that bought a plan was served the free
+        5-exam quota.
+        """
+        from app.services.subscription_service import (resolve_tier,
+                                                       tier_for_duration_days)
+        catalogue = {1: 30, 2: 90, 3: 120, 4: 180, 5: 365, 6: 730, 7: 1095,
+                     8: 1825, 9: 2555, 10: 0}
+        for pid, days in catalogue.items():
+            tier = resolve_tier({"status": "active", "plan_id": pid},
+                                {"id": pid, "duration_days": days})
+            assert tier == tier_for_duration_days(days)
+            assert tier in ("basic", "pro", "enterprise")
 
     def test_tier_limits_structure(self):
         from app.services.subscription_service import TIER_LIMITS

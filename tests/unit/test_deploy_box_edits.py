@@ -20,7 +20,9 @@ What these tests hold:
   alone.
 * **A heal is visible in the verdict**, which is what a stalled box's page is for: it
   explains a checkout that reads clean because the box's change is in the state
-  directory now. A refusal still outranks it, because a refusal is a stop.
+  directory now. A refusal still outranks it, because a refusal is a stop — and a
+  checkout that is dirty *now* does too, because the heal is an event and the dirty
+  tree is the fact the page just read.
 * **The page has a sentence for the key, in both languages.**
 """
 import re
@@ -223,6 +225,23 @@ class TestWhatAHealAddsUpTo:
         assert verdict["detail"] == "aaaaaaa", (
             "the verdict names the commit the box's edit was moved aside for, "
             "which is the one thing a reader needs to find the record")
+
+    def test_a_checkout_dirty_now_outranks_a_standing_heal(self, tmp_path):
+        """A heal is an event; a dirty tree is a fact read at this moment.
+
+        Measured on the live box, 2026-10-01: a heal record from the day before
+        held the verdict at `box_edits` while the checkout was genuinely dirty, so
+        the page never rendered the *kind* of dirty it was holding — the one card
+        this whole reading exists for. The heal is still named on its own card; the
+        verdict says what is true now.
+        """
+        state = self._state(tmp_path)
+        verdict = status.verdict(self._RUNNER, self._checkout(dirty=2),
+                                 paused=False, box_edits=state)
+        assert verdict["key"] == "dirty", (
+            "a checkout that is dirty now must be the verdict, not a heal from "
+            "before it")
+        assert verdict["level"] == status.WARN
 
     def test_a_refusal_still_outranks_a_heal(self, tmp_path):
         """A refusal is a stop; a heal is an intervention that let a release go."""

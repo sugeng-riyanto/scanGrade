@@ -1,0 +1,187 @@
+{% set content_lang = 'id' %}
+{% extends "base.html" %}
+{% block title %}Tutup Tahun Ajaran - ScanGrade{% endblock %}
+{% block page_title %}Tutup Tahun Ajaran{% endblock %}
+{% block content %}
+{# Pinned Indonesian (`content_lang` above), like `/admin-sekolah/promote`: its
+   copy is written as plain Indonesian, its floor in deploy/i18n_baseline.json is
+   0 pairs. The three things that happen at the turn of a year — closing the old
+   year, opening the new one as a draft, and giving every pupil an outcome — are
+   on ONE screen so nobody has to reconcile them by hand across three pages. #}
+<div class="max-w-4xl mx-auto space-y-6">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+    {% for cat, msg in messages %}
+    <div class="p-4 rounded-xl text-sm font-semibold flex items-center gap-2 {% if cat == 'success' %}bg-emerald-50 text-emerald-700 border border-emerald-200{% elif cat == 'warning' %}bg-amber-50 text-amber-700 border border-amber-200{% else %}bg-red-50 text-red-700 border border-red-200{% endif %}">
+        <i class="fas fa-{% if cat == 'success' %}check-circle{% elif cat == 'warning' %}exclamation-triangle{% else %}exclamation-circle{% endif %}"></i>{{ msg }}
+    </div>
+    {% endfor %}
+    {% endif %}
+    {% endwith %}
+
+    <div class="card p-6 lg:p-8">
+        <div class="flex items-center gap-3 mb-6">
+            <div class="w-12 h-12 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center"><i class="fas fa-calendar-check text-xl"></i></div>
+            <div>
+                <h3 class="font-extrabold text-stone-800">Tutup Tahun Ajaran &amp; Buka Tahun Baru</h3>
+                <p class="text-sm text-stone-500 font-medium">
+                    Menutup tahun lama (jadi arsip, tidak bisa diubah lagi), membuat tahun baru, dan mencatat status setiap murid.
+                    {% if active_year %}<br>Tahun aktif sekarang: <strong>{{ active_year.name }}</strong>.{% endif %}
+                </p>
+            </div>
+        </div>
+
+        {% if not active_year %}
+        <div class="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm font-semibold text-amber-700">
+            <i class="fas fa-info-circle mr-2"></i>
+            Belum ada tahun ajaran aktif. Aktifkan satu dulu di <a href="/admin-sekolah/school-years" class="underline">Tahun Ajaran</a>.
+        </div>
+
+        {% elif report %}
+        {# ── 3. done: what actually happened, row by row ── #}
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-5">
+            <div class="p-4 rounded-xl bg-emerald-50 border border-emerald-200">
+                <p class="text-xs font-bold text-emerald-700 uppercase">Dipindahkan</p>
+                <p class="text-2xl font-extrabold text-emerald-800">{{ report.moved }}</p>
+            </div>
+            <div class="p-4 rounded-xl bg-indigo-50 border border-indigo-200">
+                <p class="text-xs font-bold text-indigo-700 uppercase">Riwayat dicatat</p>
+                <p class="text-2xl font-extrabold text-indigo-800">{{ report.recorded }}</p>
+            </div>
+            <div class="p-4 rounded-xl {% if report.errors %}bg-red-50 border border-red-200{% else %}bg-stone-50 border border-stone-200{% endif %}">
+                <p class="text-xs font-bold {% if report.errors %}text-red-700{% else %}text-stone-500{% endif %} uppercase">Gagal</p>
+                <p class="text-2xl font-extrabold {% if report.errors %}text-red-800{% else %}text-stone-700{% endif %}">{{ report.errors|length }}</p>
+            </div>
+        </div>
+        {% if report.errors %}
+        <div class="border border-red-200 rounded-xl overflow-hidden">
+            <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead class="bg-red-50 text-red-700"><tr><th class="text-left px-4 py-2 font-bold">Murid</th><th class="text-left px-4 py-2 font-bold">Alasan</th></tr></thead>
+                <tbody class="divide-y divide-red-50">
+                    {% for e in report.errors %}
+                    <tr><td class="px-4 py-2 font-mono text-xs text-stone-500">{{ (e.student_id or '')[:8] }}</td><td class="px-4 py-2 text-red-700">{{ e.reason }}</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            </div>
+        </div>
+        {% endif %}
+        <div class="mt-5">
+            <a href="/admin-sekolah/school-years" class="inline-block px-4 py-2.5 border border-stone-200 rounded-xl font-bold text-stone-600 hover:bg-stone-100 transition text-sm">Selesai</a>
+        </div>
+
+        {% elif plan %}
+        {# ── 2. the plan: one row per pupil, outcome editable ── #}
+        <form method="POST" action="/admin-sekolah/school-years/close" class="space-y-5">
+            <input type="hidden" name="old_year_id" value="{{ active_year.id }}">
+            <input type="hidden" name="confirmed" value="1">
+            {% if pending_new %}
+            <input type="hidden" name="name" value="{{ pending_new.name }}">
+            <input type="hidden" name="start_date" value="{{ pending_new.start_date }}">
+            <input type="hidden" name="end_date" value="{{ pending_new.end_date }}">
+            {% else %}
+            <div>
+                <label class="block text-sm font-bold text-stone-700 mb-1.5">Tahun Ajaran Baru</label>
+                <select name="new_year_id" required
+                        class="w-full px-4 py-3 border border-stone-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-stone-700 font-medium bg-white transition">
+                    <option value="">- Pilih Tahun -</option>
+                    {% for y in drafts %}
+                    <option value="{{ y.id }}" {% if plan.to_year == y.id %}selected{% endif %}>{{ y.name }} (draf)</option>
+                    {% endfor %}
+                </select>
+            </div>
+            {% endif %}
+
+            {% if plan.errors %}
+            <div class="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800">
+                <p class="font-bold mb-2"><i class="fas fa-triangle-exclamation mr-1"></i>{{ plan.errors|length }} murid tidak bisa ditebak otomatis:</p>
+                <ul class="list-disc pl-5 space-y-0.5">
+                    {% for e in plan.errors[:12] %}
+                    <li>{{ e.name or (e.student_id or '')[:8] }} — {{ e.reason }}</li>
+                    {% endfor %}
+                </ul>
+                <p class="mt-2 text-xs font-medium">Mereka dilewati, bukan ditebak. Perbaiki kelasnya lalu ulangi.</p>
+            </div>
+            {% endif %}
+
+            <div class="border border-stone-200 rounded-xl overflow-hidden">
+                <div class="max-h-96 overflow-auto">
+                    <table class="w-full min-w-[440px] text-sm">
+                        <thead class="bg-stone-50 text-stone-500 sticky top-0">
+                            <tr>
+                                <th class="text-left px-3 py-2 font-bold">Murid</th>
+                                <th class="text-left px-3 py-2 font-bold">Kelas</th>
+                                <th class="text-left px-3 py-2 font-bold">Status Akhir Tahun</th>
+                                <th class="text-left px-3 py-2 font-bold">Lanjut ke</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-stone-50">
+                            {% for r in plan.rows %}
+                            <tr>
+                                <td class="px-3 py-2 font-medium text-stone-700">{{ r.name or (r.student_id or '')[:8] }}</td>
+                                <td class="px-3 py-2 text-stone-500">{{ r.from_class }}</td>
+                                <td class="px-3 py-2">
+                                    <select name="outcome_{{ r.student_id }}" class="px-2 py-1.5 border border-stone-200 rounded-lg text-xs font-medium bg-white">
+                                        <option value="naik" {% if r.outcome == 'naik' %}selected{% endif %}>Naik kelas</option>
+                                        <option value="tinggal_kelas" {% if r.outcome == 'tinggal_kelas' %}selected{% endif %}>Tinggal kelas</option>
+                                        <option value="lulus" {% if r.outcome == 'lulus' %}selected{% endif %}>Lulus (alumni)</option>
+                                        <option value="pindah" {% if r.outcome == 'pindah' %}selected{% endif %}>Pindah / keluar</option>
+                                    </select>
+                                </td>
+                                <td class="px-3 py-2">
+                                    {% if r.to_class_id %}
+                                    <select name="to_class_{{ r.student_id }}" class="px-2 py-1.5 border border-stone-200 rounded-lg text-xs font-medium bg-white">
+                                        {% for c in classes if c.school_year_id == plan.to_year %}
+                                        <option value="{{ c.id }}" {% if c.id == r.to_class_id %}selected{% endif %}>{{ c.name }}</option>
+                                        {% endfor %}
+                                    </select>
+                                    {% else %}<span class="text-xs text-stone-400">—</span>{% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm font-semibold text-amber-700">
+                <i class="fas fa-info-circle mr-2"></i>
+                Setelah dikonfirmasi: tahun <strong>{{ active_year.name }}</strong> ditutup (jadi arsip), tahun baru diaktifkan, dan status tiap murid dicatat sebagai riwayat.
+            </div>
+
+            <div class="flex flex-col sm:flex-row gap-3">
+                <a href="/admin-sekolah/school-years/close" class="flex-1 py-2.5 border border-stone-200 rounded-xl font-bold text-stone-600 hover:bg-stone-100 transition text-center">Batal</a>
+                <button type="submit" class="flex-1 py-2.5 bg-gradient-to-r from-indigo-500 to-violet-500 text-white rounded-xl font-extrabold shadow-lg shadow-indigo-500/25 transition">
+                    <i class="fas fa-check mr-2"></i>Tutup Tahun &amp; Aktifkan Tahun Baru
+                </button>
+            </div>
+        </form>
+
+        {% else %}
+        {# ── 1. there is no draft yet: create the next year ── #}
+        <form method="POST" action="/admin-sekolah/school-years/close" class="space-y-5">
+            <input type="hidden" name="old_year_id" value="{{ active_year.id }}">
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                    <label class="block text-sm font-bold text-stone-700 mb-1.5">Nama Tahun Baru</label>
+                    <input type="text" name="name" required placeholder="2027/2028"
+                           class="w-full px-4 py-3 border border-stone-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-stone-700 font-medium transition">
+                </div>
+                <div>
+                    <label class="block text-sm font-bold text-stone-700 mb-1.5">Tanggal Mulai</label>
+                    <input type="date" name="start_date" required class="w-full px-4 py-3 border border-stone-200 rounded-xl text-stone-700 font-medium">
+                </div>
+                <div>
+                    <label class="block text-sm font-bold text-stone-700 mb-1.5">Tanggal Berakhir</label>
+                    <input type="date" name="end_date" required class="w-full px-4 py-3 border border-stone-200 rounded-xl text-stone-700 font-medium">
+                </div>
+            </div>
+            <button type="submit" class="w-full py-2.5 bg-gradient-to-r from-indigo-500 to-violet-500 text-white rounded-xl font-extrabold shadow-lg shadow-indigo-500/25 transition">
+                <i class="fas fa-eye mr-2"></i>Lihat Rencana
+            </button>
+        </form>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
