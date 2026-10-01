@@ -95,11 +95,40 @@ def current_pairs(supabase, school_id, teacher_id, year_name=None) -> set:
     return pairs
 
 
-def school_pairs(supabase, school_id, year_name=None) -> dict:
+#: The prefix a form field carries its assignment under: `assign_<subject_id>`
+#: holds the class ids that subject is taught in. One key per subject, so a
+#: subject can be checked in some classes and not others — the source of truth a
+#: single `subject_id` select could never express.
+ASSIGN_PREFIX = "assign_"
+
+
+def pairs_from_form(form) -> list:
+    """Read `(class_id, subject_id)` pairs out of a submitted form.
+
+    The create/edit teacher forms carry one `assign_<subject_id>` field per
+    subject, each holding the class ids checked for it. Reading it here (rather
+    than in the route) keeps the two forms and their guards on one spelling.
+    """
+    pairs = []
+    for key in form.keys():
+        if not key.startswith(ASSIGN_PREFIX):
+            continue
+        subject_id = key[len(ASSIGN_PREFIX):]
+        if not subject_id:
+            continue
+        for class_id in form.getlist(key):
+            if class_id:
+                pairs.append((class_id, subject_id))
+    return pairs
+
+
+def school_pairs_detail(supabase, school_id, year_name=None) -> dict:
     """Every teacher's active pairs, in one read — the roster preview.
 
     One query for the whole list rather than one per teacher: the roster draws a
-    count beside each row, and a page of 50 teachers must not become 50 queries.
+    count beside each row, and each row's edit form needs its pre-checked matrix,
+    so a page of 50 teachers must not become 50 queries. Returns counts *and* the
+    ids, because the form has to tick exactly the pairs that are stored.
     """
     rows = (supabase.table("teacher_assignments")
             .select("teacher_id, class_id, subject_id, status, school_year")
@@ -112,13 +141,30 @@ def school_pairs(supabase, school_id, year_name=None) -> dict:
             continue
         if not (row.get("teacher_id") and row.get("class_id") and row.get("subject_id")):
             continue
-        bucket = by_teacher.setdefault(str(row["teacher_id"]), {"classes": set(), "subjects": set()})
-        bucket["classes"].add(str(row["class_id"]))
-        bucket["subjects"].add(str(row["subject_id"]))
+        bucket = by_teacher.setdefault(
+            str(row["teacher_id"]),
+            {"classes": set(), "subjects": set(), "pairs": set()},
+        )
+        class_id, subject_id = str(row["class_id"]), str(row["subject_id"])
+        bucket["classes"].add(class_id)
+        bucket["subjects"].add(subject_id)
+        # The form checks `class_id|subject_id`, so the detail reports that same
+        # key — the template's `in` then means exactly "this cell is stored".
+        bucket["pairs"].add(f"{class_id}|{subject_id}")
     return {
-        tid: {"classes": len(b["classes"]), "subjects": len(b["subjects"])}
+        tid: {
+            "classes": len(b["classes"]), "subjects": len(b["subjects"]),
+            "class_ids": sorted(b["classes"]), "subject_ids": sorted(b["subjects"]),
+            "pairs": sorted(b["pairs"]),
+        }
         for tid, b in by_teacher.items()
     }
+
+
+def school_pairs(supabase, school_id, year_name=None) -> dict:
+    """Just the counts, the shape the roster first shipped with."""
+    return {tid: {"classes": v["classes"], "subjects": v["subjects"]}
+            for tid, v in school_pairs_detail(supabase, school_id, year_name).items()}
 
 
 def owned_class_ids(supabase, school_id, class_ids) -> set:

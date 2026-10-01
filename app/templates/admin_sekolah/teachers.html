@@ -2,6 +2,45 @@
 {% extends "base.html" %}
 {% block title %}Guru - ScanGrade{% endblock %}
 {% block page_title %}Data Guru{% endblock %}
+{# ── Penugasan picker: one block per subject, a checkbox per class ────────────
+   The create and edit forms both need it, and both write the same
+   `teacher_assignments` rows the matrix does. `selected` is the set of
+   `class|subject` keys already stored, so the edit form opens on exactly what is
+   saved — and an empty selection only means "remove all" when the form says the
+   assignment section was submitted (`assign_present`). #}
+{% macro assignment_picker(subjects, classes, selected=None) %}
+<div class="sm:col-span-2">
+    <label class="block text-sm font-bold text-stone-700 mb-1.5">Penugasan — Mata Pelajaran &amp; Kelas</label>
+    <p class="text-xs text-stone-400 mb-2">Centang kelas untuk tiap mapel. Satu guru boleh mengampu lebih dari satu mapel, dan tiap mapel bisa hanya di kelas tertentu.</p>
+    {% if subjects %}
+    {# The marker must NOT begin with `assign_`: that prefix is the field naming
+       convention, and a marker named `assign_present` is read as a subject called
+       "present" in class "1". #}
+    <input type="hidden" name="assignment_present" value="1">
+    <div class="grid grid-cols-1 gap-2">
+        {% for s in subjects %}
+        <details class="border border-stone-200 rounded-xl px-3 py-2">
+            <summary class="text-sm font-bold text-stone-700 cursor-pointer">{{ s.name }}</summary>
+            <div class="flex flex-wrap gap-x-4 gap-y-1 mt-2">
+                {% for c in classes %}
+                <label class="inline-flex items-center gap-1.5 text-sm text-stone-600">
+                    <input type="checkbox" name="assign_{{ s.id }}" value="{{ c.id }}"
+                           {% if selected and (c.id ~ '|' ~ s.id) in selected %}checked{% endif %}
+                           class="rounded border-stone-300">
+                    {{ c.name }}
+                </label>
+                {% else %}
+                <span class="text-xs text-stone-400">Belum ada kelas di sekolah ini.</span>
+                {% endfor %}
+            </div>
+        </details>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p class="text-xs text-stone-400">Belum ada mata pelajaran. Tambah mapel dulu di menu Mata Pelajaran.</p>
+    {% endif %}
+</div>
+{% endmacro %}
 {% block content %}
 <div class="space-y-6" x-data="{ showForm: false, showPassword: false, generatedPassword: '', pwTitle: '', pwNote: '', formName: '', formEmail: '', formPassword: '', generateEmail() { if(!this.formName.trim()) return; fetch('/admin-sekolah/generate-email?name='+encodeURIComponent(this.formName)).then(r=>r.json()).then(d=>{ this.formEmail = d.email; this.formPassword = d.password; this.generatedPassword = d.password; }).catch(()=>{}); } }">
     <div class="bg-blue-50 rounded-xl p-3 flex items-start gap-3 border border-blue-200">
@@ -112,16 +151,7 @@
                 </div>
                 <p class="text-xs text-stone-400 mt-1" x-show="formEmail" x-text="'Password: ' + formPassword"></p>
             </div>
-            <div>
-                <label class="block text-sm font-bold text-stone-700 mb-1.5">Mata Pelajaran</label>
-                <select name="subject_id"
-                        class="w-full px-4 py-3 border border-stone-200 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-stone-700 font-medium bg-white transition">
-                    <option value="">- Pilih Mapel -</option>
-                    {% for s in subjects %}
-                    <option value="{{ s.id }}">{{ s.name }}</option>
-                    {% endfor %}
-                </select>
-            </div>
+            {{ assignment_picker(subjects, classes) }}
             <div>
                 <label class="block text-sm font-bold text-stone-700 mb-1.5">No. HP <span class="text-stone-400 font-normal">(opsional)</span></label>
                 <input type="text" name="phone"
@@ -188,7 +218,16 @@
                         <td class="px-4 py-3 font-bold text-stone-700">{{ t.name }}</td>
                         <td class="px-4 py-3 text-stone-500">{{ t.employee_number or '-' }}</td>
                         <td class="px-4 py-3 text-stone-500">{{ t.email }}</td>
-                        <td class="px-4 py-3"><span class="badge bg-violet-50 text-violet-700 border border-violet-200">{{ t.subject_name or '-' }}</span></td>
+                        <td class="px-4 py-3">
+                            {# Every subject the matrix holds, not just the legacy
+                               single `subject_id` — a teacher with two subjects
+                               must show two badges, or the assignment looks lost. #}
+                            {% for nm in t.assign_subject_names %}
+                            <span class="badge bg-violet-50 text-violet-700 border border-violet-200 mr-1">{{ nm }}</span>
+                            {% else %}
+                            <span class="text-stone-400">-</span>
+                            {% endfor %}
+                        </td>
                         <td class="px-4 py-3">
                             {# The preview the admin needs without opening 50 modals: how many
                                classes and subjects this teacher holds. A link, not just a
@@ -229,13 +268,7 @@
                                     <input type="text" name="employee_number" value="{{ t.employee_number or '' }}"
                                            class="px-3 py-2 border border-stone-200 rounded-lg text-sm font-medium">
                                     <span class="px-3 py-2 text-stone-500 text-sm flex items-center">{{ t.email }}</span>
-                                    <select name="subject_id"
-                                            class="px-3 py-2 border border-stone-200 rounded-lg text-sm font-medium bg-white">
-                                        <option value="">- Mapel -</option>
-                                        {% for s in subjects %}
-                                        <option value="{{ s.id }}" {% if t.subject_id == s.id %}selected{% endif %}>{{ s.name }}</option>
-                                        {% endfor %}
-                                    </select>
+                                    {{ assignment_picker(subjects, classes, t.assign_pairs) }}
                                     <button type="submit" class="col-span-full px-3 py-2 bg-emerald-100 text-emerald-700 rounded-lg font-bold text-sm hover:bg-emerald-200 transition">Simpan</button>
                                 </form>
                             </div>

@@ -1758,6 +1758,10 @@ def teachers():
         page = 1
 
     subjects = supabase.table("subjects").select("*").eq("school_id", sid).order("name").execute().data or []
+    # The create/edit forms pair subjects with classes, so the roster needs the
+    # class list too — read once here, not per row.
+    classes = (supabase.table("classes").select("id, name, grade_level")
+               .eq("school_id", sid).order("name").execute().data or [])
 
     data_q = supabase.table("teachers").select(
         "*, profiles!inner(id, full_name, phone), subjects(name)"
@@ -1815,14 +1819,27 @@ def teachers():
     year = ta_service.active_school_year(supabase, sid)
     year_name = (year or {}).get("name")
     try:
-        assign_counts = ta_service.school_pairs(supabase, sid, year_name)
+        assign_detail = ta_service.school_pairs_detail(supabase, sid, year_name)
     except Exception:
-        assign_counts = {}
+        assign_detail = {}
+    subject_names = {str(s["id"]): s.get("name") or "-" for s in subjects}
     for t in page_rows:
-        c = assign_counts.get(str(t["id"]), {"classes": 0, "subjects": 0})
+        c = assign_detail.get(str(t["id"]),
+                              {"classes": 0, "subjects": 0, "subject_ids": [], "pairs": []})
         t["assign_classes"] = c["classes"]
         t["assign_subjects"] = c["subjects"]
+        # The names, so a teacher with two subjects shows two — not just the one
+        # legacy `teachers.subject_id`. Falls back to that column when the matrix
+        # has no row for them (older data, a school that never opened the matrix).
+        names = [subject_names.get(sid_) for sid_ in c["subject_ids"]]
+        t["assign_subject_names"] = [n for n in names if n]
+        if not t["assign_subject_names"] and t.get("subject_name"):
+            t["assign_subject_names"] = [t["subject_name"]]
+        # Pre-tick keys for the edit form: `class|subject`, the same pair key the
+        # service stores, so the form opens on exactly the stored selection.
+        t["assign_pairs"] = set(c["pairs"])
     return render_template("admin_sekolah/teachers.html", teachers=page_rows, subjects=subjects,
+                           classes=classes,
                            q=q, subject_id=subject_id, sort=sort, dir=direction,
                            page=page, total=total, total_pages=total_pages, per_page=per_page,
                            base_qs=base_qs, page_sizes=_PAGE_SIZES,
@@ -1909,7 +1926,13 @@ def create_teacher():
     email = request.form.get("email", "").strip().lower()
     hp = request.form.get("phone", "").strip()
     recovery_email = request.form.get("recovery_email", "").strip().lower()
-    subject_id = request.form.get("subject_id") or None
+    # The assignment section carries one `assign_<subject_id>` field per subject,
+    # each holding the classes that subject is taught in. It is the same write the
+    # matrix makes, so a teacher created here and one edited there are identical.
+    pairs = ta_service.pairs_from_form(request.form)
+    # The legacy single column keeps the first chosen subject, so the older
+    # `subjects(name)` join and the subject filter still answer something.
+    subject_id = request.form.get("subject_id") or (pairs[0][1] if pairs else None)
     password = request.form.get("password", "").strip() or _gen_password()
 
     if not nama:
@@ -1926,6 +1949,15 @@ def create_teacher():
             password=password, employee_id=nip, subject_id=subject_id,
             phone=recovery_email or hp,
         )
+        if pairs:
+            year = ta_service.active_school_year(supabase, sid)
+            ok, result = ta_service.save(supabase, sid, uid, pairs,
+                                         year_name=(year or {}).get("name"))
+            if not ok:
+                flash(f"Guru dibuat, tetapi penugasan gagal: {result.get('reason')}",
+                      "warning")
+            invalidate_teacher_assignments(uid, sid)
+            invalidate_school(sid)
         log_activity("create", "teacher", uid, new_data={"full_name": nama, "employee_id": nip}, user_id=g.user_id)
         flash(f"Guru berhasil ditambahkan. Email: {user_email}, Password: {password}", "success")
     except Exception as e:
@@ -1939,12 +1971,25 @@ def create_teacher():
 @require_school_access("teachers", "teacher_id")
 def edit_teacher(teacher_id):
     supabase = get_supabase()
+    sid = _school_id()
     data = {}
     emp_id = request.form.get("employee_number", request.form.get("employee_id", ""))
     if emp_id:
         data["employee_id"] = emp_id.strip()
-    subj = request.form.get("subject_id")
-    data["subject_id"] = subj if subj else None
+    # `assign_present` separates "the admin unchecked every box" from "another
+    # caller posted only a name": without it, an empty selection is
+    # indistinguishable from no selection, and the first would silently wipe the
+    # teacher's assignment on any unrelated edit.
+    assignment_submitted = bool(request.form.get("assignment_present"))
+    pairs = ta_service.pairs_from_form(request.form) if assignment_submitted else None
+    # The legacy single column follows the first chosen subject — but only when
+    # this edit actually carried an assignment section. Writing `subject_id=None`
+    # on every unrelated edit would erase the one piece of assignment the older
+    # join still reads, which is the opposite of an unrelated edit's job.
+    if assignment_submitted:
+        data["subject_id"] = pairs[0][1] if pairs else None
+    elif "subject_id" in request.form:
+        data["subject_id"] = request.form.get("subject_id") or None
 
     profile_data = {}
     nama = request.form.get("name", request.form.get("full_name", ""))
@@ -1960,6 +2005,16 @@ def edit_teacher(teacher_id):
             supabase.table("teachers").update(data).eq("id", teacher_id).execute()
         if profile_data:
             supabase.table("profiles").update(profile_data).eq("id", teacher_id).execute()
+        if assignment_submitted:
+            year = ta_service.active_school_year(supabase, sid)
+            ok, result = ta_service.save(supabase, sid, teacher_id, pairs,
+                                         year_name=(year or {}).get("name"),
+                                         confirm_remove=True)
+            if not ok:
+                flash(f"Penugasan tidak tersimpan: {result.get('reason')}", "warning")
+            else:
+                invalidate_teacher_assignments(teacher_id, sid)
+                invalidate_school(sid)
         log_activity("update", "teacher", teacher_id, new_data={**data, **profile_data}, user_id=g.user_id)
         flash("Guru berhasil diperbarui", "success")
         return redirect("/admin-sekolah/teachers")
