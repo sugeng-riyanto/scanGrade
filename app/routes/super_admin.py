@@ -511,9 +511,25 @@ def reset_demo_passwords():
             continue
         try:
             supabase.auth.admin.update_user_by_id(uid, {"password": password})
-            results.append({"email": email, "password": password, "success": True})
         except Exception as e:
             results.append({"email": email, "error": str(e)[:60]})
+            continue
+        # A demo account is not a first sign-in. `must_change_password` takes a
+        # trainee to a password form instead of the dashboard, and the trainee who
+        # follows it changes the shared credential for the next person — so a
+        # repair that only rewrites the password leaves the demo broken in a way
+        # the next trainee discovers. Clear the flag (and make sure the account is
+        # not parked as pending) as part of the same repair. Best-effort: the
+        # password above is already set, so a failure here is a warning, not a
+        # lost repair.
+        try:
+            supabase.table("profiles").update(
+                {"must_change_password": False, "status": "active"}
+            ).eq("id", uid).execute()
+            results.append({"email": email, "password": password, "success": True})
+        except Exception as e:
+            results.append({"email": email, "password": password,
+                            "warning": f"password set; flag not cleared: {str(e)[:40]}"})
 
     return jsonify({"results": results, "total": len(results), "ok": sum(1 for r in results if r.get("success"))})
 

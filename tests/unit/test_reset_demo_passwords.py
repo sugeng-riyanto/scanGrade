@@ -63,14 +63,38 @@ class _Admin:
             "its first page, so this is the bug, not the test")
 
 
+class _Table:
+    """`profiles.update({...}).eq("id", uid).execute()` — recorded, not run."""
+
+    def __init__(self, calls, name):
+        self._c = calls
+        self._name = name
+        self._payload = None
+
+    def update(self, payload):
+        self._payload = payload
+        return self
+
+    def eq(self, column, value):
+        self._c["profile_updates"].append((self._name, self._payload, column, value))
+        return self
+
+    def execute(self):
+        return SimpleNamespace(data=[{}])
+
+
 class _Supabase:
     def __init__(self, calls):
         self.auth = SimpleNamespace(admin=_Admin(calls))
+        self._calls = calls
+
+    def table(self, name):
+        return _Table(self._calls, name)
 
 
 @pytest.fixture()
 def calls():
-    return {"updated": {}, "paged_calls": 0}
+    return {"updated": {}, "paged_calls": 0, "profile_updates": []}
 
 
 @pytest.fixture()
@@ -116,6 +140,21 @@ def test_it_updates_every_seeded_account_including_the_officials(seeded):
     assert officials == "demo123", (
         "the school officials were left out of the repair, so a principal's demo "
         "login stays broken while /demo offers it")
+
+
+def test_every_repaired_account_has_the_forced_change_cleared(seeded):
+    """A repair that sets the password but leaves `must_change_password` on does
+    not make the demo work: the trainee lands on a password form, and the trainee
+    who completes it changes the shared credential for the next person."""
+    calls, _ = seeded
+    with app_instance().test_request_context("/super-admin/reset-demo-passwords",
+                                             method="POST"):
+        payload = _call_route()
+    assert payload["ok"] == len(ALL_EMAILS), payload
+    cleared = {value for _t, payload_, column, value in calls["profile_updates"]
+               if column == "id" and payload_.get("must_change_password") is False}
+    assert cleared == {f"id-{e}" for e in ALL_EMAILS}, (
+        "the forced-password-change flag was not cleared for every repaired account")
 
 
 def test_an_account_the_database_does_not_have_is_reported_not_counted(seeded, monkeypatch):
