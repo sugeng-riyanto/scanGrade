@@ -523,10 +523,10 @@
                                 {% endfor %}
                             </ul>
                             {% if b.patch %}
-                            <p class="mt-1 text-xs text-surface-500"><span x-text="t('Diff terhadap HEAD:','Diff against HEAD:')></span> <code class="font-mono break-all">{{ b.patch }}</code>{% if b.patch_bytes is not none %} <span class="text-surface-400">({{ b.patch_bytes }} <span x-text="t('bita','bytes')"></span>)</span>{% endif %}</p>
+                            <p class="mt-1 text-xs text-surface-500"><span x-text="t('Diff terhadap HEAD:','Diff against HEAD:')"></span> <code class="font-mono break-all">{{ b.patch }}</code>{% if b.patch_bytes is not none %} <span class="text-surface-400">({{ b.patch_bytes }} <span x-text="t('bita','bytes')"></span>)</span>{% endif %}</p>
                             {% endif %}
                             {% if b.files %}
-                            <p class="mt-1 text-xs text-surface-500"><span x-text="t('Salinan utuh berkas yang belum ada di HEAD:','Whole copies of files HEAD did not have:')></span> <code class="font-mono break-all">{{ b.files }}</code>{% if not b.files_present %} <span class="text-amber-700" x-text="t('(direktori itu sudah tidak ada)','(that directory is gone now)')"></span>{% endif %}</p>
+                            <p class="mt-1 text-xs text-surface-500"><span x-text="t('Salinan utuh berkas yang belum ada di HEAD:','Whole copies of files HEAD did not have:')"></span> <code class="font-mono break-all">{{ b.files }}</code>{% if not b.files_present %} <span class="text-amber-700" x-text="t('(direktori itu sudah tidak ada)','(that directory is gone now)')"></span>{% endif %}</p>
                             {% endif %}
                         </div>
                         {% endif %}
