@@ -996,6 +996,39 @@ def export_scan_results():
     return jsonify({"error": "Format tidak didukung"}), 400
 
 
+def _builder_defaults(supabase, teacher_id, subjects, classes) -> dict:
+    """What the exam builder may pre-fill for this teacher, and nothing more.
+
+    Progressive disclosure is only honest if what it pre-fills is *derivable*, so
+    every default here has a source rather than a guess:
+
+    * a subject/class is pre-selected only when the teacher has exactly **one**
+      available. With a choice to make, the field is left empty — a wrong guess is
+      worse than an empty field (`unassigned_class_ids` already fails closed for
+      the same reason);
+    * the duration is the one this teacher used last, falling back to the app's 60
+      when they have never built a paper.
+
+    An unscoped caller (admin) usually has many subjects/classes, so they get no
+    pre-selection and keep full manual control.
+    """
+    defaults = {"subject_id": None, "class_ids": [], "duration_minutes": 60}
+    if len(subjects) == 1 and subjects[0].get("id"):
+        defaults["subject_id"] = subjects[0]["id"]
+    if len(classes) == 1 and classes[0].get("id"):
+        defaults["class_ids"] = [classes[0]["id"]]
+    try:
+        last = (supabase.table("exams").select("duration_minutes")
+                .eq("teacher_id", teacher_id).order("created_at", desc=True)
+                .limit(1).execute().data or [])
+        if last and last[0].get("duration_minutes") is not None:
+            defaults["duration_minutes"] = last[0]["duration_minutes"]
+    except Exception:
+        # A failed read must not cost the teacher a page; the 60 default stands.
+        logger.warning("duration default lookup failed for %s", teacher_id)
+    return defaults
+
+
 @teacher_bp.route("/exams/new", methods=["GET", "POST"])
 @subscription_write_required
 @teacher_or_admin_required
@@ -1033,7 +1066,8 @@ def exam_form():
                     subjects = supabase.table("subjects").select("*").eq("school_id", sid).order("name").execute().data or []
                 if not classes:
                     classes = supabase.table("classes").select("*").eq("school_id", sid).order("name").execute().data or []
-        return render_template("teacher/exam_form.html", exam=None, subjects=subjects, classes=classes)
+        return render_template("teacher/exam_form.html", exam=None, subjects=subjects, classes=classes,
+                               builder_defaults=_builder_defaults(supabase, g.user_id, subjects, classes))
 
     title = request.form.get("title")
     subject = request.form.get("subject")
@@ -1255,7 +1289,8 @@ def exam_detail(exam_id):
         # the row (it would be expired long before anyone read it again).
         exam_data["question_audio"] = exam_media.with_media_urls(
             exam_data.get("question_audio"), subject=g.user_id, exam_id=exam_id)
-        return render_template("teacher/exam_form.html", exam=exam_data, subjects=subjects, classes=classes)
+        return render_template("teacher/exam_form.html", exam=exam_data, subjects=subjects, classes=classes,
+                               builder_defaults=_builder_defaults(supabase, g.user_id, subjects, classes))
 
     title = request.form.get("title")
     subject = request.form.get("subject")

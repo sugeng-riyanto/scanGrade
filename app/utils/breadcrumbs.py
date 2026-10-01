@@ -113,6 +113,12 @@ ARTIFACT = frozenset({
     # an `<audio>`/`<video>` element: there is no document, so there is no chrome
     # and no trail. The crumb is the exam page that asked for it.
     "media",
+    # `/admin-sekolah/download-template/<kind>` hands over the spreadsheets a
+    # school fills in: `murid` and `guru` are role words and dropped above by
+    # `PREFIXES`, while `pejabat` (officials) and `semua` (every sheet in one
+    # workbook) are not — and neither names a place. A download is a file; the
+    # crumb is the import page the workbook is built for.
+    "pejabat", "semua",
 })
 
 #: A *login door*. `/auth/login` and its siblings render a different chrome

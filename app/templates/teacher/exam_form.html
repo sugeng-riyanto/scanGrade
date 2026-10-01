@@ -1,4 +1,9 @@
 {% extends "base.html" %}
+{# The route always sends `builder_defaults`, but a page that reads it must not
+   depend on that to render: a missing value falls back to an empty mapping, and
+   the duration below then falls back to the app's own default hour rather than
+   silently reading a new paper as Unlimited. #}
+{% set builder_defaults = builder_defaults if builder_defaults is defined else {} %}
 {% block title %}{{ 'Edit' if exam else 'Create' }} Exam - ScanGrade{% endblock %}
 {# `page_title` is defined here and rendered by nothing — base.html has no such
    block — so it stays a single string rather than growing a toggle it can never
@@ -38,9 +43,20 @@
                     {code:'ar', label:'ع', name:'العربية', bg:'bg-amber-100', text:'text-amber-700'},
                 ],
                 examTitle: '{{ exam.title if exam else '' }}',
-                hasClasses: {{ 'true' if exam and exam.class_ids else 'false' }},
+                hasClasses: {{ 'true' if (exam and exam.class_ids) or (not exam and builder_defaults.class_ids) else 'false' }},
                 pdfUrl: '{{ exam.pdf_url if exam else '' }}',
                 qCount: 0,
+                // Progressive disclosure: only the fields a hurried teacher must
+                // see are shown; everything else lives behind this and stays
+                // fully editable. Nothing was removed — a collapsed control is
+                // still a control, and un-checking it always works.
+                advanced: false,
+                acDetail: false,
+                // "otomatis" badges: true while the value still came from the
+                // server default, cleared the moment the teacher touches it.
+                subjectAuto: {{ 'true' if (not exam and builder_defaults.subject_id) else 'false' }},
+                classAuto: {{ 'true' if (not exam and builder_defaults.class_ids) else 'false' }},
+                durationAuto: {{ 'true' if not exam else 'false' }},
                 get step1Done() { return this.examTitle.trim().length > 0 && this.hasClasses; },
                 get step2Done() { return false; },
                 get step3Done() { return false; },
@@ -618,8 +634,14 @@
                                 {% for s in subjects %}
                                 <label class="flex items-center gap-2 p-2.5 rounded-xl border-2 cursor-pointer transition border-slate-200 bg-white hover:border-slate-300">
                                     <input type="radio" name="subject_id" value="{{ s.id }}" class="w-4 h-4 text-primary-600 border-slate-300 focus:ring-primary-500"
-                                           {{ 'checked' if (exam and exam.subject_id == s.id) or (not exam and subjects|length == 1 and loop.first) else '' }}>
+                                           @change="subjectAuto=false"
+                                           {{ 'checked' if (exam and exam.subject_id == s.id) or (not exam and builder_defaults.subject_id == s.id) else '' }}>
                                     <span class="text-sm font-bold text-slate-700">{{ s.name }}</span>
+                                    {% if not exam and builder_defaults.subject_id == s.id %}
+                                    <span x-show="subjectAuto" x-cloak
+                                          class="ml-auto text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded"
+                                          x-text="t('otomatis','auto')"></span>
+                                    {% endif %}
                                 </label>
                                 {% endfor %}
                             </div>
@@ -629,15 +651,19 @@
                             {% endif %}
                         </div>
                         <div>
-                            <label class="block text-sm font-extrabold text-slate-700 mb-1" x-text="t('Durasi','Duration')"></label>
+                            <label class="block text-sm font-extrabold text-slate-700 mb-1">
+                                <span x-text="t('Durasi','Duration')"></span>
+                                {% if not exam %}<span x-show="durationAuto" x-cloak class="ml-1 text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded" x-text="t('otomatis','auto')"></span>{% endif %}
+                            </label>
                             {# Read once, by the rule the rest of the app reads it with:
                                a *stored* 0 is Tak terbatas, while a paper being created
                                still opens on the form's own default hour. `or 60`
                                marked the 60-minute option on a paper the teacher had
                                left unlimited — one conditional render away from saving
                                60 and silently converting the paper. #}
-                            {% set dur = duration_facts(exam.duration_minutes) if exam else duration_facts(60) %}
-                            <select name="duration_minutes" class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-500 font-bold transition">
+                            {% set dur = duration_facts(exam.duration_minutes) if exam else duration_facts(builder_defaults.get('duration_minutes', 60)) %}
+                            <select name="duration_minutes" @change="durationAuto=false"
+                                    class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-500 font-bold transition">
                                 {% for m in [10,15,20,25,30,40,45,50,60,75,90,100,120,150,180] %}
                                 <option value="{{ m }}" {% if not dur.unlimited and dur.minutes == m %}selected{% endif %} x-text="'{{ m }} ' + t('menit','minutes')">{{ m }} minutes</option>
                                 {% endfor %}
@@ -650,14 +676,17 @@
                     <div>
                         <label class="block text-sm font-extrabold text-slate-700 mb-2" x-text="t('Kelas Tujuan','Target Classes')"></label>
                         {% if classes %}
-                        <div class="grid grid-cols-2 gap-1.5 sm:gap-2" x-data='{ selected: {{ (exam.class_ids or []) | tojson }} }'>
+                        <div class="grid grid-cols-2 gap-1.5 sm:gap-2" x-data='{ selected: {{ ((exam.class_ids if exam else builder_defaults.class_ids) or []) | tojson }} }'>
                             {% for c in classes %}
                             <label class="flex items-center gap-2 p-2.5 rounded-xl border-2 cursor-pointer transition"
                                    :class="selected.includes('{{ c.id }}') ? 'border-primary-400 bg-primary-50' : 'border-slate-200 bg-white hover:border-slate-300'">
                                  <input type="checkbox" name="class_ids" value="{{ c.id }}" class="w-4 h-4 text-primary-600 border-slate-300 rounded focus:ring-primary-500"
-                                        {{ 'checked' if exam and c.id|string in (exam.class_ids or [])|map('string')|list else '' }}
-                                        @change="setTimeout(() => document.querySelectorAll('input[name=class_ids]:checked').length > 0 ? window.dispatchEvent(new CustomEvent('classes-selected')) : '', 50)">
+                                        {{ 'checked' if (exam and c.id|string in (exam.class_ids or [])|map('string')|list) or (not exam and c.id in builder_defaults.class_ids) else '' }}
+                                        @change="classAuto=false; setTimeout(() => document.querySelectorAll('input[name=class_ids]:checked').length > 0 ? window.dispatchEvent(new CustomEvent('classes-selected')) : '', 50)">
                                 <span class="text-sm font-bold text-slate-700">{{ c.name }}</span>
+                                {% if not exam and c.id in builder_defaults.class_ids %}
+                                <span x-show="classAuto" x-cloak class="ml-auto text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded" x-text="t('otomatis','auto')"></span>
+                                {% endif %}
                             </label>
                             {% endfor %}
                         </div>
@@ -666,6 +695,16 @@
                         {% endif %}
                     </div>
 
+                    {# Progressive disclosure. Everything below still submits and is
+                       still editable — this only decides what a hurried teacher has
+                       to look at. The anti-cheat summary card stays visible below,
+                       so a value that matters is never hidden, only its details. #}
+                    <button type="button" @click="advanced = !advanced"
+                            class="w-full flex items-center justify-between gap-2 px-4 py-2.5 rounded-xl border-2 border-dashed border-slate-300 text-slate-600 hover:border-primary-400 hover:text-primary-700 transition text-sm font-extrabold">
+                        <span class="flex items-center gap-2"><i class="fas fa-sliders"></i><span x-text="t('Pengaturan lanjutan (opsional)','Advanced settings (optional)')"></span></span>
+                        <i class="fas" :class="advanced ? 'fa-chevron-up' : 'fa-chevron-down'"></i>
+                    </button>
+                    <div x-show="advanced" x-collapse x-cloak class="space-y-4 pt-1">
                     <div>
                         <label class="block text-sm font-extrabold text-slate-700 mb-1" x-text="t('Deskripsi (opsional)','Description (optional)')"></label>
                         <textarea name="description" rows="2" :placeholder="t('Petunjuk atau catatan untuk siswa','Instructions or notes for students')"
@@ -710,6 +749,7 @@
                         </span>
                     </label>
                     </div>
+                    </div><!-- /advanced -->
                 </div>
 
                 <!-- Tips: Audio & YouTube -->
@@ -1350,7 +1390,20 @@
                             <input type="number" name="max_violations" x-model="max_violations" min="1" max="20" class="w-16 text-center border-2 border-slate-200 rounded-lg px-2 py-1 font-bold">
                         </label>
                     </div>
-                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs sm:text-sm">
+                    {# The values that decide fairness stay on screen; only the
+                       switches that set them are collapsible. A teacher reading
+                       this line knows the paper's policy before publishing. #}
+                    <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
+                        <span x-text="t('Penalti','Penalty') + ' ' + penalty_per_violation"></span>
+                        <span>&middot;</span>
+                        <span x-text="t('Maks pelanggaran','Max violations') + ' ' + max_violations"></span>
+                        <span>&middot;</span>
+                        <span :class="fullscreen_required ? 'text-emerald-600 font-bold' : 'text-slate-400'" x-text="'Fullscreen ' + (fullscreen_required ? 'on' : 'off')"></span>
+                        <button type="button" @click="acDetail = !acDetail"
+                                class="ml-auto font-extrabold text-primary-600 hover:underline"
+                                x-text="acDetail ? t('Sembunyikan','Hide') : t('Atur anti-cheat','Configure anti-cheat')"></button>
+                    </div>
+                    <div x-show="acDetail" x-collapse x-cloak class="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs sm:text-sm">
                         <label class="flex items-center gap-2 p-2.5 rounded-xl border-2 cursor-pointer transition"
                                :class="fullscreen_required ? 'border-primary-300 bg-primary-50' : 'border-slate-200'">
                             <input type="checkbox" x-model="fullscreen_required" name="fullscreen_required" value="true" class="w-4 h-4 text-primary-600 rounded">
@@ -1387,6 +1440,7 @@
                             <span class="font-bold text-slate-700" x-text="t('Cegah Screenshot','Block screenshot')"></span>
                         </label>
                     </div>
+                    </div><!-- /acDetail -->
                 </div>
 
                 <!-- Question settings.
@@ -1395,7 +1449,7 @@
                      an exam saved with shuffling OFF still rendered ON, and the next
                      save wrote `true` back. The seeds now come from the row, which is
                      the whole of what "the teacher can turn it off" means. -->
-                <div class="card p-5" x-data="{ randomize_questions: {{ 'true' if (exam.get('randomize_questions') if exam else False) else 'false' }}, randomize_options: {{ 'true' if (exam.get('randomize_options') if exam else False) else 'false' }} }">
+                <div class="card p-5" x-show="advanced" x-collapse x-cloak x-data="{ randomize_questions: {{ 'true' if (exam.get('randomize_questions') if exam else False) else 'false' }}, randomize_options: {{ 'true' if (exam.get('randomize_options') if exam else False) else 'false' }} }">
                     <h2 class="text-lg font-extrabold text-slate-800 flex items-center gap-2 mb-4">
                         <i class="fas fa-random text-emerald-600"></i><span x-text="t('Pengaturan Soal','Question settings')"></span>
                     </h2>
