@@ -171,7 +171,8 @@ def _upload(app, monkeypatch, wb, calls):
     return client.post("/admin-sekolah/import",
                        data={"file": (buf, "data.xlsx")},
                        content_type="multipart/form-data",
-                       headers={"X-CSRF-Token": "csrf"})
+                       headers={"X-CSRF-Token": "csrf"},
+                       follow_redirects=True)
 
 
 class TestImportDispatch:
@@ -198,6 +199,98 @@ class TestImportDispatch:
         _upload(app, monkeypatch, wb, calls)
         assert calls == {"pejabat": "Pejabat"}, (
             "a combined officials sheet must let its Role column decide")
+
+    def test_a_copied_sheet_name_still_reaches_its_importer(self, app, monkeypatch):
+        # Copying a tab in Excel names it "Guru (2)"; matching the raw name made
+        # that a silent zero. Spaces, suffixes and punctuation are not the data.
+        wb = Workbook()
+        wb.active.title = "Murid "
+        wb.create_sheet("Guru (2)")
+        wb.create_sheet("MATA PELAJARAN")
+        calls: dict = {}
+        _upload(app, monkeypatch, wb, calls)
+        assert calls == {
+            "students": "Murid ", "teachers": "Guru (2)", "subjects": "MATA PELAJARAN",
+        }, calls
+
+    def test_a_workbook_with_no_recognisable_sheet_says_so(self, app, monkeypatch):
+        # The live complaint: "Impor selesai: 0 murid, 0 guru, 0 mapel. 0 error."
+        # Reaching no importer must be reported, not read as a clean run.
+        wb = Workbook()
+        wb.active.title = "Sheet1"
+        wb.create_sheet("Daftar")
+        calls: dict = {}
+        resp = _upload(app, monkeypatch, wb, calls)
+        assert calls == {}
+        assert resp.status_code in (302, 200)
+        body = _flash_of(resp)
+        assert "dikenali" in body.lower(), body
+        assert "Sheet1" in body, body
+
+    def test_an_extra_unrecognised_sheet_is_named_not_silently_dropped(self, app, monkeypatch):
+        wb = Workbook()
+        wb.active.title = "Guru"
+        wb.create_sheet("Catatan")
+        calls: dict = {}
+        resp = _upload(app, monkeypatch, wb, calls)
+        assert calls == {"teachers": "Guru"}
+        assert "Catatan" in _flash_of(resp)
+
+
+class TestSilentSkipReported:
+    def test_a_teacher_sheet_with_rows_but_no_recognised_header_is_an_error(self, captured):
+        ws = _sheet("Guru", [
+            ["Kolom A", "Kolom B"],
+            ["", "Budi"],
+            ["", "Siti"],
+        ])
+        # two non-blank rows whose positional read leaves the employee number
+        # empty, so nothing imports: the sheet must say so rather than report
+        # "0 guru, 0 error".
+        results = {"teachers": 0, "errors": []}
+        adm._import_teachers(ws, "S1", _Sb(), results)
+        assert results["teachers"] == 0
+        assert any("Guru" in e and "tidak ada yang dikenali" in e.lower()
+                   for e in results["errors"]), results["errors"]
+
+    def test_an_official_sheet_with_rows_but_no_role_is_an_error(self, captured):
+        ws = _sheet("Pejabat", [
+            ["Jabatan", "Nama Lengkap", "Email"],
+            ["Bendahara", "Orang Lain", "x@sekolah.id"],
+        ])
+        results = {"officials": 0, "errors": []}
+        adm._import_officials(ws, "S1", _Sb(), results, default_role=None)
+        assert results["officials"] == 0
+        assert any("Pejabat" in e and "tidak ada yang dikenali" in e.lower()
+                   for e in results["errors"]), results["errors"]
+
+
+def _flash_of(resp):
+    """The page body after the import redirect — the flash message lives in it."""
+    return resp.get_data(as_text=True)
+
+
+class TestCombinedTemplate:
+    def test_the_full_template_holds_every_named_sheet(self, app, monkeypatch):
+        import io
+        from openpyxl import load_workbook as _load
+        from app.utils import auth as authmod
+
+        monkeypatch.setattr(authmod, "_session_for", lambda token: {
+            "user_id": "U1", "email": "a@x", "name": "Admin",
+            "role": "admin_sekolah", "school_id": "S1", "status": "active",
+        })
+        monkeypatch.setattr(adm, "get_supabase", lambda: _Sb())
+        monkeypatch.setattr(adm, "_school_id", lambda: "S1")
+        monkeypatch.setattr(adm, "_get_email_domain", lambda sid: "sekolah.id")
+
+        client = app.test_client()
+        client.set_cookie("access_token", "tok")
+        resp = client.get("/admin-sekolah/download-template/semua")
+        assert resp.status_code == 200, resp.status_code
+        wb = _load(io.BytesIO(resp.data))
+        assert wb.sheetnames == ["Murid", "Guru", "Pejabat", "Mata Pelajaran"], wb.sheetnames
+        assert wb["Guru"].cell(row=1, column=4).value == "Mata Pelajaran"
 
 
 class TestHeaderDetection:

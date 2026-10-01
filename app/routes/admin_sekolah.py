@@ -524,6 +524,72 @@ def download_template_pejabat():
                      mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 
+@admin_sekolah_bp.route("/download-template/semua")
+@admin_sekolah_required
+def download_template_semua():
+    """One workbook, one tab per roster.
+
+    A school fills a teacher list, a pupil list and a head-teacher list, and the
+    three templates were three separate downloads — so the natural move is to
+    copy the teacher rows into the workbook that already holds the pupils. The
+    importer has always read every named sheet in one file; this template is the
+    file that makes that the easy path instead of the surprising one. The sheets
+    carry the same headers as the single-kind templates, so either route imports
+    identically.
+    """
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment
+    sid = _school_id()
+    domain = _get_email_domain(sid)
+    supabase = get_supabase()
+    subjects = supabase.table("subjects").select("name").eq("school_id", sid).execute().data or []
+    subj_names = [s["name"] for s in subjects]
+
+    def add_sheet(wb, title, headers, rows):
+        ws = wb.create_sheet(title)
+        hf = Font(bold=True, color="FFFFFF", size=11)
+        hfill = PatternFill(start_color="4338CA", end_color="4338CA", fill_type="solid")
+        for c, h in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=c, value=h)
+            cell.font = hf; cell.fill = hfill; cell.alignment = Alignment(horizontal="center")
+        for i, row in enumerate(rows, 2):
+            for c, value in enumerate(row, 1):
+                ws.cell(row=i, column=c, value=value)
+        for col in range(1, len(headers) + 1):
+            ws.column_dimensions[chr(64 + col)].width = 24
+        return ws
+
+    wb = Workbook()
+    wb.remove(wb.active)  # only the four named sheets, so nothing is unnamed
+    add_sheet(
+        wb, "Murid",
+        ["NISN", "Nama Lengkap", "Kelas", "Email", "No. HP", "Password"],
+        [("1234567801", "Ahmad Budiman", "VII-A", _generate_email("Ahmad Budiman", domain), "", _gen_password()),
+         ("1234567802", "Citra Dewi", "VII-B", _generate_email("Citra Dewi", domain), "", _gen_password())],
+    )
+    add_sheet(
+        wb, "Guru",
+        ["NIP", "Nama Lengkap", "Email", "Mata Pelajaran", "No. HP", "Email Pemulihan", "Password"],
+        [("19870101", "Budi Santoso", _generate_email("Budi Santoso", domain), subj_names[0] if subj_names else "", "", "", _gen_password()),
+         ("19900202", "Siti Rahma", _generate_email("Siti Rahma", domain), subj_names[1] if len(subj_names) > 1 else "", "", "", _gen_password())],
+    )
+    add_sheet(
+        wb, "Pejabat",
+        ["Jabatan", "Nama Lengkap", "Email", "No. HP"],
+        [("Kepala Sekolah", "Drs. Hasan Basri", _generate_email("Drs. Hasan Basri", domain), ""),
+         ("Wakil Kepala Sekolah", "Rina Marlina", _generate_email("Rina Marlina", domain), "")],
+    )
+    add_sheet(
+        wb, "Mata Pelajaran",
+        ["Nama", "Kode"],
+        [(subj_names[0] if subj_names else "Matematika", "MTK"),
+         ("Bahasa Indonesia", "BIN")],
+    )
+    buf = io.BytesIO(); wb.save(buf); buf.seek(0)
+    return send_file(buf, as_attachment=True, download_name="template_semua.xlsx",
+                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
 @admin_sekolah_bp.route("/import", methods=["GET", "POST"])
 @admin_sekolah_required
 def import_excel():
@@ -546,21 +612,43 @@ def import_excel():
 
     results = {"students": 0, "teachers": 0, "officials": 0, "subjects": 0,
                "subjects_updated": 0, "errors": []}
-    sheet_names_lower = {s.lower(): s for s in wb.sheetnames}
+
+    # A sheet is matched by its *normalised* name, not its exact spelling. A
+    # school that copies this workbook gets "Guru (2)", "Mata Pelajaran " or
+    # "Sheet1" for reasons that have nothing to do with the data, and matching
+    # the raw name turned that into a silent zero: the upload reported
+    # "0 murid, 0 guru, 0 mapel, 0 error", which reads as a clean run while
+    # nothing was imported at all. `_norm_header` already strips case, spaces
+    # and punctuation; reuse it here so the two readers agree on what a name is.
+    sheet_lookup = {}
+    for name in wb.sheetnames:
+        base = _norm_header(name)
+        sheet_lookup.setdefault(base, name)
+        # A copied tab is "Guru (2)" / "Guru2"; the digits are Excel's, not the
+        # school's, so the trimmed spelling points at the same worksheet.
+        trimmed = re.sub(r"\d+$", "", base)
+        if trimmed and trimmed != base:
+            sheet_lookup.setdefault(trimmed, name)
+    used_sheets = set()
+
+    def _find(keys):
+        """The worksheet whose normalised title is one of `keys`, else None."""
+        for key in keys:
+            actual = sheet_lookup.get(_norm_header(key))
+            if actual is not None:
+                used_sheets.add(actual)
+                return wb[actual]
+        return None
 
     # ── Sheet: Murid / Students ──
-    for key in ("murid", "siswa", "students", "student"):
-        if key in sheet_names_lower:
-            ws = wb[sheet_names_lower[key]]
-            _import_students(ws, sid, supabase, results)
-            break
+    ws = _find(("murid", "siswa", "students", "student"))
+    if ws is not None:
+        _import_students(ws, sid, supabase, results)
 
     # ── Sheet: Guru / Teachers ──
-    for key in ("guru", "teachers", "teacher"):
-        if key in sheet_names_lower:
-            ws = wb[sheet_names_lower[key]]
-            _import_teachers(ws, sid, supabase, results)
-            break
+    ws = _find(("guru", "teachers", "teacher"))
+    if ws is not None:
+        _import_teachers(ws, sid, supabase, results)
 
     # ── Sheet: Pejabat sekolah (kepala sekolah & wakil kepala sekolah) ──
     #
@@ -569,29 +657,37 @@ def import_excel():
     # or one combined "Pejabat" sheet whose Role column decides. An officials sheet
     # had no importer at all before this — the only way to create a head teacher was
     # the Officials page, one account per form submit.
-    for key in ("kepala sekolah", "kepalasekolah", "principal", "kepala"):
-        if key in sheet_names_lower:
-            _import_officials(wb[sheet_names_lower[key]], sid, supabase, results,
-                              default_role="principal")
-            break
-    for key in ("wakil kepala sekolah", "wakilkepalasekolah", "vice principal",
-                "vice_principal", "wakil"):
-        if key in sheet_names_lower:
-            _import_officials(wb[sheet_names_lower[key]], sid, supabase, results,
-                              default_role="vice_principal")
-            break
-    for key in ("pejabat", "pejabat sekolah", "officials", "official"):
-        if key in sheet_names_lower:
-            _import_officials(wb[sheet_names_lower[key]], sid, supabase, results,
-                              default_role=None)
-            break
+    ws = _find(("kepala sekolah", "kepalasekolah", "principal", "kepala"))
+    if ws is not None:
+        _import_officials(ws, sid, supabase, results, default_role="principal")
+    ws = _find(("wakil kepala sekolah", "wakilkepalasekolah", "vice principal",
+                "vice_principal", "wakil"))
+    if ws is not None:
+        _import_officials(ws, sid, supabase, results, default_role="vice_principal")
+    ws = _find(("pejabat", "pejabat sekolah", "officials", "official"))
+    if ws is not None:
+        _import_officials(ws, sid, supabase, results, default_role=None)
 
     # ── Sheet: Mata Pelajaran / Subjects ──
-    for key in ("mata pelajaran", "pelajaran", "subjects", "subject", "mapel"):
-        if key in sheet_names_lower:
-            ws = wb[sheet_names_lower[key]]
-            _import_subjects(ws, sid, supabase, results)
-            break
+    ws = _find(("mata pelajaran", "pelajaran", "subjects", "subject", "mapel"))
+    if ws is not None:
+        _import_subjects(ws, sid, supabase, results)
+
+    # Never let a workbook that reached no importer read as success. Only the
+    # sheets present are processed, and a sheet this build does not recognise is
+    # named back to the uploader — "0 murid, 0 guru, 0 error" must not be the
+    # only answer to "why did my file do nothing".
+    ignored = [n for n in wb.sheetnames if n not in used_sheets]
+    if not used_sheets:
+        found = ", ".join(wb.sheetnames) or "(kosong)"
+        results["errors"].append(
+            "Tidak ada sheet yang dikenali. Sheet di file ini: "
+            f"{found}. Beri nama tab Murid, Guru, Pejabat, atau Mata Pelajaran."
+        )
+    elif ignored:
+        results["errors"].append(
+            "Sheet diabaikan (nama tidak dikenali): " + ", ".join(ignored)
+        )
 
     log_activity("import", "school", sid, new_data={"students": results["students"], "teachers": results["teachers"], "officials": results["officials"], "subjects": results["subjects"], "errors": len(results["errors"])}, user_id=g.user_id)
     subj_msg = f"{results['subjects']} mapel"
@@ -680,9 +776,13 @@ def _import_students(ws, sid, supabase, results):
 def _import_teachers(ws, sid, supabase, results):
     subjects_cache = {}
     columns = _header_columns(ws)
+    seen = 0
+    imported_before = results.setdefault("teachers", 0)
+    errors_before = len(results.setdefault("errors", []))
     for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), 2):
         if _row_is_blank(row):
             continue
+        seen += 1
         try:
             cols = [str(c or "").strip() for c in row]
             if (columns.get("name") is not None
@@ -751,6 +851,20 @@ def _import_teachers(ws, sid, supabase, results):
                 f"Baris {row_idx}: {getattr(e, 'user_message', str(e))}"
             )
 
+    # A sheet with rows that all vanish is the silent version of a failed import:
+    # the upload says "0 guru, 0 error", and the operator has nothing to act on.
+    # Name the sheet and the header it expected instead.
+    # Only when the sheet produced *nothing at all* — not one account and not one
+    # named row error. A sheet whose rows were each rejected for a real reason
+    # (a duplicate NIP, a bad email) already says why; adding "unrecognised" on top
+    # would bury the cause it worked hard to name.
+    if seen and results.get("teachers", 0) == imported_before \
+            and len(results["errors"]) == errors_before:
+        results["errors"].append(
+            f"Sheet '{ws.title}': {seen} baris terbaca tetapi tidak ada yang dikenali. "
+            "Pastikan baris pertama adalah header (NIP, Nama Lengkap, Email, Mata Pelajaran)."
+        )
+
 
 def _import_officials(ws, sid, supabase, results, default_role=None):
     """Import a head-teacher / vice-head-teacher sheet.
@@ -782,9 +896,13 @@ def _import_officials(ws, sid, supabase, results, default_role=None):
         return default_role
 
     columns = _header_columns(ws)
+    seen = 0
+    imported_before = results.setdefault("officials", 0)
+    errors_before = len(results.setdefault("errors", []))
     for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), 2):
         if _row_is_blank(row):
             continue
+        seen += 1
         role_raw = ""
         try:
             if columns.get("name") is not None:
@@ -816,6 +934,13 @@ def _import_officials(ws, sid, supabase, results, default_role=None):
             results["errors"].append(
                 f"Baris {row_idx}: {getattr(e, 'user_message', str(e))}"
             )
+
+    if seen and results.get("officials", 0) == imported_before \
+            and len(results["errors"]) == errors_before:
+        results["errors"].append(
+            f"Sheet '{ws.title}': {seen} baris terbaca tetapi tidak ada yang dikenali. "
+            "Pastikan kolom Jabatan berisi Kepala Sekolah atau Wakil Kepala Sekolah."
+        )
 
 
 def _import_subjects(ws, sid, supabase, results):
