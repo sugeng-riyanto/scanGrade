@@ -92,7 +92,7 @@
       "frozen": false
     },
     "admin_sekolah/import.html": {
-      "pairs": 49,
+      "pairs": 63,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -146,7 +146,7 @@
       "frozen": true
     },
     "admin_sekolah/students.html": {
-      "pairs": 49,
+      "pairs": 57,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -165,7 +165,7 @@
     },
     "admin_sekolah/teachers.html": {
       "pairs": 0,
-      "leftovers": 28,
+      "leftovers": 34,
       "coverage": 0.0,
       "frozen": false
     },
