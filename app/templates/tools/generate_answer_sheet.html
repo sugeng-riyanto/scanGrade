@@ -230,13 +230,13 @@
                                         <template x-for="q in Math.min(totalQ, 25)" :key="q">
                                             <div class="flex items-center gap-[1px]">
                                                 <span class="text-[4px] text-gray-400 w-[8px] text-right shrink-0" x-text="q"></span>
+                                                {# One real element, because an x-for clones only its
+                                                   first child: two sibling x-if templates made the
+                                                   root inert and no bubble was drawn at all. #}
                                                 <template x-for="opt in optionsCount" :key="opt">
-                                                    <template x-if="markType === 'circle'">
-                                                        <div class="rounded-full border border-black shrink-0" style="width:5px;height:5px"></div>
-                                                    </template>
-                                                    <template x-if="markType === 'square'">
-                                                        <div class="border border-black shrink-0" style="width:4.5px;height:4.5px"></div>
-                                                    </template>
+                                                    <div class="border border-black shrink-0"
+                                                         :class="markType === 'circle' ? 'rounded-full' : ''"
+                                                         :style="markType === 'circle' ? 'width:5px;height:5px' : 'width:4.5px;height:4.5px'"></div>
                                                 </template>
                                             </div>
                                         </template>
