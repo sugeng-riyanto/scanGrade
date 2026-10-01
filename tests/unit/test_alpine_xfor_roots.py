@@ -47,14 +47,14 @@ def blank_bodies(text: str) -> str:
     return text
 
 
-def xfor_roots(text: str) -> list[tuple[int, list[str]]]:
-    """For each `<template x-for=...>`, the tag names of its DIRECT children."""
+def _roots(text: str, directive: str) -> list[tuple[int, list[str]]]:
+    """For each `<template DIRECTIVE=...>`, the tag names of its DIRECT children."""
     text = blank_bodies(text)
     found = []
     for match in _TAG.finditer(text):
         if match.group(1) or match.group(2).lower() != "template":
             continue
-        if "x-for" not in match.group(3):
+        if directive not in match.group(3):
             continue
         line = text.count("\n", 0, match.start()) + 1
         roots: list[str] = []
@@ -74,6 +74,14 @@ def xfor_roots(text: str) -> list[tuple[int, list[str]]]:
                 stack.append(name)
         found.append((line, roots))
     return found
+
+
+def xfor_roots(text: str) -> list[tuple[int, list[str]]]:
+    return _roots(text, "x-for")
+
+
+def xif_roots(text: str) -> list[tuple[int, list[str]]]:
+    return _roots(text, "x-if")
 
 
 def test_every_xfor_template_clones_a_rendered_element():
@@ -96,6 +104,48 @@ def test_every_xfor_template_clones_a_rendered_element():
     assert not offenders, (
         "these Alpine x-for templates cannot render what they describe:\n  "
         + "\n  ".join(offenders))
+
+
+def test_the_same_rule_holds_for_xif():
+    """`x-if` clones one element too, so it fails in exactly the same way.
+
+    The sweep that found the matrix's empty tbody found this shape only in
+    `tools/generate_answer_sheet.html` — two sibling `x-if` templates under an
+    `x-for`, whose option bubbles were never drawn. Both directives are covered,
+    because a guard that reads only one of them lets the defect move next door.
+    """
+    offenders = []
+    for page in sorted(TEMPLATES.rglob("*.html")):
+        text = page.read_text(encoding="utf-8", errors="replace")
+        if "x-if" not in text:
+            continue
+        for line, roots in xif_roots(text):
+            if len(roots) != 1:
+                offenders.append(
+                    f"{page.relative_to(TEMPLATES)}:{line} has {len(roots)} root "
+                    f"elements {roots}")
+            elif roots[0] == "template":
+                offenders.append(
+                    f"{page.relative_to(TEMPLATES)}:{line} roots on an inert "
+                    f"<template>, which renders nothing")
+    assert not offenders, (
+        "these Alpine x-if templates cannot render what they describe:\n  "
+        + "\n  ".join(offenders))
+
+
+def test_the_xif_rule_bites_on_the_defect_it_describes():
+    # Two roots under one x-if: Alpine clones the first and the second is dropped.
+    broken = ('<template x-if="show"><div class="a"></div><span class="b"></span>'
+              '</template>')
+    roots = [r for _line, r in xif_roots(broken)]
+    assert roots and any(len(r) != 1 for r in roots), \
+        "the x-if multi-root signal stopped firing"
+    # …and an inert root, the shape that killed the matrix tbody.
+    inert = '<template x-if="show"><template><div></div></template></template>'
+    assert any(r == ["template"] for _l, r in xif_roots(inert)), \
+        "the x-if inert-root signal stopped firing"
+    assert all(r == ["div"] for _l, r in xif_roots(
+        '<template x-if="ok"><div></div></template>')), "a lone root must stay legal"
 
 
 def test_the_rule_bites_on_the_defect_it_describes():

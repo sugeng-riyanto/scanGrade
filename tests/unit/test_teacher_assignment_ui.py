@@ -283,6 +283,19 @@ class TestAssignmentEndpoints:
         assert body["pairs"] == [{"class_id": "c1", "subject_id": "s1"}]
         assert {c["id"] for c in body["classes"]} == {"c1", "c2"}
 
+    def test_get_offers_the_legacy_subject_as_a_draft_only(self, app, monkeypatch):
+        # A teacher with no assignment rows but a legacy `subject_id`: the matrix must
+        # say so, so the admin can adopt it — and the GET must not write anything.
+        sb = _sb(teachers=[{"id": TEACHER, "school_id": SCHOOL,
+                            "employee_id": "T1", "subject_id": "s2"}])
+        client = _client(app, monkeypatch, sb)
+        r = client.get(f"/admin-sekolah/teachers/{TEACHER}/assignments")
+        assert r.status_code == 200, r.status_code
+        body = r.get_json()
+        assert body["legacy_subject_id"] == "s2"
+        assert body["pairs"] == []
+        assert sb.writes == [], "reading the matrix must never write the draft"
+
     def test_another_schools_teacher_is_a_404_not_a_matrix(self, app, monkeypatch):
         client = _client(app, monkeypatch, _sb())
         r = client.get("/admin-sekolah/teachers/teacher-elsewhere/assignments")
@@ -498,6 +511,32 @@ class TestTemplateWiring:
             "the old cramped placement inside the action cell is back")
         assert 'x-data="{ editing: false }"' in src, (
             "the tbody owns `editing` so both its rows can read it")
+
+    def test_the_matrix_counts_coverage_live(self):
+        src = TEMPLATE.read_text(encoding="utf-8")
+        assert "subjectCount(" in src and "classCount(" in src
+        # A browser run caught this: `isOn(c, s)` with a subject OBJECT makes the key
+        # `c0|[object Object]`, so the class counter read a silent zero while the
+        # checkbox beside it was ticked. The id is the argument.
+        assert "this.isOn(c, s.id)" in src, (
+            "classCount must pass the subject id, not the subject object")
+        assert "' dari ' + classes.length + ' kelas'" in src, \
+            "each subject needs 'X dari Y kelas'"
+        assert "' dari ' + subjects.length + ' mapel'" in src, \
+            "each class needs 'X dari Z mapel'"
+
+    def test_the_legacy_subject_is_offered_as_a_confirmable_draft(self):
+        src = TEMPLATE.read_text(encoding="utf-8")
+        # Not `legacySubjectId`: `xId: '…'` is the shape the i18n gate reads as a
+        # bilingual pair key, and a subject id is not a translation.
+        assert "legacySubject" in src, "the modal must know the legacy column"
+        assert "legacySubjectId" not in src
+        assert "fillLegacyDraft()" in src, "the hint must be adoptable in one click"
+        assert "legacy_subject_id" in src, "the draft comes from the GET, not a guess"
+        assert "hasPairs()" in src, (
+            "the offer must withdraw once the teacher has any assignment")
+        # The draft writes nothing on its own: the only write path is Simpan.
+        assert "save($event)" in src
 
     def test_the_matrix_can_widen_to_the_viewport(self):
         src = TEMPLATE.read_text(encoding="utf-8")

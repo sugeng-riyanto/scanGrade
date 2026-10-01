@@ -370,6 +370,16 @@
                 <div x-show="error" class="px-5 py-3 text-sm text-red-600" x-text="error"></div>
 
                 <div class="overflow-auto px-3 py-3 flex-1" x-show="!loading && !error">
+                    {# A teacher with no assignment rows but a legacy `subject_id` still says
+                       something about what they teach. It is a subject, not a pair (no
+                       class), so it is offered as a DRAFT the admin ticks, adjusts and
+                       saves — nothing is written until Simpan. #}
+                    <div x-show="legacySubject && !hasPairs()"
+                         class="mb-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 flex items-center justify-between gap-3 flex-wrap">
+                        <span>Belum ada penugasan. Kolom mapel lama masih menyimpan <b x-text="subjectName(legacySubject)"></b> — jadikan draf dari mapel itu?</span>
+                        <button type="button" @click="fillLegacyDraft()"
+                                class="px-2.5 py-1.5 bg-amber-100 text-amber-800 rounded-lg font-bold hover:bg-amber-200 shrink-0">Isi sebagai draf</button>
+                    </div>
                     <p class="text-xs text-stone-400 pb-2">Pilih kelas tertentu dengan mengklik sel, atau pakai tombol <b>semua kelas</b> / <b>semua mapel</b> untuk seluruh kolom / baris.</p>
                     <table class="w-full text-xs">
                         <thead class="bg-stone-50 sticky top-0 sg-layer-sticky">
@@ -381,6 +391,8 @@
                                         <button type="button" @click="toggleSubjectAll(s.id)"
                                                 class="mt-1 text-[10px] font-bold text-indigo-600 hover:underline"
                                                 title="Pilih/batalkan semua kelas untuk mapel ini">semua kelas</button>
+                                        <div class="text-[9px] font-normal text-stone-400 mt-0.5"
+                                             x-text="subjectCount(s.id) + ' dari ' + classes.length + ' kelas'"></div>
                                     </th>
                                 </template>
                             </tr>
@@ -404,6 +416,10 @@
                                         <td class="sticky left-0 bg-white px-2 py-1 font-semibold text-stone-700 sg-layer-sticky">
                                             <div class="flex items-center justify-between gap-2">
                                                 <span x-text="row.cls.name"></span>
+                                                {# A live count, so the admin can see the shortcut reached the
+                                                   coverage they meant before saving. #}
+                                                <span class="text-[9px] font-normal text-stone-400 shrink-0"
+                                                      x-text="classCount(row.cls.id) + ' dari ' + subjects.length + ' mapel'"></span>
                                                 {# The mirror of "semua kelas": every subject for ONE class,
                                                    for the common case where a form teacher takes a whole
                                                    class. Kept a click away so checking a 6x23 grid by
@@ -482,6 +498,10 @@ function assignmentMatrix() {
         yearName: '',
         classes: [],
         subjects: [],
+        // The legacy single-subject column, offered as a draft only. Named without the
+        // Id suffix on purpose: the i18n gate reads an Id-suffixed key whose value is a
+        // quoted string as a bilingual pair, and this is a subject id, not copy.
+        legacySubject: '',
         // "classId|subjectId" -> true
         selected: {},
         initial: {},
@@ -506,6 +526,27 @@ function assignmentMatrix() {
             const allOn = ids.every(s => this.isOn(c, s));
             const next = Object.assign({}, this.selected);
             ids.forEach(s => { if (allOn) { delete next[this.key(c, s)]; } else { next[this.key(c, s)] = true; } });
+            this.selected = next;
+        },
+        // How far a shortcut reached: "X dari Y kelas" under a subject, "X dari Z
+        // mapel" beside a class. Recomputed from `selected`, so it moves the moment a
+        // cell is clicked — the admin sees the coverage before pressing Simpan.
+        subjectCount(s) { return this.classes.filter(c => this.isOn(c.id, s)).length; },
+        // `s.id`, not `s`: `key()` concatenates, so a subject object would make the
+        // key `c0|[object Object]` and the count would read a silent zero.
+        classCount(c) { return this.subjects.filter(s => this.isOn(c, s.id)).length; },
+        hasPairs() { return Object.keys(this.initial).length > 0; },
+        subjectName(id) {
+            const s = this.subjects.find(x => x.id === id);
+            return s ? s.name : id;
+        },
+        // Ticks the legacy subject for every class as a starting point. It writes
+        // nothing: the admin still reviews the cells and presses Simpan, which is the
+        // only path to the database.
+        fillLegacyDraft() {
+            if (!this.legacySubject) return;
+            const next = Object.assign({}, this.selected);
+            this.classes.forEach(c => { next[this.key(c.id, this.legacySubject)] = true; });
             this.selected = next;
         },
         grades() {
@@ -541,6 +582,7 @@ function assignmentMatrix() {
                 if (!r.ok) { this.error = d.error || 'Gagal memuat penugasan'; this.loading = false; return; }
                 this.classes = d.classes || [];
                 this.subjects = d.subjects || [];
+                this.legacySubject = d.legacy_subject_id || '';
                 this.yearName = (d.year && d.year.name) || '';
                 const sel = {}, init = {};
                 (d.pairs || []).forEach(p => { sel[this.key(p.class_id, p.subject_id)] = true; init[this.key(p.class_id, p.subject_id)] = true; });
