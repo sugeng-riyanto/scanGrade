@@ -38,7 +38,7 @@
         {% if trial.duplicates %}
         <div class="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-5 text-sm text-amber-800">
             <p class="font-bold"><i class="fas fa-triangle-exclamation mr-1"></i>
-                <span x-text="t('Tabel menyimpan lebih dari satu baris:','The table holds more than one row:')></span>
+                <span x-text="t('Tabel menyimpan lebih dari satu baris:','The table holds more than one row:')"></span>
                 {{ trial.duplicates + 1 }}
             </p>
             <p class="mt-1" x-text="t('Yang berlaku adalah baris yang terakhir diubah, dan itulah yang dicetak di atas. Jalankan supabase/migrations/034_trial_settings_singleton.sql untuk merapikannya, supaya hanya satu baris yang tersisa.','The row in force is the one changed last, which is what is printed above. Apply supabase/migrations/034_trial_settings_singleton.sql to clean it up, so only one row remains.')"></p>
