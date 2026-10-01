@@ -131,6 +131,75 @@ def year_of_submission(supabase, submission_id) -> str | None:
     return year_of_exam(supabase, rows[0].get("exam_id"))
 
 
+def year_of_class(supabase, class_id) -> str | None:
+    """The year a class belongs to. A class is a year's roster, not a permanent one."""
+    if not class_id:
+        return None
+    try:
+        rows = (supabase.table("classes").select("school_year_id")
+                .eq("id", class_id).limit(1).execute().data or [])
+    except Exception:
+        logger.debug("class year read failed for %s", class_id, exc_info=True)
+        return None
+    return (rows[0].get("school_year_id") if rows else None)
+
+
+def year_of_whiteboard(supabase, whiteboard_id) -> str | None:
+    """A whiteboard is a class's surface, so its year is the class's year."""
+    if not whiteboard_id:
+        return None
+    try:
+        rows = (supabase.table("whiteboards").select("class_id")
+                .eq("id", whiteboard_id).limit(1).execute().data or [])
+    except Exception:
+        return None
+    if not rows:
+        return None
+    return year_of_class(supabase, rows[0].get("class_id"))
+
+
+def year_of_schedule(supabase, schedule_id) -> str | None:
+    """An invigilation sitting is a paper in a room, so its year is the paper's."""
+    if not schedule_id:
+        return None
+    try:
+        rows = (supabase.table("invigilation_schedules").select("exam_id")
+                .eq("id", schedule_id).limit(1).execute().data or [])
+    except Exception:
+        return None
+    if not rows:
+        return None
+    return year_of_exam(supabase, rows[0].get("exam_id"))
+
+
+def year_of_invigilator_assignment(supabase, assignment_id) -> str | None:
+    """An invigilator's duty reaches the year through the sitting it belongs to."""
+    if not assignment_id:
+        return None
+    try:
+        rows = (supabase.table("invigilator_assignments").select("schedule_id")
+                .eq("id", assignment_id).limit(1).execute().data or [])
+    except Exception:
+        return None
+    if not rows:
+        return None
+    return year_of_schedule(supabase, rows[0].get("schedule_id"))
+
+
+def year_of_retake_request(supabase, request_id) -> str | None:
+    """A retake request names the paper the pupil wants another sitting of."""
+    if not request_id:
+        return None
+    try:
+        rows = (supabase.table("exam_retake_requests").select("exam_id")
+                .eq("id", request_id).limit(1).execute().data or [])
+    except Exception:
+        return None
+    if not rows:
+        return None
+    return year_of_exam(supabase, rows[0].get("exam_id"))
+
+
 def write_refusal(supabase, year_id):
     """Return a reason string when this year may not be written to, else None.
 

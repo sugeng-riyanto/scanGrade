@@ -6,6 +6,7 @@ import string
 import time
 from datetime import datetime, timezone, date
 from urllib.parse import urlencode
+from app.decorators.year_lock import open_year_required
 
 from flask import Blueprint, render_template, g, request, jsonify, redirect, flash, send_file, current_app
 from openpyxl import load_workbook, Workbook
@@ -1332,6 +1333,7 @@ def create_class():
 @admin_sekolah_bp.route("/classes/<class_id>/edit", methods=["POST"])
 @admin_sekolah_required
 @require_school_access("classes", "class_id")
+@open_year_required("class_id")
 def edit_class(class_id):
     supabase = get_supabase()
     wants_json = _wants_json()
@@ -1384,6 +1386,7 @@ def edit_class(class_id):
 @admin_sekolah_bp.route("/classes/<class_id>/delete", methods=["POST"])
 @admin_sekolah_required
 @require_school_access("classes", "class_id")
+@open_year_required("class_id")
 def delete_class(class_id):
     supabase = get_supabase()
     wants_json = _wants_json()

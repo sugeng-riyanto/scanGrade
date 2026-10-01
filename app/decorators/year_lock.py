@@ -22,6 +22,19 @@ import logging
 
 from flask import flash, jsonify, redirect, request
 
+#: Which resolver answers for which id key. A key is named by the route, and its
+#: *name* says what kind of resource it addresses — so the decorator can reach the
+#: year of a whiteboard, a class, a sitting or an invigilator's duty, not only of an
+#: exam and a submission.
+RESOLVERS = {
+    "submission_id": "year_of_submission",
+    "whiteboard_id": "year_of_whiteboard",
+    "class_id": "year_of_class",
+    "schedule_id": "year_of_schedule",
+    "assignment_id": "year_of_invigilator_assignment",
+    "request_id": "year_of_retake_request",
+}
+
 logger = logging.getLogger(__name__)
 
 #: A refusal, as an ``(id, en)`` message pair is not used here: the flash text is
@@ -35,6 +48,28 @@ CLOSED_YEAR_API = "Tahun ajaran sudah ditutup (arsip)"
 def _wants_json() -> bool:
     return (request.is_json or request.path.startswith("/api/")
             or "application/json" in (request.headers.get("Accept") or ""))
+
+
+def _lookup(candidate: str, kwargs: dict):
+    """The id for `candidate`, wherever this request carries it.
+
+    A route may put the resource id in the URL, in a form field, or in the JSON
+    body — this app does all three, and the grading endpoints are body-only. The
+    URL is asked first (it is the cheap, unambiguous one), then the form/query
+    string, then the JSON body. `request.values` and `request.get_json` are
+    cached by Werkzeug, so reading them here does not consume the body the view
+    is about to parse.
+    """
+    value = kwargs.get(candidate)
+    if not value and request.view_args:
+        value = request.view_args.get(candidate)
+    if not value:
+        value = request.values.get(candidate)
+    if not value:
+        body = request.get_json(silent=True)
+        if isinstance(body, dict):
+            value = body.get(candidate)
+    return value
 
 
 def open_year_required(*id_keys):
@@ -54,9 +89,7 @@ def open_year_required(*id_keys):
 
             resource_id, key = None, None
             for candidate in id_keys:
-                value = kwargs.get(candidate)
-                if value is None and request.view_args:
-                    value = request.view_args.get(candidate)
+                value = _lookup(candidate, kwargs)
                 if value:
                     resource_id, key = value, candidate
                     break
@@ -68,10 +101,9 @@ def open_year_required(*id_keys):
                 return f(*args, **kwargs)
 
             supabase = get_supabase()
-            if key and key.endswith("submission_id"):
-                year_id = academic_year.year_of_submission(supabase, resource_id)
-            else:
-                year_id = academic_year.year_of_exam(supabase, resource_id)
+            resolver = getattr(academic_year,
+                               RESOLVERS.get(key, "year_of_exam"))
+            year_id = resolver(supabase, resource_id)
 
             reason = academic_year.write_refusal(supabase, year_id)
             if reason:

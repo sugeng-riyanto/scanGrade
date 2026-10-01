@@ -23,6 +23,7 @@ from app.services.student_import import create_student_account
 from app.utils.logger import get_logger
 from app.errors import ValidationError, NotFoundError, GradingError, AIProcessingError
 from app.utils.rate_limiter import limiter
+from app.decorators.year_lock import open_year_required
 
 #: This module's own logger. `current_app.logger` needs a request, and the lock's
 #: fallback path must be able to say why it fell back from places that have none.
@@ -195,6 +196,7 @@ def _check_rate_limit(row, server_now, min_interval=5):
 
 @api_bp.route("/violation/log", methods=["POST"])
 @login_required
+@open_year_required("exam_id")
 def log_violation():
     """Record anti-cheat events sent by the exam page.
 
@@ -265,6 +267,7 @@ def log_violation():
 
 @api_bp.route("/student/force-submit", methods=["POST"])
 @login_required
+@open_year_required("exam_id")
 def force_submit():
     """Force-submit an exam when anti-cheat max violations reached.
     This is a fallback when the Alpine component cannot be triggered.
@@ -709,6 +712,7 @@ def scan_bulk():
 @api_bp.route("/scan/bulk-save", methods=["POST"])
 @login_required
 @_rate_limit("10 per minute")
+@open_year_required("exam_id")
 def scan_bulk_save():
     """Save multiple scan results as submissions at once."""
     if g.get("user_role") not in ("guru", "admin_sekolah", "super_admin"):
@@ -875,6 +879,7 @@ def _get_exam_cached(exam_id, supabase):
 
 @api_bp.route("/student/sync-draft", methods=["POST"])
 @login_required
+@open_year_required("exam_id")
 def student_sync_draft():
     """Sync student draft — lightweight MCQ/text every 20s, canvas every 60s."""
     data = request.get_json(silent=True)
@@ -1049,6 +1054,7 @@ def student_sync_draft():
 
 @api_bp.route("/grade/auto-save/<submission_id>", methods=["POST"])
 @login_required
+@open_year_required("submission_id")
 def grade_auto_save(submission_id):
     """Auto-save teacher's in-progress grading."""
     data = request.get_json()
@@ -1080,6 +1086,7 @@ def grade_auto_save(submission_id):
 
 @api_bp.route("/grade/batch", methods=["POST"])
 @login_required
+@open_year_required("exam_id")
 def grade_batch():
     """Batch grade all submissions for an exam. Optimized for <2s grading speed."""
     import json, time as _time
@@ -1173,6 +1180,7 @@ def grade_batch():
 
 @api_bp.route("/student/penalty-appeal", methods=["POST"])
 @login_required
+@open_year_required("submission_id")
 def api_penalty_appeal():
     """Student submits a penalty appeal with reasoning."""
     data = request.get_json(silent=True) or {}
@@ -1227,6 +1235,7 @@ def api_penalty_appeal():
 @api_bp.route("/scan/save", methods=["POST"])
 @login_required
 @_rate_limit("30 per minute")
+@open_year_required("exam_id")
 def scan_save():
     """Save scanned answers as a submission."""
     data = request.get_json()
@@ -1994,6 +2003,7 @@ def _generate_report_excel(exam, students, stats):
 @api_bp.route("/ai/grade-essay", methods=["POST"])
 @login_required
 @require_subscription("ai_grading")
+@open_year_required("submission_id")
 def ai_grade_essay():
     """Grade a single essay answer."""
     if g.get("user_role") not in ("guru", "admin_sekolah", "super_admin"):
@@ -2034,6 +2044,7 @@ def ai_grade_essay():
 @api_bp.route("/ai/grade-bulk", methods=["POST"])
 @login_required
 @require_subscription("ai_grading")
+@open_year_required("exam_id")
 def ai_grade_bulk():
     """Grade all pending essay questions for an exam or submission list."""
     if g.get("user_role") not in ("guru", "admin_sekolah", "super_admin"):

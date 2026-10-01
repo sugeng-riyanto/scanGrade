@@ -22,6 +22,7 @@ from app.services import invigilation
 from app.utils.rate_limiter import limiter
 from app.utils.req_cache import (active_whiteboards_for, class_row, memo,
                                  school_features, school_subject_count)
+from app.decorators.year_lock import open_year_required
 
 student_bp = Blueprint("student", __name__)
 
@@ -674,6 +675,7 @@ def api_recover_exam():
 
 @student_bp.route("/exams/<exam_id>/submit", methods=["POST"])
 @login_required
+@open_year_required("exam_id")
 def submit_exam(exam_id):
     # Check subscription
     from app.utils.auth import check_subscription_write
@@ -925,6 +927,7 @@ def _retake_candidates(supabase, submissions: list[dict]) -> list[dict]:
 
 @student_bp.route("/retake-requests", methods=["POST"])
 @login_required
+@open_year_required("exam_id")
 def request_retake():
     """Ask to sit a paper again. The invigilator of that class decides.
 
@@ -1365,6 +1368,7 @@ def download_result_pdf(submission_id):
 
 @student_bp.route("/submissions/<submission_id>/retract", methods=["POST"])
 @login_required
+@open_year_required("submission_id")
 def retract_submission(submission_id):
     supabase = get_supabase()
     # Scoped to the caller, so another student's submission simply does not match.
@@ -1409,12 +1413,14 @@ def retract_submission(submission_id):
 
 @student_bp.route("/submissions/<submission_id>/toggle-visibility", methods=["POST"])
 @login_required
+@open_year_required("submission_id")
 def toggle_submission_visibility(submission_id):
     return jsonify({"error": "Fitur belum tersedia (migrasi DB belum dijalankan)"}), 501
 
 
 @student_bp.route("/submissions/<submission_id>/delete", methods=["POST"])
 @login_required
+@open_year_required("submission_id")
 def delete_submission(submission_id):
     if g.get("user_role") == "murid":
         return jsonify({"error": "Siswa tidak bisa menghapus submission"}), 403

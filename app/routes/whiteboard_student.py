@@ -6,6 +6,7 @@ from app.services.whiteboard_service import (
     log_op, log_reaction, log_anti_cheat, save_snapshot, export_pdf,
 )
 from app.utils.auth import get_supabase
+from app.decorators.year_lock import open_year_required
 
 whiteboard_student_bp = Blueprint("whiteboard_student", __name__)
 
@@ -71,6 +72,7 @@ def api_get_ops(whiteboard_id):
 
 @whiteboard_student_bp.route("/api/whiteboard/<whiteboard_id>/reaction", methods=["POST"])
 @login_required
+@open_year_required("whiteboard_id")
 def api_reaction(whiteboard_id):
     data = request.get_json() or {}
     emoji = data.get("emoji", "")
@@ -81,6 +83,7 @@ def api_reaction(whiteboard_id):
 
 @whiteboard_student_bp.route("/api/whiteboard/<whiteboard_id>/anti-cheat", methods=["POST"])
 @login_required
+@open_year_required("whiteboard_id")
 def api_anti_cheat(whiteboard_id):
     data = request.get_json() or {}
     log_anti_cheat(whiteboard_id, data.get("event_type", "unknown"), data.get("event_data"))

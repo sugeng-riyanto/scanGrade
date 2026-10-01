@@ -10,6 +10,7 @@ from app.services.whiteboard_service import (
     export_pdf, is_member, can_annotate, UPLOAD_DIR,
 )
 from app.utils.auth import get_supabase
+from app.decorators.year_lock import open_year_required
 
 whiteboard_teacher_bp = Blueprint("whiteboard_teacher", __name__)
 
@@ -82,6 +83,7 @@ def whiteboard_download(whiteboard_id):
 @whiteboard_teacher_bp.route("/api/whiteboard/create", methods=["POST"])
 @login_required
 @guru_required
+@open_year_required("class_id")
 def api_create():
     data = request.get_json() or {}
     title = data.get("title", "").strip()
@@ -100,6 +102,7 @@ def api_create():
 @login_required
 @guru_required
 @require_school_access("whiteboards", "whiteboard_id")
+@open_year_required("whiteboard_id")
 def api_update(whiteboard_id):
     data = request.get_json() or {}
     if "status" in data and data["status"] == "ended":
@@ -112,6 +115,7 @@ def api_update(whiteboard_id):
 @login_required
 @guru_required
 @require_school_access("whiteboards", "whiteboard_id")
+@open_year_required("whiteboard_id")
 def api_delete(whiteboard_id):
     try:
         delete_whiteboard(whiteboard_id)
@@ -133,6 +137,7 @@ def api_get_members(whiteboard_id):
 @login_required
 @guru_required
 @require_school_access("whiteboards", "whiteboard_id")
+@open_year_required("whiteboard_id")
 def api_add_members(whiteboard_id):
     data = request.get_json() or {}
     student_ids = data.get("student_ids", [])
@@ -144,6 +149,7 @@ def api_add_members(whiteboard_id):
 @login_required
 @guru_required
 @require_school_access("whiteboards", "whiteboard_id")
+@open_year_required("whiteboard_id")
 def api_remove_member(whiteboard_id, student_id):
     remove_member(whiteboard_id, student_id)
     return jsonify({"success": True})
@@ -153,6 +159,7 @@ def api_remove_member(whiteboard_id, student_id):
 @login_required
 @guru_required
 @require_school_access("whiteboards", "whiteboard_id")
+@open_year_required("whiteboard_id")
 def api_set_permission(whiteboard_id):
     data = request.get_json() or {}
     student_id = data.get("student_id")
@@ -176,6 +183,7 @@ def api_get_slides(whiteboard_id):
 @login_required
 @guru_required
 @require_school_access("whiteboards", "whiteboard_id")
+@open_year_required("whiteboard_id")
 def api_create_slide(whiteboard_id):
     data = request.get_json() or {}
     background_url = data.get("background_url")
@@ -187,6 +195,7 @@ def api_create_slide(whiteboard_id):
 @login_required
 @guru_required
 @require_school_access("whiteboards", "whiteboard_id")
+@open_year_required("whiteboard_id")
 def api_upload_slides(whiteboard_id):
     file = request.files.get("file")
     if not file:
@@ -210,6 +219,7 @@ def api_upload_slides(whiteboard_id):
 @login_required
 @guru_required
 @require_school_access("whiteboards", "whiteboard_id")
+@open_year_required("whiteboard_id")
 def api_delete_slide(whiteboard_id, slide_number):
     delete_slide(whiteboard_id, slide_number)
     return jsonify({"success": True})
@@ -219,6 +229,7 @@ def api_delete_slide(whiteboard_id, slide_number):
 @login_required
 @guru_required
 @require_school_access("whiteboards", "whiteboard_id")
+@open_year_required("whiteboard_id")
 def api_reorder_slides(whiteboard_id):
     data = request.get_json() or {}
     reorder_slides(whiteboard_id, data.get("order", []))
@@ -247,6 +258,7 @@ def api_get_snapshots(whiteboard_id):
 @login_required
 @guru_required
 @require_school_access("whiteboards", "whiteboard_id")
+@open_year_required("whiteboard_id")
 def api_save_snapshot(whiteboard_id):
     data = request.get_json() or {}
     slide_number = data.get("slide_number", 1)
@@ -261,6 +273,7 @@ def api_save_snapshot(whiteboard_id):
 @login_required
 @guru_required
 @require_school_access("whiteboards", "whiteboard_id")
+@open_year_required("whiteboard_id")
 def api_display_settings(whiteboard_id):
     data = request.get_json() or {}
     settings = {

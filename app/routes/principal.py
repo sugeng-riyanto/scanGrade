@@ -25,6 +25,7 @@ boleh dijalankan pembaca di sini. Menampilkan pintu yang menolak lebih buruk
 daripada tidak menampilkan pintu.
 """
 from __future__ import annotations
+from app.decorators.year_lock import open_year_required
 
 import io
 import logging
@@ -395,6 +396,7 @@ def vice_principal_invigilation():
 
 @principal_bp.route("/vice-principal/invigilation/save", methods=["POST"])
 @vice_principal_required
+@open_year_required("exam_id")
 def vice_principal_invigilation_save():
     """Create or move one sitting. The school is the session's, never the form's."""
     school_id = _school_id()
@@ -416,6 +418,7 @@ def vice_principal_invigilation_save():
 @principal_bp.route("/vice-principal/invigilation/<schedule_id>/assign",
                     methods=["POST"])
 @vice_principal_required
+@open_year_required("schedule_id")
 def vice_principal_invigilation_assign(schedule_id: str):
     """Put a teacher on a sitting, or make them its lead."""
     school_id = _school_id()
@@ -435,6 +438,7 @@ def vice_principal_invigilation_assign(schedule_id: str):
 @principal_bp.route("/vice-principal/invigilation/assignments/<assignment_id>/remove",
                     methods=["POST"])
 @vice_principal_required
+@open_year_required("assignment_id")
 def vice_principal_invigilation_unassign(assignment_id: str):
     """Take a teacher off a sitting."""
     school_id = _school_id()
@@ -448,6 +452,7 @@ def vice_principal_invigilation_unassign(assignment_id: str):
 @principal_bp.route("/vice-principal/retake-requests/<request_id>/decide",
                     methods=["POST"])
 @vice_principal_required
+@open_year_required("request_id")
 def vice_principal_retake_decide(request_id: str):
     """Decide a retake request as the school's delegated authority.
 

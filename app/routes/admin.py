@@ -13,6 +13,7 @@ from app.utils import denials, failure
 from app.services.student_import import discard_partial_account as discard_student
 from app.services.teacher_import import discard_partial_account as discard_teacher
 from app.services import trial_settings
+from app.decorators.year_lock import open_year_required
 
 def _gen_password(length=12) -> str:
     import secrets
@@ -24,6 +25,7 @@ admin_bp = Blueprint("admin", __name__)
 
 @admin_bp.route("/exams/<exam_id>/toggle-status", methods=["POST"])
 @admin_required
+@open_year_required("exam_id")
 def toggle_exam_status(exam_id):
     supabase = get_supabase()
     exam = supabase.table("exams").select("status").eq("id", exam_id).single().execute().data
@@ -36,6 +38,7 @@ def toggle_exam_status(exam_id):
 
 @admin_bp.route("/exams/<exam_id>/toggle-visibility", methods=["POST"])
 @admin_required
+@open_year_required("exam_id")
 def toggle_exam_visibility(exam_id):
     supabase = get_supabase()
     exam = supabase.table("exams").select("is_published").eq("id", exam_id).single().execute().data
@@ -48,6 +51,7 @@ def toggle_exam_visibility(exam_id):
 
 @admin_bp.route("/exams/<exam_id>/delete", methods=["POST"])
 @admin_required
+@open_year_required("exam_id")
 def delete_exam(exam_id):
     supabase = get_supabase()
     supabase.table("violation_logs").delete().eq("exam_id", exam_id).execute()
@@ -124,6 +128,7 @@ def create_class():
 @admin_bp.route("/classes/<class_id>/delete", methods=["POST"])
 @admin_required
 @require_school_access("classes", "class_id")
+@open_year_required("class_id")
 def delete_class(class_id):
     # Same twin, same fix: the id in the URL picked the row with no school in the
     # query, so this path reached **every** school's class. `require_school_access`
