@@ -167,6 +167,19 @@ def _official_rows(supabase, school_id, ids, emails=None) -> list[dict]:
     return out
 
 
+def _sort_cards(rows: list[dict]) -> None:
+    """Order cards by their group (class / subject / role), then by name — in place.
+
+    Requested: a download should come out "by Class, ascending". The rows arrive in
+    whatever order the ids were posted, which is the order checkboxes were ticked;
+    a school filing a class's cards wants them class by class, name by name, so the
+    file is ordered here for every format at once (the CSV and the XLSX both render
+    this list). ``casefold`` so a lowercase name does not sort after every capital.
+    """
+    rows.sort(key=lambda row: (str(row.get("group") or "").casefold(),
+                               str(row.get("name") or "").casefold()))
+
+
 def collect(supabase, school_id, user_ids, kind, emails=None) -> dict:
     """Read the accounts named by ``user_ids``, scoped to ``school_id``.
 
@@ -182,6 +195,7 @@ def collect(supabase, school_id, user_ids, kind, emails=None) -> dict:
 
     if conf.get("table") is None:
         out = _official_rows(supabase, school_id, ids, emails)
+        _sort_cards(out)
         found = {r["id"] for r in out}
         return {"rows": out, "missing": [i for i in ids if i not in found]}
 
@@ -213,6 +227,7 @@ def collect(supabase, school_id, user_ids, kind, emails=None) -> dict:
             "password": "",
             "error": "",
         })
+    _sort_cards(out)
     return {"rows": out, "missing": [i for i in ids if i not in found]}
 
 

@@ -5,6 +5,7 @@ import secrets
 import string
 import time
 from datetime import datetime, timezone, date
+from urllib.parse import urlencode
 
 from flask import Blueprint, render_template, g, request, jsonify, redirect, flash, send_file, current_app
 from openpyxl import load_workbook, Workbook
@@ -29,6 +30,125 @@ from app.services import account_emails
 def _gen_password(length=12) -> str:
     chars = string.ascii_letters + string.digits + "!@#$%^&*"
     return "".join(secrets.choice(chars) for _ in range(length))
+
+
+# ── Header-driven import columns ─────────────────────────────────────────────
+#
+# The importer used to guess a sheet's layout from the *shape of its values*: a
+# teacher row was read as "NIP, Nama, Email, Mapel" only when `cols[0].isdigit()`.
+# Measured, that is wrong for every school whose employee number is not pure
+# digits (`GT-001`, `1987.0101`, a NIP with a space): the row fell through to the
+# last branch, `email` read the subject column and `create_user` was handed a
+# subject name as an address, so the whole teacher sheet failed row after row
+# while the (numeric-NISN) student sheet imported fine.
+#
+# Resolve a column by its **header** instead, and keep the positional heuristics
+# only as a fallback for a sheet with no recognisable header row (the oldest
+# templates). The aliases are the header spellings this repo has shipped across
+# the student/teacher/officials templates and the `/export` workbook.
+_IMPORT_ALIASES = {
+    "nip": ("nip", "nomorpegawai", "nopegawai", "nomorindukpegawai", "employeeid",
+            "employeenumber", "npk", "nik", "nomorinduk"),
+    "nuptk": ("nuptk",),
+    "name": ("namalengkap", "nama", "name", "fullname", "namaguru", "namamurid",
+             "namapejabat"),
+    "email": ("email", "alamatemail", "emailaktif"),
+    "recovery_email": ("emailpemulihan", "recoveryemail", "emailalternatif", "emailcadangan"),
+    "subject": ("matapelajaran", "mapel", "subject", "pelajaran", "mataajar"),
+    "phone": ("nohp", "nomorhp", "hp", "phone", "telepon", "whatsapp", "wa",
+              "nohandphone", "nohandpone", "kontak"),
+    "password": ("password", "pw", "katasandi", "pass"),
+    "nisn": ("nisn", "nomorinduksiswa"),
+    "class": ("kelas", "class", "rombel", "ruangkelas"),
+    "level": ("level", "tingkat", "jenjang"),
+    "role": ("peran", "jabatan", "role", "position", "posisi"),
+}
+
+
+def _norm_header(value) -> str:
+    """A header reduced to lowercase alphanumerics: `"No. HP"` -> `"nohp"`."""
+    return re.sub(r"[^a-z0-9]", "", str(value or "").strip().lower())
+
+
+def _header_columns(ws) -> dict:
+    """Map canonical field -> column index from the worksheet's first row."""
+    first = next(ws.iter_rows(min_row=1, max_row=1, values_only=True), None)
+    if not first:
+        return {}
+    lookup = {}
+    for canonical, aliases in _IMPORT_ALIASES.items():
+        for alias in aliases:
+            lookup.setdefault(alias, canonical)
+    found = {}
+    for index, value in enumerate(first):
+        canonical = lookup.get(_norm_header(value))
+        if canonical and canonical not in found:
+            found[canonical] = index
+    return found
+
+
+def _cell(row, columns, field) -> str:
+    """The cell for `field`, or "". An integral float is written without `.0`."""
+    index = columns.get(field)
+    if index is None or index >= len(row):
+        return ""
+    value = row[index]
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
+    return str(value or "").strip()
+
+
+def _row_is_blank(row) -> bool:
+    return not row or not any(str(c or "").strip() for c in row)
+
+
+# ── List-page paging, sorting and filtering ──────────────────────────────────
+#
+# Shared by /teachers and /students so the two pages behave the same way: one
+# spelling of "show all", of "asc/desc", and of the filter links the pagination
+# carries forward. The rows are read once and sorted here rather than by the
+# database, because the useful keys (a teacher's name, a pupil's class *name*) live
+# on embedded rows, which PostgREST cannot order by.
+_PAGE_SIZES = (20, 50, 100)
+
+
+def _per_page_arg(raw) -> int:
+    """A page size, or ``0`` meaning "all" — never an error for a bad value."""
+    raw = str(raw or "").strip().lower()
+    if raw in ("all", "semua", "0"):
+        return 0
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        value = 50
+    return value if value in _PAGE_SIZES else 50
+
+
+def _sort_dir(raw) -> str:
+    return "desc" if str(raw or "").strip().lower() == "desc" else "asc"
+
+
+def _filter_qs(**params) -> str:
+    """The filter query string the pagination links must carry to stay filtered."""
+    return urlencode({k: v for k, v in params.items() if v not in (None, "", 0)})
+
+
+def _apply_sort_page(items, *, sort, direction, page, per_page, keys):
+    """Sort ``items`` by one of ``keys`` then slice the requested page.
+
+    Returns ``(page_items, total, total_pages, page)``. ``per_page == 0`` is the
+    "show all" choice: one page holding everything.
+    """
+    key_fn = keys.get(sort) or next(iter(keys.values()))
+    items = sorted(items, key=lambda row: key_fn(row),
+                   reverse=(direction == "desc"))
+    total = len(items)
+    if not per_page:
+        return items, total, 1, 1
+    total_pages = max(1, -(-total // per_page))
+    page = max(1, min(page, total_pages))
+    start = (page - 1) * per_page
+    return items[start:start + per_page], total, total_pages, page
 
 
 # Cached email map — avoids slow list_users() call on every page load
@@ -364,6 +484,43 @@ def download_template_guru():
                      mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 
+@admin_sekolah_bp.route("/download-template/pejabat")
+@admin_sekolah_required
+def download_template_pejabat():
+    """Download the XLSX template for head teachers and vice head teachers.
+
+    One sheet, one Role column, because the two accounts differ by exactly that
+    column (see app/services/school_officials.py). A school that prefers separate
+    sheets may instead name one "Kepala Sekolah" and another "Wakil Kepala
+    Sekolah" — the importer accepts both shapes.
+    """
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment
+    sid = _school_id()
+    domain = _get_email_domain(sid)
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Pejabat"
+    headers = ["Jabatan", "Nama Lengkap", "Email", "No. HP"]
+    hf = Font(bold=True, color="FFFFFF", size=11)
+    hfill = PatternFill(start_color="4338CA", end_color="4338CA", fill_type="solid")
+    for c, h in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=c, value=h)
+        cell.font = hf; cell.fill = hfill; cell.alignment = Alignment(horizontal="center")
+    examples = [("Kepala Sekolah", "Drs. Hasan Basri"),
+                ("Wakil Kepala Sekolah", "Rina Marlina")]
+    for i, (jabatan, nama) in enumerate(examples, 2):
+        ws.cell(row=i, column=1, value=jabatan)
+        ws.cell(row=i, column=2, value=nama)
+        ws.cell(row=i, column=3, value=_generate_email(nama, domain))
+        ws.cell(row=i, column=4, value="")
+    for col in range(1, 5):
+        ws.column_dimensions[chr(64 + col)].width = 26
+    buf = io.BytesIO(); wb.save(buf); buf.seek(0)
+    return send_file(buf, as_attachment=True, download_name="template_pejabat.xlsx",
+                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
 @admin_sekolah_bp.route("/import", methods=["GET", "POST"])
 @admin_sekolah_required
 def import_excel():
@@ -384,7 +541,8 @@ def import_excel():
         flash(f"Gagal membaca file: {failure.sentence(e)}", "error")
         return redirect("/admin-sekolah/import")
 
-    results = {"students": 0, "teachers": 0, "subjects": 0, "subjects_updated": 0, "errors": []}
+    results = {"students": 0, "teachers": 0, "officials": 0, "subjects": 0,
+               "subjects_updated": 0, "errors": []}
     sheet_names_lower = {s.lower(): s for s in wb.sheetnames}
 
     # ── Sheet: Murid / Students ──
@@ -401,6 +559,30 @@ def import_excel():
             _import_teachers(ws, sid, supabase, results)
             break
 
+    # ── Sheet: Pejabat sekolah (kepala sekolah & wakil kepala sekolah) ──
+    #
+    # Three spellings, because a school writes one sheet per role: a dedicated
+    # "Kepala Sekolah" (role fixed for the sheet), a "Wakil Kepala Sekolah" (same),
+    # or one combined "Pejabat" sheet whose Role column decides. An officials sheet
+    # had no importer at all before this — the only way to create a head teacher was
+    # the Officials page, one account per form submit.
+    for key in ("kepala sekolah", "kepalasekolah", "principal", "kepala"):
+        if key in sheet_names_lower:
+            _import_officials(wb[sheet_names_lower[key]], sid, supabase, results,
+                              default_role="principal")
+            break
+    for key in ("wakil kepala sekolah", "wakilkepalasekolah", "vice principal",
+                "vice_principal", "wakil"):
+        if key in sheet_names_lower:
+            _import_officials(wb[sheet_names_lower[key]], sid, supabase, results,
+                              default_role="vice_principal")
+            break
+    for key in ("pejabat", "pejabat sekolah", "officials", "official"):
+        if key in sheet_names_lower:
+            _import_officials(wb[sheet_names_lower[key]], sid, supabase, results,
+                              default_role=None)
+            break
+
     # ── Sheet: Mata Pelajaran / Subjects ──
     for key in ("mata pelajaran", "pelajaran", "subjects", "subject", "mapel"):
         if key in sheet_names_lower:
@@ -408,11 +590,12 @@ def import_excel():
             _import_subjects(ws, sid, supabase, results)
             break
 
-    log_activity("import", "school", sid, new_data={"students": results["students"], "teachers": results["teachers"], "subjects": results["subjects"], "errors": len(results["errors"])}, user_id=g.user_id)
+    log_activity("import", "school", sid, new_data={"students": results["students"], "teachers": results["teachers"], "officials": results["officials"], "subjects": results["subjects"], "errors": len(results["errors"])}, user_id=g.user_id)
     subj_msg = f"{results['subjects']} mapel"
     if results.get("subjects_updated"):
         subj_msg += f" ({results['subjects_updated']} diperbarui)"
-    msg = f"Impor selesai: {results['students']} murid, {results['teachers']} guru, {subj_msg}. {len(results['errors'])} error."
+    off_msg = f", {results['officials']} pejabat" if results["officials"] else ""
+    msg = f"Impor selesai: {results['students']} murid, {results['teachers']} guru{off_msg}, {subj_msg}. {len(results['errors'])} error."
     if results["errors"]:
         msg += " " + results["errors"][0]
     flash(msg, "success" if not results["errors"] else "warning")
@@ -421,13 +604,22 @@ def import_excel():
 
 def _import_students(ws, sid, supabase, results):
     classes_cache = {}
+    columns = _header_columns(ws)
     for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), 2):
-        if not row or not row[0]:
+        if _row_is_blank(row):
             continue
         try:
             cols = [str(c or "").strip() for c in row]
+            if columns.get("nisn") is not None or columns.get("name") is not None:
+                # Header row understood: read by name, so column order and an
+                # alphanumeric identifier cannot derail the mapping.
+                nisn = _cell(row, columns, "nisn")
+                nama = _cell(row, columns, "name")
+                kelas = _cell(row, columns, "class")
+                email = _cell(row, columns, "email")
+                hp = _cell(row, columns, "phone")
             # OLD 9-col template: NPSN(0), ThnAjaran(1), NISN(2), Email(3), Nama(4), Kelas(5), Pw(6)
-            if len(cols) >= 7 and cols[0].isdigit() and cols[2].isdigit() and len(cols[0]) >= 5 and len(cols[2]) >= 8:
+            elif len(cols) >= 7 and cols[0].isdigit() and cols[2].isdigit() and len(cols[0]) >= 5 and len(cols[2]) >= 8:
                 nisn = cols[2]; nama = cols[4]; kelas = cols[5]; email = cols[3]; hp = ""
             # New 6-col template: NISN(0), Nama(1), Kelas(2), Email(3), No.HP(4), Pw(5)
             elif len(cols) >= 6 and cols[0].isdigit() and len(cols[0]) >= 8:
@@ -473,28 +665,43 @@ def _import_students(ws, sid, supabase, results):
 
 def _import_teachers(ws, sid, supabase, results):
     subjects_cache = {}
+    columns = _header_columns(ws)
     for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), 2):
-        if not row or not row[0]:
+        if _row_is_blank(row):
             continue
         try:
             cols = [str(c or "").strip() for c in row]
-            # OLD 9-col template: NPSN(0), ThnAjaran(1), NIP(2), Email(3), Nama(4), Mapel1-3(5-7), Pw(8)
-            if len(cols) >= 9 and cols[2].isdigit() and len(cols[2]) >= 5:
-                nip = cols[2]; nama = cols[4]; email = cols[3]
-                mapels = [cols[i] for i in range(5, min(8, len(cols))) if cols[i]]
-                hp = ""; recovery_email = ""
-            # NEW 7-col template: NIP(0), Nama(1), Email(2), Mapel(3), No.HP(4), EmailPemulihan(5), Pw(6)
-            elif len(cols) >= 7 and cols[0].isdigit() and len(cols[0]) >= 5:
-                nip = cols[0]; nama = cols[1]; email = cols[2]
-                mapels = [cols[3]] if cols[3] else []
-                hp = cols[4]; recovery_email = cols[5]
-            # OLD 5-col format: NIP(0), Nama(1), Mapel(2), Email(3), HP(4)
-            elif len(cols) >= 5 and cols[0].isdigit() and len(cols[0]) >= 5:
-                nip = cols[0]; nama = cols[1]; mapels = [cols[2]] if cols[2] else []
-                email = cols[3] if len(cols) > 3 else ""; hp = cols[4] if len(cols) > 4 else ""; recovery_email = ""
+            if (columns.get("name") is not None
+                    and (columns.get("nip") is not None or columns.get("nuptk") is not None)):
+                # Header row understood. This is what fixes the alphanumeric NIP:
+                # the subject column is read as the subject, not as the email.
+                nip = _cell(row, columns, "nip") or _cell(row, columns, "nuptk")
+                nama = _cell(row, columns, "name")
+                email = _cell(row, columns, "email")
+                mapel_name = _cell(row, columns, "subject")
+                mapels = [mapel_name] if mapel_name else []
+                hp = _cell(row, columns, "phone")
+                recovery_email = _cell(row, columns, "recovery_email")
+                nuptk = _cell(row, columns, "nuptk") or None
             else:
-                nip = cols[0]; nama = cols[1]; mapels = [cols[2]] if len(cols) > 2 and cols[2] else []
-                email = cols[3] if len(cols) > 3 else ""; hp = cols[4] if len(cols) > 4 else ""; recovery_email = ""
+                nuptk = None
+                # OLD 9-col template: NPSN(0), ThnAjaran(1), NIP(2), Email(3), Nama(4), Mapel1-3(5-7), Pw(8)
+                if len(cols) >= 9 and cols[2].isdigit() and len(cols[2]) >= 5:
+                    nip = cols[2]; nama = cols[4]; email = cols[3]
+                    mapels = [cols[i] for i in range(5, min(8, len(cols))) if cols[i]]
+                    hp = ""; recovery_email = ""
+                # NEW 7-col template: NIP(0), Nama(1), Email(2), Mapel(3), No.HP(4), EmailPemulihan(5), Pw(6)
+                elif len(cols) >= 7 and cols[0].isdigit() and len(cols[0]) >= 5:
+                    nip = cols[0]; nama = cols[1]; email = cols[2]
+                    mapels = [cols[3]] if cols[3] else []
+                    hp = cols[4]; recovery_email = cols[5]
+                # OLD 5-col format: NIP(0), Nama(1), Mapel(2), Email(3), HP(4)
+                elif len(cols) >= 5 and cols[0].isdigit() and len(cols[0]) >= 5:
+                    nip = cols[0]; nama = cols[1]; mapels = [cols[2]] if cols[2] else []
+                    email = cols[3] if len(cols) > 3 else ""; hp = cols[4] if len(cols) > 4 else ""; recovery_email = ""
+                else:
+                    nip = cols[0]; nama = cols[1]; mapels = [cols[2]] if len(cols) > 2 and cols[2] else []
+                    email = cols[3] if len(cols) > 3 else ""; hp = cols[4] if len(cols) > 4 else ""; recovery_email = ""
 
             if not nip or not nama:
                 continue
@@ -522,9 +729,75 @@ def _import_teachers(ws, sid, supabase, results):
             create_teacher_account(
                 supabase, school_id=sid, full_name=nama, email=user_email,
                 password=user_pw, employee_id=nip, subject_id=subject_id,
-                phone=recovery_email or hp,
+                phone=recovery_email or hp, nuptk=nuptk,
             )
             results["teachers"] += 1
+        except Exception as e:
+            results["errors"].append(
+                f"Baris {row_idx}: {getattr(e, 'user_message', str(e))}"
+            )
+
+
+def _import_officials(ws, sid, supabase, results, default_role=None):
+    """Import a head-teacher / vice-head-teacher sheet.
+
+    A school official is a ``profiles`` row with role ``principal`` or
+    ``vice_principal`` — there is no officials table — so this calls the same
+    :func:`school_officials.create_official` the Officials page calls, and the
+    account is identical whichever way it was made.
+
+    ``default_role`` is the role a dedicated sheet fixes for every row ("Kepala
+    Sekolah" -> principal). A combined sheet passes ``None`` and reads the role
+    from its Role/Jabatan column, accepting the spellings a school actually
+    writes (`Kepala Sekolah`, `Wakil Kepala Sekolah`, `Principal`, `Vice Principal`).
+    """
+    from app.services import school_officials
+
+    role_words = {
+        "principal": ("kepalasekolah", "kepala", "principal", "headmaster",
+                      "headteacher"),
+        "vice_principal": ("wakilkepalasekolah", "wakilkepala", "wakil",
+                           "viceprincipal", "vice", "deputyprincipal", "deputy"),
+    }
+
+    def resolve_role(value):
+        word = _norm_header(value)
+        for role, aliases in role_words.items():
+            if word in aliases:
+                return role
+        return default_role
+
+    columns = _header_columns(ws)
+    for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), 2):
+        if _row_is_blank(row):
+            continue
+        role_raw = ""
+        try:
+            if columns.get("name") is not None:
+                role_raw = _cell(row, columns, "role")
+                nama = _cell(row, columns, "name")
+                email = _cell(row, columns, "email")
+                hp = _cell(row, columns, "phone")
+            else:
+                # Positional sheet with no header: Peran/Jabatan(0), Nama(1),
+                # Email(2), No. HP(3).
+                cols = [str(c or "").strip() for c in row]
+                role_raw = cols[0] if cols else ""
+                nama = cols[1] if len(cols) > 1 else ""
+                email = cols[2] if len(cols) > 2 else ""
+                hp = cols[3] if len(cols) > 3 else ""
+
+            role = resolve_role(role_raw)
+            if not role or not nama:
+                continue
+
+            user_email = email or _generate_email(nama, _get_email_domain(sid))
+            user_pw = _gen_password()
+            school_officials.create_official(
+                supabase, school_id=sid, role=role, full_name=nama,
+                email=user_email, password=user_pw, phone=hp,
+            )
+            results["officials"] += 1
         except Exception as e:
             results["errors"].append(
                 f"Baris {row_idx}: {getattr(e, 'user_message', str(e))}"
@@ -619,6 +892,10 @@ def export_excel():
     ws1.title = "Murid"
     ws1.append(["NPSN", "Tahun Ajaran", "NISN", "Email", "Nama Lengkap", "Kelas"])
     students = supabase.table("students").select("*, profiles!inner(id, full_name), classes(name)").eq("school_id", sid).execute().data or []
+    # Ordered class-by-class, name-by-name — the same order the roster page and the
+    # login-card sheet use. The database cannot order by the embedded class *name*.
+    students.sort(key=lambda s: (((s.get("classes") or {}).get("name") or "").casefold(),
+                                 ((s.get("profiles") or {}).get("full_name") or "").casefold()))
     for s in students:
         prof = s.get("profiles") or {}
         uid = prof.get("id", "")
@@ -629,6 +906,7 @@ def export_excel():
     ws2 = wb.create_sheet("Guru")
     ws2.append(["NPSN", "Tahun Ajaran", "NIP", "Email", "Nama Lengkap", "Mapel"])
     teachers = supabase.table("teachers").select("*, profiles!inner(id, full_name), subjects(name)").eq("school_id", sid).execute().data or []
+    teachers.sort(key=lambda t: ((t.get("profiles") or {}).get("full_name") or "").casefold())
     for t in teachers:
         prof = t.get("profiles") or {}
         uid = prof.get("id", "")
@@ -1147,25 +1425,29 @@ def teachers():
     sid = _school_id()
     supabase = get_supabase()
     q = request.args.get("q", "").strip()
-    page = int(request.args.get("page", 1))
-    per_page = 50
-    offset = (page - 1) * per_page
+    subject_id = request.args.get("subject_id", "").strip()
+    sort = request.args.get("sort", "employee_id")
+    direction = _sort_dir(request.args.get("dir"))
+    per_page = _per_page_arg(request.args.get("per_page", "50"))
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+    except (TypeError, ValueError):
+        page = 1
 
     subjects = supabase.table("subjects").select("*").eq("school_id", sid).order("name").execute().data or []
 
-    # Count
-    count_q = supabase.table("teachers").select("id", count="exact").eq("school_id", sid)
     data_q = supabase.table("teachers").select(
         "*, profiles!inner(id, full_name, phone), subjects(name)"
     ).eq("school_id", sid)
     if q:
-        count_q = count_q.ilike("employee_id", f"%{q}%")
         data_q = data_q.ilike("employee_id", f"%{q}%")
-    total = (count_q.execute().count or 0)
+    if subject_id:
+        data_q = data_q.eq("subject_id", subject_id)
+    teachers_raw = data_q.execute().data or []
 
-    teachers_raw = data_q.order("employee_id").range(offset, offset + per_page - 1).execute().data or []
-
-    # Fetch auth emails once for all users
+    # Fetch auth emails once for all users. Only the rows on this page need an
+    # address, but the map is cached and one read is cheaper than a page-worth of
+    # per-user calls.
     _email_map = {}
     try:
         _email_map = _get_email_map(supabase)
@@ -1179,18 +1461,30 @@ def teachers():
         uid = t["id"]
         teachers_list.append({
             "id": uid,
-            "name": prof.get("full_name", "-"),
-            "employee_number": t.get("employee_id", ""),
+            "name": prof.get("full_name", "-") or "-",
+            "employee_number": t.get("employee_id", "") or "",
             "email": _email_map.get(uid, ""),
-            "subject_name": subj.get("name", "-"),
+            "subject_name": subj.get("name", "-") or "-",
             "subject_id": t.get("subject_id"),
             "phone": prof.get("phone", ""),
-            "employee_id": t.get("employee_id", ""),
+            "employee_id": t.get("employee_id", "") or "",
         })
-    total_pages = max(1, -(-total // per_page))
-    return render_template("admin_sekolah/teachers.html", teachers=teachers_list, subjects=subjects,
-                           q=q, page=page, total=total, total_pages=total_pages, per_page=per_page,
-                           teacher_ids=[t["id"] for t in teachers_raw])
+
+    page_rows, total, total_pages, page = _apply_sort_page(
+        teachers_list, sort=sort, direction=direction, page=page, per_page=per_page,
+        keys={
+            "employee_id": lambda r: r["employee_number"].lower(),
+            "name": lambda r: r["name"].lower(),
+            "subject": lambda r: r["subject_name"].lower(),
+        })
+
+    base_qs = _filter_qs(q=q, subject_id=subject_id, sort=sort, dir=direction,
+                         per_page=("all" if not per_page else per_page))
+    return render_template("admin_sekolah/teachers.html", teachers=page_rows, subjects=subjects,
+                           q=q, subject_id=subject_id, sort=sort, dir=direction,
+                           page=page, total=total, total_pages=total_pages, per_page=per_page,
+                           base_qs=base_qs, page_sizes=_PAGE_SIZES,
+                           teacher_ids=[t["id"] for t in page_rows])
 
 
 @admin_sekolah_bp.route("/teachers/create", methods=["POST"])
@@ -1408,28 +1702,30 @@ def students():
     sid = _school_id()
     supabase = get_supabase()
     q = request.args.get("q", "").strip()
-    page = int(request.args.get("page", 1))
-    per_page = 50
-    offset = (page - 1) * per_page
+    class_id = request.args.get("class_id", "").strip()
+    sort = request.args.get("sort", "class")
+    direction = _sort_dir(request.args.get("dir", "asc"))
+    per_page = _per_page_arg(request.args.get("per_page", "50"))
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+    except (TypeError, ValueError):
+        page = 1
 
     classes_list = supabase.table("classes").select("*").eq("school_id", sid).order("name").execute().data or []
 
-    # Count with optional NISN search
-    count_q = supabase.table("students").select("id", count="exact").eq("school_id", sid)
     data_q = supabase.table("students").select(
         "*, profiles!inner(id, full_name, phone), classes(name)"
     ).eq("school_id", sid)
     if q:
-        count_q = count_q.ilike("nisn", f"%{q}%")
         data_q = data_q.ilike("nisn", f"%{q}%")
-    total = (count_q.execute().count or 0)
-
-    students_raw = data_q.order("nisn").range(offset, offset + per_page - 1).execute().data or []
+    if class_id:
+        data_q = data_q.eq("class_id", class_id)
+    students_raw = data_q.execute().data or []
 
     _email_map = {}
     try:
         _email_map = _get_email_map(supabase)
-    except:
+    except Exception:
         pass
 
     students_list = []
@@ -1439,16 +1735,31 @@ def students():
         uid = s["id"]
         students_list.append({
             "id": uid,
-            "nisn": s.get("nisn", "") or prof.get("nisn", ""),
-            "name": prof.get("full_name", "-"),
-            "class_name": cls.get("name", "-"),
+            "nisn": s.get("nisn", "") or prof.get("nisn", "") or "",
+            "name": prof.get("full_name", "-") or "-",
+            "class_name": cls.get("name", "-") or "-",
             "class_id": s.get("class_id"),
             "phone": prof.get("phone", ""),
             "email": _email_map.get(uid, ""),
         })
-    total_pages = max(1, -(-total // per_page))
-    return render_template("admin_sekolah/students.html", students=students_list, classes=classes_list,
-                           q=q, page=page, total=total, total_pages=total_pages, per_page=per_page)
+
+    # Default is the class order, ascending: a school's roster reads class by class,
+    # and this is the same order the downloadable login-card sheet uses (see
+    # app/services/login_cards.py), so the list and the file agree.
+    page_rows, total, total_pages, page = _apply_sort_page(
+        students_list, sort=sort, direction=direction, page=page, per_page=per_page,
+        keys={
+            "class": lambda r: (r["class_name"].lower(), r["name"].lower()),
+            "name": lambda r: r["name"].lower(),
+            "nisn": lambda r: r["nisn"],
+        })
+
+    base_qs = _filter_qs(q=q, class_id=class_id, sort=sort, dir=direction,
+                         per_page=("all" if not per_page else per_page))
+    return render_template("admin_sekolah/students.html", students=page_rows, classes=classes_list,
+                           q=q, class_id=class_id, sort=sort, dir=direction,
+                           page=page, total=total, total_pages=total_pages, per_page=per_page,
+                           base_qs=base_qs, page_sizes=_PAGE_SIZES)
 
 
 @admin_sekolah_bp.route("/students/create", methods=["POST"])

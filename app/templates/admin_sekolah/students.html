@@ -39,7 +39,7 @@
     </div>
 
     <div class="flex items-center justify-between">
-        <p class="text-sm text-stone-500 font-medium" x-text="'{{ total }} ' + t('murid','students')"></p>
+        <p class="text-sm text-stone-500 font-medium"><span x-text="'{{ total }} ' + t('murid','students')"></span>{% if not per_page %} · <span class="text-orange-600 font-bold" x-text="t('semua ditampilkan','showing all')"></span>{% endif %}</p>
         <button @click="showForm=!showForm" class="px-4 py-2 bg-gradient-to-r from-orange-500 to-amber-500 text-white rounded-xl font-bold text-sm shadow-lg shadow-orange-500/25 transition">
             <i class="fas fa-plus mr-1"></i><span x-text="t('Tambah Murid','Add Student')"></span>
         </button>
@@ -90,15 +90,36 @@
     </div>
 
     <div class="card p-4">
-        <form method="GET" action="/admin-sekolah/students" class="flex gap-2">
-            <div class="relative flex-1">
+        <form method="GET" action="/admin-sekolah/students" class="flex flex-wrap gap-2">
+            <div class="relative flex-1 min-w-[12rem]">
                 <i class="fas fa-search absolute left-4 top-1/2 -translate-y-1/2 text-stone-400"></i>
                 <input type="text" name="q" value="{{ q }}" :placeholder="t('Cari NISN...','Search NISN...')" class="w-full pl-10 pr-4 py-3 border border-stone-200 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-stone-700 font-medium transition">
             </div>
+            <select name="class_id" class="px-3 py-3 border border-stone-200 rounded-xl text-sm font-medium bg-white focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition">
+                <option value="" x-text="t('Semua Kelas','All Classes')"></option>
+                {% for c in classes %}
+                <option value="{{ c.id }}" {% if class_id == c.id|string %}selected{% endif %}>{{ c.name }}</option>
+                {% endfor %}
+            </select>
+            <select name="sort" class="px-3 py-3 border border-stone-200 rounded-xl text-sm font-medium bg-white focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition">
+                <option value="class" {% if sort == 'class' %}selected{% endif %} x-text="t('Urut: Kelas','Sort: Class')"></option>
+                <option value="name" {% if sort == 'name' %}selected{% endif %} x-text="t('Urut: Nama','Sort: Name')"></option>
+                <option value="nisn" {% if sort == 'nisn' %}selected{% endif %} x-text="t('Urut: NISN','Sort: NISN')"></option>
+            </select>
+            <select name="dir" class="px-3 py-3 border border-stone-200 rounded-xl text-sm font-medium bg-white focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition">
+                <option value="asc" {% if dir == 'asc' %}selected{% endif %} x-text="t('A → Z (menaik)','A → Z (ascending)')"></option>
+                <option value="desc" {% if dir == 'desc' %}selected{% endif %} x-text="t('Z → A (menurun)','Z → A (descending)')"></option>
+            </select>
+            <select name="per_page" class="px-3 py-3 border border-stone-200 rounded-xl text-sm font-medium bg-white focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition">
+                <option value="20" {% if per_page == 20 %}selected{% endif %}>20</option>
+                <option value="50" {% if per_page == 50 %}selected{% endif %}>50</option>
+                <option value="100" {% if per_page == 100 %}selected{% endif %}>100</option>
+                <option value="all" {% if not per_page %}selected{% endif %} x-text="t('Semua','All')"></option>
+            </select>
             <button type="submit" class="px-5 py-3 bg-orange-500 text-white rounded-xl font-bold hover:bg-orange-600 transition">
-                <i class="fas fa-search"></i>
+                <i class="fas fa-filter"></i>
             </button>
-            {% if q %}
+            {% if q or class_id %}
             <a href="/admin-sekolah/students" class="px-5 py-3 border border-stone-200 text-stone-500 rounded-xl font-bold hover:bg-stone-50 transition">
                 <i class="fas fa-times"></i>
             </a>
@@ -200,7 +221,7 @@
     {% if total_pages > 1 %}
     <div class="flex items-center justify-center gap-2">
         {% if page > 1 %}
-        <a href="?page={{ page - 1 }}&q={{ q }}" class="px-4 py-2 border border-stone-200 rounded-xl text-sm font-bold text-stone-600 hover:bg-stone-50 transition">
+        <a href="?page={{ page - 1 }}{% if base_qs %}&{{ base_qs }}{% endif %}" class="px-4 py-2 border border-stone-200 rounded-xl text-sm font-bold text-stone-600 hover:bg-stone-50 transition">
             <i class="fas fa-chevron-left mr-1"></i><span x-text="t('Sebelumnya','Previous')"></span>
         </a>
         {% endif %}
@@ -208,13 +229,13 @@
             {% if p == page %}
             <span class="px-4 py-2 bg-orange-500 text-white rounded-xl text-sm font-bold">{{ p }}</span>
             {% elif p <= 3 or p >= total_pages - 2 or (p >= page - 2 and p <= page + 2) %}
-            <a href="?page={{ p }}&q={{ q }}" class="px-4 py-2 border border-stone-200 rounded-xl text-sm font-bold text-stone-600 hover:bg-stone-50 transition">{{ p }}</a>
+            <a href="?page={{ p }}{% if base_qs %}&{{ base_qs }}{% endif %}" class="px-4 py-2 border border-stone-200 rounded-xl text-sm font-bold text-stone-600 hover:bg-stone-50 transition">{{ p }}</a>
             {% elif p == 4 or p == total_pages - 3 %}
             <span class="px-2 text-stone-400">...</span>
             {% endif %}
         {% endfor %}
         {% if page < total_pages %}
-        <a href="?page={{ page + 1 }}&q={{ q }}" class="px-4 py-2 border border-stone-200 rounded-xl text-sm font-bold text-stone-600 hover:bg-stone-50 transition">
+        <a href="?page={{ page + 1 }}{% if base_qs %}&{{ base_qs }}{% endif %}" class="px-4 py-2 border border-stone-200 rounded-xl text-sm font-bold text-stone-600 hover:bg-stone-50 transition">
             <span x-text="t('Selanjutnya','Next')"></span><i class="fas fa-chevron-right ml-1"></i>
         </a>
         {% endif %}

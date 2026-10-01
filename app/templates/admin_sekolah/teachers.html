@@ -41,18 +41,41 @@
 
     <div class="flex items-center justify-between gap-4 flex-wrap">
         <div>
-            <form method="GET" action="/admin-sekolah/teachers" class="flex items-center gap-2">
+            <form method="GET" action="/admin-sekolah/teachers" class="flex flex-wrap items-center gap-2">
                 <div class="relative">
                     <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 text-sm"></i>
-                    <input type="text" name="q" value="{{ q or '' }}" placeholder="Cari Nomor Pegawai..." class="pl-9 pr-4 py-2.5 border border-stone-200 rounded-xl text-sm w-56 focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition">
+                    <input type="text" name="q" value="{{ q or '' }}" placeholder="Cari Nomor Pegawai..." class="pl-9 pr-4 py-2.5 border border-stone-200 rounded-xl text-sm w-48 focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition">
                 </div>
-                <button type="submit" class="px-3 py-2.5 bg-orange-100 text-orange-700 rounded-xl text-sm font-bold hover:bg-orange-200 transition"><i class="fas fa-search"></i></button>
-                {% if q %}
-                <a href="/admin-sekolah/teachers" class="px-3 py-2.5 text-stone-400 hover:text-stone-600"><i class="fas fa-times"></i></a>
+                <select name="subject_id" class="px-3 py-2.5 border border-stone-200 rounded-xl text-sm font-medium bg-white focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition">
+                    <option value="">Semua Mapel</option>
+                    {% for s in subjects %}
+                    <option value="{{ s.id }}" {% if subject_id == s.id|string %}selected{% endif %}>{{ s.name }}</option>
+                    {% endfor %}
+                </select>
+                <select name="sort" class="px-3 py-2.5 border border-stone-200 rounded-xl text-sm font-medium bg-white focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition">
+                    <option value="employee_id" {% if sort == 'employee_id' %}selected{% endif %}>Urut: Nomor Pegawai</option>
+                    <option value="name" {% if sort == 'name' %}selected{% endif %}>Urut: Nama</option>
+                    <option value="subject" {% if sort == 'subject' %}selected{% endif %}>Urut: Mapel</option>
+                </select>
+                <select name="dir" class="px-3 py-2.5 border border-stone-200 rounded-xl text-sm font-medium bg-white focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition">
+                    <option value="asc" {% if dir == 'asc' %}selected{% endif %}>A → Z</option>
+                    <option value="desc" {% if dir == 'desc' %}selected{% endif %}>Z → A</option>
+                </select>
+                <select name="per_page" class="px-3 py-2.5 border border-stone-200 rounded-xl text-sm font-medium bg-white focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition">
+                    <option value="20" {% if per_page == 20 %}selected{% endif %}>20 / hal</option>
+                    <option value="50" {% if per_page == 50 %}selected{% endif %}>50 / hal</option>
+                    <option value="100" {% if per_page == 100 %}selected{% endif %}>100 / hal</option>
+                    <option value="all" {% if not per_page %}selected{% endif %}>Semua</option>
+                </select>
+                <button type="submit" class="px-4 py-2.5 bg-orange-500 text-white rounded-xl text-sm font-bold hover:bg-orange-600 transition">
+                    <i class="fas fa-filter mr-1"></i>Terapkan
+                </button>
+                {% if q or subject_id %}
+                <a href="/admin-sekolah/teachers" class="px-3 py-2.5 text-stone-400 hover:text-stone-600" title="Reset filter"><i class="fas fa-times"></i></a>
                 {% endif %}
             </form>
         </div>
-        <p class="text-sm text-stone-500 font-medium">{{ total }} guru</p>
+        <p class="text-sm text-stone-500 font-medium">{{ total }} guru{% if not per_page %} · <span class="text-orange-600 font-bold">semua ditampilkan</span>{% endif %}</p>
         <div class="flex gap-2">
             <input type="hidden" id="teacher-ids-json" value='{{ teacher_ids | tojson }}'>
             <button type="button" x-data @click="if(confirm('Hapus SEMUA guru ({{ total }} orang)? Tindakan ini tidak bisa dibatalkan')) { const ids = JSON.parse(document.getElementById('teacher-ids-json').value); fetch('/admin-sekolah/teachers/bulk-delete', {method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':'{{ csrf_token() }}'},body:JSON.stringify({user_ids:ids})}).then(r=>r.json()).then(d=>{if(d.total) location.reload()}) }"
@@ -210,7 +233,7 @@
     {% if total_pages > 1 %}
     <div class="flex items-center justify-center gap-2">
         {% if page > 1 %}
-        <a href="?page={{ page - 1 }}&q={{ q }}" class="px-4 py-2 border border-stone-200 rounded-xl text-sm font-bold text-stone-600 hover:bg-stone-50 transition">
+        <a href="?page={{ page - 1 }}{% if base_qs %}&{{ base_qs }}{% endif %}" class="px-4 py-2 border border-stone-200 rounded-xl text-sm font-bold text-stone-600 hover:bg-stone-50 transition">
             <i class="fas fa-chevron-left mr-1"></i>Sebelumnya
         </a>
         {% endif %}
@@ -218,13 +241,13 @@
             {% if p == page %}
             <span class="px-4 py-2 bg-orange-500 text-white rounded-xl text-sm font-bold">{{ p }}</span>
             {% elif p <= 3 or p >= total_pages - 2 or (p >= page - 2 and p <= page + 2) %}
-            <a href="?page={{ p }}&q={{ q }}" class="px-4 py-2 border border-stone-200 rounded-xl text-sm font-bold text-stone-600 hover:bg-stone-50 transition">{{ p }}</a>
+            <a href="?page={{ p }}{% if base_qs %}&{{ base_qs }}{% endif %}" class="px-4 py-2 border border-stone-200 rounded-xl text-sm font-bold text-stone-600 hover:bg-stone-50 transition">{{ p }}</a>
             {% elif p == 4 or p == total_pages - 3 %}
             <span class="px-2 text-stone-400">...</span>
             {% endif %}
         {% endfor %}
         {% if page < total_pages %}
-        <a href="?page={{ page + 1 }}&q={{ q }}" class="px-4 py-2 border border-stone-200 rounded-xl text-sm font-bold text-stone-600 hover:bg-stone-50 transition">
+        <a href="?page={{ page + 1 }}{% if base_qs %}&{{ base_qs }}{% endif %}" class="px-4 py-2 border border-stone-200 rounded-xl text-sm font-bold text-stone-600 hover:bg-stone-50 transition">
             Selanjutnya<i class="fas fa-chevron-right ml-1"></i>
         </a>
         {% endif %}
