@@ -1795,7 +1795,49 @@ def teachers():
             "subject_id": t.get("subject_id"),
             "phone": prof.get("phone", ""),
             "employee_id": t.get("employee_id", "") or "",
+            # The template branches on this to offer the right account actions:
+            # a guru is deleted and reset from THIS page, an official from
+            # /admin-sekolah/officials, where their two-role vocabulary lives.
+            "role": "guru",
+            "is_official": False,
         })
+
+    # ── the school's officials, on the same roster ──────────────────────────
+    # A head of school or their deputy may teach a subject — the school asked for
+    # it — and the matrix that assigns one lives on THIS page. They have no
+    # `teachers` row (`school_officials.py` deliberately keeps their role in
+    # `profiles`), so reading only `teachers` makes them invisible: never seen,
+    # never assignable. Read them here and mark the row.
+    #
+    # Skipped when a subject filter is active: that filter matches the legacy
+    # `teachers.subject_id`, which officials do not have — matching them to it
+    # would be a fiction. A name search still finds them.
+    if not subject_id:
+        try:
+            official_rows = officials_service.list_officials(supabase, sid)
+        except Exception:
+            official_rows = []
+        needle = q.lower()
+        for o in official_rows:
+            uid = o.get("id")
+            if not uid:
+                continue
+            name = o.get("full_name") or "-"
+            email = o.get("email") or _email_map.get(uid, "")
+            if needle and needle not in name.lower() and needle not in (email or "").lower():
+                continue
+            teachers_list.append({
+                "id": uid,
+                "name": name,
+                "employee_number": "",
+                "employee_id": "",
+                "email": email,
+                "subject_name": "-",
+                "subject_id": None,
+                "phone": o.get("phone", "") or "",
+                "role": o.get("role"),
+                "is_official": True,
+            })
 
     page_rows, total, total_pages, page = _apply_sort_page(
         teachers_list, sort=sort, direction=direction, page=page, per_page=per_page,
@@ -1977,10 +2019,17 @@ def create_teacher():
 @admin_sekolah_bp.route("/teachers/<teacher_id>/edit", methods=["POST"])
 @subscription_write_required
 @admin_sekolah_required
-@require_school_access("teachers", "teacher_id")
 def edit_teacher(teacher_id):
     supabase = get_supabase()
     sid = _school_id()
+    # Staff, not just a `teachers` row: a head of school or deputy appears on this
+    # roster now and their name/phone are edited here. `teacher_in_school` checks
+    # the *profile* — the same school and one of the assignable roles — so it
+    # refuses a colleague's id from another school just as firmly as the decorator
+    # it replaces, and additionally admits the officials with no `teachers` row.
+    if not ta_service.teacher_in_school(supabase, sid, teacher_id):
+        flash("Guru tidak ditemukan di sekolah ini", "error")
+        return redirect("/admin-sekolah/teachers")
     data = {}
     emp_id = request.form.get("employee_number", request.form.get("employee_id", ""))
     if emp_id:
@@ -2050,9 +2099,12 @@ def delete_teacher(teacher_id):
 
 @admin_sekolah_bp.route("/teachers/<teacher_id>/reset-password", methods=["POST"])
 @admin_sekolah_required
-@require_school_access("teachers", "teacher_id")
 def reset_teacher_password(teacher_id):
     supabase = get_supabase()
+    # Same staff rule as the edit: an official on this roster is reset from here
+    # too, and `teacher_in_school` is what keeps it inside the school.
+    if not ta_service.teacher_in_school(supabase, _school_id(), teacher_id):
+        return jsonify({"error": "Guru tidak ditemukan di sekolah ini"}), 404
     password = request.form.get("password", "").strip() or _gen_password()
     try:
         supabase.auth.admin.update_user_by_id(teacher_id, {"password": password})

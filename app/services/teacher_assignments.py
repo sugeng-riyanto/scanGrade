@@ -36,6 +36,13 @@ logger = logging.getLogger(__name__)
 ACTIVE = "active"
 INACTIVE = "inactive"
 
+#: The roles the matrix may assign and validate. A guru teaches; a head of school
+#: or their deputy teaches *as well* — the request was explicit. The role alone
+#: does not widen anything here: every write is still one *(class, subject)* pair,
+#: and the exam side scopes the official to that pair exactly as it scopes a guru
+#: (see `app/services/assignments.py`).
+ASSIGNABLE_ROLES = ("guru", "teacher", "principal", "vice_principal")
+
 #: The statuses of a paper that make removing its assignment worth confirming.
 LIVE_EXAM_STATUSES = ("active",)
 
@@ -189,7 +196,7 @@ def owned_subject_ids(supabase, school_id, subject_ids) -> set:
 def teacher_in_school(supabase, school_id, teacher_id) -> bool:
     rows = (supabase.table("profiles").select("id, role")
             .eq("id", teacher_id).eq("school_id", school_id)
-            .in_("role", ["guru", "teacher"]).limit(1).execute().data or [])
+            .in_("role", list(ASSIGNABLE_ROLES)).limit(1).execute().data or [])
     return bool(rows)
 
 

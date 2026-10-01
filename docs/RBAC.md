@@ -15,17 +15,37 @@ super_admin        (Super Admin — akses semua sekolah)
             └── murid         (Siswa — mengerjakan ujian)
 ```
 
-Dua peran pengawas (`principal`, `vice_principal`) **tidak mengelola apa pun**. Mereka
-membaca angka, ujian dan laporan sekolahnya sendiri — tanpa satu pun route tulis. Wewenang
-membuat dan menghapus akun tetap di `admin_sekolah`: yang tahu siapa kepala sekolahnya
-adalah sekolahnya, jadi sekolah yang membuat akunnya lewat `/admin-sekolah/officials`.
+Dua peran pengawas (`principal`, `vice_principal`) **mengawasi sekolahnya sendiri, dan
+boleh mengajar bila sekolah menugaskannya**. Secara bawaan mereka tidak mengelola apa pun —
+mereka membaca angka, ujian dan laporan sekolahnya sendiri. Wewenang membuat dan menghapus
+akun tetap di `admin_sekolah`: yang tahu siapa kepala sekolahnya adalah sekolahnya, jadi
+sekolah yang membuat akunnya lewat `/admin-sekolah/officials`.
+
+**Yang berubah: kepala sekolah dan wakilnya bisa ditugaskan sebagai guru mapel.** Seorang
+pejabat yang mengajar umumnya mengampu satu-dua mapel, kadang hanya di kelas tertentu —
+sama seperti guru. Karena itu `/admin-sekolah/teachers` kini menampilkan mereka di daftar
+yang sama (dengan lencana perannya), dan matriks **Kelola Penugasan** bisa mengisi
+(kelas, mapel) untuk mereka. Batasnya tetap sama seperti guru, bukan lebih lebar:
+
+* penulisan ujian dibatasi `assignments.SCOPED_ROLES` — hanya (kelas, mapel) yang
+ditugaskan, dan daftar itu kini memuat `principal`/`vice_principal`;
+* `exam_access.can_manage_exam` mengizinkan mereka **hanya atas ujian miliknya sendiri**
+  (`teacher_id` = dirinya, di sekolah yang sama) — bukan ujian kolega, bukan se-sekolah;
+* `@teacher_or_admin_required` membuka workspace guru bagi mereka supaya penugasan itu
+  benar-benar bisa dipakai (buat ujian, koreksi). Tanpa penugasan, workspace-nya kosong
+  dan tidak ada yang bisa ditulis; pengawasan tetap hanya-baca.
+
+`/principal/*` dan `/vice-principal/*` tetap tanpa route tulis. Akses mengajar memakai
+pintu guru yang sudah ada, dan `tests/unit/test_officials_as_subject_teachers.py` menahan
+keempat sifat ini (bisa ditugaskan, dibatasi pasangan, hanya ujian sendiri, gerbang
+workspace).
 
 | Role | Tujuan | Dibuat oleh | Dashboard | Login di |
 |------|--------|-------------|-----------|----------|
 | `super_admin` | Mengelola SEMUA sekolah + pengguna + data lintas sekolah | Via Supabase Console | `/super-admin/dashboard` | `/auth/login` |
 | `admin_sekolah` | Mengelola 1 sekolah (guru, siswa, kelas, mapel) | Register mandiri (perlu approval) | `/admin/dashboard` | `/auth/login` |
-| `principal` | Mengawasi sekolahnya sendiri (baca saja) | Dibuat admin_sekolah | `/principal/dashboard` | `/auth/login_user` |
-| `vice_principal` | Mengawasi sekolahnya sendiri (baca saja) | Dibuat admin_sekolah | `/vice-principal/dashboard` | `/auth/login_user` |
+| `principal` | Mengawasi sekolahnya sendiri (baca saja); boleh mengajar bila ditugaskan | Dibuat admin_sekolah | `/principal/dashboard` | `/auth/login_user` |
+| `vice_principal` | Mengawasi sekolahnya sendiri (baca saja); boleh mengajar bila ditugaskan | Dibuat admin_sekolah | `/vice-principal/dashboard` | `/auth/login_user` |
 | `guru` | Membuat ujian, mengoreksi, melihat hasil | Di-import oleh admin_sekolah | `/teacher/dashboard` | `/auth/login_user` |
 | `murid` | Mengerjakan ujian, melihat nilai | Di-import oleh admin_sekolah | `/student/dashboard` | `/auth/login_user` |
 
@@ -156,7 +176,7 @@ dan `tests/unit/test_reports_hub.py` menahan daftar itu dalam dua arah.
 | `@murid_required` | `murid` |
 | `@admin_required` | `super_admin`, `admin` |
 | `@teacher_required` | `guru`, `teacher` |
-| `@teacher_or_admin_required` | `guru`, `admin_sekolah`, `admin`, `teacher` |
+| `@teacher_or_admin_required` | `guru`, `admin_sekolah`, `admin`, `teacher`, `principal`, `vice_principal` (dua pejabat masuk workspace guru; tulis tetap dibatasi penugasan & kepemilikan ujian — lihat §3) |
 | `@school_official_required` | `principal`, `vice_principal` |
 | `@principal_required` | `principal` |
 | `@vice_principal_required` | `vice_principal` |

@@ -794,7 +794,17 @@ def admin_required(f):
 
 
 def teacher_or_admin_required(f):
-    return role_required("teacher", "admin", "guru", "admin_sekolah")(f)
+    """The teacher workspace: a guru, the school admin, and the two officials.
+
+    A head of school or their deputy is admitted here because the school may
+    assign them a subject to teach (see `app/services/teacher_assignments.py`).
+    Admission is not a widening of their power: every write behind this gate is
+    bound by `assignments.SCOPED_ROLES` (the pairs they hold) and by
+    `exam_access.can_manage_exam` (their own papers), so an official with no
+    assignment can reach the workspace and do nothing in it.
+    """
+    return role_required("teacher", "admin", "guru", "admin_sekolah",
+                         "principal", "vice_principal")(f)
 
 
 def teacher_or_admin_sekolah_required(f):
