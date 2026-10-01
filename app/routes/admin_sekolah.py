@@ -1881,11 +1881,20 @@ def teacher_assignments(teacher_id):
         subjects = (supabase.table("subjects").select("id, name, code")
                     .eq("school_id", sid).order("name").execute().data or [])
         pairs = sorted(ta_service.current_pairs(supabase, sid, teacher_id, year_name))
+        # A teacher created before this matrix still carries one subject in the legacy
+        # `teachers.subject_id` column and no assignment rows. That column is not a
+        # pair (it names no class), so it cannot be *written* — but it is a real hint,
+        # and the modal offers it as a DRAFT the admin must confirm. Read here, never
+        # persisted by this GET.
+        legacy = (supabase.table("teachers").select("subject_id")
+                  .eq("id", teacher_id).eq("school_id", sid)
+                  .limit(1).execute().data or [{}])[0]
         return jsonify({
             "year": year,
             "classes": classes,
             "subjects": subjects,
             "pairs": [{"class_id": c, "subject_id": s} for c, s in pairs],
+            "legacy_subject_id": legacy.get("subject_id"),
         })
 
     payload = request.get_json(silent=True) or {}
