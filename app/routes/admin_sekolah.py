@@ -19,7 +19,9 @@ from app.decorators.subscription import require_subscription
 from app.services.audit_service import log_activity, log_create, log_update, log_delete
 from app.services import trial_settings as trial_cfg
 from app.services.student_import import create_student_account
-from app.utils.req_cache import invalidate_class, invalidate_school
+from app.utils.req_cache import (invalidate_class, invalidate_school,
+                                 invalidate_teacher_assignments)
+from app.services import teacher_assignments as ta_service
 from app.services.teacher_import import create_teacher_account
 from app.services import school_officials as officials_service
 from app.services.subject_service import (subject_usage, usage_confirmation_needed,
@@ -1790,12 +1792,94 @@ def teachers():
     # Until now it was only on `/accounts`, so the answer meant leaving the list of
     # people it is about. It is `None` when migration 040 has not run, which the
     # template shows as "cannot be read", never as zero.
+    #
+    # The assignment counts are read once for the whole school, not once per row:
+    # the matrix itself is a modal, but the roster must be able to say "3 kelas, 2
+    # mapel" without the admin opening 50 modals to find out.
+    year = ta_service.active_school_year(supabase, sid)
+    year_name = (year or {}).get("name")
+    try:
+        assign_counts = ta_service.school_pairs(supabase, sid, year_name)
+    except Exception:
+        assign_counts = {}
+    for t in page_rows:
+        c = assign_counts.get(str(t["id"]), {"classes": 0, "subjects": 0})
+        t["assign_classes"] = c["classes"]
+        t["assign_subjects"] = c["subjects"]
     return render_template("admin_sekolah/teachers.html", teachers=page_rows, subjects=subjects,
                            q=q, subject_id=subject_id, sort=sort, dir=direction,
                            page=page, total=total, total_pages=total_pages, per_page=per_page,
                            base_qs=base_qs, page_sizes=_PAGE_SIZES,
                            pending_activation=_pending_activation(supabase, sid),
-                           teacher_ids=[t["id"] for t in page_rows])
+                           teacher_ids=[t["id"] for t in page_rows],
+                           active_year=year)
+
+
+@admin_sekolah_bp.route("/teachers/<teacher_id>/assignments", methods=["GET", "POST"])
+@admin_sekolah_required
+def teacher_assignments(teacher_id):
+    """The many-to-many matrix for one teacher, read and written in one place.
+
+    A GET answers the modal: the school's classes and subjects, the pairs this
+    teacher holds for the active year, and the year's own name so the screen can
+    say which year is being edited. A POST is the *whole selection*, not a delta —
+    the modal owns the matrix, so sending only what changed would make two open
+    tabs silently disagree. The diff is computed server-side (see
+    `teacher_assignments.save`).
+
+    Every id is checked against the caller's school: a manipulated `class_id` from
+    another school is refused with 403, never quietly dropped, because a silent
+    drop is indistinguishable from success to the admin who tried it.
+    """
+    sid = _school_id()
+    supabase = get_supabase()
+
+    # The teacher must be one of this school's — a 404 for anyone else's id, not a
+    # matrix that would let the admin read a rival school's class list.
+    if not ta_service.teacher_in_school(supabase, sid, teacher_id):
+        return jsonify({"error": "Guru tidak ditemukan di sekolah ini"}), 404
+
+    year = ta_service.active_school_year(supabase, sid)
+    year_name = (year or {}).get("name")
+
+    if request.method == "GET":
+        classes = (supabase.table("classes").select("id, name, grade_level")
+                   .eq("school_id", sid).order("name").execute().data or [])
+        subjects = (supabase.table("subjects").select("id, name, code")
+                    .eq("school_id", sid).order("name").execute().data or [])
+        pairs = sorted(ta_service.current_pairs(supabase, sid, teacher_id, year_name))
+        return jsonify({
+            "year": year,
+            "classes": classes,
+            "subjects": subjects,
+            "pairs": [{"class_id": c, "subject_id": s} for c, s in pairs],
+        })
+
+    payload = request.get_json(silent=True) or {}
+    raw = payload.get("pairs") or []
+    pairs = [(p.get("class_id"), p.get("subject_id"))
+             for p in raw if isinstance(p, dict) and p.get("class_id") and p.get("subject_id")]
+    confirm = bool(payload.get("confirm_remove"))
+
+    ok, result = ta_service.save(supabase, sid, teacher_id, pairs,
+                                 year_name=year_name, confirm_remove=confirm)
+    if not ok:
+        return jsonify(result), result.get("status", 400)
+
+    # Both caches the door is read through: the teacher's own list and the
+    # school's, so the exam builder's dropdown reflects the new matrix at once.
+    invalidate_teacher_assignments(teacher_id, sid)
+    invalidate_school(sid)
+    added = result.get("added_count", 0)
+    removed = result.get("removed_count", 0)
+    if added or removed:
+        log_activity("update", "teacher_assignment", teacher_id,
+                     new_data={"added": result.get("added", []),
+                               "removed": result.get("removed", []),
+                               "school_year": year_name},
+                     user_id=g.user_id)
+    return jsonify({"success": True, "added": added, "removed": removed,
+                    "pairs": [{"class_id": c, "subject_id": s} for c, s in pairs]})
 
 
 @admin_sekolah_bp.route("/teachers/create", methods=["POST"])

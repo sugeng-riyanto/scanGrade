@@ -1,0 +1,244 @@
+"""Who teaches what, as an admin edits it.
+
+`teacher_assignments` has always been able to hold a *(teacher, class, subject)*
+many-to-many — the table was built for it in migration 010 and migration 045
+added the `status` and `school_year` a real editor needs. What was missing was
+any way to *write* it in bulk: the only editor was the exam builder's dropdown,
+and it wrote one pair at a time for the signed-in teacher. So a school admin had
+no screen that said "this teacher takes Mathematics in 8A, 8B and 8C", and the
+simpler `teachers.subject_id` column (one subject per teacher) was the only truth
+the roster could show.
+
+The rules here are the ones a matrix needs and a single-pair write never did:
+
+* **the pair is one unit** — teaching Physics in 8A is not teaching Maths in 8A;
+* **every id belongs to the admin's own school** — a manipulated `class_id` from
+  another school is refused, not silently dropped (which would look like it
+  worked);
+* **removing is a soft close, never a delete** — a pair that already has papers
+  is part of the historical record, and `status='inactive'` keeps the row while
+  closing the door (`assignments.active_rows` reads a missing status as active,
+  so an old row still grants its door until something sets it);
+* **a pair with a live paper is not removed in silence** — the caller gets the
+  conflicting exams back and must confirm before the write.
+
+Scope stays *within* one school; the tenant boundary is the school filter and the
+service key, exactly as it is for `assignments.py`.
+"""
+
+from __future__ import annotations
+
+import logging
+
+logger = logging.getLogger(__name__)
+
+#: Statuses a stored row can carry; mirror of migration 045's CHECK.
+ACTIVE = "active"
+INACTIVE = "inactive"
+
+#: The statuses of a paper that make removing its assignment worth confirming.
+LIVE_EXAM_STATUSES = ("active",)
+
+
+def active_school_year(supabase, school_id):
+    """The year the admin is editing, or None when the school has no rows.
+
+    `is_active` is the source of truth (007); the newest name is the fallback so
+    a school that never flagged one still gets an editor rather than an empty
+    picker.
+    """
+    rows = (supabase.table("school_years").select("id, name, is_active")
+            .eq("school_id", school_id).execute().data or [])
+    if not rows:
+        return None
+    for row in rows:
+        if row.get("is_active"):
+            return row
+    return sorted(rows, key=lambda r: r.get("name") or "")[-1]
+
+
+def _pair_key(class_id, subject_id):
+    return (str(class_id), str(subject_id))
+
+
+def _row_in_year(row, year_name):
+    """Is this row part of the year we are editing?
+
+    A row written before 045 carries no `school_year`. That is a real assignment
+    from an earlier release, and hiding it would make the matrix read as "not
+    assigned" and then *deactivate* it on the next save — a data loss dressed as a
+    no-op. So a missing year is treated as the active year, the same discipline
+    `backfill_enrollment` uses.
+    """
+    stored = (row.get("school_year") or "").strip()
+    if not stored:
+        return True
+    if not year_name:
+        return True
+    return stored == year_name.strip()
+
+
+def current_pairs(supabase, school_id, teacher_id, year_name=None) -> set:
+    """The active *(class_id, subject_id)* pairs for one teacher."""
+    rows = (supabase.table("teacher_assignments")
+            .select("class_id, subject_id, status, school_year")
+            .eq("school_id", school_id).eq("teacher_id", teacher_id)
+            .execute().data or [])
+    pairs = set()
+    for row in rows:
+        if (row.get("status") or ACTIVE) != ACTIVE:
+            continue
+        if not _row_in_year(row, year_name):
+            continue
+        if row.get("class_id") and row.get("subject_id"):
+            pairs.add(_pair_key(row["class_id"], row["subject_id"]))
+    return pairs
+
+
+def school_pairs(supabase, school_id, year_name=None) -> dict:
+    """Every teacher's active pairs, in one read — the roster preview.
+
+    One query for the whole list rather than one per teacher: the roster draws a
+    count beside each row, and a page of 50 teachers must not become 50 queries.
+    """
+    rows = (supabase.table("teacher_assignments")
+            .select("teacher_id, class_id, subject_id, status, school_year")
+            .eq("school_id", school_id).execute().data or [])
+    by_teacher: dict = {}
+    for row in rows:
+        if (row.get("status") or ACTIVE) != ACTIVE:
+            continue
+        if not _row_in_year(row, year_name):
+            continue
+        if not (row.get("teacher_id") and row.get("class_id") and row.get("subject_id")):
+            continue
+        bucket = by_teacher.setdefault(str(row["teacher_id"]), {"classes": set(), "subjects": set()})
+        bucket["classes"].add(str(row["class_id"]))
+        bucket["subjects"].add(str(row["subject_id"]))
+    return {
+        tid: {"classes": len(b["classes"]), "subjects": len(b["subjects"])}
+        for tid, b in by_teacher.items()
+    }
+
+
+def owned_class_ids(supabase, school_id, class_ids) -> set:
+    """Which of `class_ids` are this school's — the adversarial guard, positive."""
+    wanted = [str(c) for c in (class_ids or []) if c]
+    if not wanted:
+        return set()
+    rows = (supabase.table("classes").select("id")
+            .eq("school_id", school_id).in_("id", wanted).execute().data or [])
+    return {str(r["id"]) for r in rows}
+
+
+def owned_subject_ids(supabase, school_id, subject_ids) -> set:
+    wanted = [str(s) for s in (subject_ids or []) if s]
+    if not wanted:
+        return set()
+    rows = (supabase.table("subjects").select("id")
+            .eq("school_id", school_id).in_("id", wanted).execute().data or [])
+    return {str(r["id"]) for r in rows}
+
+
+def teacher_in_school(supabase, school_id, teacher_id) -> bool:
+    rows = (supabase.table("profiles").select("id, role")
+            .eq("id", teacher_id).eq("school_id", school_id)
+            .in_("role", ["guru", "teacher"]).limit(1).execute().data or [])
+    return bool(rows)
+
+
+def running_exams_for_removal(supabase, school_id, teacher_id, remove_pairs):
+    """Papers that make a removal worth confirming.
+
+    A removal is checked against the exams it would orphan: the teacher's own,
+    still live, for one of the subjects being dropped, attached to one of the
+    classes being dropped. `exams.class_ids` is a JSON array (schema.sql), so the
+    class test is done here rather than in PostgREST.
+    """
+    pairs = list(remove_pairs or [])
+    if not pairs:
+        return []
+    subjects = {s for _c, s in pairs}
+    classes = {c for c, _s in pairs}
+    rows = (supabase.table("exams")
+            .select("id, title, subject_id, class_ids, status, is_published")
+            .eq("school_id", school_id).eq("teacher_id", teacher_id)
+            .in_("subject_id", list(subjects)).execute().data or [])
+    hits = []
+    for exam in rows:
+        if exam.get("status") not in LIVE_EXAM_STATUSES and not exam.get("is_published"):
+            continue
+        exam_classes = exam.get("class_ids") or []
+        if isinstance(exam_classes, str):
+            import json
+            try:
+                exam_classes = json.loads(exam_classes)
+            except (ValueError, TypeError):
+                exam_classes = []
+        exam_classes = {str(c) for c in exam_classes}
+        if exam_classes & classes:
+            hits.append({"id": exam.get("id"), "title": exam.get("title") or "Ujian"})
+    return hits
+
+
+def validate_targets(supabase, school_id, teacher_id, pairs):
+    """Refuse anything that is not this school's — 403, never a silent drop."""
+    if not teacher_in_school(supabase, school_id, teacher_id):
+        return "Guru tidak terdaftar di sekolah ini"
+    class_ids = {c for c, _s in pairs}
+    subject_ids = {s for _c, s in pairs}
+    if not class_ids <= owned_class_ids(supabase, school_id, class_ids):
+        return "Ada kelas yang bukan milik sekolah ini"
+    if not subject_ids <= owned_subject_ids(supabase, school_id, subject_ids):
+        return "Ada mata pelajaran yang bukan milik sekolah ini"
+    return None
+
+
+def save(supabase, school_id, teacher_id, pairs, year_name=None, confirm_remove=False):
+    """Diff `pairs` against the current set and apply it.
+
+    Returns ``(ok, payload)`` where a refusal carries a `reason` and, for a
+    removal with live papers, the `running` exams. Unlike the older
+    single-pair write this never deletes a row: an assignment that is dropped is
+    set `inactive`, so the pair a past paper was built under stays in the record.
+    """
+    wanted = {_pair_key(c, s) for c, s in pairs if c and s}
+    error = validate_targets(supabase, school_id, teacher_id, wanted)
+    if error:
+        return False, {"reason": error, "status": 403}
+
+    current = current_pairs(supabase, school_id, teacher_id, year_name)
+    to_add = sorted(wanted - current)
+    to_remove = sorted(current - wanted)
+
+    if to_remove and not confirm_remove:
+        running = running_exams_for_removal(supabase, school_id, teacher_id, to_remove)
+        if running:
+            return False, {
+                "reason": "penugasan ini punya ujian berjalan",
+                "status": 409,
+                "needs_confirmation": True,
+                "running": running,
+                "removing": [{"class_id": c, "subject_id": s} for c, s in to_remove],
+                "added": len(to_add),
+                "removed": len(to_remove),
+            }
+
+    if to_add:
+        rows = [{"teacher_id": teacher_id, "class_id": c, "subject_id": s,
+                 "school_id": school_id, "status": ACTIVE,
+                 "school_year": (year_name or None)}
+                for c, s in to_add]
+        supabase.table("teacher_assignments").upsert(
+            rows, on_conflict="teacher_id,class_id,subject_id").execute()
+
+    for class_id, subject_id in to_remove:
+        supabase.table("teacher_assignments").update({"status": INACTIVE}) \
+            .eq("school_id", school_id).eq("teacher_id", teacher_id) \
+            .eq("class_id", class_id).eq("subject_id", subject_id).execute()
+
+    return True, {
+        "added": [{"class_id": c, "subject_id": s} for c, s in to_add],
+        "removed": [{"class_id": c, "subject_id": s} for c, s in to_remove],
+        "added_count": len(to_add), "removed_count": len(to_remove),
+    }

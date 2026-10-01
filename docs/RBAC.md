@@ -364,3 +364,33 @@ Super Admin juga masih bisa mengakses `/admin/*` untuk approval registrasi dan c
      /super-admin/exams
      /super-admin/logs
 ```
+
+## Penugasan guru–kelas–mapel (banyak-ke-banyak)
+
+`/admin-sekolah/teachers` memberi admin sekolah sebuah **matriks** penugasan: baris = kelas
+(dikelompokkan per jenjang), kolom = mata pelajaran, sel = pasangan *(kelas, mapel)* yang
+diampu guru itu untuk **tahun ajaran aktif**. Pratinjau di baris daftar menunjukkan
+"N kelas, M mapel" tanpa perlu membuka modal.
+
+Endpoint (admin sekolah saja):
+
+- `GET  /admin-sekolah/teachers/<teacher_id>/assignments` — kelas + mapel sekolah, pasangan
+  aktif untuk tahun berjalan, dan nama tahunnya; guru yang bukan milik sekolah ini → **404**.
+- `POST /admin-sekolah/teachers/<teacher_id>/assignments` — seluruh pilihan, bukan delta.
+  Server yang menghitung selisihnya (`app/services/teacher_assignments.py`).
+
+Aturan yang ditegakkan server, bukan UI:
+
+- setiap `class_id`/`subject_id` harus milik **sekolah pemanggil**; yang bukan → **403**,
+  bukan diabaikan diam-diam (diam-diam terlihat seperti berhasil);
+- guru target harus terdaftar di sekolah yang sama (role `guru`/`teacher`);
+- pencabutan penugasan **menonaktifkan** baris (`status='inactive'`), tidak menghapusnya —
+  pasangan tempat ujian lama dibuat tetap ada di riwayat;
+- pasangan yang dicabut tetapi masih punya **ujian berjalan** mengembalikan **409** beserta
+  daftar ujiannya; penyimpanan hanya berlanjut dengan `confirm_remove: true`;
+- baris lama tanpa `school_year` (pra-migrasi 045) dianggap milik tahun aktif, supaya
+  menyimpan ulang tidak diam-diam menonaktifkannya.
+
+Sumber otorisasi guru tetap `app/services/assignments.py`: guru hanya boleh membuat/mengubah
+ujian untuk pasangan yang benar-benar dipegangnya, dan daftar dropdown yang kosong **menutup**
+(admin sekolah & super admin tidak dibatasi per pasangan).
