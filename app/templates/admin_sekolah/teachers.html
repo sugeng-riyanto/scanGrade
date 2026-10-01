@@ -177,6 +177,7 @@
                         <th class="text-left px-4 py-3">No. Pegawai</th>
                         <th class="text-left px-4 py-3">Email</th>
                         <th class="text-left px-4 py-3">Mapel</th>
+                        <th class="text-left px-4 py-3">Penugasan</th>
                         <th class="text-right px-4 py-3">Aksi</th>
                     </tr>
                 </thead>
@@ -188,8 +189,28 @@
                         <td class="px-4 py-3 text-stone-500">{{ t.employee_number or '-' }}</td>
                         <td class="px-4 py-3 text-stone-500">{{ t.email }}</td>
                         <td class="px-4 py-3"><span class="badge bg-violet-50 text-violet-700 border border-violet-200">{{ t.subject_name or '-' }}</span></td>
+                        <td class="px-4 py-3">
+                            {# The preview the admin needs without opening 50 modals: how many
+                               classes and subjects this teacher holds. A link, not just a
+                               number — the count is the answer, the matrix is the detail. #}
+                            {% if t.assign_classes or t.assign_subjects %}
+                            <button type="button"
+                                    @click="$dispatch('open-assign', { who: '{{ t.id }}', label: '{{ t.name|e }}' })"
+                                    class="text-xs font-bold text-indigo-700 hover:underline">
+                                {{ t.assign_classes }} kelas, {{ t.assign_subjects }} mapel
+                            </button>
+                            {% else %}
+                            <button type="button"
+                                    @click="$dispatch('open-assign', { who: '{{ t.id }}', label: '{{ t.name|e }}' })"
+                                    class="text-xs font-semibold text-stone-400 hover:text-primary-600 hover:underline">Belum ada</button>
+                            {% endif %}
+                        </td>
                         <td class="px-4 py-3 text-right">
                             <div class="flex items-center justify-end gap-1">
+                                <button type="button"
+                                        @click="$dispatch('open-assign', { who: '{{ t.id }}', label: '{{ t.name|e }}' })"
+                                        title="Kelola Penugasan (kelas &amp; mapel)"
+                                        class="px-2.5 py-1.5 text-xs font-bold bg-indigo-50 text-indigo-700 rounded-lg hover:bg-indigo-100 transition border border-indigo-200"><i class="fas fa-table-cells"></i></button>
                                 <button @click="editing=!editing" class="px-2.5 py-1.5 text-xs font-bold bg-amber-50 text-amber-700 rounded-lg hover:bg-amber-100 transition border border-amber-200"><i class="fas fa-edit"></i></button>
                                 {# `fetch`, not htmx: the route answers JSON, and a JSON body swapped
                                    into a button is a button-shaped error message. `fetch` is already
@@ -222,7 +243,7 @@
                     </tr>
                     {% else %}
                     <tr>
-                        <td colspan="5" class="px-4 py-12 text-center text-stone-400 font-medium">
+                        <td colspan="7" class="px-4 py-12 text-center text-stone-400 font-medium">
                             <i class="fas fa-chalkboard-teacher text-3xl mb-2 block text-stone-300"></i>
                             {% if q %}Pencarian tidak ditemukan{% else %}Belum ada guru{% endif %}
                         </td>
@@ -256,5 +277,183 @@
         {% endif %}
     </div>
     {% endif %}
+
+    {# ── Kelola Penugasan: the many-to-many matrix ──────────────────────────────
+       Rows are classes grouped by grade, columns are subjects, a cell is one
+       (class, subject) pair. Kept as its own Alpine component listening for an
+       `open-assign` event so the roster's giant `x-data` does not have to grow a
+       second screen's worth of state. #}
+    <div x-data="assignmentMatrix()" x-cloak @open-assign.window="open($event.detail)">
+        <div x-show="isOpen" class="fixed inset-0 sg-layer-dialog flex items-center justify-center bg-black/40 p-3" @click.self="close()">
+            <div class="bg-white rounded-2xl shadow-xl w-full max-w-5xl max-h-[92vh] flex flex-col">
+                <div class="px-5 py-4 border-b border-stone-100 flex items-center justify-between gap-3">
+                    <div class="min-w-0">
+                        <h3 class="font-extrabold text-stone-800 truncate">Kelola Penugasan — <span x-text="teacherName"></span></h3>
+                        <p class="text-xs text-stone-500" x-show="yearName" x-text="'Tahun ajaran: ' + yearName"></p>
+                        <p class="text-xs text-amber-600" x-show="!yearName">Sekolah ini belum punya tahun ajaran — penugasan disimpan tanpa label tahun.</p>
+                    </div>
+                    <button type="button" @click="close()" class="text-stone-400 hover:text-stone-700"><i class="fas fa-times"></i></button>
+                </div>
+
+                <div x-show="loading" class="px-5 py-3 text-sm text-stone-500">Memuat matriks…</div>
+                <div x-show="error" class="px-5 py-3 text-sm text-red-600" x-text="error"></div>
+
+                <div class="overflow-auto px-3 py-3 flex-1" x-show="!loading && !error">
+                    <table class="w-full text-xs">
+                        <thead class="bg-stone-50 sticky top-0 sg-layer-sticky">
+                            <tr>
+                                <th class="text-left px-2 py-2 font-bold text-stone-500 sticky left-0 bg-stone-50 sg-layer-header">Kelas</th>
+                                <template x-for="s in subjects" :key="s.id">
+                                    <th class="px-1 py-2 text-center font-bold text-stone-600 align-bottom">
+                                        <div x-text="s.name" class="max-w-[110px] mx-auto leading-tight"></div>
+                                        <button type="button" @click="toggleSubjectAll(s.id)"
+                                                class="mt-1 text-[10px] font-bold text-indigo-600 hover:underline"
+                                                title="Pilih/batalkan semua kelas untuk mapel ini">semua kelas</button>
+                                    </th>
+                                </template>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template x-for="g in grades()" :key="g">
+                                <template>
+                                    <tr class="bg-stone-100">
+                                        <td class="sticky left-0 bg-stone-100 px-2 py-1 font-extrabold text-stone-600 sg-layer-sticky"
+                                            :colspan="subjects.length + 1" x-text="'Kelas ' + g"></td>
+                                    </tr>
+                                    <template x-for="c in classesOf(g)" :key="c.id">
+                                        <tr class="hover:bg-indigo-50/40">
+                                            <td class="sticky left-0 bg-white px-2 py-1 font-semibold text-stone-700 sg-layer-sticky" x-text="c.name"></td>
+                                            <template x-for="s in subjects" :key="s.id">
+                                                <td class="text-center px-1 py-1">
+                                                    <input type="checkbox" class="w-4 h-4"
+                                                           :checked="isOn(c.id, s.id)"
+                                                           @click="toggle(c.id, s.id)">
+                                                </td>
+                                            </template>
+                                        </tr>
+                                    </template>
+                                </template>
+                            </template>
+                        </tbody>
+                    </table>
+                    <p class="text-xs text-stone-400 mt-2" x-show="subjects.length === 0">Belum ada mata pelajaran di sekolah ini.</p>
+                </div>
+
+                <div class="px-5 py-4 border-t border-stone-100 flex items-center justify-between gap-3 flex-wrap">
+                    <div class="text-xs font-bold" :class="(addedCount() || removedCount()) ? 'text-indigo-700' : 'text-stone-400'">
+                        <span x-text="addedCount() ? '+' + addedCount() + ' ditambah' : ''"></span>
+                        <span x-text="removedCount() ? (addedCount() ? ' · ' : '') + '-' + removedCount() + ' dicabut' : ''"></span>
+                        <span x-show="!addedCount() && !removedCount()">Tidak ada perubahan</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button type="button" @click="close()" class="px-4 py-2.5 border border-stone-200 rounded-xl font-bold text-stone-600 hover:bg-stone-50 transition text-sm">Batal</button>
+                        <button type="button" @click="save($event)" :disabled="saving"
+                                class="px-4 py-2.5 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition text-sm disabled:opacity-50">
+                            <span x-show="!saving">Simpan Penugasan</span><span x-show="saving">Menyimpan…</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
+
+<script>
+// The matrix editor. A cell is a (class, subject) pair; the modal owns the whole
+// selection, so the server is sent the selection, not a delta — two open tabs
+// would otherwise disagree about what a "removal" is. The diff shown to the admin
+// before saving is computed here from the same two sets the server will diff.
+function assignmentMatrix() {
+    return {
+        isOpen: false,
+        loading: false,
+        saving: false,
+        error: '',
+        who: '',
+        teacherName: '',
+        yearName: '',
+        classes: [],
+        subjects: [],
+        // "classId|subjectId" -> true
+        selected: {},
+        initial: {},
+        key(c, s) { return c + '|' + s; },
+        isOn(c, s) { return !!this.selected[this.key(c, s)]; },
+        toggle(c, s) {
+            const k = this.key(c, s);
+            if (this.selected[k]) { delete this.selected[k]; } else { this.selected[k] = true; }
+            this.selected = Object.assign({}, this.selected);
+        },
+        toggleSubjectAll(s) {
+            const ids = this.classes.map(c => c.id);
+            const allOn = ids.every(c => this.isOn(c, s));
+            const next = Object.assign({}, this.selected);
+            ids.forEach(c => { if (allOn) { delete next[this.key(c, s)]; } else { next[this.key(c, s)] = true; } });
+            this.selected = next;
+        },
+        grades() {
+            return [...new Set(this.classes.map(c => c.grade_level || 'Lainnya'))].sort();
+        },
+        classesOf(g) {
+            return this.classes.filter(c => (c.grade_level || 'Lainnya') === g);
+        },
+        addedCount() { return Object.keys(this.selected).filter(k => !this.initial[k]).length; },
+        removedCount() { return Object.keys(this.initial).filter(k => !this.selected[k]).length; },
+        csrf() {
+            const meta = document.querySelector('meta[name="csrf-token"]');
+            return meta ? meta.content : '';
+        },
+        async open(detail) {
+            this.who = detail.who;
+            this.teacherName = detail.label || '';
+            this.isOpen = true; this.loading = true; this.error = '';
+            try {
+                const r = await fetch('/admin-sekolah/teachers/' + this.who + '/assignments');
+                const d = await r.json();
+                if (!r.ok) { this.error = d.error || 'Gagal memuat penugasan'; this.loading = false; return; }
+                this.classes = d.classes || [];
+                this.subjects = d.subjects || [];
+                this.yearName = (d.year && d.year.name) || '';
+                const sel = {}, init = {};
+                (d.pairs || []).forEach(p => { sel[this.key(p.class_id, p.subject_id)] = true; init[this.key(p.class_id, p.subject_id)] = true; });
+                this.selected = sel; this.initial = init;
+            } catch (e) {
+                this.error = 'Gagal memuat penugasan';
+            }
+            this.loading = false;
+        },
+        close() { this.isOpen = false; },
+        payload() {
+            return Object.keys(this.selected).map(k => {
+                const parts = k.split('|');
+                return { class_id: parts[0], subject_id: parts[1] };
+            });
+        },
+        async save(ev, confirmRemove) {
+            this.saving = true; this.error = '';
+            try {
+                const r = await fetch('/admin-sekolah/teachers/' + this.who + '/assignments', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': this.csrf() },
+                    body: JSON.stringify({ pairs: this.payload(), confirm_remove: !!confirmRemove }),
+                });
+                const d = await r.json();
+                if (r.status === 409 && d.needs_confirmation) {
+                    const names = (d.running || []).map(e => '- ' + e.title).join('\n');
+                    if (confirm('Guru ini punya ujian berjalan yang memakai penugasan yang akan dicabut:\n' + names + '\n\nTetap cabut penugasan ini?')) {
+                        this.saving = false;
+                        return this.save(ev, true);
+                    }
+                    this.saving = false; return;
+                }
+                if (!r.ok) { this.error = d.reason || d.error || 'Gagal menyimpan'; this.saving = false; return; }
+                location.reload();
+            } catch (e) {
+                this.error = 'Gagal menyimpan';
+            }
+            this.saving = false;
+        },
+    };
+}
+</script>
 {% endblock %}
