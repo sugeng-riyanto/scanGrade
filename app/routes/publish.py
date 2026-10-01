@@ -1,12 +1,14 @@
 from flask import Blueprint, jsonify, request, redirect, g
 from app.utils.auth import teacher_or_admin_required, get_supabase
 from app.decorators.security import require_school_access
+from app.decorators.year_lock import open_year_required
 
 publish_bp = Blueprint("publish", __name__)
 
 
 @publish_bp.route("/", methods=["POST"])
 @teacher_or_admin_required
+@open_year_required("exam_id")
 def publish_scores():
     """Publish scores for an exam — expects exam_id in request body."""
     data = request.get_json()

@@ -3,6 +3,7 @@ from app.utils.auth import login_required, teacher_required, get_supabase
 from app.services.pdf_service import upload_pdf
 from app.errors import FileTooLargeError, InvalidPDFError, NotFoundError, ValidationError
 from app.utils import denials
+from app.decorators.year_lock import open_year_required
 
 exam_bp = Blueprint("exam", __name__)
 MAX_PDF_SIZE = 50 * 1024 * 1024
@@ -18,6 +19,7 @@ def list_exams():
 
 @exam_bp.route("/<exam_id>/upload-pdf", methods=["POST"])
 @teacher_required
+@open_year_required("exam_id")
 def upload_exam_pdf(exam_id):
     if "pdf" not in request.files:
         return jsonify({"error": "File PDF diperlukan"}), 400
@@ -87,6 +89,7 @@ def get_exam(exam_id):
 
 @exam_bp.route("/<exam_id>", methods=["PUT"])
 @teacher_required
+@open_year_required("exam_id")
 def update_exam(exam_id):
     data = request.get_json()
     if not data:
@@ -111,6 +114,7 @@ def update_exam(exam_id):
 
 @exam_bp.route("/<exam_id>", methods=["DELETE"])
 @teacher_required
+@open_year_required("exam_id")
 def delete_exam(exam_id):
     supabase = get_supabase()
     existing = supabase.table("exams").select("teacher_id,school_id").eq("id", exam_id).single().execute().data
