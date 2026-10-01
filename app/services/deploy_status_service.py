@@ -283,6 +283,10 @@ GATE_KEYS = frozenset({
     "smoke_test",
     "claims_gate",
     "perf_gate",
+    #: The exam builder's finger floor, measured on a real headless browser
+    #: (`deploy/touch_gate.py`). A control the stylesheet promised would be at
+    #: least 44px on a finger measured under it.
+    "touch_gate",
     "schema_gate",
 })
 
@@ -2673,14 +2677,6 @@ def verdict(runner: dict, checkout: dict, *, paused: bool,
         return {**out, "level": level, "key": "refused",
                 "detail": preflight.get("gate") or gate,
                 "behind": checkout.get("behind")}
-    # A heal is a real intervention on the box — something that was there is now in
-    # the state directory instead — and it explains a checkout that is clean, or
-    # clean-but-still-dirty elsewhere. It sits below a refusal, which is a stop, and
-    # above `dirty` and `behind`, which describe a box that is otherwise well.
-    if box_edits and box_edits.get("present"):
-        return {**out, "level": WARN, "key": "box_edits",
-                "detail": box_edits.get("short") or box_edits.get("at"),
-                "behind": checkout.get("behind")}
     if not checkout["available"]:
         return {**out, "level": UNKNOWN, "key": checkout["reason_key"] or "checkout_unreadable",
                 "detail": checkout["detail"]}
@@ -2695,6 +2691,20 @@ def verdict(runner: dict, checkout: dict, *, paused: bool,
                 "detail": str(running.get("behind")), "behind": checkout.get("behind")}
     if checkout.get("dirty"):
         return {**out, "level": WARN, "key": "dirty", "detail": str(checkout["dirty"])}
+    # A heal is a real intervention on the box — something that was there is now in
+    # the state directory instead — and it explains a checkout that reads clean
+    # because the box's change is in the state directory now. It sits below a
+    # refusal, which is a stop, and below `dirty`, because the two are different
+    # kinds of fact: a heal is an *event*, and the dirty count is read at this
+    # moment. Measured on the live box, 2026-10-01: a heal record from the day before
+    # held the verdict at `box_edits` while the checkout was genuinely dirty, so the
+    # page never rendered which kind of dirty it was holding — the one card the
+    # reading exists for. The heal is still reported on its own card, which does not
+    # depend on the verdict; what moved is only which sentence is the headline.
+    if box_edits and box_edits.get("present"):
+        return {**out, "level": WARN, "key": "box_edits",
+                "detail": box_edits.get("short") or box_edits.get("at"),
+                "behind": checkout.get("behind")}
     behind = checkout.get("behind")
     if isinstance(behind, int) and behind > 0:
         return {**out, "level": WARN, "key": "behind", "detail": str(behind),

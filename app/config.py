@@ -100,6 +100,14 @@ class Config:
     APP_URL = env_str("APP_URL", "http://localhost:5000")
     DEMO_AI_KEY = env_str("DEMO_AI_KEY", "")
 
+    #: Drive the whole payment path without a gateway account: the notification
+    #: handler trusts the callback's own fields instead of asking Midtrans to parse
+    #: it. Used by tests and staging so a school's checkout -> code -> redemption ->
+    #: tier/invoice journey can be exercised end to end. `ProductionConfig` pins it
+    #: off regardless of the environment, and a guard test reads that class
+    #: attribute rather than a running app.
+    PAYMENT_SIMULATION = env_bool("PAYMENT_SIMULATION", False)
+
     @classmethod
     def email_configured(cls):
         return bool(cls.SMTP_EMAIL and cls.SMTP_PASSWORD)
@@ -173,6 +181,10 @@ class ProductionConfig(Config):
     SESSION_COOKIE_SECURE = True
     SESSION_COOKIE_SAMESITE = "Lax"
     SENTRY_ENVIRONMENT = "production"
+    # Never simulate a payment on a box that takes real money. Set as a class
+    # attribute, not a read of the environment, so no `.env` on the box can turn it
+    # on; `PAYMENT_SIMULATION` in `Config` is what the other environments inherit.
+    PAYMENT_SIMULATION = False
     # Production is fronted by nginx, which appends the real client address to
     # X-Forwarded-For. Trust exactly one hop.
     TRUSTED_PROXY_HOPS = env_int("TRUSTED_PROXY_HOPS", 1)
@@ -218,6 +230,7 @@ class TestingConfig(Config):
     FONNTE_API_KEY = ""
     NGROK_DOMAIN = ""
     SMTP_PASSWORD = ""
+    PAYMENT_SIMULATION = True
 
     @classmethod
     def validate(cls):

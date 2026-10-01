@@ -1102,7 +1102,7 @@ def generate_code_by_npsn():
     npsn_short = npsn if npsn else "0000"
     supabase.table("payment_transactions").insert({
         "school_id": school_id,
-        "plan_id": None,
+        "plan_id": _latest_plan_for_school(supabase, school_id),
         "order_id": f"CSH-{npsn_short}-{datetime.now(timezone.utc).strftime('%y%m%d%H%M%S')}-{secrets.randbelow(9000)+1000}",
         "gross_amount": 0,
         "status": "cash",
@@ -1114,21 +1114,61 @@ def generate_code_by_npsn():
     return redirect("/super-admin/activation-codes")
 
 
+def _latest_plan_for_school(supabase, school_id):
+    """The plan the school last chose, so a manual activation records it.
+
+    A school that picked a plan online but paid in cash is the common case here:
+    the pending Midtrans transaction carries the plan. Returning ``None`` (the
+    school never chose one) is honest, and the caller then grants a paid tier from
+    that fact rather than the free trial's.
+    """
+    try:
+        res = supabase.table("payment_transactions") \
+            .select("plan_id, created_at") \
+            .eq("school_id", school_id) \
+            .order("created_at", desc=True) \
+            .limit(10) \
+            .execute()
+    except Exception:
+        return None
+    for row in (res.data or []):
+        if row.get("plan_id") is not None:
+            return row["plan_id"]
+    return None
+
+
 @super_bp.route("/activation-codes/<school_id>/activate-cash", methods=["POST"])
 @_sa_required
 def activate_cash(school_id):
     supabase = get_supabase()
     try:
         from app.services.midtrans_service import generate_activation_code
+        from app.services.subscription_service import (subscription_end,
+                                                       tier_for_duration_days,
+                                                       tier_for_manual_activation)
         code = generate_activation_code()
 
         school = supabase.table("schools").select("name, npsn").eq("id", school_id).single().execute()
         school_name = school.data.get("name", "") if school.data else ""
         npsn = school.data.get("npsn", "") if school.data else ""
 
+        # What the school actually bought: the plan on its latest transaction,
+        # falling back to the lowest *paid* tier when it never chose one. The row
+        # used to carry neither, so an active cash subscription resolved as trial.
+        plan_id = _latest_plan_for_school(supabase, school_id)
+        plan_days = None
+        if plan_id is not None:
+            try:
+                pr = supabase.table("subscription_plans").select("duration_days").eq("id", plan_id).limit(1).execute()
+                if pr.data:
+                    plan_days = pr.data[0].get("duration_days")
+            except Exception:
+                plan_days = None
+        tier = tier_for_duration_days(plan_days) if plan_id is not None else tier_for_manual_activation()
+
         supabase.table("payment_transactions").insert({
             "school_id": school_id,
-            "plan_id": None,
+            "plan_id": plan_id,
             "order_id": f"CSH-{npsn}-{datetime.now(timezone.utc).strftime('%y%m%d%H%M%S')}-{secrets.randbelow(9000)+1000}",
             "gross_amount": 0,
             "status": "cash",
@@ -1139,13 +1179,22 @@ def activate_cash(school_id):
         now = datetime.now(timezone.utc)
         trial_days = trial_cfg.get_trial_days(supabase)
 
+        # The plan's length, or the documented year when no plan recorded one.
+        # This used to stay NULL for a cash activation with no readable plan, so
+        # the subscription never expired; the online path had always defaulted to
+        # a year, and the two disagreed.
+        sub_end = subscription_end(now, plan_days)
+
         supabase.table("school_subscriptions").insert({
             "school_id": school_id,
+            "plan_id": plan_id,
+            "tier": tier,
             "status": "active",
             "trial_days": trial_days,
             "trial_start": now.isoformat(),
             "trial_end": trial_cfg.days_until(now, trial_days).isoformat(),
             "subscription_start": now.isoformat(),
+            "subscription_end": sub_end.isoformat() if sub_end else None,
             "activation_code": code,
         }).execute()
 

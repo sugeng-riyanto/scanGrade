@@ -15,6 +15,7 @@ from app.utils import failure
 from app.utils.cache import cache_get, cache_set
 from app.utils.helpers import row_or_none
 from app.decorators.security import require_school_access
+from app.decorators.subscription import require_subscription
 from app.services.audit_service import log_activity, log_create, log_update, log_delete
 from app.services import trial_settings as trial_cfg
 from app.services.student_import import create_student_account
@@ -26,6 +27,8 @@ from app.services.subject_service import (subject_usage, usage_confirmation_need
 from app.services import analysis_scope
 from app.services import login_cards
 from app.services import account_emails
+from app.services import enrollment
+from app.services import academic_year
 
 def _gen_password(length=12) -> str:
     chars = string.ascii_letters + string.digits + "!@#$%^&*"
@@ -603,6 +606,17 @@ def import_excel():
 
 
 def _import_students(ws, sid, supabase, results):
+    # The student cap is enforced here, not on the whole `/import` route: the same
+    # upload can carry teacher and subject sheets, and those must not be refused
+    # because the student quota is full.
+    from app.services.subscription_service import check_feature_limit
+    incoming = sum(1 for row in ws.iter_rows(min_row=2, values_only=True)
+                   if row and row[0])
+    allowed, message = check_feature_limit(sid, "add_student", extra=incoming)
+    if not allowed:
+        results["errors"].append(message)
+        return
+
     classes_cache = {}
     columns = _header_columns(ws)
     for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), 2):
@@ -994,6 +1008,128 @@ def delete_school_year(year_id):
     return redirect("/admin-sekolah/school-years")
 
 
+# ─── YEAR CLOSE (tutup tahun ajaran & buka tahun baru) ─
+#
+# One screen, because the three things that happen at the turn of a year belong
+# together: the old year is closed (and becomes read-only), the new one is
+# created as a draft, and every pupil gets an outcome. Doing them by hand, on
+# separate pages, is how a class pointer gets overwritten with no record of where
+# the pupil was — the defect `student_enrollment` (migration 046) exists to fix.
+
+@admin_sekolah_bp.route("/school-years/close", methods=["GET", "POST"])
+@admin_sekolah_required
+def close_school_year():
+    sid = _school_id()
+    supabase = get_supabase()
+
+    years = (supabase.table("school_years").select("*")
+             .eq("school_id", sid).order("name", desc=True).execute().data or [])
+    active_year = next((y for y in years if y.get("is_active")), None)
+    drafts = [y for y in years if (y.get("status") or "") == "draft"]
+
+    if request.method == "GET":
+        plan = None
+        classes = (supabase.table("classes")
+                   .select("id, name, grade_level, school_year_id")
+                   .eq("school_id", sid).execute().data or [])
+        if active_year and drafts:
+            plan = academic_year.plan_close(supabase, sid, active_year["id"],
+                                            drafts[0]["id"], classes=classes)
+        # `classes` is passed even when there is no plan yet: the template's
+        # per-pupil "next class" dropdown reads it, and an empty list would render
+        # a plan whose target options are all blank.
+        return render_template("admin_sekolah/year_close.html",
+                               years=years, active_year=active_year, drafts=drafts,
+                               plan=plan, classes=classes, report=None)
+
+    wants_json = _wants_json()
+
+    def refuse(message, code=400):
+        if wants_json:
+            return jsonify({"error": message}), code
+        flash(message, "error")
+        return redirect("/admin-sekolah/school-years/close")
+
+    old_id = request.form.get("old_year_id") or (active_year or {}).get("id")
+    if not old_id:
+        return refuse("Tidak ada tahun ajaran aktif untuk ditutup")
+    if not _year_in_school(supabase, old_id, sid):
+        return refuse("Tahun ajaran bukan milik sekolah ini", 403)
+
+    # The new year: an existing draft, or one created from the form. A year is
+    # never reused across schools, and its name must be new here.
+    new_id = request.form.get("new_year_id") or None
+    if not new_id:
+        name = (request.form.get("name") or "").strip()
+        start_date = (request.form.get("start_date") or "").strip()
+        end_date = (request.form.get("end_date") or "").strip()
+        if not (name and start_date and end_date):
+            return refuse("Nama, tanggal mulai, dan tanggal berakhir tahun baru wajib diisi")
+        if any((y.get("name") or "") == name for y in years):
+            return refuse(f"Tahun ajaran '{name}' sudah ada")
+        if not request.form.get("confirmed"):
+            # Preview first: build the plan against a year that does not exist yet
+            # by planning outcomes without a target (`to_year=None`), so the admin
+            # sees who graduates and who advances before anything is written.
+            classes = (supabase.table("classes")
+                       .select("id, name, grade_level, school_year_id")
+                       .eq("school_id", sid).execute().data or [])
+            plan = academic_year.plan_close(supabase, sid, old_id, None, classes=classes)
+            return render_template("admin_sekolah/year_close.html",
+                                   years=years, active_year=active_year, drafts=drafts,
+                                   plan=plan, classes=classes, report=None,
+                                   pending_new={"name": name, "start_date": start_date,
+                                                "end_date": end_date})
+        new_year = academic_year.create_draft_year(supabase, sid, name, start_date, end_date)
+        new_id = new_year.get("id")
+    if not _year_in_school(supabase, new_id, sid):
+        return refuse("Tahun ajaran baru bukan milik sekolah ini", 403)
+
+    classes = (supabase.table("classes")
+               .select("id, name, grade_level, school_year_id")
+               .eq("school_id", sid).execute().data or [])
+    plan = academic_year.plan_close(supabase, sid, old_id, new_id, classes=classes)
+
+    # First pass (no `confirmed`): show the plan with each pupil's outcome and
+    # target, so a person decides — the wizard never closes a year on its own.
+    if not request.form.get("confirmed"):
+        return render_template("admin_sekolah/year_close.html",
+                               years=years, active_year=active_year, drafts=drafts,
+                               plan=plan, classes=classes, report=None)
+
+    # Per-pupil overrides: `outcome_<student_id>` and `to_class_<student_id>`.
+    overrides = {}
+    for row in plan["rows"]:
+        sid_ = row["student_id"]
+        chosen = request.form.get(f"outcome_{sid_}")
+        target = request.form.get(f"to_class_{sid_}")
+        if chosen or target:
+            overrides[sid_] = {"outcome": chosen or row["outcome"],
+                               "to_class_id": target or row.get("to_class_id")}
+
+    report = academic_year.apply_close(supabase, sid, plan, overrides)
+    # Only after the pupils are safely recorded does the old year close and the new
+    # one start: closing first and failing halfway would leave nobody enrolled.
+    academic_year.close_year(supabase, sid, old_id)
+    academic_year.activate_year(supabase, sid, new_id)
+    log_activity("close_year", "school_year", old_id,
+                 new_data={"opened": new_id, "moved": report["moved"],
+                           "recorded": report["recorded"],
+                           "errors": len(report["errors"])}, user_id=g.user_id)
+
+    if wants_json:
+        return jsonify({"success": True, **report})
+    if report["errors"]:
+        flash(f"Tahun ajaran ditutup, tetapi {len(report['errors'])} murid gagal diproses. "
+              f"Lihat laporan di bawah.", "warning")
+    else:
+        flash(f"Tahun ajaran ditutup. {report['moved']} murid dipindahkan, "
+              f"{report['recorded']} riwayat dicatat.", "success")
+    return render_template("admin_sekolah/year_close.html",
+                           years=years, active_year=active_year, drafts=drafts,
+                           plan=plan, classes=classes, report=report)
+
+
 # ─── CLASSES ─────────────────────────────────────────
 
 @admin_sekolah_bp.route("/classes")
@@ -1341,6 +1477,15 @@ def promote():
         elif not _year_in_school(supabase, year_id, sid):
             return refuse("Tahun ajaran bukan milik sekolah ini", 403)
 
+        # The same read-only rule the teacher write paths carry, at the school
+        # admin's door: promoting INTO a closed year would add rows to a year
+        # whose marks are already history. Refused before the preview, so a new
+        # class is never created inside a closed year either.
+        target_year = year_id if create_new else ((tgt or {}).get("school_year_id") or year_id)
+        closed_reason = academic_year.write_refusal(supabase, target_year)
+        if closed_reason:
+            return refuse(closed_reason, 403)
+
         # Preview mode: show students before executing
         if not confirmed:
             students_to_move = supabase.table("students").select("id, profiles!inner(full_name)").eq("class_id", source_class_id).eq("status", "active").execute().data or []
@@ -1389,15 +1534,50 @@ def promote():
 
         # Move students
         students = supabase.table("students").select("id").eq("class_id", source_class_id).eq("status", "active").execute().data or []
+
+        # Which year the pupil moves INTO, and which they came FROM. The target
+        # year is the target class's own year (or the new class's, for `create_new`);
+        # the source year is the source class's, if it has one. Both are needed
+        # because the membership history is per year, not per class.
+        tgt_year_id = year_id if create_new else ((tgt or {}).get("school_year_id") or year_id)
+        src_year_id = src.get("school_year_id")
+
+        # The outcome is what this year *was* for the pupil. It defaults by rule —
+        # a school's last grade graduates, every other grade advances — and the
+        # form may override it. `enrollment.default_outcome` owns that rule.
+        levels = [c.get("grade_level") for c in
+                  (supabase.table("classes").select("grade_level").eq("school_id", sid).execute().data or [])]
+        outcome = enrollment.normalise_status(
+            request.form.get("outcome"),
+            default=enrollment.default_outcome(src.get("grade_level"), levels))
+
         moved = 0
+        enrolled = 0
         for s in students:
             try:
                 supabase.table("students").update({"class_id": target_class_id}).eq("id", s["id"]).execute()
                 supabase.table("profiles").update({"class_id": target_class_id}).eq("id", s["id"]).execute()
                 moved += 1
             except Exception:
-                pass
-        log_activity("promote", "class", source_class_id, new_data={"target_class_id": target_class_id, "moved": moved, "school_year_id": request.form.get("school_year_id")}, user_id=g.user_id)
+                continue
+            # The record promotion used to erase. A pupil moving within one year
+            # (a class change, not a year change) has ONE row for that year, so
+            # the outcome is written only when the years actually differ.
+            try:
+                if src_year_id and str(src_year_id) == str(tgt_year_id):
+                    enrollment.record(supabase, sid, s["id"], src_year_id,
+                                      target_class_id, status=outcome)
+                else:
+                    if src_year_id:
+                        enrollment.record(supabase, sid, s["id"], src_year_id,
+                                          source_class_id, status=outcome)
+                    if tgt_year_id:
+                        enrollment.record(supabase, sid, s["id"], tgt_year_id,
+                                          target_class_id, status="aktif")
+                enrolled += 1
+            except Exception:
+                current_app.logger.warning("enrollment record failed for %s", s["id"])
+        log_activity("promote", "class", source_class_id, new_data={"target_class_id": target_class_id, "moved": moved, "enrolled": enrolled, "outcome": outcome, "school_year_id": request.form.get("school_year_id")}, user_id=g.user_id)
         flash(f"{moved} murid berhasil dipindahkan ke kelas tujuan", "success")
         return redirect("/admin-sekolah/promote")
 
@@ -1480,10 +1660,16 @@ def teachers():
 
     base_qs = _filter_qs(q=q, subject_id=subject_id, sort=sort, dir=direction,
                          per_page=("all" if not per_page else per_page))
+    # `pending_activation` rides along so THIS page answers "who has not activated
+    # yet" — the question the admin is already asking while looking at the roster.
+    # Until now it was only on `/accounts`, so the answer meant leaving the list of
+    # people it is about. It is `None` when migration 040 has not run, which the
+    # template shows as "cannot be read", never as zero.
     return render_template("admin_sekolah/teachers.html", teachers=page_rows, subjects=subjects,
                            q=q, subject_id=subject_id, sort=sort, dir=direction,
                            page=page, total=total, total_pages=total_pages, per_page=per_page,
                            base_qs=base_qs, page_sizes=_PAGE_SIZES,
+                           pending_activation=_pending_activation(supabase, sid),
                            teacher_ids=[t["id"] for t in page_rows])
 
 
@@ -1756,15 +1942,19 @@ def students():
 
     base_qs = _filter_qs(q=q, class_id=class_id, sort=sort, dir=direction,
                          per_page=("all" if not per_page else per_page))
+    # Same as `/teachers`: the "who has not activated" count belongs on the page
+    # that lists the people, not two clicks away on `/accounts`.
     return render_template("admin_sekolah/students.html", students=page_rows, classes=classes_list,
                            q=q, class_id=class_id, sort=sort, dir=direction,
                            page=page, total=total, total_pages=total_pages, per_page=per_page,
+                           pending_activation=_pending_activation(supabase, sid),
                            base_qs=base_qs, page_sizes=_PAGE_SIZES)
 
 
 @admin_sekolah_bp.route("/students/create", methods=["POST"])
 @subscription_write_required
 @admin_sekolah_required
+@require_subscription("add_student")
 def create_student():
     sid = _school_id()
     supabase = get_supabase()

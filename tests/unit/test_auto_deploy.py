@@ -459,6 +459,7 @@ def test_smoke_pages_are_namespaced_under_their_role():
     smoke = _smoke_module()
 
     prefixes = {"super_admin": "/super-admin/", "admin_sekolah": "/admin-sekolah/",
+                "principal": "/principal/", "vice_principal": "/vice-principal/",
                 "guru": "/teacher/", "murid": "/student/"}
     for role, paths in smoke.ROLE_PAGES.items():
         for path in paths:
@@ -475,11 +476,23 @@ def test_smoke_roles_and_isolation_matrix_are_complete():
     # Every role is forbidden from every area above it, and from nothing else:
     # a role must never be listed as forbidden from its own area, and the matrix
     # must not accidentally leave a lower role free to reach a higher one.
-    order = ["super_admin", "admin_sekolah", "guru", "murid"]
-    for i, role in enumerate(order):
+    # The two school officials are *peers* — each stands on
+    # `school_official_required`, so each may open the other's dashboard — which
+    # is why they share a rank rather than forming a chain.
+    above = {
+        "super_admin": set(),
+        "admin_sekolah": {"super_admin"},
+        "principal": {"super_admin", "admin_sekolah"},
+        "vice_principal": {"super_admin", "admin_sekolah"},
+        "guru": {"super_admin", "admin_sekolah", "principal", "vice_principal"},
+        "murid": {"super_admin", "admin_sekolah", "principal", "vice_principal",
+                  "guru"},
+    }
+    assert set(above) == set(smoke.ROLES)
+    for role, expected in above.items():
         assert role not in smoke.FORBIDDEN[role], f"{role} forbidden from itself"
-        assert set(smoke.FORBIDDEN[role]) == set(order[:i]), (
-            f"{role} should be refused {order[:i]}, got {smoke.FORBIDDEN[role]}"
+        assert set(smoke.FORBIDDEN[role]) == expected, (
+            f"{role} should be refused {sorted(expected)}, got {smoke.FORBIDDEN[role]}"
         )
 
 
@@ -542,12 +555,26 @@ def test_smoke_test_writes_to_exactly_two_documented_places():
 def test_smoke_credential_parsing(env, expected, monkeypatch):
     smoke = _smoke_module()
 
-    for key in ("SMOKE_SUPER_ADMIN", "SMOKE_ADMIN_SEKOLAH", "SMOKE_GURU", "SMOKE_MURID"):
-        monkeypatch.delenv(key, raising=False)
+    for role in smoke.ROLES:
+        monkeypatch.delenv(f"SMOKE_{role.upper()}", raising=False)
     for key, value in env.items():
         monkeypatch.setenv(key, value)
 
-    assert [(a.role, a.email, a.password) for a in smoke.creds_from_env()] == expected
+    accounts, _malformed = smoke.creds_from_env()
+    assert [(a.role, a.email, a.password) for a in accounts] == expected
+
+
+def test_smoke_malformed_credentials_are_named_not_dropped(monkeypatch):
+    """A malformed entry used to leave the role silently out of the run."""
+    smoke = _smoke_module()
+    for role in smoke.ROLES:
+        monkeypatch.delenv(f"SMOKE_{role.upper()}", raising=False)
+    monkeypatch.setenv("SMOKE_GURU", "no-colon")
+    monkeypatch.setenv("SMOKE_MURID", "a@b.c:pw")
+
+    accounts, malformed = smoke.creds_from_env()
+    assert malformed == ["guru"]
+    assert [a.role for a in accounts] == ["murid"]
 
 
 def test_smoke_test_reports_skip_when_unconfigured(tmp_path):

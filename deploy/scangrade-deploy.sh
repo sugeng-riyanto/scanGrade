@@ -2705,6 +2705,42 @@ log "$CONSTRUCT_OUT"
 # property of the release rather than of the box, so it rolls back with exit 1;
 # the journal says which of the two it was, because "unreadable text" and "the
 # gate has been deleted" are fixed in different places.
+#
+# Before the gate looks: raise this box's own i18n floors.
+#
+# A release that adds bilingual copy is measured *above* the floors the repository
+# committed, and the gate used to refuse it over that JSON file — not a defect —
+# until somebody recorded the new number in the checkout. Recording it there is a
+# dirty tree, which blocks the next merge, so the box keeps its own floors beside
+# the deploy state and the gate reads them out of SCANGRADE_I18N_FLOORS.
+#
+# The step only ever *raises*. A page that translates less than a floor it is
+# already held to measures below it, `--adopt` writes nothing for it, and the gate
+# still refuses the release — the property the committed file exists to keep. The
+# write itself is bookkeeping, so a box that cannot raise its floors falls back to
+# the committed file and says so, rather than failing a release over state.
+#
+# And the raise is staged, not published: the gate judges on a copy seeded from
+# the floors this box already holds, and that copy becomes the box's floors only
+# once the release has passed every gate and is serving (`publish-i18n-floors`, in
+# the success block below). A raise from a commit that then rolls back would hold
+# the next, *correct* release below a page it never added — a new page one failed
+# release introduced is exactly the floor a later fix would trip over.
+I18N_FLOORS_FILE="$STATE_DIR/i18n-floors.json"
+I18N_FLOORS_STAGE="$STATE_DIR/i18n-floors.stage.json"
+rm -f "$I18N_FLOORS_STAGE" 2>/dev/null || true
+[ -f "$I18N_FLOORS_FILE" ] && cp "$I18N_FLOORS_FILE" "$I18N_FLOORS_STAGE" 2>/dev/null || true
+export SCANGRADE_I18N_FLOORS="$I18N_FLOORS_STAGE"
+I18N_ADOPT_OUT=$("$REPO/.venv/bin/python" "$REPO/deploy/i18n_coverage.py" --adopt 2>&1)
+I18N_ADOPT_RC=$?
+if [ "$I18N_ADOPT_RC" -eq 0 ]; then
+  log "$(printf '%s\n' "$I18N_ADOPT_OUT" | grep -E '^i18n coverage: adopted' | tail -1)"
+elif [ "$I18N_ADOPT_RC" -eq 1 ]; then
+  log "i18n floors: not raised — this release translates less than its floor,"
+  log "    so it is left for the gate to refuse"
+else
+  log "i18n floors: could not raise ($I18N_ADOPT_RC) — the gate reads the committed floors"
+fi
 RUN_STEP="theme"
 THEME_OUT=$(as_owner bash "$REPO/deploy/theme_gate.sh" 2>&1)
 THEME_RC=$?
@@ -3011,7 +3047,8 @@ elif [ "$HEALTHY" = "1" ] && [ -f "$SMOKE_CONF" ]; then
   set +a
 
   SMOKE_ENV=()
-  for v in SMOKE_BASE_URL SMOKE_INSECURE SMOKE_SUPER_ADMIN SMOKE_ADMIN_SEKOLAH SMOKE_GURU SMOKE_MURID; do
+  for v in SMOKE_BASE_URL SMOKE_INSECURE SMOKE_SUPER_ADMIN SMOKE_ADMIN_SEKOLAH \
+           SMOKE_PRINCIPAL SMOKE_VICE_PRINCIPAL SMOKE_GURU SMOKE_MURID; do
     [ -n "${!v:-}" ] && SMOKE_ENV+=("$v=${!v}")
   done
 
@@ -3107,6 +3144,62 @@ elif [ ! -f "$SMOKE_CONF" ]; then
   log "    signed in against: rolling back to $BEFORE (see docs/AUTO_DEPLOY.md)"
   HEALTHY=0
   FAIL_REASON="smoke test (unarmed: no $SMOKE_CONF)"
+fi
+
+# ── Gate 4b: the exam builder's finger floor, on a real browser ─────────────
+# Gate 4 signs in and reads the pages that answer. None of that lays a page out,
+# and the exam builder's finger floor is a claim about laid-out geometry: the
+# stylesheet hands every control inside `.sg-exam-builder` a 44px minimum under
+# `pointer: coarse`, written after 42 controls were measured under 40px at every
+# tablet width the page was opened at. A grep cannot keep that promise — a
+# release that renames the scope class, or splits a control out of it, keeps
+# passing every other gate while a teacher's thumb misses the control.
+#
+# So this gate drives a headless browser at the documented tablet widths and
+# measures the controls again. It reuses Gate 4's own credentials and base URL —
+# the smoke test already signs a teacher in, and the builder is that teacher's
+# page — so there is no second conf to keep in step.
+#
+# Exit 2 is "could not measure": no browser on the box, the account refused, the
+# page did not render. Never a rollback — an unmeasured release is not a bad one,
+# and a box without a browser must not refuse every good release. It is said
+# loudly rather than passed off as a pass. Exit 1 is a real finding, and rolls
+# back only when the box is armed to enforce it (TOUCH_ENFORCE), the way the smoke
+# and perf gates are, so a browser that produces a false positive cannot take the
+# site down.
+# (The guard names the conf as well as the health, because the gate reads the
+# credentials out of it: without the conf there is nothing to sign in with, which
+# the gate itself would then report as "could not measure".)
+if [ "$HEALTHY" = "1" ] && [ -f "$SMOKE_CONF" ]; then
+  TOUCH_ENV=()
+  [ -n "${SMOKE_BASE_URL:-}" ] && TOUCH_ENV+=("TOUCH_BASE_URL=${SMOKE_BASE_URL}")
+  [ -n "${SMOKE_GURU:-}" ] && TOUCH_ENV+=("TOUCH_TEACHER=${SMOKE_GURU}")
+  [ "${SMOKE_INSECURE:-}" = "true" ] && TOUCH_ENV+=("TOUCH_INSECURE=true")
+
+  TOUCH_OUT=$(as_owner env "${TOUCH_ENV[@]}" "$REPO/.venv/bin/python" \
+      "$REPO/deploy/touch_gate.py" 2>&1)
+  TOUCH_RC=$?
+
+  case "$TOUCH_RC" in
+    0)
+      log "$(printf '%s\n' "$TOUCH_OUT" | grep -m1 '^touch gate: OK' || echo 'touch gate: OK')" ;;
+    2)
+      log "touch gate could not measure (exit 2) — this release's exam builder was"
+      log "    NOT measured for the finger floor:"
+      printf '%s\n' "$TOUCH_OUT" | grep -E '^    ' | head -3 | sed 's/^/  /' ;;
+    *)
+      if [ "${TOUCH_ENFORCE:-false}" = "true" ]; then
+        log "touch gate FAILED — a control on the exam builder is under the finger floor:"
+        printf '%s\n' "$TOUCH_OUT" | grep -E '^touch gate|^    - ' | head -8 | sed 's/^/    /'
+        HEALTHY=0
+        FAIL_REASON="touch gate (a control under the finger floor)"
+        FAIL_DETAIL=$(printf '%s\n' "$TOUCH_OUT" | grep -E '^touch gate: FAILED|^    - ')
+      else
+        log "touch gate FAILED but TOUCH_ENFORCE is not 'true' — keeping the release:"
+        printf '%s\n' "$TOUCH_OUT" | grep -E '^touch gate|^    - ' | head -8 | sed 's/^/    /'
+        log "    to enforce it: TOUCH_ENFORCE=\"true\" in $SMOKE_CONF"
+      fi ;;
+  esac
 fi
 
 # ── Gate 5: do the numbers on the landing page still describe this box? ──────
@@ -3309,6 +3402,12 @@ if [ "$HEALTHY" = "1" ]; then
   # refusing before it started.
   refusal_streak_clear
   log "DEPLOY OK: $BEFORE -> $AFTER"
+  # publish-i18n-floors: the release passed every gate and is serving, so the
+  # floors it raised for itself may now become this box's floors. Until here they
+  # lived only in the stage the gate judged on (see the readability gate above).
+  if [ -f "$I18N_FLOORS_STAGE" ]; then
+    mv -f "$I18N_FLOORS_STAGE" "$I18N_FLOORS_FILE" 2>/dev/null || true
+  fi
   # The release is verified and serving, so this is the moment the arrangement can
   # be brought back in step with the repo — a copy that has drifted, or a launcher
   # rendered from an older entrypoint.sh, heals here instead of waiting for

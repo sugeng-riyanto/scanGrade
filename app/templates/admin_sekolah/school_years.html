@@ -16,9 +16,15 @@
 
     <div class="flex items-center justify-between">
         <p class="text-sm text-stone-500 font-medium" :lang="lang" x-text="'{{ years|length }} ' + t('tahun ajaran','academic years')"></p>
-        <button @click="showForm=!showForm" class="px-4 py-2 bg-gradient-to-r from-orange-500 to-amber-500 text-white rounded-xl font-bold text-sm shadow-lg shadow-orange-500/25 transition">
-            <i class="fas fa-plus mr-1"></i>Tambah
-        </button>
+        <div class="flex items-center gap-2">
+            <a href="/admin-sekolah/school-years/close"
+               class="px-4 py-2 bg-gradient-to-r from-indigo-500 to-violet-500 text-white rounded-xl font-bold text-sm shadow-lg shadow-indigo-500/25 transition">
+                <i class="fas fa-calendar-check mr-1"></i><span :lang="lang" x-text="t('Tutup Tahun Ajaran','Close academic year')"></span>
+            </a>
+            <button @click="showForm=!showForm" class="px-4 py-2 bg-gradient-to-r from-orange-500 to-amber-500 text-white rounded-xl font-bold text-sm shadow-lg shadow-orange-500/25 transition">
+                <i class="fas fa-plus mr-1"></i>Tambah
+            </button>
+        </div>
     </div>
 
     <!-- Add Form -->

@@ -169,6 +169,12 @@
       "coverage": 0.0,
       "frozen": false
     },
+    "admin_sekolah/year_close.html": {
+      "pairs": 0,
+      "leftovers": 27,
+      "coverage": 0.0,
+      "frozen": false
+    },
     "auth/_chrome.html": {
       "pairs": 1,
       "leftovers": 0,

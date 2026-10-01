@@ -747,6 +747,7 @@
                                 {% elif q.gate_key == 'smoke_test' %}<span x-text="t('uji asap setelah deploy','the post-deploy smoke test')"></span>
                                 {% elif q.gate_key == 'claims_gate' %}<span x-text="t('gerbang klaim','the claims gate')"></span>
                                 {% elif q.gate_key == 'perf_gate' %}<span x-text="t('gerbang kinerja','the performance gate')"></span>
+                                {% elif q.gate_key == 'touch_gate' %}<span x-text="t('gerbang sentuh','the touch gate')"></span>
                                 {% elif q.gate_key == 'schema_gate' %}<span x-text="t('gerbang skema basis data','the database schema gate')"></span>
                                 {% else %}<span x-text="t('tidak diketahui','unknown')"></span>
                                 {% endif %}

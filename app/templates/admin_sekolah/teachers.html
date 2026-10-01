@@ -12,6 +12,9 @@
             <button @click="showForm=true" class="ml-1 text-blue-600 font-bold hover:underline">Tambah Guru</button> atau
             <a href="/admin-sekolah/import" class="text-blue-600 font-bold hover:underline">Import Excel</a> atau
             <a href="/admin-sekolah/accounts" class="text-blue-600 font-bold hover:underline">Email &amp; Aktivasi</a>.
+            {% if pending_activation %}
+            <span class="ml-1 px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-bold">Belum aktivasi: {{ pending_activation.get('guru', 0) }}</span>
+            {% endif %}
         </div>
     </div>
     {% with messages = get_flashed_messages(with_categories=true) %}

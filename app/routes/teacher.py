@@ -12,6 +12,7 @@ from app.utils.cache import cache_get, cache_set, cache_delete
 from app.utils import failure
 from app.utils.helpers import read_with_retry, row_or_none
 from app.decorators.security import require_school_access
+from app.decorators.year_lock import open_year_required
 from app.decorators.subscription import require_subscription
 from app.utils.exam_access import can_manage_exam, exam_class_ids
 from app.services.export_service import export_to_xlsx, export_to_pdf
@@ -24,6 +25,7 @@ from app.services.question_types import (
     objective_result, question_kind, scheme_in,
 )
 from app.services import mark_scheme
+from app.services import assignments as assignments_service
 from app.services import exam_media
 from app.services import invigilation
 from app.services import session_review
@@ -1021,17 +1023,35 @@ def exam_form():
                             classes.append(a["classes"])
             except Exception:
                 current_app.logger.warning("Failed to fetch teacher assignments, falling back to all")
-            # Fallback: for admin/super_admin, show all subjects; for guru, empty list
-            if not subjects:
-                subjects = supabase.table("subjects").select("*").eq("school_id", sid).order("name").execute().data or []
-            if not classes:
-                classes = supabase.table("classes").select("*").eq("school_id", sid).order("name").execute().data or []
+            # The fallback is for the roles that are not scoped to a pair: an
+            # admin runs the school, a guru does not. Running it for a guru is
+            # the bug this guard was written for — an empty assignment list made
+            # "no rows" mean "every class and subject in the school", which is a
+            # permission nobody granted.
+            if not assignments_service.is_scoped_role(g.get("user_role")):
+                if not subjects:
+                    subjects = supabase.table("subjects").select("*").eq("school_id", sid).order("name").execute().data or []
+                if not classes:
+                    classes = supabase.table("classes").select("*").eq("school_id", sid).order("name").execute().data or []
         return render_template("teacher/exam_form.html", exam=None, subjects=subjects, classes=classes)
 
     title = request.form.get("title")
     subject = request.form.get("subject")
     subject_id = request.form.get("subject_id") or None
     class_ids = request.form.getlist("class_ids")
+    # The dropdown is scoped; the write must be too, or the scoping is just a
+    # suggestion the browser is free to disagree with. Admins are not scoped.
+    if assignments_service.is_scoped_role(g.get("user_role")):
+        _unassigned = assignments_service.unassigned_class_ids(
+            supabase, g.user_id, g.get("user_school_id"), subject_id, class_ids)
+        if _unassigned:
+            # 403 for a programmatic caller, so the refusal is legible instead of
+            # arriving as a redirect it follows to a page that looks fine; a
+            # browser form post gets the error it can read.
+            if _wants_json():
+                return jsonify({"error": "Anda tidak ditugaskan untuk kelas terpilih"}), 403
+            flash("Anda tidak ditugaskan untuk kelas terpilih. Hubungi admin sekolah.", "error")
+            return redirect(request.referrer or "/teacher/exams/new")
     is_template = request.form.get("is_template", "false") == "true"
     source_exam_id = request.form.get("source_exam_id") or None
     max_attempts = int(request.form.get("max_attempts", 1))
@@ -1206,6 +1226,7 @@ def exam_form():
 @teacher_bp.route("/exams/<exam_id>", methods=["GET", "POST", "DELETE"])
 @subscription_write_required
 @teacher_or_admin_required
+@open_year_required("exam_id")
 def exam_detail(exam_id):
     supabase = get_supabase()
     # This route edits AND deletes, and DELETE here bypassed the check added to
@@ -1240,6 +1261,19 @@ def exam_detail(exam_id):
     subject = request.form.get("subject")
     subject_id = request.form.get("subject_id") or None
     class_ids = request.form.getlist("class_ids")
+    # The dropdown is scoped; the write must be too, or the scoping is just a
+    # suggestion the browser is free to disagree with. Admins are not scoped.
+    if assignments_service.is_scoped_role(g.get("user_role")):
+        _unassigned = assignments_service.unassigned_class_ids(
+            supabase, g.user_id, g.get("user_school_id"), subject_id, class_ids)
+        if _unassigned:
+            # 403 for a programmatic caller, so the refusal is legible instead of
+            # arriving as a redirect it follows to a page that looks fine; a
+            # browser form post gets the error it can read.
+            if _wants_json():
+                return jsonify({"error": "Anda tidak ditugaskan untuk kelas terpilih"}), 403
+            flash("Anda tidak ditugaskan untuk kelas terpilih. Hubungi admin sekolah.", "error")
+            return redirect(request.referrer or "/teacher/exams/new")
     is_template = request.form.get("is_template", "false") == "true"
     source_exam_id = request.form.get("source_exam_id") or None
     max_attempts = int(request.form.get("max_attempts", 1))
@@ -1394,6 +1428,7 @@ def exam_detail(exam_id):
 @teacher_bp.route("/exams/<exam_id>/preprocess-essays", methods=["POST"])
 @teacher_or_admin_required
 @require_school_access("exams", "exam_id")
+@open_year_required("exam_id")
 def preprocess_exam_essays(exam_id):
     """Generate embeddings + rubric for all essay questions in an exam."""
     supabase = get_supabase()
@@ -1435,6 +1470,7 @@ def preview_exam(exam_id):
 @subscription_write_required
 @teacher_or_admin_required
 @require_school_access("exams", "exam_id")
+@open_year_required("exam_id")
 def publish_exam(exam_id):
     supabase = get_supabase()
     supabase.table("exams").update({
@@ -1449,6 +1485,7 @@ def publish_exam(exam_id):
 @subscription_write_required
 @teacher_or_admin_required
 @require_school_access("exams", "exam_id")
+@open_year_required("exam_id")
 def upload_exam_pdf(exam_id):
     supabase = get_supabase()
     if request.method == "GET":
@@ -1475,6 +1512,7 @@ def upload_exam_pdf(exam_id):
 
 @teacher_bp.route("/exams/<exam_id>/media", methods=["POST"])
 @teacher_or_admin_required
+@open_year_required("exam_id")
 def upload_exam_media(exam_id):
     """Store one question's audio or video, and say where it went.
 
@@ -1577,6 +1615,7 @@ def my_exams():
 @teacher_bp.route("/exams/<exam_id>/toggle-status", methods=["POST"])
 @subscription_write_required
 @teacher_or_admin_required
+@open_year_required("exam_id")
 def toggle_exam_status(exam_id):
     supabase = get_supabase()
     # require_school_access let a colleague in the same school deactivate an exam —
@@ -1597,6 +1636,7 @@ def toggle_exam_status(exam_id):
 @teacher_bp.route("/exams/<exam_id>/toggle-visibility", methods=["POST"])
 @subscription_write_required
 @teacher_or_admin_required
+@open_year_required("exam_id")
 def toggle_exam_visibility(exam_id):
     supabase = get_supabase()
     # Withdrawing an exam from students is equally consequential, so it follows the
@@ -1617,6 +1657,7 @@ def toggle_exam_visibility(exam_id):
 @teacher_bp.route("/exams/<exam_id>/delete", methods=["POST"])
 @subscription_write_required
 @teacher_or_admin_required
+@open_year_required("exam_id")
 def delete_exam(exam_id):
     supabase = get_supabase()
     # This cascades: violations, access codes, analytics cache, every submission,
@@ -1640,6 +1681,7 @@ def delete_exam(exam_id):
 @teacher_bp.route("/exams/<exam_id>/duplicate", methods=["POST"])
 @subscription_write_required
 @teacher_or_admin_required
+@open_year_required("exam_id")
 def duplicate_exam(exam_id):
     supabase = get_supabase()
     # Copies the exam including its answer key, so it follows the same rule and
@@ -1678,6 +1720,7 @@ def duplicate_exam(exam_id):
 
 @teacher_bp.route("/exams/<exam_id>/answer-keys", methods=["GET", "POST"])
 @teacher_or_admin_required
+@open_year_required("exam_id")
 def answer_keys(exam_id):
     supabase = get_supabase()
     # This page IS the answer key, so it follows the same rule as the grading
@@ -1791,6 +1834,7 @@ def retraction_requests():
 @teacher_bp.route("/retractions/<submission_id>/approve", methods=["POST"])
 @teacher_or_admin_required
 @require_school_access("submissions", "submission_id", ("exam_id", "exams"))
+@open_year_required("submission_id")
 def approve_retraction(submission_id):
     supabase = get_supabase()
     sub = supabase.table("submissions").select("answers").eq("id", submission_id).single().execute().data
@@ -1819,6 +1863,7 @@ def approve_retraction(submission_id):
 @teacher_bp.route("/retractions/<submission_id>/reject", methods=["POST"])
 @teacher_or_admin_required
 @require_school_access("submissions", "submission_id", ("exam_id", "exams"))
+@open_year_required("submission_id")
 def reject_retraction(submission_id):
     supabase = get_supabase()
     sub = supabase.table("submissions").select("answers").eq("id", submission_id).single().execute().data
@@ -2020,6 +2065,7 @@ def results_print():
 
 @teacher_bp.route("/submission/<submission_id>/late", methods=["POST"])
 @teacher_or_admin_required
+@open_year_required("submission_id")
 def submission_late(submission_id):
     """Record — or clear — that a paper's answers arrived after its deadline.
 
@@ -2866,6 +2912,7 @@ def grade_question_api(exam_id, question_index):
 
 @teacher_bp.route("/api/grade-question/<exam_id>/<int:question_index>/save", methods=["POST"])
 @teacher_or_admin_required
+@open_year_required("exam_id")
 def grade_question_save(exam_id, question_index):
     """Save a grade update for a specific question on a submission."""
     data = request.get_json()
@@ -2966,6 +3013,7 @@ def grade_detail(submission_id):
 @subscription_write_required
 @teacher_or_admin_required
 @require_school_access("submissions", "submission_id", ("exam_id", "exams"))
+@open_year_required("submission_id")
 def override_score(submission_id):
     if request.is_json:
         data = request.get_json()
@@ -3035,6 +3083,7 @@ def penalty_appeals():
 @teacher_bp.route("/api/penalty-appeal/<submission_id>", methods=["POST"])
 @teacher_or_admin_required
 @require_school_access("submissions", "submission_id", ("exam_id", "exams"))
+@open_year_required("submission_id")
 def api_penalty_appeal_handle(submission_id):
     """Teacher approves/rejects a penalty appeal."""
     data = request.get_json(silent=True) or {}
@@ -3095,6 +3144,7 @@ def api_penalty_appeal_handle(submission_id):
 @subscription_write_required
 @require_school_access("exams", "exam_id")
 @teacher_or_admin_required
+@open_year_required("exam_id")
 def publish_scores(exam_id):
     supabase = get_supabase()
     if request.method == "GET":
@@ -3124,6 +3174,7 @@ def publish_scores(exam_id):
 @teacher_bp.route("/publish/<exam_id>/unpublish", methods=["POST"])
 @subscription_write_required
 @teacher_or_admin_required
+@open_year_required("exam_id")
 def unpublish_scores(exam_id):
     supabase = get_supabase()
     # This withdraws released marks and had NO check at all, so a teacher in one
@@ -3141,6 +3192,7 @@ def unpublish_scores(exam_id):
 
 @teacher_bp.route("/exams/<exam_id>/recalculate", methods=["POST"])
 @teacher_or_admin_required
+@open_year_required("exam_id")
 def recalculate_exam_scores(exam_id):
     """Recalculate all scores for an exam (MCQ auto-grade + essay + penalty)."""
     _, err = _guard_exam(get_supabase(), exam_id, as_json=_wants_json(),
@@ -3155,6 +3207,7 @@ def recalculate_exam_scores(exam_id):
 @teacher_bp.route("/publish/submission/<submission_id>", methods=["POST"])
 @subscription_write_required
 @teacher_or_admin_required
+@open_year_required("submission_id")
 def publish_single(submission_id):
     # Replaced a hand-rolled check that skipped itself entirely whenever the
     # submission lookup came back empty, then re-queried the same row. One shared
@@ -3958,6 +4011,7 @@ def exam_check_pdf(exam_id):
 @teacher_bp.route("/tools/exam/<exam_id>/reprocess-pdf", methods=["POST"])
 @teacher_or_admin_required
 @require_school_access("exams", "exam_id")
+@open_year_required("exam_id")
 def exam_reprocess_pdf(exam_id):
     """Reprocess PDF for existing exam: regenerate local page images."""
     from app.services.pdf_service import upload_pdf
@@ -4068,6 +4122,7 @@ def exam_sessions_data(exam_id):
 @teacher_bp.route("/exams/<exam_id>/generate-remedial", methods=["POST"])
 @teacher_or_admin_required
 @require_school_access("exams", "exam_id")
+@open_year_required("exam_id")
 def generate_remedial(exam_id):
     """Analyze exam results and generate remedial questions via AI."""
     supabase = get_supabase()

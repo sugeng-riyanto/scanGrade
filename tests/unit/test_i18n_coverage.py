@@ -26,6 +26,7 @@ proven, so what follows is:
 """
 import importlib.util
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -175,7 +176,12 @@ class TestTheFloorsCoverTheTree:
         assert cov.counts('<span>Just a label</span>')[0] == 0
 
     def test_every_gated_template_has_a_floor(self, rows):
-        floors = cov.load_baseline()
+        # The box's own floors count too: a release that adds a page has no
+        # committed floor for it, and the deploy raises one before this gate
+        # runs. On a developer's machine the environment is unset and this is
+        # the committed file alone, which is the deliberate act that guards a
+        # new page's number from quietly starting at zero.
+        floors = cov.effective_floors(cov.load_baseline(), cov.adopted_floors())
         missing = sorted(r for r, v in rows.items()
                          if not v["standalone"] and r not in floors)
         assert not missing, (
@@ -222,16 +228,176 @@ class TestTheFloorsCoverTheTree:
             "`newline='\\n'` so the Windows checkout and the Linux deploy agree"
         )
 
-    def test_the_floors_are_exactly_what_scan_sees(self, rows):
-        """A floor is a recorded measurement, so `--write-baseline` round-trips."""
+    def test_the_committed_floors_are_a_high_water_mark_not_an_equality(self, rows):
+        """A tree *ahead* of the file is not stale, it is a release that
+        translated more.
+
+        The old guard required the committed floor to equal the scan, so one
+        added `t('…','…')` pair anywhere in the tree made the file "stale" and
+        the readability gate refused the release over a JSON file. A floor is a
+        high-water mark: at or above it is fine (the deploy raises the box's own
+        floor into the gap), and below it is a regression — the direction that
+        *is* a defect, held by `test_the_tree_is_at_or_above_its_floors`.
+        """
         floors = cov.load_baseline()
-        for rel, floor in floors.items():
-            if rel not in rows:
-                continue
-            assert floor["pairs"] == rows[rel]["pairs"], (
-                f"{rel}: the committed floor says {floor['pairs']} pairs and the "
-                f"template has {rows[rel]['pairs']} — the file is stale"
-            )
+        above = sorted(
+            rel for rel, floor in floors.items()
+            if rel in rows and floor["pairs"] > rows[rel]["pairs"]
+        )
+        assert not above, (
+            "deploy/i18n_baseline.json records more bilingual units than the "
+            "tree carries, which is the direction that is a real regression:\n  "
+            + "\n  ".join(above[:10])
+        )
+
+    def test_a_tree_ahead_of_the_floor_is_no_regression(self, rows):
+        """A page measured above its committed floor passes the tool."""
+        floors = cov.load_baseline()
+        page = next(r for r, v in rows.items()
+                    if not v["standalone"] and v["pairs"] > 0 and r in floors)
+        lowered = {r: dict(f) for r, f in floors.items()}
+        lowered[page]["pairs"] -= 1
+        lowered[page]["coverage"] = 0.0
+        regressed, _ = cov.check(rows, lowered)
+        assert not regressed, (
+            "a floor below the tree is being read as a regression — the "
+            "stale-floor quarantine this change removes:\n  "
+            + "\n  ".join(regressed)
+        )
+
+
+# ── the box raises its own floors ───────────────────────────────────────────
+
+class TestTheBoxRaisesItsOwnFloors:
+    """A release that adds bilingual copy — or a page — is not refused over a
+    JSON floor the repository cannot have recorded yet.
+
+    The deploy keeps its own floors, box-locally (a tracked file rewritten inside
+    the checkout is a dirty tree that blocks the next merge), and only ever
+    *raises* them. What the committed file is for is unchanged: a page that
+    translates less than a floor it is already held to still fails.
+    """
+
+    def _committed_without(self, tmp_path, page):
+        """The committed floors minus one page — a release that adds it."""
+        floors = json.loads(cov.BASELINE.read_text(encoding="utf-8"))
+        floors["pages"].pop(page, None)
+        path = tmp_path / "baseline.json"
+        path.write_text(json.dumps(floors), encoding="utf-8", newline="\n")
+        return path
+
+    def _committed_with(self, tmp_path, page, delta):
+        """The committed floors with one page moved by `delta` pairs."""
+        floors = json.loads(cov.BASELINE.read_text(encoding="utf-8"))
+        floors["pages"][page]["pairs"] += delta
+        path = tmp_path / "baseline.json"
+        path.write_text(json.dumps(floors), encoding="utf-8", newline="\n")
+        return path
+
+    def _a_gated_page(self, rows):
+        return sorted(r for r, v in rows.items()
+                      if not v["standalone"] and v["pairs"] > 0)[0]
+
+    def test_the_committed_file_wins_for_a_page_it_already_covers(self):
+        committed = {"a.html": {"pairs": 5, "coverage": 50.0,
+                                "leftovers": 1, "frozen": False}}
+        adopted = {"a.html": {"pairs": 1, "coverage": 10.0,
+                              "leftovers": 9, "frozen": False}}
+        merged = cov.effective_floors(committed, adopted)
+        assert merged["a.html"] == committed["a.html"], (
+            "a box-local floor loosened the repository's floor for a page the "
+            "repository already floors"
+        )
+
+    def test_a_new_page_needs_no_committed_floor_once_adopted(
+            self, tmp_path, monkeypatch, capsys):
+        rows = cov.scan()
+        page = self._a_gated_page(rows)
+        monkeypatch.setattr(cov, "BASELINE", self._committed_without(tmp_path, page))
+        floors_file = tmp_path / "floors.json"
+        monkeypatch.setenv(cov.ADOPTED_ENV, str(floors_file))
+        capsys.readouterr()
+
+        # Without the box's floor the release cannot be measured at all.
+        assert cov.main([]) == 2
+        assert "no floor recorded" in capsys.readouterr().err
+
+        # The deploy raises one from what the release measures, and the next
+        # run — the gate's own — passes.
+        assert cov.main(["--adopt"]) == 0
+        written = json.loads(floors_file.read_text(encoding="utf-8"))["pages"]
+        assert written[page]["pairs"] == rows[page]["pairs"], written.get(page)
+        assert cov.main([]) == 0
+        assert "i18n coverage: OK" in capsys.readouterr().out
+
+    def test_the_box_floor_only_rises(self, tmp_path, monkeypatch, capsys):
+        """A box's own floor is a ratchet: a release below it is preserved.
+
+        The page is one the committed file does not know, so the box's floor is
+        the only one holding it. Today's tree measures below that floor, so the
+        release is a regression the box remembers — not a number to quietly
+        lower.
+        """
+        rows = cov.scan()
+        page = self._a_gated_page(rows)
+        monkeypatch.setattr(cov, "BASELINE", self._committed_without(tmp_path, page))
+        high = rows[page]["pairs"] + 4
+        floors_file = tmp_path / "floors.json"
+        floors_file.write_text(json.dumps({"pages": {page: {
+            "pairs": high, "coverage": 100.0, "leftovers": 0,
+            "frozen": rows[page]["frozen"]}}}), encoding="utf-8", newline="\n")
+        monkeypatch.setenv(cov.ADOPTED_ENV, str(floors_file))
+
+        assert cov.main(["--adopt"]) == 1
+        written = json.loads(floors_file.read_text(encoding="utf-8"))["pages"]
+        assert written[page]["pairs"] == high, (
+            "the box lowered its own floor to today's measurement; a ratchet that "
+            "can fall lets the next release that loses copy pass"
+        )
+        assert "NOT adopting" in capsys.readouterr().err
+
+    def test_a_page_the_committed_file_knows_is_never_adopted(self, rows):
+        known = sorted(cov.load_baseline())[0]
+        raised = cov.adopt(rows, cov.load_baseline(), {})
+        assert known not in raised, (
+            "the box recorded a floor for a page the repository already floors, "
+            "so two floors exist for it and the box's could disagree"
+        )
+
+    def test_a_page_with_nothing_bilingual_is_not_adoptable(self, rows):
+        blank = sorted(r for r, v in rows.items()
+                       if not v["standalone"] and v["pairs"] == 0)
+        assert blank, (
+            "no gated template has zero bilingual units, so this guard cannot "
+            "show that a page's number never quietly starts at zero"
+        )
+        assert not cov.adoptable(rows[blank[0]]), (
+            "a page with no bilingual copy was recorded at 0 pairs — its floor "
+            "is a floor of nothing, which is the one thing recording floors "
+            "exists to prevent"
+        )
+
+    def test_adopt_refuses_a_regression_and_writes_nothing(
+            self, tmp_path, monkeypatch, capsys):
+        rows = cov.scan()
+        page = self._a_gated_page(rows)
+        monkeypatch.setattr(cov, "BASELINE", self._committed_with(tmp_path, page, 5))
+        floors_file = tmp_path / "floors.json"
+        monkeypatch.setenv(cov.ADOPTED_ENV, str(floors_file))
+
+        assert cov.main(["--adopt"]) == 1
+        assert not floors_file.exists(), (
+            "a floor was written for a release that translates less than its "
+            "floor, which is how a regression becomes the new yardstick"
+        )
+        err = capsys.readouterr().err
+        assert "NOT adopting" in err and page in err, err
+
+    def test_without_a_path_the_box_says_so_and_does_not_guess(
+            self, tmp_path, monkeypatch, capsys):
+        monkeypatch.delenv(cov.ADOPTED_ENV, raising=False)
+        assert cov.main(["--adopt"]) == 2
+        assert "needs a path" in capsys.readouterr().err
 
 
 # ── the exit codes ───────────────────────────────────────────────────────────
@@ -362,6 +528,42 @@ class TestTheGateRunsIt:
         assert "theme_gate.sh" in deploy, (
             "the auto-deploy stopped running the gate, so the checks only run on "
             "the developer's machine"
+        )
+
+    def test_the_deploy_raises_the_box_floors_before_the_gate(self):
+        """Otherwise a release that adds bilingual copy is still quarantined.
+
+        The raise has to happen *before* the gate judges the release, and the
+        gate has to be told where the floors are — the tool and the guard
+        assertion read the same file through `SCANGRADE_I18N_FLOORS`.
+        """
+        src = (DEPLOY / "scangrade-deploy.sh").read_text(encoding="utf-8")
+        adopt = src.find('i18n_coverage.py" --adopt')
+        gate = src.find('bash "$REPO/deploy/theme_gate.sh"')
+        assert adopt != -1, (
+            "the deploy never raises the box's own i18n floors, so a release "
+            "that adds bilingual copy is refused over a stale JSON file"
+        )
+        assert "SCANGRADE_I18N_FLOORS" in src, (
+            "the floors file is never exported, so the gate reads only the "
+            "committed file and the raise is invisible to it"
+        )
+        assert 0 <= adopt < gate, (
+            "the floors are raised after the gate has already judged the "
+            "release, so the raise cannot help the release it was written for"
+        )
+        # Staged, not published: a raise the gate judges on lives in a copy, and
+        # only a release that is verified and serving promotes it.
+        stage = src.find("i18n-floors.stage.json")
+        publish = src.find('mv -f "$I18N_FLOORS_STAGE" "$I18N_FLOORS_FILE"')
+        ok = src.find('log "DEPLOY OK:')
+        assert stage != -1 and stage < adopt, (
+            "the raise is written straight to the box's floors, so a commit that "
+            "then rolls back leaves a floor the next, correct release must clear"
+        )
+        assert publish != -1 and ok != -1 and publish > ok, (
+            "the raised floors are published before the release is verified, so a "
+            "commit that fails a later gate still tightens the box"
         )
 
     def test_every_tool_the_gate_names_exists(self):

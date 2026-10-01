@@ -52,16 +52,25 @@ Exit codes
 
 Why the login result is not simply treated as a failure
 ------------------------------------------------------
-A rejected password is indistinguishable from a broken login route, and rolling
-production back because someone changed a demo password would be worse than the
-outage it was trying to prevent. So:
+A *configured* account that cannot sign in is a failure, not a note.
 
-* no role can log in      -> the login path is broken  -> FAIL
-* some roles cannot log in -> credentials have drifted -> WARN, keep the deploy
-* a page returns 5xx, or a role reaches another role's area -> FAIL
+This used to be the other way round: a rejected password was indistinguishable
+from a broken login route, so only the all-roles-refused case rolled back and a
+single stale credential was a warning. Production showed the cost of that — one
+role's password had drifted, so every release was signed in against one fewer
+role than the config promised and still reported PASS. The role was not checked,
+and nothing said so. Now:
 
-That way the dangerous case (login broken for everyone) still rolls back, while a
-stale credential in the config file cannot.
+* no role can log in            -> the login path is broken     -> FAIL
+* a configured role cannot log in -> the credential has drifted -> FAIL
+* a malformed SMOKE_<ROLE> entry  -> the role would be dropped   -> FAIL
+* a page returns 5xx, or a role reaches another role's area    -> FAIL
+
+The one case that still rolls back without a real problem is a genuinely
+unreachable box (a DNS, nginx or TLS fault), which is a SKIP — that is not the
+release's fault and rolling back would not fix it. Arming additionally requires
+all six roles to be configured (`--check-credentials`), so a box cannot be armed
+to check a role it has no credential for.
 """
 
 from __future__ import annotations
@@ -235,6 +244,18 @@ ROLE_PAGES: dict[str, list[str]] = {
         "/admin-sekolah/subscription",
         "/admin-sekolah/comms",
     ],
+    "principal": [
+        "/principal/dashboard",
+        "/principal/analytics",
+        "/principal/progress",
+        "/principal/invigilation",
+    ],
+    "vice_principal": [
+        "/vice-principal/dashboard",
+        "/vice-principal/analytics",
+        "/vice-principal/progress",
+        "/vice-principal/invigilation",
+    ],
     "guru": [
         "/teacher/dashboard",
         "/teacher/exams",
@@ -260,22 +281,34 @@ ROLE_PAGES: dict[str, list[str]] = {
 ROLE_AREAS = {
     "super_admin": "/super-admin/dashboard",
     "admin_sekolah": "/admin-sekolah/dashboard",
+    "principal": "/principal/dashboard",
+    "vice_principal": "/vice-principal/dashboard",
     "guru": "/teacher/dashboard",
     "murid": "/student/dashboard",
 }
+# The two school officials are peers: each may open the other's dashboard (both
+# stand on `school_official_required`), so neither is forbidden from the other.
+# Everyone below them is forbidden from both; both are forbidden from everything
+# above.
 FORBIDDEN: dict[str, list[str]] = {
     "super_admin": [],
     "admin_sekolah": ["super_admin"],
-    "guru": ["super_admin", "admin_sekolah"],
-    "murid": ["super_admin", "admin_sekolah", "guru"],
+    "principal": ["super_admin", "admin_sekolah"],
+    "vice_principal": ["super_admin", "admin_sekolah"],
+    "guru": ["super_admin", "admin_sekolah", "principal", "vice_principal"],
+    "murid": ["super_admin", "admin_sekolah", "principal", "vice_principal",
+              "guru"],
 }
 LOGIN_PATHS = {
     "super_admin": "/auth/login",
     "admin_sekolah": "/auth/login",
+    "principal": "/auth/login-user",
+    "vice_principal": "/auth/login-user",
     "guru": "/auth/login-user",
     "murid": "/auth/login-user",
 }
-ROLES = ("super_admin", "admin_sekolah", "guru", "murid")
+ROLES = ("super_admin", "admin_sekolah", "principal", "vice_principal",
+         "guru", "murid")
 
 
 @dataclass
@@ -345,9 +378,16 @@ class Account:
     password: str
 
 
-def creds_from_env() -> list[Account]:
-    """``SMOKE_<ROLE>`` holds ``email:password`` — split on the FIRST colon."""
-    accounts = []
+def creds_from_env() -> tuple[list[Account], list[str]]:
+    """``SMOKE_<ROLE>`` holds ``email:password`` — split on the FIRST colon.
+
+    Returns the accounts **and** the roles whose configured credential could not
+    be parsed. A malformed entry used to be skipped with a warning, so the role
+    quietly left the run and every later release was signed in against one fewer
+    role than the operator believed; the caller now refuses to run with one.
+    """
+    accounts: list[Account] = []
+    malformed: list[str] = []
     for role in ROLES:
         raw = os.environ.get(f"SMOKE_{role.upper()}", "").strip()
         if not raw:
@@ -355,9 +395,10 @@ def creds_from_env() -> list[Account]:
         email, sep, password = raw.partition(":")
         if not sep or not email or not password:
             print(f"   warn  SMOKE_{role.upper()} is malformed (want email:password)")
+            malformed.append(role)
             continue
         accounts.append(Account(role, email.strip(), password))
-    return accounts
+    return accounts, malformed
 
 
 def login(session: requests.Session, base: str, acct: Account, res: Result) -> str:
@@ -782,7 +823,12 @@ def main() -> int:
     if not verify_tls:
         requests.packages.urllib3.disable_warnings()  # noqa: S001 - explicit opt-in
 
-    accounts = creds_from_env()
+    accounts, malformed = creds_from_env()
+    if malformed:
+        print(f"malformed credential(s) in config: {malformed}")
+        print("   each SMOKE_<ROLE> must be email:password — refusing to run with "
+              "a role silently dropped")
+        return 1
     if not accounts:
         print("no SMOKE_* credentials configured — nothing to verify")
         print("   create /etc/scangrade-smoke.conf (see docs/AUTO_DEPLOY.md)")
@@ -792,6 +838,16 @@ def main() -> int:
     if unknown:
         print(f"unknown role(s) in config: {unknown}")
         return 2
+
+    # Arming a rollback gate on a half-valid config would let the missing role go
+    # unchecked and nobody would notice, so arming needs every role configured.
+    if check_credentials:
+        configured = {a.role for a in accounts}
+        missing = [r for r in ROLES if r not in configured]
+        if missing:
+            print(f"credential(s) missing for role(s): {missing}")
+            print(f"   arming needs all {len(ROLES)} roles — see docs/AUTO_DEPLOY.md")
+            return 1
 
     print(f"smoke test against {base} — {len(accounts)} role(s)"
           f"{' (credentials only)' if check_credentials else ''}")
@@ -822,16 +878,17 @@ def main() -> int:
         return 1
 
     if len(signed_in) < len(accounts):
-        print(f"   note: {len(accounts) - len(signed_in)} role(s) could not sign in — "
-              "fix the credentials in /etc/scangrade-smoke.conf")
-        if check_credentials:
-            # A half-valid config is not good enough to arm a gate that can
-            # reject a release: the missing role would go unchecked and nobody
-            # would notice.
-            print()
-            print(f"RESULT: FAIL — only {len(signed_in)}/{len(accounts)} configured "
-                  "account(s) signed in")
-            return 1
+        # A *configured* account that cannot sign in is a failure, not a note.
+        # This used to be a warning in the gate path, and production carried a
+        # role whose password had drifted: every release was signed in against
+        # one fewer role than the config promised and reported PASS anyway.
+        refused = [a.role for a in accounts if a not in signed_in]
+        print(f"   {len(accounts) - len(signed_in)} configured role(s) could not "
+              f"sign in: {refused}")
+        print()
+        print(f"RESULT: FAIL — only {len(signed_in)}/{len(accounts)} configured "
+              "account(s) signed in")
+        return 1
 
     if not check_credentials:
         for acct in signed_in:

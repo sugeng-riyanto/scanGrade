@@ -12,8 +12,10 @@ def midtrans_callback():
     if not data:
         return jsonify({"ok": False, "error": "No data"}), 400
 
-    # Verify Midtrans signature
-    server_key = Config.MIDTRANS_SERVER_KEY
+    # Verify Midtrans signature. Read from the app's config (which the running
+    # config class filled) rather than the base class, so a box's environment is
+    # the single source and a test can set the key it signs with.
+    server_key = current_app.config.get("MIDTRANS_SERVER_KEY") or Config.MIDTRANS_SERVER_KEY
     if not server_key:
         current_app.logger.warning("Midtrans webhook received but MIDTRANS_SERVER_KEY not configured")
         return jsonify({"ok": False, "error": "Webhook not configured"}), 503
