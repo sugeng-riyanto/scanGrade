@@ -465,3 +465,30 @@ class TestTemplateWiring:
         src = TEMPLATE.read_text(encoding="utf-8")
         assert "t.assign_subject_names" in src, (
             "the roster must list all assigned subjects, not only the legacy one")
+
+    # ── "Semua kelas" vs "kelas tertentu": the all-or-specific shortcut ─────────
+    #
+    # Requested: "Penugasan guru harusnya bisa lebih dari satu mata pelajaran dan
+    # bisa hanya kelas tertentu. Ada pilihan semua, tertentu." Checking a class per
+    # subject is the little picture; the whole picture is a teacher who takes one
+    # subject in every class (the common case) and another in only two of them. So
+    # each subject needs a one-click "Semua kelas" beside the individual classes.
+    def test_the_form_picker_offers_all_or_specific_classes(self):
+        src = TEMPLATE.read_text(encoding="utf-8")
+        assert 'class="rounded border-indigo-300 sg-assign-all"' in src or \
+            "sg-assign-all" in src, "the picker needs a per-subject 'Semua kelas' box"
+        assert "data-all-for" in src and "data-class-for" in src
+        assert "Semua kelas" in src
+        # The shortcut is a client-side convenience over the same explicit class
+        # checkboxes the form already submits — the server stays the only
+        # authority on what a pair is, so no new field is invented.
+        assert "function sgAssignAll(" in src
+        assert "function sgAssignSync(" in src, (
+            "unchecking a class must clear the 'all' box, or it claims all while one is off")
+
+    def test_the_matrix_offers_all_subjects_for_a_class(self):
+        src = TEMPLATE.read_text(encoding="utf-8")
+        assert "semua mapel" in src, (
+            "a class row needs the mirror shortcut: every subject for that class")
+        assert "toggleClassAll(" in src, "the mirror shortcut must be backed by the component"
+        assert "toggleSubjectAll(" in src, "the per-subject 'semua kelas' shortcut must stay"
