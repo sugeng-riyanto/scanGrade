@@ -486,6 +486,19 @@ class TestTemplateWiring:
         assert "function sgAssignSync(" in src, (
             "unchecking a class must clear the 'all' box, or it claims all while one is off")
 
+    def test_the_edit_form_gets_its_own_full_width_row(self):
+        src = TEMPLATE.read_text(encoding="utf-8")
+        assert src.count("{{ assignment_picker(") == 2, (
+            "both the create and the edit form must still offer the picker")
+        # The picker is a whole grid of subjects; inside the narrow "Aksi" cell it
+        # was unreadable. The edit form must sit on its own full-width row.
+        assert '<td colspan="7" class="px-4 pb-4 text-left">' in src, (
+            "the edit form must live on its own full-width row")
+        assert 'x-collapse x-cloak class="mt-3 text-left"' not in src, (
+            "the old cramped placement inside the action cell is back")
+        assert 'x-data="{ editing: false }"' in src, (
+            "the tbody owns `editing` so both its rows can read it")
+
     def test_the_matrix_can_widen_to_the_viewport(self):
         src = TEMPLATE.read_text(encoding="utf-8")
         assert "expanded" in src, (

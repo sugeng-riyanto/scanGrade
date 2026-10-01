@@ -230,9 +230,13 @@
                         <th class="text-right px-4 py-3">Aksi</th>
                     </tr>
                 </thead>
-                <tbody class="divide-y divide-stone-50">
-                    {% for t in teachers %}
-                    <tr class="hover:bg-stone-50 transition" x-data="{ editing: false }" :class="selected.includes('{{ t.id }}') ? 'bg-amber-50/50' : ''">
+                {# One <tbody> per teacher so the edit form can live on its own full-width
+                   row: the assignment picker is a whole grid of subjects, and inside the
+                   narrow "Aksi" cell it was unreadable. `editing` lives on the tbody and
+                   both rows read it; the outer `selected` scope still resolves. #}
+                {% for t in teachers %}
+                <tbody class="divide-y divide-stone-50" x-data="{ editing: false }">
+                    <tr class="hover:bg-stone-50 transition" :class="selected.includes('{{ t.id }}') ? 'bg-amber-50/50' : ''">
                         <td class="px-2 py-3"><input type="checkbox" :checked="selected.includes('{{ t.id }}')" @click="selected.includes('{{ t.id }}') ? selected = selected.filter(x => x !== '{{ t.id }}') : selected.push('{{ t.id }}')" class="w-4 h-4"></td>
                         <td class="px-4 py-3 font-bold text-stone-700">{{ t.name }}</td>
                         <td class="px-4 py-3 text-stone-500">{{ t.employee_number or '-' }}</td>
@@ -280,28 +284,34 @@
                                         @click="if(confirm('Hapus guru {{ t.name }}?')) fetch('/admin-sekolah/teachers/{{ t.id }}/delete',{method:'POST'}).then(r=>{ if(r.ok) location.reload(); else alert('Gagal menghapus') }).catch(()=>alert('Gagal menghapus'))"
                                         class="px-2.5 py-1.5 text-xs font-bold bg-red-50 text-red-700 rounded-lg hover:bg-red-100 transition border border-red-200">Hapus</button>
                             </div>
-                            <div x-show="editing" x-collapse x-cloak class="mt-3 text-left">
-                                <form method="POST" action="/admin-sekolah/teachers/{{ t.id }}/edit" class="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4 bg-stone-50 rounded-xl">
-                                    <input type="text" name="name" value="{{ t.name }}"
-                                           class="px-3 py-2 border border-stone-200 rounded-lg text-sm font-medium">
-                                    <input type="text" name="employee_number" value="{{ t.employee_number or '' }}"
-                                           class="px-3 py-2 border border-stone-200 rounded-lg text-sm font-medium">
-                                    <span class="px-3 py-2 text-stone-500 text-sm flex items-center">{{ t.email }}</span>
-                                    {{ assignment_picker(subjects, classes, t.assign_pairs) }}
-                                    <button type="submit" class="col-span-full px-3 py-2 bg-emerald-100 text-emerald-700 rounded-lg font-bold text-sm hover:bg-emerald-200 transition">Simpan</button>
-                                </form>
-                            </div>
                         </td>
                     </tr>
-                    {% else %}
+                    {# The edit form on its own row: full width, so the assignment picker
+                       has room to be read and used. #}
+                    <tr x-show="editing" x-cloak class="bg-stone-50">
+                        <td colspan="7" class="px-4 pb-4 text-left">
+                            <form method="POST" action="/admin-sekolah/teachers/{{ t.id }}/edit" class="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4 bg-white border border-stone-200 rounded-xl">
+                                <input type="text" name="name" value="{{ t.name }}"
+                                       class="px-3 py-2 border border-stone-200 rounded-lg text-sm font-medium">
+                                <input type="text" name="employee_number" value="{{ t.employee_number or '' }}"
+                                       class="px-3 py-2 border border-stone-200 rounded-lg text-sm font-medium">
+                                <span class="px-3 py-2 text-stone-500 text-sm flex items-center">{{ t.email }}</span>
+                                {{ assignment_picker(subjects, classes, t.assign_pairs) }}
+                                <button type="submit" class="col-span-full px-3 py-2 bg-emerald-100 text-emerald-700 rounded-lg font-bold text-sm hover:bg-emerald-200 transition">Simpan</button>
+                            </form>
+                        </td>
+                    </tr>
+                </tbody>
+                {% else %}
+                <tbody>
                     <tr>
                         <td colspan="7" class="px-4 py-12 text-center text-stone-400 font-medium">
                             <i class="fas fa-chalkboard-teacher text-3xl mb-2 block text-stone-300"></i>
                             {% if q %}Pencarian tidak ditemukan{% else %}Belum ada guru{% endif %}
                         </td>
                     </tr>
-                    {% endfor %}
                 </tbody>
+                {% endfor %}
             </table>
         </div>
     </div>
