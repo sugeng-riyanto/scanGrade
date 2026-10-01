@@ -119,15 +119,41 @@ class TestStructureAndIndicators:
         assert "x-show=\"advanced\"" in src, "the advanced layer is missing"
         assert "advanced = !advanced" in src, "nothing toggles the advanced layer"
 
-    def test_the_anti_cheat_values_stay_visible(self):
+    def test_the_anti_cheat_switches_are_not_behind_a_toggle(self):
+        """The fairness policy is read before publishing, and a control nobody
+        opens is a control nobody reads — the switches are on screen, and the
+        one-line summary above them says what the paper enforces."""
         src = TEMPLATE.read_text(encoding="utf-8")
-        # A compact summary must show the effective numbers without expanding.
         assert "penalty_per_violation" in src and "max_violations" in src
-        assert "Atur anti-cheat" in src
-        assert 'x-show="acDetail"' in src
+        assert "acDetail" not in src, "an anti-cheat switch is behind an expander again"
+        for field in ("fullscreen_required", "allow_calculator", "block_screenshot"):
+            assert f'name="{field}"' in src
 
     def test_the_auto_fill_badge_exists_and_clears_on_touch(self):
         src = TEMPLATE.read_text(encoding="utf-8")
         assert "subjectAuto" in src and "durationAuto" in src and "classAuto" in src
         assert "durationAuto=false" in src, "the badge must clear when the teacher changes it"
         assert "'otomatis'" in src or '"otomatis"' in src
+
+    def test_the_rendered_builder_attribute_is_well_formed(self, app):
+        """A double quote inside the `x-data` value ends the HTML attribute, the
+        browser prints the rest of the object as text and Alpine never starts —
+        every collapsed control stays hidden and the page reads as broken. This
+        happened for real (a `// "otomatis"…` comment), so the rendered attribute
+        is checked for quotes rather than trusted."""
+        import re
+        from flask import g
+
+        with app.test_request_context("/teacher/exams/new"):
+            g.user_id, g.user_name, g.user_role = "u-1", "Uji", "guru"
+            g.user_email, g.tz_offset, g.show = "u@example.test", 7, {}
+            g.user_school_id, g.user_class_id = "sch-1", "cls-1"
+            html = app.jinja_env.get_template("teacher/exam_form.html").render(
+                exam=None, subjects=[], classes=[],
+                builder_defaults={"subject_id": None, "class_ids": [],
+                                  "duration_minutes": 60})
+        attr = re.search(r'<div x-data="(.*?)"\s*\n\s*x-init=', html, re.S)
+        assert attr, "the builder's x-data attribute no longer parses"
+        assert '"' not in attr.group(1), (
+            "a double quote inside x-data ends the attribute; the browser then "
+            "prints the rest as text and Alpine never starts")

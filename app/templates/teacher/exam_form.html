@@ -51,9 +51,10 @@
                 // fully editable. Nothing was removed — a collapsed control is
                 // still a control, and un-checking it always works.
                 advanced: false,
-                acDetail: false,
-                // "otomatis" badges: true while the value still came from the
-                // server default, cleared the moment the teacher touches it.
+                // The 'otomatis' badge is true while the value still came from
+                // the server default, and clears the moment the teacher touches
+                // it. (Single quotes, deliberately: this attribute is delimited
+                // by double quotes, and a stray one ends it.)
                 subjectAuto: {{ 'true' if (not exam and builder_defaults.subject_id) else 'false' }},
                 classAuto: {{ 'true' if (not exam and builder_defaults.class_ids) else 'false' }},
                 durationAuto: {{ 'true' if not exam else 'false' }},
@@ -1390,20 +1391,18 @@
                             <input type="number" name="max_violations" x-model="max_violations" min="1" max="20" class="w-16 text-center border-2 border-slate-200 rounded-lg px-2 py-1 font-bold">
                         </label>
                     </div>
-                    {# The values that decide fairness stay on screen; only the
-                       switches that set them are collapsible. A teacher reading
-                       this line knows the paper's policy before publishing. #}
+                    {# The switches are on screen, never behind an expander: a
+                       fairness policy is decided *before* publishing, and a control
+                       nobody opens is a control nobody reads. The line above says
+                       what the paper currently enforces. #}
                     <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
                         <span x-text="t('Penalti','Penalty') + ' ' + penalty_per_violation"></span>
                         <span>&middot;</span>
                         <span x-text="t('Maks pelanggaran','Max violations') + ' ' + max_violations"></span>
                         <span>&middot;</span>
                         <span :class="fullscreen_required ? 'text-emerald-600 font-bold' : 'text-slate-400'" x-text="'Fullscreen ' + (fullscreen_required ? 'on' : 'off')"></span>
-                        <button type="button" @click="acDetail = !acDetail"
-                                class="ml-auto font-extrabold text-primary-600 hover:underline"
-                                x-text="acDetail ? t('Sembunyikan','Hide') : t('Atur anti-cheat','Configure anti-cheat')"></button>
                     </div>
-                    <div x-show="acDetail" x-collapse x-cloak class="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs sm:text-sm">
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs sm:text-sm">
                         <label class="flex items-center gap-2 p-2.5 rounded-xl border-2 cursor-pointer transition"
                                :class="fullscreen_required ? 'border-primary-300 bg-primary-50' : 'border-slate-200'">
                             <input type="checkbox" x-model="fullscreen_required" name="fullscreen_required" value="true" class="w-4 h-4 text-primary-600 rounded">
@@ -1440,7 +1439,6 @@
                             <span class="font-bold text-slate-700" x-text="t('Cegah Screenshot','Block screenshot')"></span>
                         </label>
                     </div>
-                    </div><!-- /acDetail -->
                 </div>
 
                 <!-- Question settings.

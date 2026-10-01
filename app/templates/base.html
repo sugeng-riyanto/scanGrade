@@ -275,8 +275,8 @@ window.sgSavePrefs = function (patch) {
             <div class="nav-section-title pt-2"><span x-text="t('Data','Data')"></span></div>
             <a href="/super-admin/users" class="nav-item {% if request.path == '/super-admin/users' %}active{% endif %}"><i class="fas fa-users-cog"></i><span x-text="t('Semua User','All Users')"></span></a>
             <a href="/super-admin/exams" class="nav-item {% if request.path == '/super-admin/exams' %}active{% endif %}"><i class="fas fa-file-alt"></i><span x-text="t('Semua Ujian','All Exams')"></span></a>
-             <a href="/super-admin/logs" class="nav-item {% if request.path == '/super-admin/logs' %}active{% endif %}"><i class="fas fa-history"></i><span x-text="t('Audit Log','Audit Log')"></span></a>
              <a href="/super-admin/users/manage" class="nav-item {% if request.path == '/super-admin/users/manage' %}active{% endif %}"><i class="fas fa-user-cog"></i><span x-text="t('Manajemen User','User Management')"></span></a>
+             <a href="/super-admin/logs" class="nav-item {% if request.path == '/super-admin/logs' %}active{% endif %}"><i class="fas fa-history"></i><span x-text="t('Audit Log','Audit Log')"></span></a>
              <a href="/super-admin/feature-flags" class="nav-item {% if request.path == '/super-admin/feature-flags' %}active{% endif %}"><i class="fas fa-toggle-on"></i><span x-text="t('Feature Flags','Feature Flags')"></span></a>
             <div class="nav-section-title pt-2"><span x-text="t('Laporan','Reports')"></span></div>
             <a href="/teacher/analytics" class="nav-item {% if request.path == '/teacher/analytics' %}active{% endif %}"><i class="fas fa-chart-line"></i><span x-text="t('Analitik Semua Sekolah','All-School Analytics')"></span></a>
@@ -285,31 +285,30 @@ window.sgSavePrefs = function (patch) {
                that can, scoped to whoever is reading: every school for the super
                admin, one for the admin, their own papers for a teacher. #}
             <a href="/teacher/reports" class="nav-item {% if request.path == '/teacher/reports' %}active{% endif %}"><i class="fas fa-file-lines"></i><span x-text="t('Laporan Global &amp; Individu','Global &amp; Individual Reports')"></span></a>
-            <div class="nav-section-title pt-2"><span x-text="t('Demo','Demo')"></span></div>
-            <a href="/super-admin/demo-settings" class="nav-item {% if request.path == '/super-admin/demo-settings' %}active{% endif %}"><i class="fas fa-flask"></i><span x-text="t('Pengaturan Demo','Demo Settings')"></span></a>
             <div class="nav-section-title pt-2"><span x-text="t('Langganan','Subscription')"></span></div>
             <a href="/super-admin/midtrans" class="nav-item {% if request.path == '/super-admin/midtrans' %}active{% endif %}"><i class="fab fa-cc-visa"></i><span x-text="t('Midtrans','Midtrans')"></span></a>
             <a href="/super-admin/activation-codes" class="nav-item {% if request.path == '/super-admin/activation-codes' %}active{% endif %}"><i class="fas fa-key"></i><span x-text="t('Kode Aktivasi','Activation Codes')"></span></a>
-            <a href="/super-admin/pricing-settings" class="nav-item {% if request.path == '/super-admin/pricing-settings' %}active{% endif %}"><i class="fas fa-sliders-h"></i><span x-text="t('Model Harga','Pricing Model')"></span></a>
-            <a href="/super-admin/privacy-settings" class="nav-item {% if request.path == '/super-admin/privacy-settings' %}active{% endif %}"><i class="fas fa-shield-alt"></i><span x-text="t('Privasi &amp; Kepatuhan','Privacy &amp; Compliance')"></span></a>
             <a href="/super-admin/plans" class="nav-item {% if request.path == '/super-admin/plans' %}active{% endif %}"><i class="fas fa-tags"></i><span x-text="t('Paket Harga','Pricing Plans')"></span></a>
+            <a href="/super-admin/pricing-settings" class="nav-item {% if request.path == '/super-admin/pricing-settings' %}active{% endif %}"><i class="fas fa-sliders-h"></i><span x-text="t('Model Harga','Pricing Model')"></span></a>
             <a href="/super-admin/payment-fee-settings" class="nav-item {% if request.path == '/super-admin/payment-fee-settings' %}active{% endif %}"><i class="fas fa-receipt"></i><span x-text="t('Biaya Admin','Admin Fees')"></span></a>
             <a href="/super-admin/trial-settings" class="nav-item {% if request.path == '/super-admin/trial-settings' %}active{% endif %}"><i class="fas fa-clock"></i><span x-text="t('Masa Trial','Trial Period')"></span></a>
+            <div class="nav-section-title pt-2"><span x-text="t('Komunikasi','Communication')"></span></div>
             <a href="/super-admin/email-settings" class="nav-item {% if request.path == '/super-admin/email-settings' %}active{% endif %}"><i class="fas fa-envelope"></i><span x-text="t('Email (SMTP)','Email (SMTP)')"></span></a>
             <a href="/super-admin/whatsapp-settings" class="nav-item {% if request.path == '/super-admin/whatsapp-settings' %}active{% endif %}"><i class="fab fa-whatsapp"></i><span x-text="t('WhatsApp','WhatsApp')"></span></a>
-            <div class="nav-section-title pt-2"><span x-text="t('Data','Data')"></span></div>
+            <a href="/super-admin/comms" class="nav-item {% if request.path == '/super-admin/comms' %}active{% endif %}"><i class="fas fa-comments"></i><span x-text="t('Pesan &amp; Pengumuman','Messages &amp; Announcements')"></span></a>
+            <div class="nav-section-title pt-2"><span x-text="t('Demo','Demo')"></span></div>
+            <a href="/super-admin/demo-settings" class="nav-item {% if request.path == '/super-admin/demo-settings' %}active{% endif %}"><i class="fas fa-flask"></i><span x-text="t('Pengaturan Demo','Demo Settings')"></span></a>
+            <div class="nav-section-title pt-2"><span x-text="t('Alat','Tools')"></span></div>
+            <a href="/tools/generate-answer-sheet" class="nav-item {% if request.path == '/tools/generate-answer-sheet' %}active{% endif %}"><i class="fas fa-print"></i><span x-text="t('Lembar Jawaban','Answer Sheets')"></span></a>
+            <a href="/tools/device-preview" class="nav-item {% if request.path == '/tools/device-preview' %}active{% endif %}"><i class="fas fa-mobile-alt"></i><span x-text="t('Pratinjau Perangkat','Device Preview')"></span></a>
+            <div class="nav-section-title pt-2"><span x-text="t('Panduan','Guide')"></span></div>
+            <a href="/guide/skor" class="nav-item {% if request.path == '/guide/skor' %}active{% endif %}"><i class="fas fa-book-open"></i><span x-text="t('Panduan Skor','Scoring Guide')"></span></a>
+            <div class="nav-section-title pt-2"><span x-text="t('Sistem','System')"></span></div>
+            <a href="/super-admin/privacy-settings" class="nav-item {% if request.path == '/super-admin/privacy-settings' %}active{% endif %}"><i class="fas fa-shield-alt"></i><span x-text="t('Privasi &amp; Kepatuhan','Privacy &amp; Compliance')"></span></a>
             <a href="/super-admin/file-management" class="nav-item {% if request.path == '/super-admin/file-management' %}active{% endif %}"><i class="fas fa-folder-open"></i><span x-text="t('Manajemen File','File Management')"></span></a>
             <a href="/super-admin/omr-test" class="nav-item {% if request.path == '/super-admin/omr-test' %}active{% endif %}"><i class="fas fa-microscope"></i><span x-text="t('Uji OMR','OMR Test')"></span></a>
             <a href="/super-admin/deploy-status" class="nav-item {% if request.path == '/super-admin/deploy-status' %}active{% endif %}"><i class="fas fa-rocket"></i><span x-text="t('Kesiapan Runner','Runner Health')"></span></a>
-            <div class="nav-section-title pt-2"><span x-text="t('Tools','Tools')"></span></div>
-            <a href="/tools/generate-answer-sheet" class="nav-item {% if request.path == '/tools/generate-answer-sheet' %}active{% endif %}"><i class="fas fa-print"></i><span x-text="t('Lembar Jawaban','Answer Sheets')"></span></a>
-            <a href="/tools/device-preview" class="nav-item {% if request.path == '/tools/device-preview' %}active{% endif %}"><i class="fas fa-mobile-alt"></i><span x-text="t('Pratinjau Perangkat','Device Preview')"></span></a>
             <a href="/super-admin/reset-school-data" class="nav-item {% if request.path == '/super-admin/reset-school-data' %}active{% endif %}"><i class="fas fa-skull-crossbones text-red-400"></i><span class="text-red-400" x-text="t('Reset Sekolah','Reset School')"></span></a>
-            <div class="nav-section-title pt-2"><span x-text="t('Panduan','Guide')"></span></div>
-            <a href="/guide/skor" class="nav-item {% if request.path == '/guide/skor' %}active{% endif %}"><i class="fas fa-book-open"></i><span x-text="t('Panduan Skor','Scoring Guide')"></span></a>
-            <div class="nav-section-title pt-2"><span x-text="t('Komunikasi','Communication')"></span></div>
-            <a href="/super-admin/comms" class="nav-item {% if request.path == '/super-admin/comms' %}active{% endif %}"><i class="fas fa-comments"></i><span x-text="t('Pesan &amp; Pengumuman','Messages &amp; Announcements')"></span></a>
-
 {% elif g.user_role == 'admin_sekolah' %}
             <div class="nav-section-title"><span x-text="t('Utama','Main')"></span></div>
             <a href="/admin-sekolah/dashboard" class="nav-item {% if request.path == '/admin-sekolah/dashboard' %}active{% endif %}"><i class="fas fa-chart-pie"></i><span x-text="t('Dashboard','Dashboard')"></span></a>
@@ -317,6 +316,7 @@ window.sgSavePrefs = function (patch) {
             <div class="nav-section-title pt-2"><span x-text="t('Akademik','Academic')"></span></div>
             <a href="/admin-sekolah/school-years" class="nav-item {% if request.path == '/admin-sekolah/school-years' %}active{% endif %}"><i class="fas fa-calendar"></i><span x-text="t('Tahun Ajaran','Academic Years')"></span></a>
             <a href="/admin-sekolah/classes" class="nav-item {% if request.path == '/admin-sekolah/classes' %}active{% endif %}"><i class="fas fa-school"></i><span x-text="t('Kelas','Classes')"></span></a>
+            <a href="/admin-sekolah/subjects" class="nav-item {% if request.path == '/admin-sekolah/subjects' %}active{% endif %}"><i class="fas fa-book"></i><span x-text="t('Mata Pelajaran','Subjects')"></span></a>
             <a href="/admin-sekolah/promote" class="nav-item {% if request.path == '/admin-sekolah/promote' %}active{% endif %}"><i class="fas fa-arrow-up"></i><span x-text="t('Naik Kelas','Promote Students')"></span></a>
             <div class="nav-section-title pt-2"><span x-text="t('Pengguna','Users')"></span></div>
             <a href="/admin-sekolah/teachers" class="nav-item {% if request.path == '/admin-sekolah/teachers' %}active{% endif %}"><i class="fas fa-chalkboard-teacher"></i><span x-text="t('Guru','Teachers')"></span></a>
@@ -331,8 +331,7 @@ window.sgSavePrefs = function (patch) {
                all — reachable only by typing its URL — so a school reported it as a
                feature that does not exist. #}
             <a href="/admin-sekolah/accounts" class="nav-item {% if request.path == '/admin-sekolah/accounts' %}active{% endif %}"><i class="fas fa-envelope-circle-check"></i><span x-text="t('Email &amp; Aktivasi','Email &amp; Activation')"></span></a>
-            <div class="nav-section-title pt-2"><span x-text="t('Akademik','Academic')"></span></div>
-            <a href="/admin-sekolah/subjects" class="nav-item {% if request.path == '/admin-sekolah/subjects' %}active{% endif %}"><i class="fas fa-book"></i><span x-text="t('Mata Pelajaran','Subjects')"></span></a>
+            <div class="nav-section-title pt-2"><span x-text="t('Laporan','Reports')"></span></div>
             {# The school's own reports, at the school's own address. Both pages
                are shared with the teacher — one template each, rendered with the
                base path of the reader — and every role opens them at its own
@@ -340,23 +339,21 @@ window.sgSavePrefs = function (patch) {
                the teacher at `/teacher/*`. The menu used to sit in this section
                and link into `/teacher/*`, so the entry, the address and the
                breadcrumb named three different areas. #}
-            <div class="nav-section-title pt-2"><span x-text="t('Laporan','Reports')"></span></div>
             <a href="/admin-sekolah/analytics" class="nav-item {% if request.path == '/admin-sekolah/analytics' %}active{% endif %}"><i class="fas fa-chart-line"></i><span x-text="t('Analitik Sekolah','School Analytics')"></span></a>
             {# Every class report and every learner report this school may file, in
                one index. The analytics page answers "how is the school doing"; this
                is where the documents behind that answer are opened. #}
             <a href="/admin-sekolah/reports" class="nav-item {% if request.path == '/admin-sekolah/reports' %}active{% endif %}"><i class="fas fa-file-lines"></i><span x-text="t('Laporan Sekolah','School Reports')"></span></a>
-            <div class="nav-section-title pt-2"><span x-text="t('Panduan','Guide')"></span></div>
-            <a href="/guide/skor" class="nav-item {% if request.path == '/guide/skor' %}active{% endif %}"><i class="fas fa-book-open"></i><span x-text="t('Panduan Skor','Scoring Guide')"></span></a>
             <div class="nav-section-title pt-2"><span x-text="t('Komunikasi','Communication')"></span></div>
             <a href="/admin-sekolah/comms" class="nav-item {% if request.path == '/admin-sekolah/comms' %}active{% endif %}"><i class="fas fa-comments"></i><span x-text="t('Pesan &amp; Pengumuman','Messages &amp; Announcements')"></span></a>
             <div class="nav-section-title pt-2"><span x-text="t('Langganan','Subscription')"></span></div>
             <a href="/admin-sekolah/subscription" class="nav-item {% if request.path == '/admin-sekolah/subscription' %}active{% endif %}"><i class="fas fa-credit-card"></i><span x-text="t('Langganan Saya','My Subscription')"></span></a>
             <a href="/admin-sekolah/invoices" class="nav-item {% if request.path == '/admin-sekolah/invoices' %}active{% endif %}"><i class="fas fa-file-invoice"></i><span x-text="t('Invoice','Invoices')"></span></a>
-            <div class="nav-section-title pt-2"><span x-text="t('Tools','Tools')"></span></div>
+            <div class="nav-section-title pt-2"><span x-text="t('Alat','Tools')"></span></div>
             <a href="/tools/generate-answer-sheet" class="nav-item {% if request.path == '/tools/generate-answer-sheet' %}active{% endif %}"><i class="fas fa-print"></i><span x-text="t('Lembar Jawaban','Answer Sheets')"></span></a>
             <a href="/tools/device-preview" class="nav-item {% if request.path == '/tools/device-preview' %}active{% endif %}"><i class="fas fa-mobile-alt"></i><span x-text="t('Pratinjau Perangkat','Device Preview')"></span></a>
-
+            <div class="nav-section-title pt-2"><span x-text="t('Panduan','Guide')"></span></div>
+            <a href="/guide/skor" class="nav-item {% if request.path == '/guide/skor' %}active{% endif %}"><i class="fas fa-book-open"></i><span x-text="t('Panduan Skor','Scoring Guide')"></span></a>
 {% elif g.user_role in ('principal', 'vice_principal') %}
             {# The two school officials. The menu is short on purpose: it lists only
                pages these roles can actually open, because a door that refuses is
@@ -378,14 +375,14 @@ window.sgSavePrefs = function (patch) {
             <div class="nav-section-title"><span x-text="t('Utama','Main')"></span></div>
             <a href="/teacher/dashboard" class="nav-item {% if request.path == '/teacher/dashboard' %}active{% endif %}"><i class="fas fa-chart-pie"></i><span x-text="t('Dashboard','Dashboard')"></span></a>
             <a href="/teacher/classes" class="nav-item {% if request.path == '/teacher/classes' %}active{% endif %}"><i class="fas fa-school"></i><span x-text="t('Kelas &amp; Mapel Saya','My Classes &amp; Subjects')"></span></a>
+            <a href="/teacher/subjects" class="nav-item {% if request.path == '/teacher/subjects' %}active{% endif %}"><i class="fas fa-book"></i><span x-text="t('Mata Pelajaran','Subjects')"></span></a>
             <div class="nav-section-title pt-2"><span x-text="t('Ujian','Exams')"></span></div>
             <a href="/teacher/exams" class="nav-item {% if request.path == '/teacher/exams' %}active{% endif %}"><i class="fas fa-file-alt"></i><span x-text="t('Ujian Saya','My Exams')"></span></a>
             <a href="/teacher/exams/new" class="nav-item {% if request.path == '/teacher/exams/new' %}active{% endif %}"><i class="fas fa-plus-circle"></i><span x-text="t('Buat Ujian','Create Exam')"></span></a>
-            <div class="nav-section-title pt-2"><span x-text="t('AI','AI')"></span></div>
-            <a href="/teacher/ai-settings" class="nav-item {% if request.path == '/teacher/ai-settings' %}active{% endif %}"><i class="fas fa-robot"></i><span x-text="t('Koreksi AI','AI Grading')"></span></a>
             <div class="nav-section-title pt-2"><span x-text="t('Koreksi','Grading')"></span></div>
             <a href="/teacher/scan" class="nav-item {% if request.path == '/teacher/scan' %}active{% endif %}"><i class="fas fa-camera"></i><span x-text="t('Scan OMR','Scan OMR')"></span></a>
             <a href="/teacher/grading" class="nav-item {% if request.path == '/teacher/grading' %}active{% endif %}"><i class="fas fa-pen-alt"></i><span x-text="t('Koreksi Esai','Grade Essays')"></span></a>
+            <a href="/teacher/ai-settings" class="nav-item {% if request.path == '/teacher/ai-settings' %}active{% endif %}"><i class="fas fa-robot"></i><span x-text="t('Koreksi AI','AI Grading')"></span></a>
             <a href="/teacher/retractions" class="nav-item {% if request.path == '/teacher/retractions' %}active{% endif %}"><i class="fas fa-undo-alt"></i><span x-text="t('Permintaan Tarik','Retraction Requests')"></span></a>
             <a href="/teacher/penalty-appeals" class="nav-item {% if request.path == '/teacher/penalty-appeals' %}active{% endif %}"><i class="fas fa-gavel"></i><span x-text="t('Banding Penalti','Penalty Appeals')"></span></a>
             <div class="nav-section-title pt-2"><span x-text="t('Laporan','Reports')"></span></div>
@@ -396,16 +393,15 @@ window.sgSavePrefs = function (patch) {
                principal should not have to know to open the analysis of one exam
                first to find it. #}
             <a href="/teacher/reports" class="nav-item {% if request.path == '/teacher/reports' %}active{% endif %}"><i class="fas fa-file-lines"></i><span x-text="t('Laporan Global &amp; Individu','Global &amp; Individual Reports')"></span></a>
-            <div class="nav-section-title pt-2"><span x-text="t('Panduan','Guide')"></span></div>
-            <a href="/guide/skor" class="nav-item {% if request.path == '/guide/skor' %}active{% endif %}"><i class="fas fa-book-open"></i><span x-text="t('Panduan Skor','Scoring Guide')"></span></a>
             <div class="nav-section-title pt-2"><span x-text="t('Komunikasi','Communication')"></span></div>
             <a href="/teacher/comms" class="nav-item {% if request.path == '/teacher/comms' %}active{% endif %}"><i class="fas fa-comments"></i><span x-text="t('Pesan &amp; Pengumuman','Messages &amp; Announcements')"></span></a>
-            <div class="nav-section-title pt-2"><span x-text="t('Pengaturan','Settings')"></span></div>
-            <a href="/teacher/settings" class="nav-item {% if request.path == '/teacher/settings' %}active{% endif %}"><i class="fas fa-cog"></i><span x-text="t('Pengaturan Akun','Account Settings')"></span></a>
-            <div class="nav-section-title pt-2"><span x-text="t('Tools','Tools')"></span></div>
+            <div class="nav-section-title pt-2"><span x-text="t('Alat','Tools')"></span></div>
             <a href="/tools/generate-answer-sheet" class="nav-item {% if request.path == '/tools/generate-answer-sheet' %}active{% endif %}"><i class="fas fa-print"></i><span x-text="t('Lembar Jawaban','Answer Sheets')"></span></a>
             <a href="/tools/device-preview" class="nav-item {% if request.path == '/tools/device-preview' %}active{% endif %}"><i class="fas fa-mobile-alt"></i><span x-text="t('Pratinjau Perangkat','Device Preview')"></span></a>
-            <a href="/teacher/subjects" class="nav-item {% if request.path == '/teacher/subjects' %}active{% endif %}"><i class="fas fa-book"></i><span x-text="t('Mata Pelajaran','Subjects')"></span></a>
+            <div class="nav-section-title pt-2"><span x-text="t('Panduan','Guide')"></span></div>
+            <a href="/guide/skor" class="nav-item {% if request.path == '/guide/skor' %}active{% endif %}"><i class="fas fa-book-open"></i><span x-text="t('Panduan Skor','Scoring Guide')"></span></a>
+            <div class="nav-section-title pt-2"><span x-text="t('Pengaturan','Settings')"></span></div>
+            <a href="/teacher/settings" class="nav-item {% if request.path == '/teacher/settings' %}active{% endif %}"><i class="fas fa-cog"></i><span x-text="t('Pengaturan Akun','Account Settings')"></span></a>
             {% set _feat = get_school_features() %}
             {% if False and _feat.get('whiteboard_enabled', True) %}
             <div class="nav-section-title pt-2"><span x-text="t('Belajar','Learning')"></span></div>
@@ -422,6 +418,7 @@ window.sgSavePrefs = function (patch) {
             <a href="/guide/skor" class="nav-item {% if request.path == '/guide/skor' %}active{% endif %}"><i class="fas fa-book-open"></i><span x-text="t('Panduan Skor','Scoring Guide')"></span></a>
             <div class="nav-section-title pt-2"><span x-text="t('Komunikasi','Communication')"></span></div>
             <a href="/student/comms" class="nav-item {% if request.path == '/student/comms' %}active{% endif %}"><i class="fas fa-comments"></i><span x-text="t('Pesan &amp; Pengumuman','Messages &amp; Announcements')"></span></a>
+            <div class="nav-section-title pt-2"><span x-text="t('Pengaturan','Settings')"></span></div>
             <a href="/student/settings" class="nav-item {% if request.path == '/student/settings' %}active{% endif %}"><i class="fas fa-cog"></i><span x-text="t('Pengaturan','Settings')"></span></a>
             {% set _feat = get_school_features() %}
             {% if False and _feat.get('whiteboard_enabled', True) %}
