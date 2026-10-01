@@ -337,14 +337,23 @@
        second screen's worth of state. #}
     <div x-data="assignmentMatrix()" x-cloak @open-assign.window="open($event.detail)">
         <div x-show="isOpen" class="fixed inset-0 sg-layer-dialog flex items-center justify-center bg-black/40 p-3" @click.self="close()">
-            <div class="bg-white rounded-2xl shadow-xl w-full max-w-5xl max-h-[92vh] flex flex-col">
+            {# A 23-subject grid is unusable in a 5xl box, so the admin can widen it to
+               the viewport and back — the same table either way, not a second screen. #}
+            <div class="bg-white rounded-2xl shadow-xl w-full max-h-[92vh] flex flex-col"
+                 :class="expanded ? 'max-w-[99vw]' : 'max-w-5xl'">
                 <div class="px-5 py-4 border-b border-stone-100 flex items-center justify-between gap-3">
                     <div class="min-w-0">
                         <h3 class="font-extrabold text-stone-800 truncate">Kelola Penugasan — <span x-text="teacherName"></span></h3>
                         <p class="text-xs text-stone-500" x-show="yearName" x-text="'Tahun ajaran: ' + yearName"></p>
                         <p class="text-xs text-amber-600" x-show="!yearName">Sekolah ini belum punya tahun ajaran — penugasan disimpan tanpa label tahun.</p>
                     </div>
-                    <button type="button" @click="close()" class="text-stone-400 hover:text-stone-700"><i class="fas fa-times"></i></button>
+                    <div class="flex items-center gap-2 shrink-0">
+                        <button type="button" @click="expanded = !expanded"
+                                class="text-xs font-bold text-stone-500 hover:text-stone-700 border border-stone-200 rounded-lg px-2 py-1"
+                                :title="expanded ? 'Perkecil' : 'Perbesar'"
+                                x-text="expanded ? 'Perkecil' : 'Perbesar'"></button>
+                        <button type="button" @click="close()" class="text-stone-400 hover:text-stone-700"><i class="fas fa-times"></i></button>
+                    </div>
                 </div>
 
                 <div x-show="loading" class="px-5 py-3 text-sm text-stone-500">Memuat matriks…</div>
@@ -367,36 +376,42 @@
                             </tr>
                         </thead>
                         <tbody>
-                            <template x-for="g in grades()" :key="g">
-                                <template>
-                                    <tr class="bg-stone-100">
+                            {# ONE root per x-for: Alpine clones the template's first element
+                               child and nothing else. Wrapping the grade row and the class
+                               rows in a bare `<template>` made that root inert, so Alpine
+                               cloned "nothing" for every grade and the whole tbody stayed
+                               empty — columns drawn, no rows, no checkboxes, no "semua
+                               mapel". The flat `rows()` list (grade header, then its
+                               classes) keeps the grouping while giving the template a real
+                               `<tr>` to repeat. #}
+                            <template x-for="row in rows()" :key="row.key">
+                                <tr :class="row.cls ? 'hover:bg-indigo-50/40' : 'bg-stone-100'">
+                                    <template x-if="!row.cls">
                                         <td class="sticky left-0 bg-stone-100 px-2 py-1 font-extrabold text-stone-600 sg-layer-sticky"
-                                            :colspan="subjects.length + 1" x-text="'Kelas ' + g"></td>
-                                    </tr>
-                                    <template x-for="c in classesOf(g)" :key="c.id">
-                                        <tr class="hover:bg-indigo-50/40">
-                                            <td class="sticky left-0 bg-white px-2 py-1 font-semibold text-stone-700 sg-layer-sticky">
-                                                <div class="flex items-center justify-between gap-2">
-                                                    <span x-text="c.name"></span>
-                                                    {# The mirror of "semua kelas": every subject for ONE class,
-                                                       for the common case where a form teacher takes a whole
-                                                       class. Kept a click away so checking a 6x22 grid by
-                                                       hand is never the only way to say "all of it". #}
-                                                    <button type="button" @click="toggleClassAll(c.id)"
-                                                            class="text-[10px] font-bold text-indigo-600 hover:underline shrink-0"
-                                                            title="Pilih/batalkan semua mapel untuk kelas ini">semua mapel</button>
-                                                </div>
-                                            </td>
-                                            <template x-for="s in subjects" :key="s.id">
-                                                <td class="text-center px-1 py-1">
-                                                    <input type="checkbox" class="w-4 h-4"
-                                                           :checked="isOn(c.id, s.id)"
-                                                           @click="toggle(c.id, s.id)">
-                                                </td>
-                                            </template>
-                                        </tr>
+                                            :colspan="subjects.length + 1" x-text="'Kelas ' + row.grade"></td>
                                     </template>
-                                </template>
+                                    <template x-if="row.cls">
+                                        <td class="sticky left-0 bg-white px-2 py-1 font-semibold text-stone-700 sg-layer-sticky">
+                                            <div class="flex items-center justify-between gap-2">
+                                                <span x-text="row.cls.name"></span>
+                                                {# The mirror of "semua kelas": every subject for ONE class,
+                                                   for the common case where a form teacher takes a whole
+                                                   class. Kept a click away so checking a 6x23 grid by
+                                                   hand is never the only way to say "all of it". #}
+                                                <button type="button" @click="toggleClassAll(row.cls.id)"
+                                                        class="text-[10px] font-bold text-indigo-600 hover:underline shrink-0"
+                                                        title="Pilih/batalkan semua mapel untuk kelas ini">semua mapel</button>
+                                            </div>
+                                        </td>
+                                    </template>
+                                    <template x-for="s in (row.cls ? subjects : [])" :key="row.key + '|' + s.id">
+                                        <td class="text-center px-1 py-1">
+                                            <input type="checkbox" class="w-4 h-4"
+                                                   :checked="isOn(row.cls.id, s.id)"
+                                                   @click="toggle(row.cls.id, s.id)">
+                                        </td>
+                                    </template>
+                                </tr>
                             </template>
                         </tbody>
                     </table>
@@ -448,6 +463,7 @@ function sgAssignSync(box) {
 function assignmentMatrix() {
     return {
         isOpen: false,
+        expanded: false,
         loading: false,
         saving: false,
         error: '',
@@ -487,6 +503,17 @@ function assignmentMatrix() {
         },
         classesOf(g) {
             return this.classes.filter(c => (c.grade_level || 'Lainnya') === g);
+        },
+        // A flat list — a grade header, then its classes — because one x-for can only
+        // repeat one element. A grade row is `{ grade, cls: null }`; a class row is
+        // `{ grade, cls }`. The template branches on `cls`.
+        rows() {
+            const out = [];
+            this.grades().forEach(g => {
+                out.push({ key: 'g:' + g, grade: g, cls: null });
+                this.classesOf(g).forEach(c => out.push({ key: 'c:' + c.id, grade: g, cls: c }));
+            });
+            return out;
         },
         addedCount() { return Object.keys(this.selected).filter(k => !this.initial[k]).length; },
         removedCount() { return Object.keys(this.initial).filter(k => !this.selected[k]).length; },

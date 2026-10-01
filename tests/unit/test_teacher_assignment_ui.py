@@ -486,6 +486,12 @@ class TestTemplateWiring:
         assert "function sgAssignSync(" in src, (
             "unchecking a class must clear the 'all' box, or it claims all while one is off")
 
+    def test_the_matrix_can_widen_to_the_viewport(self):
+        src = TEMPLATE.read_text(encoding="utf-8")
+        assert "expanded" in src, (
+            "a 23-subject grid needs a full-screen / restore toggle, not only a 5xl box")
+        assert "Perbesar" in src and "Perkecil" in src
+
     def test_the_matrix_offers_all_subjects_for_a_class(self):
         src = TEMPLATE.read_text(encoding="utf-8")
         assert "semua mapel" in src, (
