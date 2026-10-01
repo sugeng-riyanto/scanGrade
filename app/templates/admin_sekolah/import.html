@@ -113,6 +113,10 @@
     <div class="card p-6">
         <h3 class="font-extrabold text-stone-800 mb-4" x-text="t('Download Template','Download Template')"></h3>
         <p class="text-sm text-stone-500 mb-4" x-text="t('Template sudah include NPSN, tahun ajaran, email auto-generate, dan password random.','The template already includes NPSN, academic year, auto-generated email, and a random password.')"></p>
+        <a href="/admin-sekolah/download-template/semua"
+           class="inline-flex items-center gap-2 px-5 py-3 bg-violet-600 text-white rounded-xl font-extrabold text-sm hover:bg-violet-700 transition shadow mb-4">
+            <i class="fas fa-file-excel"></i><span x-text="t('Template Lengkap (Murid, Guru, Pejabat, Mapel — satu file, banyak tab)','Full Template (Students, Teachers, Officials, Subjects — one file, many tabs)')"></span>
+        </a>
         <div class="flex flex-wrap gap-3">
             <a href="/admin-sekolah/download-template/murid"
                class="inline-flex items-center gap-2 px-4 py-2.5 bg-amber-50 text-amber-700 rounded-xl font-bold text-sm hover:bg-amber-100 transition border border-amber-200">
