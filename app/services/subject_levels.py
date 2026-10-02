@@ -96,26 +96,32 @@ def save_mapping(supabase, school_id, subject_id, class_ids, created_by=None):
         ("eq", "school_id", school_id), ("eq", "subject_id", subject_id)])
     by_class = {str(r["class_id"]): r for r in existing if r.get("class_id")}
 
-    added = removed = 0
+    # Two statements, never one per class. The first version inserted class by
+    # class, and a live probe caught what that costs: the connection dropped
+    # between inserts, one row had already landed, and the caller was told the
+    # save failed — a half-applied mapping the admin had no way to see. Bulk
+    # writes make that window as small as it can be, and the operation is
+    # idempotent, so re-saving after a network error simply finishes the job.
+    to_on = sorted(wanted)
+    off_ids = [r["id"] for class_id, r in by_class.items()
+               if class_id not in wanted and r.get("is_active", True)]
+    added = sum(1 for c in to_on
+                if c not in by_class or not by_class[c].get("is_active", True))
+    removed = len(off_ids)
+
     try:
-        for class_id in sorted(wanted):
-            row = by_class.get(class_id)
-            if row is None:
-                supabase.table("class_subjects").insert({
-                    "school_id": school_id, "class_id": class_id,
-                    "subject_id": subject_id, "is_active": True,
-                    "created_by": created_by,
-                }).execute()
-                added += 1
-            elif not row.get("is_active", True):
-                (supabase.table("class_subjects")
-                 .update({"is_active": True}).eq("id", row["id"]).execute())
-                added += 1
-        for class_id, row in by_class.items():
-            if class_id not in wanted and row.get("is_active", True):
-                (supabase.table("class_subjects")
-                 .update({"is_active": False}).eq("id", row["id"]).execute())
-                removed += 1
+        if to_on:
+            # One upsert over the unique (class_id, subject_id): a class already
+            # on is reactivated in place, so a row is never duplicated.
+            (supabase.table("class_subjects")
+             .upsert([{"school_id": school_id, "class_id": class_id,
+                       "subject_id": subject_id, "is_active": True,
+                       "created_by": created_by} for class_id in to_on],
+                     on_conflict="class_id,subject_id")
+             .execute())
+        if off_ids:
+            (supabase.table("class_subjects")
+             .update({"is_active": False}).in_("id", off_ids).execute())
     except Exception as e:
         logger.warning("could not save subject mapping for %s", subject_id, exc_info=True)
         return False, {"error": str(e), "status": 400}
@@ -213,24 +219,45 @@ def save_levels(supabase, school_id, subject_id, class_id, levels,
     if strangers:
         return False, {"error": "Ada murid yang bukan anggota kelas ini", "status": 403}
 
-    rows = [{
-        "school_id": school_id,
-        "student_id": sid,
-        "subject_id": subject_id,
-        "class_id": class_id,
-        "school_year_id": year_id,
-        "level": level,
-        "set_by": set_by,
-    } for sid, level in sorted(incoming.items())]
-    if not rows:
+    if not incoming:
         return True, {"saved": 0}
 
+    # An upsert would be one statement, but the uniqueness here is a *partial*
+    # index (`WHERE school_year_id IS NOT NULL`, migration 049) and PostgREST
+    # sends `ON CONFLICT (cols)` without the predicate — Postgres then cannot
+    # infer the index and answers 42P10, measured live. So the write is split
+    # instead: one bulk insert for the pupils with no row yet, and one update per
+    # level for the rest. Bounded at four statements, never one per pupil — a
+    # loop is how a dropped connection left a half-applied mapping once.
+    existing = _rows(supabase, "student_subject_levels", "id, student_id", [
+        ("eq", "school_id", school_id),
+        ("eq", "subject_id", subject_id),
+        ("in_", "student_id", list(incoming.keys())),
+    ] + ([] if not year_id else [("eq", "school_year_id", year_id)]))
+    known = {str(r["student_id"]): r["id"] for r in existing
+             if r.get("student_id") and r.get("id")}
+
+    to_insert = [{
+        "school_id": school_id, "student_id": sid, "subject_id": subject_id,
+        "class_id": class_id, "school_year_id": year_id,
+        "level": level, "set_by": set_by,
+    } for sid, level in sorted(incoming.items()) if sid not in known]
+
+    by_level: dict = {}
+    for sid, level in incoming.items():
+        if sid in known:
+            by_level.setdefault(level, []).append(known[sid])
+
     try:
-        (supabase.table("student_subject_levels")
-         .upsert(rows, on_conflict="student_id,subject_id,school_year_id")
-         .execute())
+        if to_insert:
+            supabase.table("student_subject_levels").insert(to_insert).execute()
+        for level, ids in by_level.items():
+            (supabase.table("student_subject_levels")
+             .update({"level": level, "class_id": class_id, "set_by": set_by})
+             .in_("id", ids).execute())
     except Exception as e:
         logger.warning("could not save subject levels for %s", subject_id, exc_info=True)
         return False, {"error": str(e), "status": 400}
 
-    return True, {"saved": len(rows)}
+    return True, {"saved": len(incoming), "inserted": len(to_insert),
+                  "updated": len(incoming) - len(to_insert)}
