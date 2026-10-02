@@ -34,6 +34,7 @@ from app.services import enrollment
 from app.services import academic_year
 from app.services import identity_names
 from app.services import subject_levels as sl_service
+from app.services import subject_kkm as kkm_service
 
 def _gen_password(length=12) -> str:
     chars = string.ascii_letters + string.digits + "!@#$%^&*"
@@ -1477,7 +1478,7 @@ def admin_subjects():
     # What each subject is carrying, so the delete dialog can name it. Two
     # batched reads rather than one count per card.
     subject_ids = [s["id"] for s in data]
-    assign_counts, exam_counts, class_counts = {}, {}, {}
+    assign_counts, exam_counts, closed_counts = {}, {}, {}
     if subject_ids:
         for r in (supabase.table("teacher_assignments").select("subject_id")
                   .in_("subject_id", subject_ids).execute().data or []):
@@ -1487,19 +1488,64 @@ def admin_subjects():
             key = r.get("subject_id")
             if key:
                 exam_counts[key] = exam_counts.get(key, 0) + 1
-        # How many classes actually offer each subject (migration 049). A subject
-        # mapped to no class reads as "not taught anywhere yet" rather than as a
-        # listing that would be offered against every class in the exam builder.
+        # Count only the pairs an admin has switched OFF. A subject is offered by
+        # every class unless a row says otherwise (see subject_levels.mapped_class_ids),
+        # so "X of Y classes" is Y minus the closed pairs — not the number of rows,
+        # which is zero for a school that has never opened this panel.
         for r in (supabase.table("class_subjects").select("subject_id, is_active")
                   .eq("school_id", sid).in_("subject_id", subject_ids).execute().data or []):
             key = r.get("subject_id")
-            if key and r.get("is_active", True):
-                class_counts[key] = class_counts.get(key, 0) + 1
+            if key and not r.get("is_active", True):
+                closed_counts[key] = closed_counts.get(key, 0) + 1
+
+    # The classes of this school, so the card can say "offered in X of Y classes"
+    # and the modal can render its picker without a second round-trip. `grade_level`
+    # is what the per-level KKM panel groups by.
+    school_classes = (supabase.table("classes").select("id, name, grade_level")
+                      .eq("school_id", sid).order("name").execute().data or [])
+    total_classes = len(school_classes)
+
+    # KKM for the running year: one read for every subject, then grouped in code.
+    year = ta_service.active_school_year(supabase, sid) or {}
+    year_id = year.get("id")
+    # `active_school_year` reads the picker's fields, not `status`, so read the
+    # status here: the page must show a closed year as read-only before an admin
+    # tries to edit a mark and is refused.
+    year_status = ""
+    if year_id:
+        flags = (supabase.table("school_years").select("status").eq("id", year_id)
+                 .eq("school_id", sid).execute().data or [])
+        year_status = (flags[0].get("status") if flags else "") or ""
+    kkm_rows = kkm_service.list_kkm(supabase, sid, year_id=year_id)
+    kkm_general, kkm_over = {}, {}
+    for row in kkm_rows:
+        key = row.get("subject_id")
+        level = row.get("grade_level")
+        if level in (None, ""):
+            kkm_general[key] = kkm_service._value(row.get("kkm"))
+        elif key:
+            kkm_over.setdefault(key, {})[str(level)] = kkm_service._value(row.get("kkm"))
+
     for s in data:
         s["assignment_count"] = assign_counts.get(s["id"], 0)
         s["exam_count"] = exam_counts.get(s["id"], 0)
-        s["class_count"] = class_counts.get(s["id"], 0)
-    return render_template("admin_sekolah/subjects.html", subjects=data, sort=sort, q=q)
+        closed = closed_counts.get(s["id"], 0)
+        s["class_count"] = max(total_classes - closed, 0)
+        s["kkm"] = kkm_general.get(s["id"], kkm_service.DEFAULT_KKM)
+        s["kkm_overrides"] = kkm_over.get(s["id"], {})
+
+    # The grade levels present in this school, so the override panel has something
+    # to offer even before a subject is mapped to any class.
+    grade_levels = sorted({str(c.get("grade_level")) for c in school_classes
+                           if c.get("grade_level") not in (None, "")})
+    return render_template(
+        "admin_sekolah/subjects.html", subjects=data, sort=sort, q=q,
+        total_classes=total_classes, grade_levels=grade_levels,
+        kkm_default=kkm_service.DEFAULT_KKM,
+        kkm_range=(kkm_service.MIN_KKM, kkm_service.MAX_KKM),
+        year_name=year.get("name") or "",
+        year_status=year_status,
+    )
 
 
 @admin_sekolah_bp.route("/subjects/create", methods=["POST"])
@@ -1613,7 +1659,11 @@ def admin_subject_mapping(subject_id):
     if request.method == "GET":
         classes = (supabase.table("classes").select("id, name, grade_level")
                    .eq("school_id", sid).order("name").execute().data or [])
-        mapped = sorted(sl_service.mapped_class_ids(supabase, sid, subject_id))
+        # Every class is offered by default, so the modal opens fully ticked and
+        # an un-tick is what writes a row (see subject_levels.mapped_class_ids).
+        mapped = sorted(sl_service.mapped_class_ids(
+            supabase, sid, subject_id,
+            all_class_ids=[c["id"] for c in classes]))
         # How many pupils each mapped class holds, so the modal can say "6 classes,
         # 148 pupils" without a query per class.
         counts = {}
@@ -1664,6 +1714,63 @@ def admin_subject_class_roster(subject_id, class_id):
                                            year_id=(year or {}).get("id"))
     return jsonify({"subject_id": subject_id, "class_id": class_id,
                     "students": roster, "levels": list(sl_service.LEVELS)})
+
+
+# ─── KKM (Kriteria Ketuntasan Minimal) ────────────────────────
+#
+# The mark a subject passes at, for one school year, with an optional override
+# per grade level. It lives on the subject rather than on a paper: Fase 0 found
+# `exams.passing_score` used in ~27 places for lulus / tidak lulus, which is why
+# one subject could pass at two marks in the same building. Reading it here and
+# writing it here keeps one answer; the reports follow in a later step, and a
+# paper that already exists keeps the mark it was created with.
+
+@admin_sekolah_bp.route("/subjects/<subject_id>/kkm", methods=["POST"])
+@admin_sekolah_required
+@require_school_access("subjects", "subject_id")
+def admin_subject_kkm_save(subject_id):
+    """Set this subject's mark, or one grade's override.
+
+    The body is ``{"kkm": 75, "grade_level": "9"}`` — `grade_level` omitted or
+    empty writes the subject's general mark. The school is the session's, and a
+    value outside the range is refused before anything is written.
+    """
+    sid = _school_id()
+    supabase = get_supabase()
+    payload = request.get_json(silent=True) or {}
+    year = ta_service.active_school_year(supabase, sid)
+    out = kkm_service.set_kkm(
+        supabase, sid, subject_id, payload.get("kkm"),
+        grade_level=payload.get("grade_level"),
+        year_id=payload.get("year_id") or (year or {}).get("id"),
+        actor_id=g.user_id,
+    )
+    if not out.get("ok"):
+        return jsonify(out), 400
+    invalidate_school(sid)
+    log_activity("update", "subject_kkm", subject_id,
+                 new_data={"kkm": out.get("kkm"),
+                           "grade_level": payload.get("grade_level")},
+                 user_id=g.user_id)
+    return jsonify({"success": True, **out})
+
+
+@admin_sekolah_bp.route("/subjects/<subject_id>/kkm/<grade_level>/clear", methods=["POST"])
+@admin_sekolah_required
+@require_school_access("subjects", "subject_id")
+def admin_subject_kkm_clear(subject_id, grade_level):
+    """Drop one level's override so it reads the subject's general mark again."""
+    sid = _school_id()
+    supabase = get_supabase()
+    year = ta_service.active_school_year(supabase, sid)
+    out = kkm_service.clear_override(
+        supabase, sid, subject_id, grade_level, year_id=(year or {}).get("id"))
+    if not out.get("ok"):
+        return jsonify(out), 400
+    invalidate_school(sid)
+    log_activity("update", "subject_kkm", subject_id,
+                 new_data={"cleared_grade_level": grade_level}, user_id=g.user_id)
+    return jsonify({"success": True, **out})
 
 
 @admin_sekolah_bp.route("/subjects/<subject_id>/levels", methods=["POST"])

@@ -67,9 +67,23 @@
                 &middot;
                 {{ s.exam_count }} <span x-text="t('ujian','exams')"></span>
                 &middot;
-                {{ s.class_count }} <span x-text="t('kelas','classes')"></span>
+                {{ s.class_count }}/{{ total_classes }} <span x-text="t('kelas','classes')"></span>
             </p>
             {% endif %}
+            <!-- KKM: the mark this subject passes at. It belongs to the subject,
+                 not to a paper, so one subject cannot pass at two marks. The
+                 badge shows the subject's own mark; the modal edits it and adds
+                 per-grade overrides. The class summary reads "X of Y" because a
+                 subject is offered by every class unless a pair is switched off. -->
+            <div class="flex items-center justify-center gap-2 mt-2">
+                <button type="button"
+                        @click='openKkm({{ s.id|tojson }}, {{ s.name|tojson }}, {{ s.kkm }}, {{ s.kkm_overrides|tojson }})'
+                        class="text-[10px] font-bold px-2 py-1 rounded-lg border border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 transition">
+                    <i class="fas fa-bullseye mr-1"></i>KKM {{ s.kkm }}
+                </button>
+                <span class="text-[10px] font-bold text-slate-400"
+                      x-text="t('Berlaku di','Offered in') + ' ' + {{ s.class_count }} + '/' + {{ total_classes }} + ' ' + t('kelas','classes')"></span>
+            </div>
             <!-- The mapping editor: which classes teach this subject, and the track
                  each pupil is on in it. `tojson` escapes the id and name so a name
                  with a quote cannot end the Alpine expression early. -->
@@ -197,6 +211,57 @@
             </div>
         </div>
     </div>
+
+    {# ── the KKM modal: the subject's mark, plus an override per grade ── #}
+    <div x-show="kkmOpen" x-cloak class="fixed inset-0 sg-layer-dialog flex items-center justify-center bg-black/40 p-3" @click.self="kkmOpen=false">
+        <div class="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[92vh] flex flex-col">
+            <div class="px-5 py-4 border-b border-stone-100 flex items-center justify-between gap-3">
+                <div class="min-w-0">
+                    <h3 class="font-extrabold text-stone-800 truncate">
+                        <span x-text="t('KKM','Minimum Mastery Criteria')"></span> — <span x-text="kkmSubjectName"></span>
+                    </h3>
+                    {% if year_name %}<p class="text-xs text-stone-500"><span x-text="t('Tahun ajaran','School year')"></span>: {{ year_name }}</p>{% endif %}
+                </div>
+                <button type="button" @click="kkmOpen=false" class="text-stone-400 hover:text-stone-700 shrink-0"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="overflow-auto px-5 py-4 flex-1">
+                <p class="text-xs text-stone-400 mb-3" x-text="t('Nilai minimum untuk lulus. Kosongkan override tingkat untuk memakai nilai mapel.','The minimum mark to pass. Clear a grade override to use the subject mark.')"></p>
+
+                <div x-show="kkmClosed" class="mb-3 p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs font-bold text-amber-700"
+                     x-text="t('Tahun ajaran ini sudah ditutup - KKM hanya bisa dilihat.','This school year is closed - the KKM can only be viewed.')"></div>
+
+                <div class="flex items-end gap-2 mb-4">
+                    <label class="flex-1">
+                        <span class="block text-xs font-bold text-stone-600 mb-1" x-text="t('Nilai mapel','Subject mark')"></span>
+                        <input type="number" min="{{ kkm_range[0] }}" max="{{ kkm_range[1] }}" x-model.number="kkmGeneral"
+                               :disabled="kkmClosed" class="w-full px-3 py-2 border border-stone-200 rounded-xl text-sm font-bold disabled:bg-stone-100 disabled:text-stone-400">
+                    </label>
+                    <button type="button" @click="saveKkm(null)" :disabled="kkmSaving || kkmClosed"
+                            class="px-4 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold hover:bg-emerald-700 transition disabled:opacity-50"
+                            x-text="t('Simpan','Save')"></button>
+                </div>
+
+                <div x-show="gradeLevels.length">
+                    <p class="text-xs font-bold text-stone-500 mb-2" x-text="t('Override per tingkat','Override per grade')"></p>
+                    {% for g in grade_levels %}
+                    <div class="flex items-center gap-2 py-1.5 border-b border-stone-100 last:border-0">
+                        <span class="text-xs font-bold text-stone-600 w-20 shrink-0" x-text="t('Kelas','Grade') + ' {{ g }}'"></span>
+                        <input type="number" min="{{ kkm_range[0] }}" max="{{ kkm_range[1] }}" x-model.number="kkmGrade['{{ g }}']"
+                               :disabled="kkmClosed" class="flex-1 px-3 py-1.5 border border-stone-200 rounded-lg text-xs font-bold disabled:bg-stone-100">
+                        <button type="button" @click="saveKkm('{{ g }}')" :disabled="kkmSaving || kkmClosed"
+                                class="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-bold hover:bg-emerald-700 transition disabled:opacity-50"
+                                x-text="t('Simpan','Save')"></button>
+                        <button type="button" @click="clearKkm('{{ g }}')" :disabled="kkmSaving || kkmClosed"
+                                class="px-3 py-1.5 border border-stone-200 rounded-lg text-xs font-bold text-stone-500 hover:bg-white transition disabled:opacity-50"
+                                x-text="t('Hapus','Clear')"></button>
+                    </div>
+                    {% endfor %}
+                </div>
+
+                <p class="text-xs font-bold mt-3" :class="kkmOk ? 'text-emerald-600' : 'text-red-600'" x-show="kkmMsg" x-text="kkmMsg"></p>
+            </div>
+        </div>
+    </div>
 </div>
 
 <script>
@@ -208,6 +273,79 @@ function subjectLevels() {
     return {
         showForm: false,
         name: '',
+
+        // KKM: the subject's pass mark and an optional override per grade
+        kkmOpen: false,
+        kkmSubjectId: '',
+        kkmSubjectName: '',
+        kkmGeneral: {{ kkm_default }},
+        kkmGrade: {},
+        gradeLevels: {{ grade_levels|tojson }},
+        kkmClosed: {{ 'true' if year_status == 'closed' else 'false' }},
+        kkmSaving: false,
+        kkmMsg: '',
+        kkmOk: false,
+
+        openKkm(id, name, general, overrides) {
+            this.kkmOpen = true;
+            this.kkmSubjectId = String(id);
+            this.kkmSubjectName = name || '';
+            this.kkmGeneral = (general === null || general === undefined) ? {{ kkm_default }} : general;
+            this.kkmGrade = {};
+            const over = overrides || {};
+            (this.gradeLevels || []).forEach(g => {
+                const key = String(g);
+                const v = over[key];
+                this.kkmGrade[key] = (v === null || v === undefined) ? this.kkmGeneral : v;
+            });
+            this.kkmMsg = ''; this.kkmOk = false;
+        },
+        saveKkm(gradeLevel) {
+            const value = (gradeLevel === null) ? this.kkmGeneral : this.kkmGrade[String(gradeLevel)];
+            if (value === null || value === undefined || value === '') {
+                this.kkmOk = false; this.kkmMsg = this.t('Isi nilainya dulu.','Enter a value first.'); return;
+            }
+            this.kkmSaving = true; this.kkmMsg = '';
+            const body = { kkm: value };
+            if (gradeLevel !== null) { body.grade_level = String(gradeLevel); }
+            fetch('/admin-sekolah/subjects/' + this.kkmSubjectId + '/kkm', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
+                body: JSON.stringify(body),
+            })
+                .then(r => r.json().then(d => ({ok: r.ok, d})))
+                .then(({ok, d}) => {
+                    this.kkmOk = ok && !d.error;
+                    this.kkmMsg = this.kkmOk ? this.t('Tersimpan.','Saved.') : this.kkmReason(d);
+                })
+                .catch(() => { this.kkmOk = false; this.kkmMsg = this.t('Gagal menyimpan.','Could not save.'); })
+                .finally(() => { this.kkmSaving = false; });
+        },
+        clearKkm(gradeLevel) {
+            this.kkmSaving = true; this.kkmMsg = '';
+            fetch('/admin-sekolah/subjects/' + this.kkmSubjectId + '/kkm/' + encodeURIComponent(gradeLevel) + '/clear', {
+                method: 'POST',
+                headers: {'Accept': 'application/json'},
+            })
+                .then(r => r.json().then(d => ({ok: r.ok, d})))
+                .then(({ok, d}) => {
+                    this.kkmOk = ok && !d.error;
+                    if (this.kkmOk) { this.kkmGrade[String(gradeLevel)] = this.kkmGeneral; }
+                    this.kkmMsg = this.kkmOk ? this.t('Override dihapus.','Override cleared.') : this.kkmReason(d);
+                })
+                .catch(() => { this.kkmOk = false; this.kkmMsg = this.t('Gagal menyimpan.','Could not save.'); })
+                .finally(() => { this.kkmSaving = false; });
+        },
+        kkmReason(d) {
+            const reason = (d && d.reason) || '';
+            const map = {
+                bad_value: this.t('Nilai harus 0-100.','The mark must be 0-100.'),
+                year_closed: this.t('Tahun ajaran sudah ditutup.','The school year is closed.'),
+                bad_subject: this.t('Mapel tidak ditemukan.','Subject not found.'),
+                bad_grade: this.t('Tingkat tidak valid.','Invalid grade.'),
+            };
+            return map[reason] || (d && d.error) || this.t('Gagal menyimpan.','Could not save.');
+        },
 
         // the modal
         isOpen: false,
