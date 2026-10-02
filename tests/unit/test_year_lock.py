@@ -137,6 +137,10 @@ EXEMPT = {
     "admin_sekolah_bp /subjects/create": "a school subject, not a year's marks",
     "admin_sekolah_bp /subjects/<subject_id>/edit": "a school subject",
     "admin_sekolah_bp /subjects/<subject_id>/delete": "a school subject",
+    "admin_sekolah_bp /subjects/<subject_id>/mapping":
+        "which classes a subject is offered to; a mapping, not a year's marks",
+    "admin_sekolah_bp /subjects/<subject_id>/levels":
+        "a pupil's basic/intermediate/advanced track; a label, not a year's marks",
     "admin_sekolah_bp /promote":
         "checked inside the view against the target year (its own test)",
     "admin_sekolah_bp /teachers/<teacher_id>/assignments":

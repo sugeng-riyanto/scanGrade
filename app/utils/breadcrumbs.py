@@ -83,6 +83,10 @@ MACHINE = frozenset({
     # `/teacher/api/exam-roster` answers the class roster as JSON for the exam
     # builder's Target Classes panel: a readback, never a page of its own.
     "exam-roster",
+    # `/admin-sekolah/subjects/<id>/mapping` hands back which classes a subject is
+    # offered to, and `.../classes/<id>/roster` hands back that class's pupils and
+    # their levels — both JSON for the Subjects modal, which is where the crumb is.
+    "mapping", "roster",
     "members", "slides", "snapshots", "ops", "can-annotate", "sessions-data",
     "wizard-status", "check-pdf", "contacts", "task",
     "violation", "status", "transaction", "evidence", "data", "school",
