@@ -97,7 +97,10 @@
                 <!-- Edit Inline -->
                 <div x-show="editing" x-collapse x-cloak class="col-span-full mt-3">
                     <form method="POST" action="/admin-sekolah/classes/{{ c.id }}/edit" class="grid grid-cols-1 sm:grid-cols-4 gap-3 p-4 bg-stone-50 rounded-xl">
-                        <input type="hidden" name="school_year_id" value="{{ c.school_year_id }}">
+                        {# `c.school_year_id` may be NULL, and Jinja writes Python's None
+                           as the *string* "None" — which Postgres then refuses as a uuid
+                           and the whole save 500s. An absent id must post as nothing. #}
+                        <input type="hidden" name="school_year_id" value="{{ c.school_year_id or '' }}">
                         <input type="text" name="name" value="{{ c.name }}"
                                class="px-3 py-2 border border-stone-200 rounded-lg text-sm font-medium">
                         <select name="grade_level"

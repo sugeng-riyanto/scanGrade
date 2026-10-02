@@ -58,7 +58,7 @@
                 <span class="text-xs font-bold text-emerald-700 ml-auto" x-text="t('Disetujui — kertasnya sudah kembali ke daftar ujian Anda','Approved — the paper is back on your exam list')"></span>
                 {% else %}
                 <form method="POST" action="/student/retake-requests" class="flex items-center gap-2 ml-auto">
-                    <input type="hidden" name="exam_id" value="{{ c.exam_id }}">
+                    <input type="hidden" name="exam_id" value="{{ c.exam_id or '' }}">
                     <input type="text" name="reason" maxlength="200" class="px-2 py-1.5 border border-surface-200 rounded-lg text-xs text-surface-700 w-40 sm:w-56" placeholder="{{ 'Alasan (mis. sakit)' if lang == 'id' else 'Reason (e.g. illness)' }}">
                     <button type="submit" class="px-3 py-1.5 bg-primary-50 text-primary-700 rounded-lg font-bold text-xs hover:bg-primary-100 transition" x-text="t('Kirim permintaan','Send request')"></button>
                 </form>

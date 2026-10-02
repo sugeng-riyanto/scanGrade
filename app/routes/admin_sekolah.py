@@ -286,13 +286,46 @@ def _class_in_school(supabase, class_id, sid) -> dict | None:
     crash it used to be: `.single()` on a class that is not ours has no row, and
     the page answered 500.
     """
+    class_id = _clean_uuid(class_id)
     if not class_id or not sid:
+        return None
+    if not _is_uuid(class_id):
         return None
     rows = (supabase.table("classes")
             .select("id, name, grade_level, school_id, teacher_id, school_year_id")
             .eq("id", class_id).eq("school_id", sid)
             .limit(1).execute().data or [])
     return rows[0] if rows else None
+
+
+# ── Ids off the wire ────────────────────────────────────────────────────────
+#
+# A form field is text, and text that means "nothing chosen" has more than one
+# spelling. The one that bit us is Jinja's own: a template that interpolates a
+# NULL column bare writes the **string** "None", the class form posted it back,
+# and Postgres answered `invalid input syntax for type uuid: "None"` — a 500
+# with nothing about the form in the message. So an id is folded to None when it
+# names no value, and a value that is not a uuid is refused **before** a query is
+# built rather than handed to Postgres to fail on. The template fix repairs this
+# field; this repairs the class.
+
+_NULLISH_IDS = {"", "none", "null", "undefined", "nil", "nan"}
+
+_UUID_RE = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+
+
+def _clean_uuid(raw):
+    """A uuid string, or None. Junk that names 'no value' becomes None."""
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    return None if text.lower() in _NULLISH_IDS else text
+
+
+def _is_uuid(value) -> bool:
+    return bool(value) and bool(_UUID_RE.match(str(value)))
 
 
 def _teacher_in_school(supabase, teacher_id, sid) -> bool:
@@ -302,8 +335,11 @@ def _teacher_in_school(supabase, teacher_id, sid) -> bool:
     typed in from outside the school would otherwise hang off our class in a
     dropdown another admin reads.
     """
+    teacher_id = _clean_uuid(teacher_id)
     if not teacher_id or not sid:
         return not teacher_id
+    if not _is_uuid(teacher_id):
+        return False
     rows = (supabase.table("profiles").select("id")
             .eq("id", teacher_id).eq("role", "guru").eq("school_id", sid)
             .limit(1).execute().data or [])
@@ -312,8 +348,11 @@ def _teacher_in_school(supabase, teacher_id, sid) -> bool:
 
 def _year_in_school(supabase, year_id, sid) -> bool:
     """Whether `classes.school_year_id` may point at this id."""
+    year_id = _clean_uuid(year_id)
     if not year_id or not sid:
         return not year_id
+    if not _is_uuid(year_id):
+        return False
     rows = (supabase.table("school_years").select("id")
             .eq("id", year_id).eq("school_id", sid)
             .limit(1).execute().data or [])
@@ -1315,10 +1354,18 @@ def create_class():
 
     name = request.form.get("name", "").strip()
     grade_level = request.form.get("grade_level", "").strip()
-    wali_id = request.form.get("wali_kelas_id") or None
-    year_id = request.form.get("school_year_id") or None
+    wali_raw = request.form.get("wali_kelas_id")
+    year_raw = request.form.get("school_year_id")
+    wali_id = _clean_uuid(wali_raw)
+    year_id = _clean_uuid(year_raw)
     if not name:
         return refuse("Nama kelas wajib diisi")
+    # A value that was provided and is not an id is refused out loud: folding it
+    # to 'no teacher' would silently drop the admin's choice.
+    if (wali_raw or "").strip() and wali_id and not _is_uuid(wali_id):
+        return refuse("Guru yang dipilih tidak valid")
+    if (year_raw or "").strip() and year_id and not _is_uuid(year_id):
+        return refuse("Tahun ajaran yang dipilih tidak valid")
     # Check duplicate across all roles
     dup = supabase.table("classes").select("id").eq("school_id", sid).eq("name", name).limit(1).execute()
     if dup.data:
@@ -1365,8 +1412,16 @@ def edit_class(class_id):
     name = (request.form.get("name") or "").strip()
     if not name:
         return refuse("Nama kelas wajib diisi")
-    wali_id = request.form.get("wali_kelas_id") or None
-    year_id = request.form.get("school_year_id") or None
+    wali_raw = request.form.get("wali_kelas_id")
+    year_raw = request.form.get("school_year_id")
+    wali_id = _clean_uuid(wali_raw)
+    year_id = _clean_uuid(year_raw)
+    # The word "None" is what a bare `{{ c.school_year_id }}` posts for a NULL
+    # column; it is not an id, and it must not reach Postgres as one.
+    if (wali_raw or "").strip() and wali_id and not _is_uuid(wali_id):
+        return refuse("Guru yang dipilih tidak valid")
+    if (year_raw or "").strip() and year_id and not _is_uuid(year_id):
+        return refuse("Tahun ajaran yang dipilih tidak valid")
     if not _teacher_in_school(supabase, wali_id, sid):
         return refuse("Guru tersebut bukan milik sekolah ini", 403)
     if not _year_in_school(supabase, year_id, sid):

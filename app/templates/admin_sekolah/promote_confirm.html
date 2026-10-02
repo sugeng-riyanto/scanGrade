@@ -34,13 +34,15 @@
         </div>
 
         <form method="POST" action="/admin-sekolah/promote">
-            <input type="hidden" name="source_class_id" value="{{ source_class_id }}">
-            <input type="hidden" name="target_class_id" value="{{ target_class_id }}">
+            {# Every id here is written `or ''`: a missing one must post as nothing, never
+               as the word "None" — which a uuid column refuses and the request 500s. #}
+            <input type="hidden" name="source_class_id" value="{{ source_class_id or '' }}">
+            <input type="hidden" name="target_class_id" value="{{ target_class_id or '' }}">
             <input type="hidden" name="confirmed" value="1">
             {% if create_new == "1" %}
             <input type="hidden" name="create_new" value="1">
             <input type="hidden" name="new_class_name" value="{{ new_class_name }}">
-            <input type="hidden" name="school_year_id" value="{{ school_year_id }}">
+            <input type="hidden" name="school_year_id" value="{{ school_year_id or '' }}">
             {% endif %}
             <div class="flex gap-3">
                 <a href="/admin-sekolah/promote" class="flex-1 px-4 py-3 border-2 border-stone-200 rounded-xl font-bold text-stone-600 hover:bg-stone-50 transition text-center" :lang="lang" x-text="t('Batal','Cancel')"></a>
