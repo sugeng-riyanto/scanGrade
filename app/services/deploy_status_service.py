@@ -2684,7 +2684,7 @@ def verdict(runner: dict, checkout: dict, *, paused: bool,
     # never loaded. It sits above `dirty` and `behind` for the reason those two sit
     # where they do: they describe the arrangement, i.e. what the next tick would
     # do, and this describes what a student is being served right now. It sits
-    # below every stop, because a refusal or a heal says the run ended.
+    # below every stop, because a refusal says the run ended.
     running = checkout.get("running") or {}
     if running.get("key") == RUNNING_BEHIND:
         return {**out, "level": WARN, "key": "running_behind",
@@ -2693,14 +2693,15 @@ def verdict(runner: dict, checkout: dict, *, paused: bool,
         return {**out, "level": WARN, "key": "dirty", "detail": str(checkout["dirty"])}
     # A heal is a real intervention on the box — something that was there is now in
     # the state directory instead — and it explains a checkout that reads clean
-    # because the box's change is in the state directory now. It sits below a
-    # refusal, which is a stop, and below `dirty`, because the two are different
-    # kinds of fact: a heal is an *event*, and the dirty count is read at this
-    # moment. Measured on the live box, 2026-10-01: a heal record from the day before
-    # held the verdict at `box_edits` while the checkout was genuinely dirty, so the
-    # page never rendered which kind of dirty it was holding — the one card the
-    # reading exists for. The heal is still reported on its own card, which does not
-    # depend on the verdict; what moved is only which sentence is the headline.
+    # because the box's change is in the state directory now. It is an *event*, not
+    # a stop: a heal is the runner letting a release go, so it sits **below** the
+    # dirty count (the fact the page just read) and below `running_behind` (what is
+    # being served right now). Measured on the live box, 2026-10-01: a heal record
+    # from the day before held the verdict at `box_edits` while the checkout was
+    # genuinely dirty, so the page never rendered which kind of dirty it was holding
+    # — the one card this reading exists for. A refusal is a stop and sits above all
+    # of this; a heal is not. The heal is still named on its own card regardless of
+    # the verdict.
     if box_edits and box_edits.get("present"):
         return {**out, "level": WARN, "key": "box_edits",
                 "detail": box_edits.get("short") or box_edits.get("at"),

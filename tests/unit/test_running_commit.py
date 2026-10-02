@@ -274,21 +274,27 @@ class TestWhatItAddsUpTo:
         assert verdict["detail"] == "1"
 
     @needs_git
-    def test_it_outranks_a_dirty_checkout_but_not_a_stop(self, tmp_path):
-        """A stop is still a stop: `refused` and a heal the runner performed say
-        the run ended, which is above any reading of what is currently served."""
+    def test_it_outranks_a_dirty_checkout_but_not_a_refusal(self, tmp_path):
+        """A refusal is a stop — the run ended before merging — and outranks any
+        reading of what is currently served. A *heal* is not a stop: it is the
+        runner letting a release go, so a tree that is dirty right now still owns
+        the verdict (see `test_deploy_box_edits`, measured live on 2026-10-01).
+        """
         repo = repo_with_commits(tmp_path)
         served = build_info.read_commit(repo)
         _commit(repo, "landed")
         (repo / "scribble.txt").write_text("x\n", encoding="utf-8")
         dirty = status.checkout_state(repo, now=_now(), running=served)
         assert status.verdict(_runner_ok(), dirty, paused=False)["key"] == "running_behind"
-        for stop in ("refused", "box_edits"):
-            verdict = status.verdict(
-                _runner_ok(), dirty, paused=False,
-                preflight={"present": True, "gate_key": "smoke"} if stop == "refused" else None,
-                box_edits={"present": True, "short": "x"} if stop == "box_edits" else None)
-            assert verdict["key"] == stop, f"{stop} is a stop, not a reading"
+        refused = status.verdict(
+            _runner_ok(), dirty, paused=False,
+            preflight={"present": True, "gate_key": "smoke"})
+        assert refused["key"] == "refused", "a refusal is a stop, not a reading"
+        healed = status.verdict(
+            _runner_ok(), dirty, paused=False,
+            box_edits={"present": True, "short": "x"})
+        assert healed["key"] == "running_behind", (
+            "a heal does not displace the reading of what is being served")
 
     @needs_git
     def test_a_matching_process_changes_nothing(self, tmp_path):
