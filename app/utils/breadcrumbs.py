@@ -80,6 +80,9 @@ PREFIXES = frozenset({"super-admin", "admin-sekolah", "admin", "teacher",
 #: reaches from a script rather than from a link.
 MACHINE = frozenset({
     "api", "ai", "class", "me", "count", "read-status", "unread-count",
+    # `/teacher/api/exam-roster` answers the class roster as JSON for the exam
+    # builder's Target Classes panel: a readback, never a page of its own.
+    "exam-roster",
     "members", "slides", "snapshots", "ops", "can-annotate", "sessions-data",
     "wizard-status", "check-pdf", "contacts", "task",
     "violation", "status", "transaction", "evidence", "data", "school",

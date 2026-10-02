@@ -18,6 +18,7 @@ from app.services.question_types import (
 )
 from app.services.submission_service import finish_sitting, open_sitting
 from app.services import exam_media
+from app.services import exam_targets
 from app.services import invigilation
 from app.utils.rate_limiter import limiter
 from app.utils.req_cache import (active_whiteboards_for, class_row, memo,
@@ -82,7 +83,7 @@ def _chart_points(rows):
     return points
 
 
-def _offerable(exam, student_class_id, draft_exam_ids, now=None):
+def _offerable(exam, student_class_id, draft_exam_ids, now=None, included_exam_ids=None):
     """Should this exam appear on the student's list?
 
     Three different questions, and collapsing them is how a paper either vanished
@@ -101,7 +102,14 @@ def _offerable(exam, student_class_id, draft_exam_ids, now=None):
         return False
     if state == exam_window.CLOSED and exam.get("id") not in draft_exam_ids:
         return False
-    return class_assignment_allows(exam, student_class_id)
+    if not class_assignment_allows(exam, student_class_id):
+        return False
+    # A per-pupil paper is offered only to the pupils on its list. `None` means the
+    # caller did not load the list (a route that never offers target papers), so
+    # the class rule stands alone rather than every row vanishing.
+    if exam.get("target_mode") == "students" and included_exam_ids is not None:
+        return exam.get("id") in included_exam_ids
+    return True
 
 
 def _rate_limit(n):
@@ -144,15 +152,19 @@ def dashboard():
     draft_ids = {s["exam_id"] for s in subs if s.get("status") == "draft"}
 
     try:
-        query = supabase.table("exams").select("id,title,subject,start_at,end_at,auto_submit_on_window_end,class_ids,question_types,total_questions,duration_minutes").eq("is_published", True).eq("status", "active")
+        query = supabase.table("exams").select("id,title,subject,start_at,end_at,auto_submit_on_window_end,class_ids,target_mode,question_types,total_questions,duration_minutes").eq("is_published", True).eq("status", "active")
         if student_school_id:
             query = query.eq("school_id", student_school_id)
         # Same rule as the door the pupil walks through (`exam_sitting_allowed`),
         # from the same function: an exam is offered to the classes the teacher
         # assigned it to, and to nobody else.
         all_exams = read_with_retry(query.execute).data or []
+        # The per-pupil lists, in one query for the whole page.
+        _target_ids = [e["id"] for e in all_exams if e.get("target_mode") == "students"]
+        _included = exam_targets.included_exam_ids(supabase, g.user_id, _target_ids) \
+            if _target_ids else set()
         for e in all_exams:
-            if _offerable(e, student_class_id, draft_ids):
+            if _offerable(e, student_class_id, draft_ids, included_exam_ids=_included):
                 # The card says which window state it is in and which clock ends it,
                 # from the same rules the door uses — never from its own reading.
                 e["sg_window_state"] = exam_window.window_state(e)
@@ -366,10 +378,13 @@ def exam_list():
         # leaving it out made every row look unassigned. `not cids` then matched
         # every exam in the school, so a pupil in X-B was shown the papers for X-A
         # and XI-A and had all three refused one click later.
-        query = supabase.table("exams").select("id,title,subject,class_ids,question_types,total_questions,duration_minutes,start_at,end_at,auto_submit_on_window_end").eq("is_published", True).eq("status", "active")
+        query = supabase.table("exams").select("id,title,subject,class_ids,target_mode,question_types,total_questions,duration_minutes,start_at,end_at,auto_submit_on_window_end").eq("is_published", True).eq("status", "active")
         if student_school_id:
             query = query.eq("school_id", student_school_id)
         all_exams = read_with_retry(lambda: query.order("created_at", desc=True).execute()).data or []
+        _target_ids = [e["id"] for e in all_exams if e.get("target_mode") == "students"]
+        _included = exam_targets.included_exam_ids(supabase, g.user_id, _target_ids) \
+            if _target_ids else set()
         # Filter by class_id if student has one, AND check the window
         for e in all_exams:
             # `question_types` is jsonb, and a jsonb value written with
@@ -385,7 +400,7 @@ def exam_list():
                     e["question_types"] = {}
             # The window, and the same predicate the access guard applies. `not cids`
             # — an exam the teacher never assigned — is no longer a match for anyone.
-            if _offerable(e, student_class_id, draft_ids):
+            if _offerable(e, student_class_id, draft_ids, included_exam_ids=_included):
                 e["sg_window_state"] = exam_window.window_state(e)
                 e["sg_in_progress"] = e["id"] in draft_ids
                 exams.append(e)
@@ -598,7 +613,7 @@ def recover_exam_page():
     open_sessions = []
     try:
         drafts = supabase.table("submissions").select(
-            "id,exam_id,started_at,exams(id,title,subject,is_published,status,school_id,class_ids)"
+            "id,exam_id,started_at,exams(id,title,subject,is_published,status,school_id,class_ids,target_mode)"
         ).eq("student_id", g.user_id).eq("status", "draft").order("started_at", desc=True).execute().data or []
         for d in drafts:
             exam = d.get("exams") or {}
@@ -687,7 +702,7 @@ def submit_exam(exam_id):
 
     # ── Query 1: GET exam (only needed columns) ──
     exam = supabase.table("exams").select(
-        "id,is_published,status,class_ids,max_attempts,publish_mode,"
+        "id,is_published,status,class_ids,target_mode,max_attempts,publish_mode,"
         "total_questions,answer_key,question_types,question_weights,question_pages,"
         "question_scoring,"
         "start_at,end_at,auto_submit_on_window_end,duration_minutes"

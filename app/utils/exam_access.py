@@ -156,6 +156,14 @@ def exam_sitting_allowed(supabase, exam, exam_id, student_id):
     own school and class. Fails CLOSED: if the profile lookup itself fails, the
     student is refused rather than waved through, because these checks are the
     only thing standing between one school's exam and another's students.
+
+    When the paper carries a per-student target list (`exams.target_mode` is
+    'students'), the class rule is only the outer door: the pupil must also be on
+    the included list. That check reads the target row itself, every request, so a
+    pupil excluded mid-sitting is refused on their *next* call rather than at some
+    later sync — the same server-is-the-truth rule the rest of the sitting uses.
+    A paper with no target list ('class', every exam written before 048) is
+    unchanged.
     """
     if not exam.get("is_published") or exam.get("status") != "active":
         return False, "Ujian ini belum tersedia."
@@ -183,5 +191,13 @@ def exam_sitting_allowed(supabase, exam, exam_id, student_id):
     # door, and then the pupil is offered a page that refuses them.
     if not class_assignment_allows(exam, student_class_id):
         return False, "Ujian ini tidak ditugaskan untuk kelas Anda."
+
+    # The per-pupil door, only for a paper that has a target list. Imported here
+    # rather than at module top so the two modules stay independent (this one is
+    # imported by the anti-cheat path, which must not drag the target service in).
+    if (exam or {}).get("target_mode") == "students":
+        from app.services import exam_targets
+        if not exam_targets.student_is_included(supabase, exam_id, student_id):
+            return False, "Anda tidak termasuk peserta ujian ini."
 
     return True, ""

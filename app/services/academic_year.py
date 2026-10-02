@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import logging
 
+from app.utils.helpers import row_or_none
+
 from app.services import enrollment
 
 logger = logging.getLogger(__name__)
@@ -82,15 +84,19 @@ def year_of_exam(supabase, exam_id) -> str | None:
     if not exam_id:
         return None
     try:
-        rows = (supabase.table("exams")
-                .select("id, school_year_id, class_ids")
-                .eq("id", exam_id).limit(1).execute().data or [])
+        exam = row_or_none(
+            supabase.table("exams")
+            .select("id, school_year_id, class_ids")
+            .eq("id", exam_id).limit(1).execute())
     except Exception:
         logger.debug("exam year read failed for %s", exam_id, exc_info=True)
         return None
-    if not rows:
+    # `.limit(1)` is a *list* read, and `maybe_single()` a row: accept both, so a
+    # caller (or a test double) that answers either shape still resolves a year.
+    if isinstance(exam, list):
+        exam = exam[0] if exam else None
+    if not exam:
         return None
-    exam = rows[0]
     if exam.get("school_year_id"):
         return exam["school_year_id"]
     return _year_from_classes(supabase, exam.get("class_ids"))
