@@ -355,7 +355,13 @@ def _jwt_expired(token):
 
 #: The profile columns a session has always read. Kept as one string so the
 #: fallback below is the same read minus one column.
-_PROFILE_COLUMNS = "role, school_id, status, class_id"
+#:
+#: `full_name` is here because it is the *source of truth* for the name shown on
+#: every page. It was read from Auth `user_metadata` instead, which no rename ever
+#: updates — so an account renamed after creation (or created from a pasted
+#: message) wore the stale Auth value on the dashboard forever. `profiles` is the
+#: row the school edits, so the session reads its name from there.
+_PROFILE_COLUMNS = "role, school_id, status, class_id, full_name"
 
 #: The columns that arrived after this code did, newest last. A select naming one the
 #: database has not been migrated for is refused by PostgREST, and losing the whole
@@ -512,7 +518,9 @@ def _fetch_session(token):
     return {
         "user_id": user.user.id,
         "email": user.user.email,
-        "name": meta.get("full_name", ""),
+        # The profile's own name first — it is what every rename writes and what
+        # the school sees. Auth metadata is the fallback for a row that has none.
+        "name": pd.get("full_name") or meta.get("full_name", ""),
         "role": _normalize_role(pd.get("role") or meta.get("role", "murid")),
         "school_id": school_id,
         "class_id": class_id,
@@ -695,12 +703,16 @@ def _refresh_token():
         token = res.session.access_token
         g.user_id = res.user.id
         g.user_email = res.user.email
-        g.user_name = res.user.user_metadata.get("full_name", "")
+        _meta = res.user.user_metadata or {}
+        g.user_name = _meta.get("full_name", "")
         db = get_supabase()
         try:
             pd = db.table("profiles").select("*").eq("id", g.user_id).single().execute().data or {}
         except Exception:
             pd = {}
+        # Same rule as `_fetch_session`: the profile is the name, Auth the fallback.
+        if pd.get("full_name"):
+            g.user_name = pd["full_name"]
         if pd:
             g.user_role = _normalize_role(pd.get("role", "murid"))
             g.user_school_id = pd.get("school_id") or res.user.user_metadata.get("school_id")
