@@ -32,6 +32,7 @@ Two traps this module exists to close, both measured against the live database:
 """
 
 from app.services import password_change as _password_change
+from app.utils import auth_retry
 from app.utils.logger import get_logger
 from app.errors import ValidationError
 
@@ -127,12 +128,15 @@ def create_teacher_account(supabase, *, school_id, full_name, email, password,
 
     uid = None
     try:
-        created = supabase.auth.admin.create_user({
-            "email": email,
-            "password": password,
-            "user_metadata": {"role": "guru", "full_name": full_name},
-            "email_confirm": True,
-        })
+        # Retried for the reason app/utils/auth_retry.py spells out: this is the
+        # hiccup, not a refusal, and a create that answered this way rolled back.
+        created = auth_retry.create_user_with_retry(
+            lambda: supabase.auth.admin.create_user({
+                "email": email,
+                "password": password,
+                "user_metadata": {"role": "guru", "full_name": full_name},
+                "email_confirm": True,
+            }))
         uid = created.user.id
 
         profile = {

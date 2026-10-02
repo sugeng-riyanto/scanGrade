@@ -7,6 +7,7 @@ Usage:
 import csv
 import io
 from app.services import password_change as _password_change
+from app.utils import auth_retry
 from app.utils.auth import get_supabase
 from app.utils.helpers import row_or_none
 from app.utils.logger import get_logger
@@ -127,12 +128,15 @@ def create_student_account(supabase, *, school_id, nisn, full_name, email,
 
     uid = None
     try:
-        created = supabase.auth.admin.create_user({
-            "email": email,
-            "password": password,
-            "user_metadata": {"role": "murid", "full_name": full_name},
-            "email_confirm": True,
-        })
+        # Same reason as a teacher's account: this answer is a hiccup that rolled
+        # back, so repeating the create cannot make a second pupil.
+        created = auth_retry.create_user_with_retry(
+            lambda: supabase.auth.admin.create_user({
+                "email": email,
+                "password": password,
+                "user_metadata": {"role": "murid", "full_name": full_name},
+                "email_confirm": True,
+            }))
         uid = created.user.id
 
         profile = {
