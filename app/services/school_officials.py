@@ -19,6 +19,7 @@ import logging
 
 from app.services import identity_names
 from app.services import password_change as _password_change
+from app.utils import auth_retry
 
 logger = logging.getLogger(__name__)
 
@@ -111,15 +112,18 @@ def create_official(supabase, *, school_id: str, role: str, full_name: str,
 
     uid = None
     try:
-        created = supabase.auth.admin.create_user({
-            "email": email,
-            "password": password,
-            "user_metadata": {"role": role, "full_name": full_name},
-            # Confirmed on creation, like every other account this app makes: the
-            # address is typed by the school admin, and an unconfirmed account
-            # cannot sign in at all.
-            "email_confirm": True,
-        })
+        # A head teacher is created by the same retry as everyone else: the generic
+        # database answer is the server hiccupping, and that create rolled back.
+        created = auth_retry.create_user_with_retry(
+            lambda: supabase.auth.admin.create_user({
+                "email": email,
+                "password": password,
+                "user_metadata": {"role": role, "full_name": full_name},
+                # Confirmed on creation, like every other account this app makes: the
+                # address is typed by the school admin, and an unconfirmed account
+                # cannot sign in at all.
+                "email_confirm": True,
+            }))
         uid = created.user.id
 
         profile = {
