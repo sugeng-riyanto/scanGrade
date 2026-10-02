@@ -164,6 +164,22 @@ def test_a_guru_still_manages_only_their_own():
     assert can_manage_exam("u-1", "guru", SCHOOL, COLLEAGUE) is False
 
 
+def test_an_owner_still_manages_a_legacy_paper_with_no_school():
+    """`exams.school_id` is nullable (migration 007, set NULL when a school is
+    deleted), so an old paper can carry no school. Its owner must still manage it;
+    the school equality added for officials must not turn that into nobody's."""
+    legacy = {"id": "exam-old", "teacher_id": "u-1"}
+    for role in ("guru",) + OFFICIALS:
+        assert can_manage_exam("u-1", role, SCHOOL, legacy) is True, role
+    # A stranger still does not.
+    assert can_manage_exam("u-9", "guru", SCHOOL, legacy) is False
+
+
+def test_an_owner_from_another_school_still_cannot_take_it():
+    """A paper that *does* name a school stays inside it."""
+    assert can_manage_exam("u-1", "guru", OTHER_SCHOOL, OWN) is False
+
+
 # ── the workspace gate names them ────────────────────────────────────────────
 
 def test_the_teacher_workspace_admits_officials():
