@@ -70,12 +70,18 @@ def can_manage_exam(user_id, user_role, user_school_id, exam) -> bool:
     if user_role == "admin_sekolah":
         return bool(user_school_id) and str(exam.get("school_id") or "") == str(user_school_id)
     if user_role in OWN_PAPER_ROLES:
-        # Owner *and* same school: the owner branch used to test the teacher id
-        # alone, which an id from a session with no school could match on the
-        # empty string. An owner with no school on file owns nothing.
-        return (bool(user_id) and bool(user_school_id)
-                and str(exam.get("teacher_id") or "") == str(user_id)
-                and str(exam.get("school_id") or "") == str(user_school_id))
+        # Owner, and the *user* must have a school on file: the owner branch used
+        # to test the teacher id alone, which an id from a school-less session
+        # could match on the empty string. The paper's own school is checked only
+        # when it has one — `exams.school_id` is nullable since 007 (it is set to
+        # NULL when a school is deleted), and a legacy paper with no school is
+        # still its owner's to manage, not a stranger's and not nobody's either.
+        if not (bool(user_id) and bool(user_school_id)):
+            return False
+        if str(exam.get("teacher_id") or "") != str(user_id):
+            return False
+        exam_school = exam.get("school_id")
+        return (not exam_school) or str(exam_school) == str(user_school_id)
     return False
 
 
