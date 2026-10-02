@@ -88,6 +88,10 @@ MACHINE = frozenset({
     # comment and set a review flag — readbacks and writes the marking page makes
     # for itself, never pages of their own.
     "grading-assist", "bank",
+    # `/teacher/api/grading-assist/annotations` hands back the marks a teacher has
+    # drawn over a pupil's answer, and its siblings add, edit and remove one — the
+    # marking page's own readbacks and writes, never a page of their own.
+    "annotations",
     # `/admin-sekolah/subjects/<id>/mapping` hands back which classes a subject is
     # offered to, and `.../classes/<id>/roster` hands back that class's pupils and
     # their levels — both JSON for the Subjects modal, which is where the crumb is.

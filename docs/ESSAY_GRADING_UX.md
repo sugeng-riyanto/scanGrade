@@ -45,6 +45,27 @@ yang paling sering dipakai.
   **sebelum menulis apa pun**. Guru hanya bisa menerapkan komentar miliknya sendiri
   (403 untuk milik guru lain).
 
+## Anotasi di atas jawaban (jawaban ketik)
+
+Menandai jawaban berarti **menunjuk kata-katanya**, bukan menjelaskannya nanti.
+Pilih teks di badan jawaban, lalu palet mengambang muncul di dekat pilihan itu:
+
+| Aksi | Arti |
+| --- | --- |
+| **Sorot** (kuning) | Bagian yang jadi argumen / yang benar |
+| **Coret** (merah, bergaris) | Klaim yang bertentangan atau salah |
+| **Komentar** (biru) | Tanda dengan catatan; ketik catatannya lalu ✓ |
+
+- **Klik tanda** untuk membuka palet lagi: ubah catatannya atau hapus. `Esc` menutup palet.
+- **Tombol skor mengambang** ada di palet yang sama (0/25/50/75/100), jadi menandai dan
+  memberi nilai adalah satu gerakan — tidak perlu pindah ke bar skor di atas kartu.
+- Batas pilihan: server menolak rentang kosong, terbalik, negatif, atau melewati akhir
+  jawaban **sebelum menulis apa pun**. Tanda milik guru yang membuatnya; guru lain tidak
+  bisa mengubah atau menghapusnya.
+- **Jawaban murid tidak pernah diubah.** Tanda adalah baris di sebelah jawaban yang
+  menamai rentang offset-nya. Menghapus tanda mengembalikan persis apa yang ditulis anak
+  itu, dan tidak ada laporan yang bisa menampilkan kata yang tidak mereka ketik.
+
 ## Penanda tinjau ulang
 
 Tombol **Tinjau ulang** (atau `F`) menandai satu soal dari satu kertas untuk

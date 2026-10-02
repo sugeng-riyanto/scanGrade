@@ -28,6 +28,7 @@ from app.services import mark_scheme
 from app.services import assignments as assignments_service
 from app.services import exam_media
 from app.services import exam_targets
+from app.services import grading_annotations
 from app.services import grading_assist
 from app.services import invigilation
 from app.services import session_review
@@ -3013,6 +3014,17 @@ def _review_flags_for(supabase, submission_ids):
             .in_("attempt_id", list(submission_ids)).execute().data or [])
 
 
+def _annotations_for(supabase, submission_ids, question_index):
+    """This question's marks on a set of papers, in one query.
+
+    Read for the whole page rather than per card, the same way the review flags
+    are: the queue is long and a mark is one small fact about one range of text.
+    """
+    return (supabase.table("grading_annotation").select("*")
+            .in_("attempt_id", list(submission_ids))
+            .eq("question_index", int(question_index)).execute().data or [])
+
+
 def grade_question_api(exam_id, question_index):
     """API: return all students' answers for a specific question."""
     supabase = get_supabase()
@@ -3024,9 +3036,9 @@ def grade_question_api(exam_id, question_index):
     # Which questions of which papers this teacher already flagged to come back
     # to. Read in one query for the whole page rather than per card, because the
     # queue is long and a flag is one small fact.
+    sub_ids = [s["id"] for s in subs]
     flags_by_submission = {}
     try:
-        sub_ids = [s["id"] for s in subs]
         if sub_ids:
             flag_rows = _review_flags_for(supabase, sub_ids)
             for row in flag_rows:
@@ -3034,6 +3046,18 @@ def grade_question_api(exam_id, question_index):
                     int(row["question_index"]))
     except Exception:
         logger.exception("could not read the review flags for exam %s", exam_id)
+
+    # Marks this teacher has made on this question, per paper — the same
+    # once-for-the-page read as the flags, so a long queue does not cost a
+    # request per learner.
+    annotations_by_submission = {}
+    try:
+        if sub_ids:
+            rows = _annotations_for(supabase, sub_ids, question_index)
+            for row in rows:
+                annotations_by_submission.setdefault(str(row["attempt_id"]), []).append(row)
+    except Exception:
+        logger.exception("could not read the annotations for exam %s", exam_id)
 
     students = []
     for s in subs:
@@ -3063,9 +3087,13 @@ def grade_question_api(exam_id, question_index):
         elif isinstance(ans_data, str):
             answer_val = ans_data
 
+        anns = sorted(annotations_by_submission.get(str(s["id"]), []),
+                      key=lambda r: (int(r.get("start_offset") or 0),
+                                     int(r.get("end_offset") or 0)))
         students.append({
             "submission_id": s["id"],
             "flagged": flags_by_submission.get(str(s["id"]), []),
+            "annotations": anns,
             "name": student_name,
             "answer": answer_val,
             "essayText": essay_text or answer_val if essay_text else "",
@@ -3214,6 +3242,126 @@ def grading_assist_flag():
                                 reason=data.get("reason") or "")
     flags = grading_assist.flags_for(supabase, submission_id)
     return jsonify({"success": True, "flagged": sorted(flags)})
+
+
+# ── Annotation: a mark on the pupil's words, never an edit of them ──────────
+#
+# The comment bank is the marker's own phrase reused across papers. These routes
+# are the other half: a highlight, a strike-through or a comment pin over a range
+# of *this child's* answer. The answer itself is never written to — the mark is a
+# row beside it — so removing a mark restores exactly what the pupil typed.
+
+
+def _answer_text_length(supabase, submission_id, question_index):
+    """How long the answer is, so a range past its end can be refused.
+
+    Returns `None` when the length cannot be read; the service then checks the
+    shape of the range alone rather than refusing a mark the teacher can see.
+    """
+    try:
+        row = row_or_none(supabase.table("submissions").select("answers")
+                          .eq("id", submission_id).maybe_single().execute())
+    except Exception:
+        logger.exception("could not read the answer length for %s", submission_id)
+        return None
+    answers = (row or {}).get("answers") or {}
+    if isinstance(answers, str):
+        try:
+            answers = json.loads(answers)
+        except Exception:
+            answers = {}
+    entry = answers.get(str(question_index)) if isinstance(answers, dict) else None
+    if isinstance(entry, dict):
+        text = entry.get("text") or entry.get("answer") or ""
+    elif isinstance(entry, str):
+        text = entry
+    else:
+        text = ""
+    return len(text)
+
+
+@teacher_bp.route("/api/grading-assist/annotations")
+@teacher_or_admin_required
+def grading_annotation_list():
+    """This paper's marks on one question, in reading order."""
+    submission_id = request.args.get("submission_id")
+    question_index = request.args.get("question_index")
+    if not submission_id or question_index in (None, ""):
+        return jsonify({"error": "submission_id dan question_index wajib"}), 400
+    _gb, err = _guard_submission(get_supabase(), submission_id, as_json=True)
+    if err:
+        return err
+    rows = grading_annotations.list_annotations(
+        get_supabase(), submission_id, int(question_index))
+    return jsonify({"annotations": rows})
+
+
+@teacher_bp.route("/api/grading-assist/annotations", methods=["POST"])
+@teacher_or_admin_required
+def grading_annotation_add():
+    """Mark a range of the pupil's answer — highlight, strike, or a comment pin."""
+    data = request.get_json(silent=True) or {}
+    submission_id = data.get("submission_id")
+    question_index = data.get("question_index")
+    if not submission_id or question_index is None:
+        return jsonify({"error": "submission_id dan question_index wajib"}), 400
+    supabase = get_supabase()
+    _gb, err = _guard_submission(supabase, submission_id, as_json=True)
+    if err:
+        return err
+    try:
+        row = grading_annotations.add_annotation(
+            supabase, submission_id, int(question_index), g.user_id,
+            kind=data.get("kind"), start=data.get("start_offset"),
+            end=data.get("end_offset"),
+            text_length=_answer_text_length(supabase, submission_id, int(question_index)),
+            note=data.get("note"), color=data.get("color"))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"success": True, "annotation": row})
+
+
+@teacher_bp.route("/api/grading-assist/annotations/update", methods=["POST"])
+@teacher_or_admin_required
+def grading_annotation_update():
+    """Change a mark's note or colour. The owner may; anyone else is refused."""
+    data = request.get_json(silent=True) or {}
+    annotation_id = data.get("annotation_id")
+    submission_id = data.get("submission_id")
+    if not annotation_id or not submission_id:
+        return jsonify({"error": "annotation_id dan submission_id wajib"}), 400
+    _gb, err = _guard_submission(get_supabase(), submission_id, as_json=True)
+    if err:
+        return err
+    try:
+        row = grading_annotations.update_annotation(
+            get_supabase(), annotation_id, g.user_id,
+            note=data.get("note"), color=data.get("color"))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except LookupError as exc:
+        return jsonify({"error": str(exc)}), 403
+    return jsonify({"success": True, "annotation": row})
+
+
+@teacher_bp.route("/api/grading-assist/annotations/delete", methods=["POST"])
+@teacher_or_admin_required
+def grading_annotation_delete():
+    """Remove a mark, leaving the pupil's answer exactly as it was."""
+    data = request.get_json(silent=True) or {}
+    annotation_id = data.get("annotation_id")
+    submission_id = data.get("submission_id")
+    if not annotation_id or not submission_id:
+        return jsonify({"error": "annotation_id dan submission_id wajib"}), 400
+    _gb, err = _guard_submission(get_supabase(), submission_id, as_json=True)
+    if err:
+        return err
+    try:
+        grading_annotations.remove_annotation(
+            get_supabase(), annotation_id, g.user_id)
+    except LookupError as exc:
+        return jsonify({"error": str(exc)}), 403
+    return jsonify({"success": True})
 
 
 @teacher_bp.route("/grade/<submission_id>")

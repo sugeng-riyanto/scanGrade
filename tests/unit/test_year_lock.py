@@ -50,6 +50,14 @@ EXEMPT = {
     "teacher_bp /api/grading-assist/flag":
         "a 'come back to this one' note on one paper's question, not the mark "
         "itself; the paper is guarded by _guard_submission",
+    "teacher_bp /api/grading-assist/annotations":
+        "a mark drawn over a pupil's answer — a highlight, a strike-through or a "
+        "comment pin — stored beside the answer and never editing it; the paper "
+        "is guarded by _guard_submission",
+    "teacher_bp /api/grading-assist/annotations/update":
+        "changes one mark's note or colour, not the paper's marks",
+    "teacher_bp /api/grading-assist/annotations/delete":
+        "removes one mark, so a closed year's answers are unchanged by it",
     "teacher_bp /ai-settings/add-key": "the teacher's own settings",
     "teacher_bp /ai-settings/<key_id>/toggle": "the teacher's own settings",
     "teacher_bp /ai-settings/<key_id>/delete": "the teacher's own settings",

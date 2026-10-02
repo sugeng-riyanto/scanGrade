@@ -157,7 +157,22 @@
                                           x-text="(idx + 1) + ' / ' + students.length"></span>
                                 </div>
                             </div>
-                            <div class="answer-body text-base leading-relaxed text-surface-700 bg-blue-50/50 rounded-lg p-3 max-h-56 overflow-y-auto mb-3 whitespace-pre-wrap border border-blue-100" x-text="s.essayText || '(Tidak ada jawaban teks)'"></div>
+                            {# The answer is rendered as segments so a mark can be drawn
+                               over a range of it. The words are still the pupil's: a
+                               mark changes which span carries a class, never the text. #}
+                            <div class="answer-body text-base leading-relaxed text-surface-700 bg-blue-50/50 rounded-lg p-3 max-h-56 overflow-y-auto mb-3 whitespace-pre-wrap border border-blue-100 select-text"
+                                 :class="sel && sel.student === s.submission_id ? 'ring-2 ring-sky-300 border-sky-300' : ''"
+                                 @mouseup="onAnswerSelect($event, s)"
+                                 @keyup="onAnswerSelect($event, s)">
+                                <template x-if="!(s.essayText || '').trim()">
+                                    <span class="italic text-surface-400" x-text="'(Tidak ada jawaban teks)'"></span>
+                                </template>
+                                <template x-for="seg in segmentsFor(s)" :key="seg.key">
+                                    <span :class="seg.cls"
+                                          @click="seg.ids.length && pickAnnot($event, s, seg.ids[0])"
+                                          x-text="seg.text"></span>
+                                </template>
+                            </div>
                             <!-- Canvas thumbnail -->
                             <div x-show="s.hasCanvas" class="mb-3">
                                 <div class="relative rounded-lg overflow-hidden border border-surface-200 bg-surface-50" style="max-height:280px">
@@ -245,6 +260,59 @@
         </template>
     </div>
 
+    {# The floating marking palette. It sits at page level and is positioned from
+       the selection, so it works over any card; `fixed` is why it must name a
+       line of the layer scale. #}
+    <div x-show="sel || picked" x-cloak
+         class="fixed sg-layer-float bg-surface-900/95 text-white rounded-xl shadow-2xl px-2 py-1.5 flex items-center gap-1.5 max-w-[92vw] overflow-x-auto"
+         :style="paletteStyle()"
+         data-mark-toolbar>
+        <template x-if="sel">
+            <div class="flex items-center gap-1 shrink-0">
+                <button @click="annotate('highlight')" title="Sorot"
+                        class="w-9 h-9 rounded-lg hover:bg-white/15 text-amber-300 flex items-center justify-center">
+                    <i class="fas fa-highlighter"></i>
+                </button>
+                <button @click="annotate('strike')" title="Coret"
+                        class="w-9 h-9 rounded-lg hover:bg-white/15 text-rose-300 flex items-center justify-center">
+                    <i class="fas fa-strikethrough"></i>
+                </button>
+                <button @click="annotate('comment')" title="Komentar"
+                        class="w-9 h-9 rounded-lg hover:bg-white/15 text-sky-300 flex items-center justify-center">
+                    <i class="fas fa-comment-dots"></i>
+                </button>
+            </div>
+        </template>
+        <template x-if="picked">
+            <div class="flex items-center gap-1 shrink-0">
+                <input type="text" x-ref="noteInput" x-model="noteDraft"
+                       @keydown.enter.prevent="saveNote()"
+                       placeholder="Catatan..."
+                       class="w-40 sm:w-56 px-2 py-1.5 rounded-lg bg-white/10 text-white placeholder:text-white/40 text-xs focus:bg-white/20 outline-none">
+                <button @click="saveNote()" title="Simpan catatan"
+                        class="w-9 h-9 rounded-lg hover:bg-white/15 text-emerald-300 flex items-center justify-center">
+                    <i class="fas fa-check"></i>
+                </button>
+                <button @click="deletePicked()" title="Hapus tanda ini"
+                        class="w-9 h-9 rounded-lg hover:bg-white/15 text-rose-300 flex items-center justify-center">
+                    <i class="fas fa-trash"></i>
+                </button>
+            </div>
+        </template>
+        <span class="w-px h-6 bg-white/20 shrink-0"></span>
+        <span class="text-[9px] font-bold text-white/50 shrink-0 pl-0.5">Nilai</span>
+        {# Floating score buttons: the mark and the number are one gesture, so the
+           palette that draws the highlight also writes the score. #}
+        <template x-for="preset in [0, 25, 50, 75, 100]" :key="preset">
+            <button @click="paletteScore(preset)"
+                    class="w-9 h-9 rounded-lg text-[11px] font-bold shrink-0 transition"
+                    :class="paletteStudent() && String(paletteStudent().scoreVal) === String(preset)
+                        ? 'bg-emerald-500 text-white'
+                        : 'bg-white/10 hover:bg-white/20 text-white/80'"
+                    x-text="preset"></button>
+        </template>
+    </div>
+
     <!-- Empty state -->
     <div x-show="!loading && displayedStudents.length === 0" class="text-center py-12">
         <i class="fas fa-inbox text-4xl text-surface-300 mb-3"></i>
@@ -263,6 +331,7 @@ function graderApp() {
         students: [], loading: true, loadingText: 'Memuat data siswa...',
         focusedIdx: 0,
         bank: [], bankDraft: '', bankDelta: '',
+        sel: null, picked: null, noteDraft: '',
 
         get displayedStudents() { return this.students; },
         get isMCQ() { return this.questionTypes[this.currentQ] !== 'essay'; },
@@ -331,6 +400,180 @@ function graderApp() {
             return (s.flagged || []).includes(this.currentQ);
         },
 
+        // ── Annotation: a mark on the pupil's words, never an edit of them ──
+        //
+        // The answer renders as segments so a mark can be drawn over a range;
+        // the words themselves are still the pupil's, and removing a mark
+        // restores exactly what they typed.
+        segmentsFor(s) {
+            const text = s.essayText || '';
+            if (!text) return [];
+            const anns = (s.annotations || []).slice().sort(
+                (a, b) => (a.start_offset - b.start_offset) || (a.end_offset - b.end_offset));
+            if (!anns.length) return [{ key: 't0', text: text, ids: [], cls: '' }];
+            const segs = [];
+            let pos = 0;
+            let n = 0;
+            anns.forEach(a => {
+                const start = Math.max(0, Math.min(Number(a.start_offset), text.length));
+                const end = Math.max(start, Math.min(Number(a.end_offset), text.length));
+                if (start > pos) {
+                    segs.push({ key: 'g' + (n++), text: text.slice(pos, start), ids: [], cls: '' });
+                }
+                const from = Math.max(pos, start);
+                if (end > from) {
+                    segs.push({ key: 'a' + a.id, text: text.slice(from, end), ids: [a.id], cls: this.annotClass(a) });
+                }
+                if (end > pos) pos = end;
+            });
+            if (pos < text.length) {
+                segs.push({ key: 't' + (n++), text: text.slice(pos), ids: [], cls: '' });
+            }
+            return segs;
+        },
+
+        annotClass(a) {
+            const base = 'cursor-pointer rounded px-0.5 transition ';
+            if (a.kind === 'strike') return base + 'line-through bg-rose-100/70 text-rose-700';
+            if (a.kind === 'comment') return base + 'bg-sky-100/70 border-b-2 border-sky-400';
+            return base + 'bg-amber-200/70';
+        },
+
+        _rangeOffsets(container) {
+            const selection = window.getSelection();
+            if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return null;
+            const range = selection.getRangeAt(0);
+            if (!container.contains(range.startContainer) || !container.contains(range.endContainer)) return null;
+            const pre = document.createRange();
+            pre.selectNodeContents(container);
+            pre.setEnd(range.startContainer, range.startOffset);
+            const start = pre.toString().length;
+            const length = range.toString().length;
+            if (length <= 0) return null;
+            return { start: start, end: start + length, rect: range.getBoundingClientRect() };
+        },
+
+        onAnswerSelect(event, s) {
+            if (!s || !(s.essayText || '').trim()) return;
+            const off = this._rangeOffsets(event.currentTarget);
+            if (!off) return;
+            const rect = off.rect;
+            this.picked = null;
+            this.sel = {
+                student: s.submission_id,
+                start: off.start,
+                end: off.end,
+                x: rect.left + rect.width / 2,
+                y: rect.bottom,
+            };
+        },
+
+        paletteStudent() {
+            const id = this.sel ? this.sel.student : (this.picked ? this.picked.student : null);
+            return id ? (this.students.find(st => st.submission_id === id) || null) : null;
+        },
+
+        paletteStyle() {
+            const anchor = this.sel || this.picked;
+            if (!anchor) return 'left:-9999px;top:-9999px';
+            return 'left:' + Math.round(anchor.x) + 'px;top:' + Math.round(anchor.y + 8) +
+                   'px;transform:translateX(-50%)';
+        },
+
+        clearSelection() {
+            this.sel = null;
+            this.picked = null;
+            this.noteDraft = '';
+            const selection = window.getSelection();
+            if (selection) selection.removeAllRanges();
+        },
+
+        annotate(kind) {
+            if (!this.sel) return;
+            const student = this.sel.student;
+            const body = {
+                submission_id: student,
+                question_index: this.currentQ,
+                kind: kind,
+                start_offset: this.sel.start,
+                end_offset: this.sel.end,
+            };
+            fetch('/teacher/api/grading-assist/annotations', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(body),
+            })
+            .then(r => r.json())
+            .then(d => {
+                if (!d.success) return;
+                const st = this.students.find(x => x.submission_id === student);
+                if (st) st.annotations = (st.annotations || []).concat([d.annotation]);
+                this.clearSelection();
+            })
+            .catch(() => {});
+        },
+
+        pickAnnot(event, s, id) {
+            if (event) event.stopPropagation();
+            const a = (s.annotations || []).find(x => x.id === id);
+            if (!a) return;
+            const el = event ? event.currentTarget : null;
+            const rect = el ? el.getBoundingClientRect() : { left: 0, bottom: 0, width: 0 };
+            this.sel = null;
+            this.noteDraft = a.note || '';
+            this.picked = { student: s.submission_id, id: id,
+                            x: rect.left + rect.width / 2, y: rect.bottom };
+        },
+
+        saveNote() {
+            if (!this.picked) return;
+            const student = this.picked.student;
+            const id = this.picked.id;
+            fetch('/teacher/api/grading-assist/annotations/update', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ submission_id: student, annotation_id: id, note: this.noteDraft }),
+            })
+            .then(r => r.json())
+            .then(d => {
+                if (!d.success) return;
+                const st = this.students.find(x => x.submission_id === student);
+                if (st) {
+                    const a = (st.annotations || []).find(x => x.id === id);
+                    if (a) a.note = this.noteDraft;
+                }
+                this.clearSelection();
+            })
+            .catch(() => {});
+        },
+
+        deletePicked() {
+            if (!this.picked) return;
+            const student = this.picked.student;
+            const id = this.picked.id;
+            fetch('/teacher/api/grading-assist/annotations/delete', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ submission_id: student, annotation_id: id }),
+            })
+            .then(r => r.json())
+            .then(d => {
+                if (!d.success) return;
+                const st = this.students.find(x => x.submission_id === student);
+                if (st) st.annotations = (st.annotations || []).filter(x => x.id !== id);
+                this.clearSelection();
+            })
+            .catch(() => {});
+        },
+
+        paletteScore(preset) {
+            const st = this.paletteStudent();
+            if (!st) return;
+            st.scoreVal = preset;
+            this.saveEssayScore(st);
+            this.clearSelection();
+        },
+
         toggleFlag(s) {
             const on = this.isFlagged(s);
             fetch('/teacher/api/grading-assist/flag', {
@@ -348,7 +591,7 @@ function graderApp() {
                 .then(r => r.json())
                 .then(d => {
                     this.students = (d.students || []).map(s => ({
-                        ...s, flagged: s.flagged || [], expanded: false, scoreVal: s.feedback?.score || '', feedbackVal: s.feedback?.feedback || '', aiReasoning: '', aiConfidence: undefined, _aiLoading: false
+                        ...s, flagged: s.flagged || [], annotations: s.annotations || [], expanded: false, scoreVal: s.feedback?.score || '', feedbackVal: s.feedback?.feedback || '', aiReasoning: '', aiConfidence: undefined, _aiLoading: false
                     }));
                     this.loading = false;
                     this.focusedIdx = 0;
@@ -400,6 +643,7 @@ function graderApp() {
                 e.preventDefault();
                 if (this.$refs.bankInput) this.$refs.bankInput.focus();
             }
+            if (e.key === 'Escape') { this.clearSelection(); }
         },
 
         _nextStudent() {
