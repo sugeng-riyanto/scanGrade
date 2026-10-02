@@ -512,7 +512,7 @@ html { transition: background-color .3s, color .3s; }
         :where(.dark) :is(.hover\:bg-sky-50,.hover\:bg-sky-100):hover { background: #133149; }
         :where(.dark) :is(.text-sky-200,.text-sky-300,.text-sky-400,.text-sky-500) { color: #38bdf8; }
         :where(.dark) :is(.text-sky-600,.text-sky-700,.text-sky-800,.text-sky-900) { color: #7dd3fc; }
-        :where(.dark) :is(.border-sky-100,.border-sky-200,.border-sky-300) { border-color: #1c5a80; }
+        :where(.dark) :is(.border-sky-100,.border-sky-200,.border-sky-300,.border-sky-400) { border-color: #1c5a80; }
 
         /* cyan */
         :where(.dark) :is(.bg-cyan-50,.bg-cyan-100,.bg-cyan-200) { background: #0a2a30; }
