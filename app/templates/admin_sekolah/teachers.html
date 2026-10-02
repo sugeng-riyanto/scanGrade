@@ -406,17 +406,23 @@
                                 class="px-2.5 py-1.5 bg-amber-100 text-amber-800 rounded-lg font-bold hover:bg-amber-200 shrink-0">Isi sebagai draf</button>
                     </div>
                     <p class="text-xs text-stone-400 pb-2">Pilih kelas tertentu dengan mengklik sel, atau pakai tombol <b>semua kelas</b> / <b>semua mapel</b> untuk seluruh kolom / baris.</p>
-                    <table class="w-full text-xs">
+                    {# A grid of many subjects is wider than any phone: the table keeps a
+                       floor width and the box scrolls sideways, so a column never
+                       squeezes its button onto the next one's text. `overflow-x-auto`
+                       sits right against the table so the scroll ancestor is found
+                       from the table itself (the mobile gate reads the near window). #}
+                    <div class="overflow-x-auto">
+                    <table class="w-max min-w-[560px] text-xs">
                         <thead class="bg-stone-50 sticky top-0 sg-layer-sticky">
                             <tr>
-                                <th class="text-left px-2 py-2 font-bold text-stone-500 sticky left-0 bg-stone-50 sg-layer-header">Kelas</th>
+                                <th class="text-left px-2 py-2 font-bold text-stone-500 sticky left-0 bg-stone-50 sg-layer-header min-w-[150px]">Kelas</th>
                                 <template x-for="s in subjects" :key="s.id">
-                                    <th class="px-1 py-2 text-center font-bold text-stone-600 align-bottom">
-                                        <div x-text="s.name" class="max-w-[110px] mx-auto leading-tight"></div>
+                                    <th class="px-1 py-2 text-center font-bold text-stone-600 align-bottom min-w-[72px]">
+                                        <div x-text="s.name" class="mx-auto max-w-[96px] leading-tight break-words"></div>
                                         <button type="button" @click="toggleSubjectAll(s.id)"
-                                                class="mt-1 text-[10px] font-bold text-indigo-600 hover:underline"
+                                                class="mt-1 text-[10px] font-bold text-indigo-600 hover:underline whitespace-nowrap"
                                                 title="Pilih/batalkan semua kelas untuk mapel ini">semua kelas</button>
-                                        <div class="text-[9px] font-normal text-stone-400 mt-0.5"
+                                        <div class="text-[9px] font-normal text-stone-400 mt-0.5 whitespace-nowrap"
                                              x-text="subjectCount(s.id) + ' dari ' + classes.length + ' kelas'"></div>
                                     </th>
                                 </template>
@@ -438,25 +444,30 @@
                                             :colspan="subjects.length + 1" x-text="'Kelas ' + row.grade"></td>
                                     </template>
                                     <template x-if="row.cls">
-                                        <td class="sticky left-0 bg-white px-2 py-1 font-semibold text-stone-700 sg-layer-sticky">
-                                            <div class="flex items-center justify-between gap-2">
-                                                <span x-text="row.cls.name"></span>
-                                                {# A live count, so the admin can see the shortcut reached the
-                                                   coverage they meant before saving. #}
-                                                <span class="text-[9px] font-normal text-stone-400 shrink-0"
-                                                      x-text="classCount(row.cls.id) + ' dari ' + subjects.length + ' mapel'"></span>
-                                                {# The mirror of "semua kelas": every subject for ONE class,
-                                                   for the common case where a form teacher takes a whole
-                                                   class. Kept a click away so checking a 6x23 grid by
-                                                   hand is never the only way to say "all of it". #}
-                                                <button type="button" @click="toggleClassAll(row.cls.id)"
-                                                        class="text-[10px] font-bold text-indigo-600 hover:underline shrink-0"
-                                                        title="Pilih/batalkan semua mapel untuk kelas ini">semua mapel</button>
+                                        {# The class cell stacks its three facts so the name, the
+                                           live count and the shortcut cannot overlap in a
+                                           narrow sticky column. #}
+                                        <td class="sticky left-0 bg-white px-2 py-1.5 sg-layer-sticky min-w-[150px]">
+                                            <div class="flex flex-col gap-0.5 text-left">
+                                                <span class="font-semibold text-stone-700" x-text="row.cls.name"></span>
+                                                <div class="flex items-center justify-between gap-2">
+                                                    {# A live count, so the admin can see the shortcut reached the
+                                                       coverage they meant before saving. #}
+                                                    <span class="text-[9px] font-normal text-stone-400 whitespace-nowrap"
+                                                          x-text="classCount(row.cls.id) + ' dari ' + subjects.length + ' mapel'"></span>
+                                                    {# The mirror of "semua kelas": every subject for ONE class,
+                                                       for the common case where a form teacher takes a whole
+                                                       class. Kept a click away so checking a 6x23 grid by
+                                                       hand is never the only way to say "all of it". #}
+                                                    <button type="button" @click="toggleClassAll(row.cls.id)"
+                                                            class="text-[10px] font-bold text-indigo-600 hover:underline whitespace-nowrap"
+                                                            title="Pilih/batalkan semua mapel untuk kelas ini">semua mapel</button>
+                                                </div>
                                             </div>
                                         </td>
                                     </template>
                                     <template x-for="s in (row.cls ? subjects : [])" :key="row.key + '|' + s.id">
-                                        <td class="text-center px-1 py-1">
+                                        <td class="text-center px-1 py-1 min-w-[72px]">
                                             <input type="checkbox" class="w-4 h-4"
                                                    :checked="isOn(row.cls.id, s.id)"
                                                    @click="toggle(row.cls.id, s.id)">
@@ -466,6 +477,7 @@
                             </template>
                         </tbody>
                     </table>
+                    </div>
                     <p class="text-xs text-stone-400 mt-2" x-show="subjects.length === 0">Belum ada mata pelajaran di sekolah ini.</p>
                 </div>
 
