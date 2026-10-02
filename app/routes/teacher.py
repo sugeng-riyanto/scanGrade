@@ -28,6 +28,7 @@ from app.services import mark_scheme
 from app.services import assignments as assignments_service
 from app.services import exam_media
 from app.services import exam_targets
+from app.services import grading_assist
 from app.services import invigilation
 from app.services import session_review
 from app.services import teacher_assignments as ta_service
@@ -3006,6 +3007,12 @@ def grade_question(exam_id, question_index):
 
 @teacher_bp.route("/api/grade-question/<exam_id>/<int:question_index>")
 @teacher_or_admin_required
+def _review_flags_for(supabase, submission_ids):
+    """Review flags for a set of papers, in one query."""
+    return (supabase.table("grading_flag").select("attempt_id,question_index")
+            .in_("attempt_id", list(submission_ids)).execute().data or [])
+
+
 def grade_question_api(exam_id, question_index):
     """API: return all students' answers for a specific question."""
     supabase = get_supabase()
@@ -3013,6 +3020,20 @@ def grade_question_api(exam_id, question_index):
     if err:
         return err
     subs = supabase.table("submissions").select("id,student_id,answers,score,final_score,status,submitted_at,profiles(full_name)").eq("exam_id", exam_id).execute().data or []
+
+    # Which questions of which papers this teacher already flagged to come back
+    # to. Read in one query for the whole page rather than per card, because the
+    # queue is long and a flag is one small fact.
+    flags_by_submission = {}
+    try:
+        sub_ids = [s["id"] for s in subs]
+        if sub_ids:
+            flag_rows = _review_flags_for(supabase, sub_ids)
+            for row in flag_rows:
+                flags_by_submission.setdefault(str(row["attempt_id"]), []).append(
+                    int(row["question_index"]))
+    except Exception:
+        logger.exception("could not read the review flags for exam %s", exam_id)
 
     students = []
     for s in subs:
@@ -3044,6 +3065,7 @@ def grade_question_api(exam_id, question_index):
 
         students.append({
             "submission_id": s["id"],
+            "flagged": flags_by_submission.get(str(s["id"]), []),
             "name": student_name,
             "answer": answer_val,
             "essayText": essay_text or answer_val if essay_text else "",
@@ -3094,6 +3116,10 @@ def grade_question_save(exam_id, question_index):
     if not isinstance(current, dict):
         current = {"answer": current}
 
+    # The mark this question carried before this save, read before it is
+    # overwritten — the audit needs both ends of the move.
+    old_score = current.get("ai_score")
+
     if "answer" in data:
         current["answer"] = data["answer"]
     if "essay_score" in data:
@@ -3103,7 +3129,91 @@ def grade_question_save(exam_id, question_index):
 
     answers[qi] = current
     supabase.table("submissions").update({"answers": answers}).eq("id", submission_id).execute()
+    # A history of edits that did not happen is worse than none: this writes only
+    # when the mark actually moved.
+    try:
+        grading_assist.record_score_change(
+            supabase, submission_id, question_index, g.user_id,
+            old_score, current.get("ai_score"))
+    except Exception:
+        logger.exception("could not record the score change for %s/%s",
+                         submission_id, question_index)
     return jsonify({"success": True})
+
+
+# ── Grading assist: the comment bank, the review flag, the audit ────────────
+#
+# Marking 200 essays is one question marked 200 times, so these routes carry the
+# facts that make that tolerable. All of them are the caller's own: the bank is
+# scoped to the signed-in teacher, and a flag is set only on a paper
+# `_guard_submission` says is theirs to grade.
+
+@teacher_bp.route("/api/grading-assist/bank")
+@teacher_or_admin_required
+def grading_assist_bank():
+    """The caller's own comments, most-used first."""
+    subject = request.args.get("subject") or None
+    qi = request.args.get("question_index")
+    rows = grading_assist.list_bank(
+        get_supabase(), g.user_id, subject=subject,
+        question_index=int(qi) if qi not in (None, "") else None)
+    return jsonify({"comments": rows})
+
+
+@teacher_bp.route("/api/grading-assist/bank", methods=["POST"])
+@teacher_or_admin_required
+def grading_assist_add_comment():
+    """Save a new comment to the caller's bank for reuse on later papers."""
+    data = request.get_json(silent=True) or {}
+    try:
+        row = grading_assist.add_comment(
+            get_supabase(), g.user_id,
+            body=data.get("body"),
+            subject=data.get("subject") or None,
+            question_index=data.get("question_index"),
+            score_delta=data.get("score_delta"))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"success": True, "comment": row})
+
+
+@teacher_bp.route("/api/grading-assist/bank/apply", methods=["POST"])
+@teacher_or_admin_required
+def grading_assist_apply():
+    """Count one use of the caller's own comment and hand back its text."""
+    data = request.get_json(silent=True) or {}
+    comment_id = data.get("comment_id")
+    if not comment_id:
+        return jsonify({"error": "comment_id wajib"}), 400
+    try:
+        applied = grading_assist.apply_comment(get_supabase(), g.user_id, comment_id)
+    except LookupError as exc:
+        return jsonify({"error": str(exc)}), 403
+    return jsonify({"success": True, "comment": applied})
+
+
+@teacher_bp.route("/api/grading-assist/flag", methods=["POST"])
+@teacher_or_admin_required
+def grading_assist_flag():
+    """Set or clear the 'come back to this one' flag on one paper's question."""
+    data = request.get_json(silent=True) or {}
+    submission_id = data.get("submission_id")
+    question_index = data.get("question_index")
+    if not submission_id or question_index is None:
+        return jsonify({"error": "submission_id dan question_index wajib"}), 400
+    # The paper itself is the thing being touched, so it is checked first: a flag
+    # may only be set on a paper the caller may grade.
+    _gb, err = _guard_submission(get_supabase(), submission_id, as_json=True)
+    if err:
+        return err
+    supabase = get_supabase()
+    if data.get("clear"):
+        grading_assist.clear_flag(supabase, submission_id, question_index, g.user_id)
+    else:
+        grading_assist.set_flag(supabase, submission_id, question_index, g.user_id,
+                                reason=data.get("reason") or "")
+    flags = grading_assist.flags_for(supabase, submission_id)
+    return jsonify({"success": True, "flagged": sorted(flags)})
 
 
 @teacher_bp.route("/grade/<submission_id>")
@@ -3183,6 +3293,22 @@ def override_score(submission_id):
             feedback = {}
     supabase = get_supabase()
     final_score_val = float(new_score) if new_score is not None and new_score != '' else None
+    # Each per-question mark this edit moves is recorded, with both ends. The
+    # previous feedback is read before the update overwrites it, because after
+    # the write the old marks exist only here.
+    try:
+        prior = row_or_none(
+            supabase.table("submissions").select("teacher_feedback")
+            .eq("id", submission_id).maybe_single().execute())
+        prior_fb = (prior or {}).get("teacher_feedback") or {}
+        if isinstance(prior_fb, str):
+            prior_fb = json.loads(prior_fb)
+        prior_scores = (prior_fb or {}).get("scores") or {}
+        for qi, new_val in (feedback or {}).get("scores", {}).items():
+            grading_assist.record_score_change(
+                supabase, submission_id, qi, g.user_id, prior_scores.get(qi), new_val)
+    except Exception:
+        logger.exception("could not audit the score change for %s", submission_id)
     update_data = {
         "final_score": final_score_val,
         "status": "graded",

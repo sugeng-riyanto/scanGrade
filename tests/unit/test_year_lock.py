@@ -42,6 +42,14 @@ EXEMPT = {
     "teacher_bp /assignments": "an assignment is per class-subject, not per year's marks",
     "teacher_bp /assignments/<assignment_id>": "same as /assignments",
     "teacher_bp /api/ai/test-demo": "a test call to the AI provider; writes nothing",
+    "teacher_bp /api/grading-assist/bank":
+        "the marker's own reusable comments, not a year's marks; the page opens "
+        "only on a running year anyway",
+    "teacher_bp /api/grading-assist/bank/apply":
+        "counts one use of the marker's own comment",
+    "teacher_bp /api/grading-assist/flag":
+        "a 'come back to this one' note on one paper's question, not the mark "
+        "itself; the paper is guarded by _guard_submission",
     "teacher_bp /ai-settings/add-key": "the teacher's own settings",
     "teacher_bp /ai-settings/<key_id>/toggle": "the teacher's own settings",
     "teacher_bp /ai-settings/<key_id>/delete": "the teacher's own settings",

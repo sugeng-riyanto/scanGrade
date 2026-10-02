@@ -83,6 +83,11 @@ MACHINE = frozenset({
     # `/teacher/api/exam-roster` answers the class roster as JSON for the exam
     # builder's Target Classes panel: a readback, never a page of its own.
     "exam-roster",
+    # `/teacher/api/grading-assist/bank` hands back the marking comment bank as
+    # JSON for the per-question marking page, and its two siblings apply a
+    # comment and set a review flag — readbacks and writes the marking page makes
+    # for itself, never pages of their own.
+    "grading-assist", "bank",
     # `/admin-sekolah/subjects/<id>/mapping` hands back which classes a subject is
     # offered to, and `.../classes/<id>/roster` hands back that class's pupils and
     # their levels — both JSON for the Subjects modal, which is where the crumb is.
