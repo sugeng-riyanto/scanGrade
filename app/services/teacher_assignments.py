@@ -85,6 +85,25 @@ def _row_in_year(row, year_name):
     return stored == year_name.strip()
 
 
+def row_is_active(row, year_name=None) -> bool:
+    """One rule for "is this assignment in force right now?"
+
+    Every reader that shows a teacher what they teach — the exam builder, the
+    dashboard, `/teacher/classes`, the class list on the roster — must agree, or
+    one of them shows a pair another has already taken away. The two halves are
+
+    * `status`: `inactive` is migration 045's soft close, the way an assignment is
+      removed without losing the history a past paper was built under; a row with
+      no `status` at all predates it and is still in force;
+    * the **year**: a pair belongs to the year it was written for, and a row with
+      no year (again, written before 045) belongs to the active year rather than
+      vanishing from every screen.
+    """
+    if (row.get("status") or ACTIVE) != ACTIVE:
+        return False
+    return _row_in_year(row, year_name)
+
+
 def current_pairs(supabase, school_id, teacher_id, year_name=None) -> set:
     """The active *(class_id, subject_id)* pairs for one teacher."""
     rows = (supabase.table("teacher_assignments")
@@ -93,13 +112,58 @@ def current_pairs(supabase, school_id, teacher_id, year_name=None) -> set:
             .execute().data or [])
     pairs = set()
     for row in rows:
-        if (row.get("status") or ACTIVE) != ACTIVE:
-            continue
-        if not _row_in_year(row, year_name):
+        if not row_is_active(row, year_name):
             continue
         if row.get("class_id") and row.get("subject_id"):
             pairs.add(_pair_key(row["class_id"], row["subject_id"]))
     return pairs
+
+
+def assigned_class_ids(supabase, school_id, teacher_id, year_name=None) -> set:
+    """The classes one teacher actively holds, for THIS year.
+
+    The question `/teacher/students` has to ask before it can show the right
+    pupils: a guru teaches in the classes they are assigned to, not in the whole
+    school. Fails to the empty set on an unreadable table, which shows no pupils
+    rather than all of them.
+    """
+    try:
+        rows = (supabase.table("teacher_assignments")
+                .select("class_id, subject_id, status, school_year")
+                .eq("school_id", school_id).eq("teacher_id", teacher_id)
+                .execute().data or [])
+    except Exception:
+        logger.warning("could not read assignments for %s", teacher_id, exc_info=True)
+        return set()
+    ids = set()
+    for row in rows:
+        if row_is_active(row, year_name) and row.get("class_id"):
+            ids.add(str(row["class_id"]))
+    return ids
+
+
+#: The profile columns a pupil needs on a class roster — the same set the old
+#: whole-school query named, so the page is unchanged except for the narrowing.
+STUDENT_COLUMNS = "id, full_name, phone, role, class_id"
+
+
+def students_in_classes(supabase, school_id, class_ids) -> list:
+    """This school's pupils whose class is one of `class_ids`.
+
+    An empty `class_ids` returns nobody, not the school: an unassigned teacher has
+    no class roster, and the whole-school list this replaces was the leak — a guru
+    with nothing assigned saw every pupil in the school.
+    """
+    wanted = [str(c) for c in (class_ids or []) if c]
+    if not school_id or not wanted:
+        return []
+    try:
+        return (supabase.table("profiles").select(STUDENT_COLUMNS)
+                .eq("role", "murid").eq("school_id", school_id)
+                .in_("class_id", wanted).execute().data or [])
+    except Exception:
+        logger.warning("could not read pupils for classes %s", wanted, exc_info=True)
+        return []
 
 
 #: The prefix a form field carries its assignment under: `assign_<subject_id>`
@@ -142,9 +206,7 @@ def school_pairs_detail(supabase, school_id, year_name=None) -> dict:
             .eq("school_id", school_id).execute().data or [])
     by_teacher: dict = {}
     for row in rows:
-        if (row.get("status") or ACTIVE) != ACTIVE:
-            continue
-        if not _row_in_year(row, year_name):
+        if not row_is_active(row, year_name):
             continue
         if not (row.get("teacher_id") and row.get("class_id") and row.get("subject_id")):
             continue
