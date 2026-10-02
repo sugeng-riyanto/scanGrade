@@ -17,6 +17,23 @@
     {% endif %}
     {% endwith %}
 
+    {# The period the school is running, so a teacher filing a paper knows which
+       window it lands in without opening the calendar — the same row the pupil's
+       list and the head's report read, because it comes from the one template
+       global rather than from each page's own query. #}
+    {% set _period = active_assessment_period() %}
+    {% if _period %}
+    {# This page is pinned to Indonesian (`content_lang = 'id'`), so the label is
+       written in one language rather than bound — a bilingual `t()` here would be
+       copy that switches inside a page that declares it does not. #}
+    <div class="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-2.5 flex flex-wrap items-center gap-2 text-xs" data-active-period="{{ _period.id }}">
+        <i class="fas fa-calendar-check text-sky-600"></i>
+        <span class="font-bold text-sky-900">Periode berjalan</span>
+        <span class="text-sky-800">{{ _period.name }}</span>
+        <span class="text-sky-600">{{ (_period.start_date or '')[:10] }} → {{ (_period.end_date or '')[:10] }}</span>
+    </div>
+    {% endif %}
+
     <!-- Header -->
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>

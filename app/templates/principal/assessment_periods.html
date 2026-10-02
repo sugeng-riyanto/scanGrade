@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% from "shared/_assessment_period_reasons.html" import reason_note %}
+{# Kalender penilaian sekolah: UTS, UAS, Try Out, Asesmen Sekolah.
+
+   Satu halaman, dua pembaca, dan yang membedakan keduanya adalah *kata kerja*:
+   kepala sekolah membaca kalendernya tanpa satu pun tombol yang menulis, sedangkan
+   wakil kepala sekolah menyusunnya. Formulir di bawah hanya digambar saat
+   `can_write` — tetapi wewenangnya tidak bergantung pada itu: setiap route POST-nya
+   berada di prefiks `/vice-principal/*` di belakang `vice_principal_required`, jadi
+   halaman yang menggambar formulirnya pun tetap ditolak kalau pembacanya kepala
+   sekolah. #}
+{% block title %}{{ 'Periode Penilaian' if lang == 'id' else 'Assessment Periods' }} - ScanGrade{% endblock %}
+{% block page_title %}{{ 'Periode Penilaian' if lang == 'id' else 'Assessment Periods' }}{% endblock %}
+{% block content %}
+<div class="space-y-6">
+
+    <div class="rounded-2xl bg-sky-50 border border-sky-200 p-3 flex items-start gap-3">
+        <i class="fas fa-calendar-days text-sky-600 mt-0.5"></i>
+        <div class="text-xs text-sky-900">
+            <strong x-text="t('Satu periode berjalan pada satu waktu.','Exactly one period runs at a time.')"></strong>
+            <span x-text="t('Periode yang berjalan dipakai halaman guru untuk menandai ujiannya dan daftar murid untuk menunjuk periode yang sama, jadi semua peran menyebut periode yang sama. Menyalakan satu periode otomatis mematikan yang lain.','The running period is what the teacher page marks its papers with and what the pupil list names, so every role says the same period. Turning one on turns the other off.')"></span>
+        </div>
+    </div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}{% for cat, msg in messages %}
+    <div class="p-4 rounded-xl text-sm font-semibold flex items-center gap-2 {% if cat == 'success' %}bg-emerald-50 text-emerald-700 border border-emerald-200{% else %}bg-red-50 text-red-700 border border-red-200{% endif %}">
+        <i class="fas fa-{% if cat == 'success' %}check-circle{% else %}exclamation-circle{% endif %}"></i>{{ reason_note(msg) }}
+    </div>
+    {% endfor %}{% endif %}
+    {% endwith %}
+
+    {% if active %}
+    <div class="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 flex flex-wrap items-center gap-3" data-active-period="{{ active.id }}">
+        <span class="text-xs font-bold px-2.5 py-1 bg-emerald-600 text-white rounded-full" x-text="t('Sedang berjalan','Running now')"></span>
+        <span class="font-extrabold text-emerald-900">{{ active.name }}</span>
+        <span class="text-sm text-emerald-700">{{ (active.start_date or '')[:10] }} → {{ (active.end_date or '')[:10] }}</span>
+    </div>
+    {% else %}
+    <div class="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900" x-text="t('Belum ada periode yang berjalan. Ujian dan laporan tidak menunjuk periode apa pun sampai wakil kepala sekolah menyalakan satu.','No period is running. Papers and reports name no period until the vice principal turns one on.')"></div>
+    {% endif %}
+
+    {% if can_write %}
+    <div class="card p-5">
+        <h2 class="font-extrabold text-surface-800 mb-1" x-text="t('Susun periode','Set a period')"></h2>
+        <p class="text-xs text-surface-500 mb-4" x-text="t('Tanggal memakai kalender sekolah. Mengedit periode tidak mengubah tanggal periode lain.','Dates use the school calendar. Editing one period never changes the dates of another.')"></p>
+        <form method="POST" action="/vice-principal/assessment-periods/save" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <label class="text-xs font-bold text-surface-600">
+                <span x-text="t('Jenis','Kind')"></span>
+                <select name="kind" required class="mt-1 w-full px-3 py-2 border border-surface-200 rounded-xl text-sm text-surface-700">
+                    <option value="mid_semester" x-text="t('UTS — Tengah Semester','Mid Semester')"></option>
+                    <option value="final_semester" x-text="t('UAS — Akhir Semester','Final Semester')"></option>
+                    <option value="tryout" x-text="t('Try Out / Uji Coba','Mock Test / Try Out')"></option>
+                    <option value="asesmen" x-text="t('Asesmen Sekolah','School Assessment')"></option>
+                </select>
+            </label>
+            <label class="text-xs font-bold text-surface-600">
+                <span x-text="t('Nama periode','Period name')"></span>
+                <input type="text" name="name" maxlength="80" required class="mt-1 w-full px-3 py-2 border border-surface-200 rounded-xl text-sm text-surface-700" placeholder="{{ 'mis. UTS Ganjil 2026/2027' if lang == 'id' else 'e.g. Mid Semester 2026/2027' }}">
+            </label>
+            <label class="text-xs font-bold text-surface-600">
+                <span x-text="t('Tanggal mulai','Start date')"></span>
+                <input type="date" name="start_date" required class="mt-1 w-full px-3 py-2 border border-surface-200 rounded-xl text-sm text-surface-700">
+            </label>
+            <label class="text-xs font-bold text-surface-600">
+                <span x-text="t('Tanggal selesai','End date')"></span>
+                <input type="date" name="end_date" required class="mt-1 w-full px-3 py-2 border border-surface-200 rounded-xl text-sm text-surface-700">
+            </label>
+            <label class="flex items-center gap-2 text-xs font-bold text-surface-600 sm:col-span-2">
+                <input type="checkbox" name="is_active" value="1" class="rounded border-surface-300">
+                <span x-text="t('Jadikan periode yang sedang berjalan','Make this the running period')"></span>
+            </label>
+            <button type="submit" class="sm:col-span-2 px-4 py-2 bg-gradient-to-r from-primary-500 to-primary-600 text-white rounded-xl font-bold text-sm shadow-lg shadow-primary-500/25 transition">
+                <i class="fas fa-calendar-plus mr-1"></i><span x-text="t('Simpan periode','Save the period')"></span>
+            </button>
+        </form>
+    </div>
+    {% endif %}
+
+    <div class="card overflow-hidden">
+        <div class="px-5 py-4 border-b border-surface-100">
+            <h2 class="font-extrabold text-surface-800" x-text="t('Kalender penilaian','Assessment calendar')"></h2>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm min-w-[680px]">
+                <thead class="bg-surface-50 text-surface-500">
+                    <tr>
+                        <th class="text-left px-4 py-3 font-bold" x-text="t('Jenis','Kind')"></th>
+                        <th class="text-left px-4 py-3 font-bold" x-text="t('Nama','Name')"></th>
+                        <th class="text-left px-4 py-3 font-bold" x-text="t('Mulai','Start')"></th>
+                        <th class="text-left px-4 py-3 font-bold" x-text="t('Selesai','End')"></th>
+                        <th class="text-left px-4 py-3 font-bold" x-text="t('Status','Status')"></th>
+                        {% if can_write %}<th class="text-left px-4 py-3 font-bold" x-text="t('Tindakan','Action')"></th>{% endif %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for p in periods %}
+                    <tr class="border-t border-surface-100" data-period="{{ p.id }}">
+                        <td class="px-4 py-2.5 text-surface-700 font-medium">
+                            {% if p.kind == 'mid_semester' %}<span x-text="t('UTS','Mid Semester')"></span>
+                            {% elif p.kind == 'final_semester' %}<span x-text="t('UAS','Final Semester')"></span>
+                            {% elif p.kind == 'tryout' %}<span x-text="t('Try Out','Mock Test')"></span>
+                            {% else %}<span x-text="t('Asesmen Sekolah','School Assessment')"></span>{% endif %}
+                        </td>
+                        <td class="px-4 py-2.5 text-surface-600">{{ p.name }}</td>
+                        <td class="px-4 py-2.5 text-surface-600">{{ (p.start_date or '')[:10] }}</td>
+                        <td class="px-4 py-2.5 text-surface-600">{{ (p.end_date or '')[:10] }}</td>
+                        <td class="px-4 py-2.5">
+                            {% if p.is_active %}<span class="text-xs font-bold px-2 py-0.5 rounded bg-emerald-50 text-emerald-700" x-text="t('Berjalan','Running')"></span>
+                            {% else %}<span class="text-xs font-bold text-surface-400" x-text="t('Tidak berjalan','Not running')"></span>{% endif %}
+                        </td>
+                        {% if can_write %}
+                        <td class="px-4 py-2.5">
+                            <form method="POST" action="/vice-principal/assessment-periods/{{ p.id }}/delete" class="inline"
+                                  onsubmit="return confirm('{{ 'Hapus periode ini?' if lang == 'id' else 'Delete this period?' }}')">
+                                <button type="submit" class="text-rose-600 hover:text-rose-700" title="{{ 'Hapus' if lang == 'id' else 'Delete' }}"><i class="fas fa-trash"></i></button>
+                            </form>
+                        </td>
+                        {% endif %}
+                    </tr>
+                    {% endfor %}
+                    {% if not periods %}
+                    <tr><td colspan="6" class="px-4 py-8 text-center text-sm text-surface-400" x-text="t('Belum ada periode penilaian.','No assessment period yet.')"></td></tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+</div>
+{% endblock %}

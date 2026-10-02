@@ -385,6 +385,27 @@ def create_app(env=None):
         return school_features(sid) if sid else {}
     app.jinja_env.globals["get_school_features"] = get_school_features
 
+    def active_assessment_period():
+        """The school's running assessment period, or None.
+
+        A template global because the answer is one row per school per request and
+        three different areas read it: a teacher marking a paper, a pupil reading
+        their list, a head reading a report. Reaching it through each page's own
+        route would be three places that could disagree about which period is
+        running — and disagreeing about that is exactly what makes the teacher's
+        page and the pupil's list name different periods for the same paper.
+        """
+        sid = getattr(g, "user_school_id", None)
+        if not sid:
+            return None
+        try:
+            from app.services import assessment_periods
+            from app.utils.auth import get_supabase
+            return assessment_periods.active_period(get_supabase(), sid)
+        except Exception:                                      # noqa: BLE001
+            return None
+    app.jinja_env.globals["active_assessment_period"] = active_assessment_period
+
     # Stylesheet URLs carry a content hash. nginx serves /static/ with
     # `immutable, max-age=31536000`, which is right for a phone on a weak
     # signal — but a stylesheet that keeps its URL is then never re-fetched, so

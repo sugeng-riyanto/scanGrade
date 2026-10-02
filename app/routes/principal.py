@@ -36,7 +36,8 @@ from flask import (Blueprint, flash, g, redirect, render_template, request,
 from app.utils.auth import (get_supabase, principal_required,
                             school_official_required, vice_principal_required)
 from app.utils.cache import cache_get, cache_set
-from app.services import analysis_scope, invigilation, official_insight
+from app.services import (analysis_scope, assessment_periods, invigilation,
+                          official_insight)
 
 logger = logging.getLogger(__name__)
 
@@ -447,6 +448,88 @@ def vice_principal_invigilation_unassign(assignment_id: str):
     _invigilation_refused(invigilation.remove_assignment(
         get_supabase(), school_id, assignment_id))
     return redirect("/vice-principal/invigilation")
+
+
+# ── the assessment calendar ──────────────────────────────────────────────────
+#
+# The second thing a vice principal owns and a head of school only reads, after
+# invigilation — and it is the same split, expressed the same way: the writes live
+# on the deputy's prefix and none on the head's, so "read-only" stays a structural
+# property of `/principal/*` rather than a promise a new button can break.
+#
+# What a period *is* matters here: `exams.exam_type` has carried this vocabulary
+# since migration 007 and no code read it, so a school could say a paper was a UTS
+# and nothing anywhere could tell them when the UTS was. A period is that window,
+# and exactly one of them is running — which is what makes "this paper is a UTS"
+# mean the same thing on a teacher's page, a pupil's list and this calendar.
+
+
+def _periods_page(role: str):
+    """The calendar, its running period, and the four kinds the form offers."""
+    school_id = _school_id()
+    if not school_id:
+        return redirect("/auth/login")
+    supabase = get_supabase()
+    return render_template(
+        "principal/assessment_periods.html",
+        role=role,
+        base=_base(role),
+        can_write=role == "vice_principal",
+        school=_school(supabase, school_id),
+        periods=assessment_periods.list_periods(supabase, school_id),
+        active=assessment_periods.active_period(supabase, school_id),
+        kinds=assessment_periods.KINDS,
+    )
+
+
+@principal_bp.route("/principal/assessment-periods")
+@principal_required
+def principal_assessment_periods():
+    """Kepala sekolah: kalender penilaian sekolahnya, baca saja."""
+    return _periods_page("principal")
+
+
+@principal_bp.route("/vice-principal/assessment-periods")
+@vice_principal_required
+def vice_principal_assessment_periods():
+    """Wakil kepala sekolah: kalender yang sama, plus wewenang menyusunnya."""
+    return _periods_page("vice_principal")
+
+
+@principal_bp.route("/vice-principal/assessment-periods/save", methods=["POST"])
+@vice_principal_required
+def vice_principal_assessment_period_save():
+    """Create or edit one period. The school is the session's, never the form's."""
+    school_id = _school_id()
+    if not school_id:
+        return redirect("/auth/login")
+    out = assessment_periods.save_period(
+        get_supabase(), school_id,
+        period_id=request.form.get("period_id") or None,
+        kind=request.form.get("kind", ""),
+        name=request.form.get("name", ""),
+        start_date=request.form.get("start_date", ""),
+        end_date=request.form.get("end_date", ""),
+        is_active=request.form.get("is_active") in ("1", "true", "on"),
+        actor_id=g.get("user_id"),
+    )
+    flash(out["reason"] if not out.get("ok") else "period_saved",
+          "error" if not out.get("ok") else "success")
+    return redirect("/vice-principal/assessment-periods")
+
+
+@principal_bp.route("/vice-principal/assessment-periods/<period_id>/delete",
+                    methods=["POST"])
+@vice_principal_required
+def vice_principal_assessment_period_delete(period_id: str):
+    """Remove one period, scoped to this school by the service's own filter."""
+    school_id = _school_id()
+    if not school_id:
+        return redirect("/auth/login")
+    out = assessment_periods.delete_period(get_supabase(), school_id, period_id)
+    flash(out["reason"] if not out.get("ok") else "period_deleted",
+          "error" if not out.get("ok") else "success")
+    return redirect("/vice-principal/assessment-periods")
 
 
 @principal_bp.route("/vice-principal/retake-requests/<request_id>/decide",

@@ -92,7 +92,7 @@
       "frozen": false
     },
     "admin_sekolah/import.html": {
-      "pairs": 63,
+      "pairs": 64,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -129,7 +129,7 @@
     },
     "admin_sekolah/promote.html": {
       "pairs": 0,
-      "leftovers": 38,
+      "leftovers": 43,
       "coverage": 0.0,
       "frozen": false
     },
@@ -140,19 +140,19 @@
       "frozen": true
     },
     "admin_sekolah/school_years.html": {
-      "pairs": 1,
+      "pairs": 2,
       "leftovers": 9,
-      "coverage": 10.0,
+      "coverage": 18.2,
       "frozen": true
     },
     "admin_sekolah/students.html": {
-      "pairs": 57,
+      "pairs": 58,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
     },
     "admin_sekolah/subjects.html": {
-      "pairs": 15,
+      "pairs": 43,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -165,7 +165,7 @@
     },
     "admin_sekolah/teachers.html": {
       "pairs": 0,
-      "leftovers": 34,
+      "leftovers": 68,
       "coverage": 0.0,
       "frozen": false
     },
@@ -260,7 +260,7 @@
       "frozen": false
     },
     "base.html": {
-      "pairs": 169,
+      "pairs": 171,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -319,6 +319,12 @@
       "coverage": 0.0,
       "frozen": false
     },
+    "principal/assessment_periods.html": {
+      "pairs": 30,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
     "principal/dashboard.html": {
       "pairs": 5,
       "leftovers": 0,
@@ -339,6 +345,12 @@
     },
     "public/capacity.html": {
       "pairs": 64,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
+    "shared/_assessment_period_reasons.html": {
+      "pairs": 8,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -368,7 +380,7 @@
       "frozen": false
     },
     "student/exam_list.html": {
-      "pairs": 15,
+      "pairs": 16,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -434,7 +446,7 @@
       "frozen": false
     },
     "super_admin/deploy_status.html": {
-      "pairs": 410,
+      "pairs": 411,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -608,7 +620,7 @@
       "frozen": false
     },
     "teacher/exam_form.html": {
-      "pairs": 220,
+      "pairs": 233,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false

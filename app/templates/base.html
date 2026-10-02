@@ -368,6 +368,12 @@ window.sgSavePrefs = function (patch) {
                shared path would send one of them through the other's guard. #}
             <a href="{{ _official_home.replace('/dashboard', '/analytics') }}" class="nav-item {% if request.path.endswith('/analytics') %}active{% endif %}"><i class="fas fa-chart-line"></i><span x-text="t('Analitik','Analytics')"></span></a>
             <a href="{{ _official_home.replace('/dashboard', '/progress') }}" class="nav-item {% if request.path.endswith('/progress') %}active{% endif %}"><i class="fas fa-calendar-days"></i><span x-text="t('Progres Sekolah','School Progress')"></span></a>
+            {# The assessment calendar, and the one page in this branch that is not
+               the same for both readers: the deputy builds it, the head reads it.
+               Both open the page at their own address — the write routes live on
+               the deputy's prefix, so the head's copy draws no form. #}
+            <a href="{{ _official_home.replace('/dashboard', '/assessment-periods') }}" class="nav-item {% if request.path.endswith('/assessment-periods') %}active{% endif %}"><i class="fas fa-calendar-check"></i><span x-text="t('Periode Penilaian','Assessment Periods')"></span></a>
+            <a href="{{ _official_home.replace('/dashboard', '/invigilation') }}" class="nav-item {% if request.path.endswith('/invigilation') %}active{% endif %}"><i class="fas fa-clipboard-check"></i><span x-text="t('Jadwal Pengawasan','Invigilation')"></span></a>
             <div class="nav-section-title pt-2"><span x-text="t('Panduan','Guide')"></span></div>
             <a href="/guide/skor" class="nav-item {% if request.path == '/guide/skor' %}active{% endif %}"><i class="fas fa-book-open"></i><span x-text="t('Panduan Skor','Scoring Guide')"></span></a>
 
@@ -499,6 +505,7 @@ window.sgSavePrefs = function (patch) {
                     'ai-settings': ('Koreksi AI', 'AI Grading'),
                     'analysis': ('Analisis Butir', 'Item Analysis'),
                     'analytics': ('Analitik', 'Analytics'),
+                    'assessment-periods': ('Periode Penilaian', 'Assessment Periods'),
                     'progress': ('Progres Sekolah', 'School Progress'),
                     'answer-keys': ('Kunci Jawaban', 'Answer Keys'),
                     'assignments': ('Penugasan', 'Assignments'),

@@ -462,13 +462,21 @@ class TestTheOfficialBlueprint:
     def test_the_blueprint_has_routes_to_judge(self):
         assert self.ROUTES, "the official blueprint lost every route"
 
+    #: The write authorities this blueprint delegates to the deputy, each named as
+    #: the segment its routes share. Enumerated rather than pattern-matched loose,
+    #: so a *new* write domain has to be added here on purpose — which is the point
+    #: of the guard: `/principal/*` stays read-only only as long as somebody decides
+    #: what else the deputy may write, rather than as long as a regex happens to match.
+    DELEGATED = ("invigilation", "retake", "assessment-periods")
+
     def test_the_head_of_school_prefix_has_no_writing_route(self):
         """`/principal/*` is read-only by construction — the head of school oversees.
 
-        The one delegated write authority this blueprint carries — the invigilation
-        schedule — lives entirely under `/vice-principal/*`, so the separation is a
-        property of the *addresses* rather than a flag inside a template. That is why
-        this assertion is about the prefix and not about the blueprint: `for spec in
+        The delegated write authorities this blueprint carries — the invigilation
+        schedule, the retake decisions it authorises, and the assessment calendar —
+        all live entirely under `/vice-principal/*`, so the separation is a property
+        of the *addresses* rather than a flag inside a template. That is why this
+        assertion is about the prefix and not about the blueprint: `for spec in
         self.ROUTES` used to forbid every write here, which made a delegated authority
         impossible to express anywhere except by breaking this guard.
         """
@@ -478,8 +486,9 @@ class TestTheOfficialBlueprint:
         assert not offenders, (
             f"the head of school's own prefix writes: {offenders}")
         for spec in writing:
-            assert "invigilation" in spec or "retake" in spec, (
-                f"a writing route outside the one delegated authority: {spec}")
+            assert any(word in spec for word in self.DELEGATED), (
+                f"a writing route outside the delegated authorities "
+                f"{self.DELEGATED}: {spec}")
 
     @pytest.mark.parametrize("path", ["/principal/analytics", "/vice-principal/analytics",
                                       "/principal/progress", "/vice-principal/progress"])

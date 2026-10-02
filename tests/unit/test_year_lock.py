@@ -141,6 +141,11 @@ EXEMPT = {
         "which classes a subject is offered to; a mapping, not a year's marks",
     "admin_sekolah_bp /subjects/<subject_id>/levels":
         "a pupil's basic/intermediate/advanced track; a label, not a year's marks",
+    "principal_bp /vice-principal/assessment-periods/save":
+        "the school's assessment calendar; a period is the subject, not the marks "
+        "inside a year",
+    "principal_bp /vice-principal/assessment-periods/<period_id>/delete":
+        "removes a period the deputy created, not the marks inside a year",
     "admin_sekolah_bp /promote":
         "checked inside the view against the target year (its own test)",
     "admin_sekolah_bp /teachers/<teacher_id>/assignments":

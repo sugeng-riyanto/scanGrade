@@ -1,0 +1,36 @@
+{# Alasan setiap penolakan periode penilaian, dalam dua bahasa.
+
+   Satu berkas, dua halaman (wakil kepala sekolah dan kepala sekolah). Kalimatnya
+   disimpan di sini karena kuncinya (`REFUSALS` di
+   `app/services/assessment_periods.py`) hanya punya satu arti — dan dua salinan
+   kalimat adalah dua tempat yang bisa berbeda pendapat tentang apa yang baru saja
+   ditolak.
+
+   Bentuk `['Indonesia', 'English']` dipilih dengan sengaja: `deploy/i18n_coverage.py`
+   mengenali larik dua bahasa sebagai satu unit bilingual, jadi kalimat di partial ini
+   ikut terhitung lantai cakupan walau partial tidak masuk daftar `TRANSLATED` (daftar
+   itu mensyaratkan setiap anggotanya meng-extend `base.html`, dan partial tidak punya
+   toggle untuk dihormati). #}
+{% set REASONS = {
+    'bad_kind': ['Jenis periode hanya boleh UTS, UAS, Try Out, atau Asesmen Sekolah.', 'A period can only be Mid Semester, Final Semester, Try Out or School Assessment.'],
+    'name_required': ['Nama periode wajib diisi.', 'A period needs a name.'],
+    'bad_dates': ['Tanggal selesai harus pada atau setelah tanggal mulai.', 'The end date must be on or after the start date.'],
+    'not_found': ['Barisnya tidak ditemukan lagi — mungkin sudah dihapus.', 'That row is no longer there — it may have been deleted.'],
+    'write_failed': ['Perubahan tidak tersimpan. Coba lagi sebentar lagi.', 'The change was not saved. Please try again in a moment.'],
+    'period_saved': ['Periode penilaian sudah disimpan.', 'The assessment period has been saved.'],
+    'period_deleted': ['Periode penilaian sudah dihapus.', 'The assessment period has been deleted.'],
+} %}
+
+
+{# Renders one flashed message. A key from `REASONS` becomes a pair of spans — one per
+   language, chosen in the browser by Alpine, exactly as `auth/_chrome.html`'s
+   `alert_body` does it — and anything else (a Supabase error, a name) is data and is
+   printed as-is in whichever language it arrived in. #}
+{% macro reason_note(value) -%}
+{%- set pair = REASONS.get(value) if value is string else (value if value is sequence and value is not string else none) -%}
+{%- if pair -%}
+<span lang="id" x-show="lang!=='en'" x-cloak>{{ pair[0] }}</span><span lang="en" x-show="lang==='en'" x-cloak>{{ pair[1] }}</span>
+{%- else -%}
+<span>{{ value }}</span>
+{%- endif -%}
+{%- endmacro %}
