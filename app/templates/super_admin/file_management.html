@@ -100,7 +100,7 @@
                             <td class="px-5 py-3 text-right">
                                 <form method="POST" class="inline" onsubmit="return confirm('Hapus file lokal exam {{ e.exam_id[:8] }}...? Data Supabase AMAN.')">
                                     <input type="hidden" name="action" value="delete_local">
-                                    <input type="hidden" name="exam_id" value="{{ e.exam_id }}">
+                                    <input type="hidden" name="exam_id" value="{{ e.exam_id or '' }}">
                                     <button type="submit" class="px-3 py-1.5 text-xs font-bold bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition border border-red-200" title="Hapus file exam ini dari VPS (aman — tidak hapus data di Supabase)">
                                         <i class="fas fa-trash mr-1"></i>Hapus
                                     </button>
