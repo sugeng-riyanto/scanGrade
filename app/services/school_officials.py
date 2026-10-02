@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 
+from app.services import identity_names
 from app.services import password_change as _password_change
 
 logger = logging.getLogger(__name__)
@@ -161,6 +162,10 @@ def update_official(supabase, official_id: str, school_id: str, *,
     if not patch:
         return
     supabase.table("profiles").update(patch).eq("id", official_id).execute()
+    if patch.get("full_name"):
+        # The Auth copy drifts otherwise: an official renamed here would keep the
+        # name the account was created with wherever Auth is the only reader.
+        identity_names.mirror_display_name(supabase, official_id, patch["full_name"])
 
 
 def delete_official(supabase, official_id: str, school_id: str) -> None:

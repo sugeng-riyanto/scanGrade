@@ -32,6 +32,7 @@ from app.services import login_cards
 from app.services import account_emails
 from app.services import enrollment
 from app.services import academic_year
+from app.services import identity_names
 
 def _gen_password(length=12) -> str:
     chars = string.ascii_letters + string.digits + "!@#$%^&*"
@@ -2063,6 +2064,12 @@ def edit_teacher(teacher_id):
             supabase.table("teachers").update(data).eq("id", teacher_id).execute()
         if profile_data:
             supabase.table("profiles").update(profile_data).eq("id", teacher_id).execute()
+            # The Auth copy is the second place a name lives; a rename that skips
+            # it leaves the dashboard's fallback (and Supabase's own views) showing
+            # the old value. Best-effort: the profile write is the one that matters.
+            if profile_data.get("full_name"):
+                identity_names.mirror_display_name(supabase, teacher_id,
+                                                   profile_data["full_name"])
         if assignment_submitted:
             year = ta_service.active_school_year(supabase, sid)
             ok, result = ta_service.save(supabase, sid, teacher_id, pairs,
@@ -2347,6 +2354,9 @@ def edit_student(student_id):
             supabase.table("students").update(data).eq("id", student_id).execute()
         if profile_data:
             supabase.table("profiles").update(profile_data).eq("id", student_id).execute()
+            if profile_data.get("full_name"):
+                identity_names.mirror_display_name(supabase, student_id,
+                                                   profile_data["full_name"])
         log_activity("update", "student", student_id, new_data={**data, **profile_data}, user_id=g.user_id)
         flash("Murid berhasil diperbarui", "success")
         return redirect("/admin-sekolah/students")
