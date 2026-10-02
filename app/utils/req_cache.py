@@ -273,18 +273,30 @@ def teacher_assignments_key(teacher_id, school_id):
 
 
 def teacher_assignments_for(teacher_id, school_id):
-    """One teacher's class+subject assignments, with the names embedded."""
+    """One teacher's **active** class+subject assignments, names embedded.
+
+    Filtered by the one rule the rest of the app uses
+    (`teacher_assignments.row_is_active`): `status='active'` and the active school
+    year. Reading every row — as this did — put a pair the admin had **removed**
+    (soft-closed `inactive`) back on the teacher's own dashboard, which is the
+    exact opposite of what the admin's save meant.
+    """
     if not teacher_id or not school_id:
         return []
 
     def load():
         from app.utils.supabase_client import get_supabase
+        from app.services import teacher_assignments as ta
         try:
-            return (get_supabase().table("teacher_assignments")
+            supabase = get_supabase()
+            rows = (supabase.table("teacher_assignments")
                     .select("*, classes(id, name, grade_level), subjects(id, name, code)")
                     .eq("teacher_id", teacher_id)
                     .eq("school_id", school_id)
                     .execute().data) or []
+            year = ta.active_school_year(supabase, school_id)
+            year_name = (year or {}).get("name")
+            return [r for r in rows if ta.row_is_active(r, year_name)]
         except Exception as e:
             logger.debug("teacher_assignments_for(%s) failed: %s", teacher_id, e)
             return []

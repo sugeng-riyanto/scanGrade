@@ -29,6 +29,7 @@ from app.services import assignments as assignments_service
 from app.services import exam_media
 from app.services import invigilation
 from app.services import session_review
+from app.services import teacher_assignments as ta_service
 from app.services.anti_cheat_service import (
     events_for_exam, events_for_student, leaving_summary,
 )
@@ -3985,10 +3986,21 @@ def ai_reset_prompt():
 def students():
     supabase = get_supabase()
     school_id = g.get("user_school_id")
-    query = supabase.table("profiles").select("id,full_name,phone,role").eq("role", "murid")
-    if school_id:
-        query = query.eq("school_id", school_id)
-    students = query.execute().data or []
+    if g.get("user_role") == "admin_sekolah" or not school_id:
+        # The admin runs the school, so the whole-school roster is theirs to see.
+        query = supabase.table("profiles").select("id,full_name,phone,role,class_id").eq("role", "murid")
+        if school_id:
+            query = query.eq("school_id", school_id)
+        students = query.execute().data or []
+    else:
+        # A teacher sees the pupils in the classes they are assigned to — not the
+        # whole school. Same rule as the dashboard and the exam builder
+        # (`ta_service.row_is_active`: active status AND the active year), so the
+        # class list here cannot disagree with the one on the dashboard.
+        year = ta_service.active_school_year(supabase, school_id)
+        class_ids = ta_service.assigned_class_ids(
+            supabase, school_id, g.user_id, (year or {}).get("name"))
+        students = ta_service.students_in_classes(supabase, school_id, class_ids)
     exam_ids = [e["id"] for e in supabase.table("exams").select("id").eq("teacher_id", g.user_id).execute().data or []]
     if exam_ids:
         subs = supabase.table("submissions").select("student_id,score,final_score").in_("exam_id", exam_ids).execute().data or []
@@ -4015,14 +4027,10 @@ def teacher_classes():
     school_info = {}
     active_year = None
     if sid:
-        try:
-            assignments = supabase.table("teacher_assignments") \
-                .select("*, classes!inner(id, name), subjects!inner(id, name)") \
-                .eq("teacher_id", g.user_id) \
-                .eq("school_id", sid) \
-                .execute().data or []
-        except Exception:
-            assignments = []
+        # The filtered, cached reader the dashboard already uses — so "My Classes &
+        # Subjects" shows exactly what the dashboard shows: soft-closed rows
+        # (`status='inactive'`) and other years' pairs are gone, not re-shown.
+        assignments = teacher_assignments_for(g.user_id, sid)
         try:
             sch = supabase.table("schools").select("name, npsn").eq("id", sid).single().execute()
             if sch.data: school_info = sch.data
