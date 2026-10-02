@@ -33,6 +33,7 @@ from app.services import account_emails
 from app.services import enrollment
 from app.services import academic_year
 from app.services import identity_names
+from app.services import subject_levels as sl_service
 
 def _gen_password(length=12) -> str:
     chars = string.ascii_letters + string.digits + "!@#$%^&*"
@@ -1476,7 +1477,7 @@ def admin_subjects():
     # What each subject is carrying, so the delete dialog can name it. Two
     # batched reads rather than one count per card.
     subject_ids = [s["id"] for s in data]
-    assign_counts, exam_counts = {}, {}
+    assign_counts, exam_counts, class_counts = {}, {}, {}
     if subject_ids:
         for r in (supabase.table("teacher_assignments").select("subject_id")
                   .in_("subject_id", subject_ids).execute().data or []):
@@ -1486,9 +1487,18 @@ def admin_subjects():
             key = r.get("subject_id")
             if key:
                 exam_counts[key] = exam_counts.get(key, 0) + 1
+        # How many classes actually offer each subject (migration 049). A subject
+        # mapped to no class reads as "not taught anywhere yet" rather than as a
+        # listing that would be offered against every class in the exam builder.
+        for r in (supabase.table("class_subjects").select("subject_id, is_active")
+                  .eq("school_id", sid).in_("subject_id", subject_ids).execute().data or []):
+            key = r.get("subject_id")
+            if key and r.get("is_active", True):
+                class_counts[key] = class_counts.get(key, 0) + 1
     for s in data:
         s["assignment_count"] = assign_counts.get(s["id"], 0)
         s["exam_count"] = exam_counts.get(s["id"], 0)
+        s["class_count"] = class_counts.get(s["id"], 0)
     return render_template("admin_sekolah/subjects.html", subjects=data, sort=sort, q=q)
 
 
@@ -1577,6 +1587,114 @@ def admin_subject_delete(subject_id):
             return jsonify({"error": str(e)}), 400
         flash(f"Gagal: {failure.sentence(e)}", "error")
         return redirect("/admin-sekolah/subjects")
+
+
+# ─── SUBJECT OFFERING & PUPIL LEVELS ─────────────────
+#
+# Which classes offer this subject, and what track each pupil is on in it.
+# Kept beside the subject CRUD because that is the page the admin edits from,
+# and school-scoped the same way: every class_id/student_id the caller sends is
+# checked against the admin's own school before anything is written.
+
+@admin_sekolah_bp.route("/subjects/<subject_id>/mapping", methods=["GET", "POST"])
+@admin_sekolah_required
+@require_school_access("subjects", "subject_id")
+def admin_subject_mapping(subject_id):
+    """Read (GET) or save (POST) which classes offer this subject.
+
+    GET answers the modal: the school's classes, the ones already mapped, and
+    the year the screen is editing. POST is the *whole selection*, not a delta —
+    the modal owns the list, so two open tabs would otherwise disagree.
+    """
+    sid = _school_id()
+    supabase = get_supabase()
+    year = ta_service.active_school_year(supabase, sid)
+
+    if request.method == "GET":
+        classes = (supabase.table("classes").select("id, name, grade_level")
+                   .eq("school_id", sid).order("name").execute().data or [])
+        mapped = sorted(sl_service.mapped_class_ids(supabase, sid, subject_id))
+        # How many pupils each mapped class holds, so the modal can say "6 classes,
+        # 148 pupils" without a query per class.
+        counts = {}
+        if mapped:
+            for r in (supabase.table("profiles").select("class_id")
+                      .eq("school_id", sid).eq("role", "murid")
+                      .in_("class_id", mapped).execute().data or []):
+                key = str(r.get("class_id"))
+                if key:
+                    counts[key] = counts.get(key, 0) + 1
+        return jsonify({
+            "subject_id": subject_id,
+            "year": year,
+            "classes": classes,
+            "mapped": mapped,
+            "pupil_counts": counts,
+            "levels": list(sl_service.LEVELS),
+            "default_level": sl_service.DEFAULT_LEVEL,
+        })
+
+    payload = request.get_json(silent=True) or {}
+    raw = payload.get("class_ids") or []
+    if not isinstance(raw, list):
+        return jsonify({"error": "class_ids harus berupa daftar"}), 400
+    class_ids = [c for c in raw if c]
+
+    ok, result = sl_service.save_mapping(supabase, sid, subject_id, class_ids,
+                                         created_by=g.user_id)
+    if not ok:
+        return jsonify(result), result.get("status", 400)
+
+    invalidate_school(sid)
+    if result.get("added") or result.get("removed"):
+        log_activity("update", "class_subjects", subject_id,
+                     new_data={"mapped": result.get("mapped")}, user_id=g.user_id)
+    return jsonify({"success": True, **result})
+
+
+@admin_sekolah_bp.route("/subjects/<subject_id>/classes/<class_id>/roster")
+@admin_sekolah_required
+@require_school_access("subjects", "subject_id")
+def admin_subject_class_roster(subject_id, class_id):
+    """The pupils of one class and the track each is on in this subject."""
+    sid = _school_id()
+    supabase = get_supabase()
+    year = ta_service.active_school_year(supabase, sid)
+    roster = sl_service.roster_with_levels(supabase, sid, subject_id, class_id,
+                                           year_id=(year or {}).get("id"))
+    return jsonify({"subject_id": subject_id, "class_id": class_id,
+                    "students": roster, "levels": list(sl_service.LEVELS)})
+
+
+@admin_sekolah_bp.route("/subjects/<subject_id>/levels", methods=["POST"])
+@admin_sekolah_required
+@require_school_access("subjects", "subject_id")
+def admin_subject_levels_save(subject_id):
+    """Save one class's pupil levels for this subject.
+
+    The body is ``{"class_id": ..., "levels": {"<student_id>": "basic"}}``.
+    A level outside the vocabulary is 400; a pupil who is not in that class of
+    this school is 403 — refused before anything is written.
+    """
+    sid = _school_id()
+    supabase = get_supabase()
+    payload = request.get_json(silent=True) or {}
+    class_id = payload.get("class_id")
+    levels = payload.get("levels") or {}
+    if not class_id or not isinstance(levels, dict):
+        return jsonify({"error": "class_id dan levels wajib diisi"}), 400
+
+    year = ta_service.active_school_year(supabase, sid)
+    ok, result = sl_service.save_levels(supabase, sid, subject_id, class_id, levels,
+                                        year_id=(year or {}).get("id"), set_by=g.user_id)
+    if not ok:
+        return jsonify(result), result.get("status", 400)
+
+    if result.get("saved"):
+        log_activity("update", "student_subject_levels", subject_id,
+                     new_data={"class_id": class_id, "saved": result.get("saved")},
+                     user_id=g.user_id)
+    return jsonify({"success": True, **result})
 
 
 # ─── PROMOTE (Naik Kelas) ────────────────────────────
