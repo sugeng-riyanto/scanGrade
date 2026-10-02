@@ -17,6 +17,19 @@
         </a>
     </div>
 
+    {# The same running period the teacher's page names, from the same global: a
+       pupil and their teacher must not describe one paper as two different
+       periods, and that is only guaranteed if both read the one row. #}
+    {% set _period = active_assessment_period() %}
+    {% if _period %}
+    <div class="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-2.5 mb-4 flex flex-wrap items-center gap-2 text-xs" data-active-period="{{ _period.id }}">
+        <i class="fas fa-calendar-check text-sky-600"></i>
+        <span class="font-bold text-sky-900" x-text="t('Periode berjalan','Running period')"></span>
+        <span class="text-sky-800">{{ _period.name }}</span>
+        <span class="text-sky-600">{{ (_period.start_date or '')[:10] }} → {{ (_period.end_date or '')[:10] }}</span>
+    </div>
+    {% endif %}
+
     {% if exams %}
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {% for e in exams %}

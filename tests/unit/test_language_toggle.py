@@ -587,6 +587,13 @@ TRANSLATED = [
     # floor (a partial has no toggle to honour, so it cannot join this list).
     "principal/invigilation.html",
     "teacher/invigilation.html",
+    # The assessment calendar, the second thing a deputy owns and a head only reads.
+    # Same three readers as invigilation and the same reason: a kind label in one
+    # language is a reader who cannot find their own period. The refusal sentences
+    # they share live in `shared/_assessment_period_reasons.html`, whose pairs are
+    # held by the coverage floor (a partial has no toggle to honour, so it cannot
+    # join this list).
+    "principal/assessment_periods.html",
 ]
 # Partials are deliberately *not* on this list, and the assertion below says why:
 # an entry has to extend base.html, because it is the page's own scope that owns
@@ -932,7 +939,7 @@ def test_the_translated_list_only_grows_with_intent():
     a reader in the other language does. Bumping this number is the deliberate act
     that says "this page is translated now".
     """
-    assert len(TRANSLATED) == 51, (
+    assert len(TRANSLATED) == 52, (
         f"{len(TRANSLATED)} pages are on the translated list. Bump this number when "
         f"you translate another one — and if you *removed* a page, put it back, "
         f"because dropping it turns the sweep off for that page: {TRANSLATED}")
