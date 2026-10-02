@@ -226,8 +226,15 @@ SMOKE_BASE_URL="$BASE_DEFAULT"
 # install-auto-deploy.sh sets it once the logins below are proven to work.
 SMOKE_ENFORCE="false"
 
+# Every role the smoke test signs in as, because the gate can only fail on a
+# role it was given a credential for. Measured on a live box 2026-10-02: the
+# release smoke test reported "4 role(s)" and passed while /demo offered six —
+# the two officials were never signed in against, so a drifted principal or
+# vice-principal login could ship with every check green.
 SMOKE_SUPER_ADMIN="superadmin@scan-grade.app:superadmin123"
 SMOKE_ADMIN_SEKOLAH="admin_smp@scan-grade.app:demo123"
+SMOKE_PRINCIPAL="principal_smp@scan-grade.app:demo123"
+SMOKE_VICE_PRINCIPAL="vice_principal_smp@scan-grade.app:demo123"
 SMOKE_GURU="guru_mtk_smp@scan-grade.app:demo123"
 SMOKE_MURID="siswa2_smp@scan-grade.app:demo123"
 EOF
@@ -241,7 +248,7 @@ fi
 say "Checking the smoke-test credentials"
 SMOKE_ENV=()
 while IFS='=' read -r key value; do
-  case "$key" in SMOKE_SUPER_ADMIN|SMOKE_ADMIN_SEKOLAH|SMOKE_GURU|SMOKE_MURID|SMOKE_BASE_URL|SMOKE_INSECURE)
+  case "$key" in SMOKE_SUPER_ADMIN|SMOKE_ADMIN_SEKOLAH|SMOKE_PRINCIPAL|SMOKE_VICE_PRINCIPAL|SMOKE_GURU|SMOKE_MURID|SMOKE_BASE_URL|SMOKE_INSECURE)
     SMOKE_ENV+=("$key=$value");; esac
 done < <(grep -E '^SMOKE_[A-Z_]+=' "$SMOKE_CONF" | tr -d '"')
 

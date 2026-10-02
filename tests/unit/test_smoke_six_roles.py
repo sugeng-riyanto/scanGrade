@@ -149,3 +149,44 @@ class TestAMalformedCredentialIsNotSkipped:
         assert "guru" in malformed, (
             "a malformed credential was skipped silently instead of named")
         assert all(a.role != "guru" for a in accounts)
+
+
+#: The installer is what writes `/etc/scangrade-smoke.conf` on a real box.
+INSTALLER = ROOT / "deploy" / "install-auto-deploy.sh"
+
+
+class TestTheInstallerArmsEveryRole:
+    """A gate that is never *configured* for a role cannot fail on that role.
+
+    Measured on the live box, 2026-10-02: the release smoke test reported
+    ``— 4 role(s)`` and passed, while ``/demo`` offered six. The cause was here,
+    not in the gate: `scangrade-deploy.sh` already forwards all six and
+    `smoke_test.py` already checks all six, but the installer's conf template
+    named only four, so the two officials were never signed in against on any
+    release — and a drifted principal or vice-principal credential could ship
+    without a single red check. The box was repaired by hand; these guard the
+    template so a fresh box cannot be born under-armed again.
+    """
+
+    def test_the_conf_template_names_all_six_roles(self):
+        src = INSTALLER.read_text(encoding="utf-8")
+        missing = [role for role in SIX if f"SMOKE_{role.upper()}=" not in src]
+        assert not missing, (
+            f"the installer never writes {missing} into the smoke conf, so those "
+            "roles would never be signed in against on a release")
+
+    def test_the_credential_check_passes_all_six_through(self):
+        """The `case` arm decides which keys reach `--check-credentials`.
+
+        A role that is written into the conf but filtered out here is *worse*
+        than one that was never written: the file looks complete, and the arming
+        step proves four logins while six are offered.
+        """
+        src = INSTALLER.read_text(encoding="utf-8")
+        line = next((ln for ln in src.splitlines()
+                     if ln.strip().startswith("case \"$key\" in")), None)
+        assert line, "the credential-check filter moved; update this rule"
+        missing = [role for role in SIX if f"SMOKE_{role.upper()}" not in line]
+        assert not missing, (
+            f"the arming check omits {missing}, so `SMOKE_ENFORCE=true` could be "
+            "set without those logins ever being proven")
