@@ -149,6 +149,24 @@ class TestTheClassMapping:
         closed = [u for u in sb.updates if u[0] == "class_subjects"]
         assert closed, "removing a class must write is_active=False, not delete"
         assert closed[0][1].get("is_active") is False
+        assert result["removed"] == 1
+
+    def test_the_write_is_one_statement_per_side_not_one_per_class(self):
+        """A live probe caught the cost of a loop here: the connection dropped
+        between per-class inserts, one row had landed, and the caller was told the
+        save failed — a half-applied mapping the admin could not see. The write is
+        two bulk statements (an upsert for everything on, an update for everything
+        off), so that window is one round-trip wide, not one per class."""
+        classes = [{"id": f"c{i}", "school_id": SCHOOL} for i in range(6)]
+        sb = _Sb({"subjects": [{"id": SUBJECT, "school_id": SCHOOL}],
+                  "classes": classes})
+        ok, result = sl.save_mapping(sb, SCHOOL, SUBJECT, {c["id"] for c in classes})
+        assert ok is True
+        assert result["added"] == 6
+        assert len(sb.upserts) == 1, f"expected ONE bulk upsert, got {len(sb.upserts)}"
+        payload = sb.upserts[0][1]
+        assert isinstance(payload, list) and len(payload) == 6
+        assert sb.upserts[0][2], "the upsert must name the conflict target"
 
     def test_re_adding_a_class_reactivates_the_same_row(self):
         sb = _Sb({
@@ -161,8 +179,9 @@ class TestTheClassMapping:
         })
         ok, _ = sl.save_mapping(sb, SCHOOL, SUBJECT, {CLASS_A})
         assert ok is True
-        assert sb.updates, "an existing (closed) row is reactivated, not duplicated"
-        assert sb.updates[0][1].get("is_active") is True
+        assert sb.upserts, "an existing (closed) row is reactivated in place"
+        row = sb.upserts[0][1][0]
+        assert row["class_id"] == CLASS_A and row["is_active"] is True
 
     def test_mapped_class_ids_reads_only_active_rows(self):
         sb = _Sb({
@@ -189,28 +208,53 @@ class TestThePupilLevels:
         assert result.get("status") == 403
         assert sb.upserts == []
 
-    def test_a_valid_level_is_upserted_once_per_pupil_subject_and_year(self):
+    def test_a_pupil_with_no_row_is_inserted_in_one_bulk_statement(self):
         sb = _Sb({
             "subjects": [{"id": SUBJECT, "school_id": SCHOOL}],
             "classes": [{"id": CLASS_A, "school_id": SCHOOL}],
-            "profiles": [{"id": "s1", "school_id": SCHOOL, "role": "murid", "class_id": CLASS_A}],
+            "profiles": [{"id": "s1", "school_id": SCHOOL, "role": "murid", "class_id": CLASS_A},
+                         {"id": "s2", "school_id": SCHOOL, "role": "murid", "class_id": CLASS_A}],
         })
         ok, result = sl.save_levels(sb, SCHOOL, SUBJECT, CLASS_A,
-                                    {"s1": "intermediate"}, year_id=YEAR, set_by="admin-1")
+                                    {"s1": "intermediate", "s2": "advanced"},
+                                    year_id=YEAR, set_by="admin-1")
         assert ok is True
-        table, payload, on_conflict = sb.upserts[0]
-        # The write is one bulk upsert, not one statement per pupil.
-        row = payload[0] if isinstance(payload, list) else payload
-        assert table == "student_subject_levels"
-        assert row["student_id"] == "s1"
+        assert len(sb.inserts) == 1, f"expected ONE bulk insert, got {len(sb.inserts)}"
+        payload = sb.inserts[0][1]
+        assert isinstance(payload, list) and len(payload) == 2
+        row = payload[0]
         assert row["subject_id"] == SUBJECT
         assert row["class_id"] == CLASS_A
         assert row["school_year_id"] == YEAR
-        assert row["level"] == "intermediate"
         assert row["school_id"] == SCHOOL
-        # One row per pupil, subject and year: an edit updates in place.
-        assert "student_id" in (on_conflict or "") and "subject_id" in (on_conflict or "")
-        assert result.get("saved") == 1
+        assert result["saved"] == 2 and result["inserted"] == 2
+
+    def test_an_existing_row_is_updated_in_place_grouped_by_level(self):
+        """One row per pupil, subject and year. The uniqueness is a *partial*
+        index, so PostgREST cannot name it in an ON CONFLICT — the write is an
+        update by id instead, one statement per distinct level (at most three)."""
+        sb = _Sb({
+            "subjects": [{"id": SUBJECT, "school_id": SCHOOL}],
+            "classes": [{"id": CLASS_A, "school_id": SCHOOL}],
+            "profiles": [{"id": "s1", "school_id": SCHOOL, "role": "murid", "class_id": CLASS_A},
+                         {"id": "s2", "school_id": SCHOOL, "role": "murid", "class_id": CLASS_A}],
+            "student_subject_levels": [
+                {"id": "lvl1", "school_id": SCHOOL, "student_id": "s1",
+                 "subject_id": SUBJECT, "school_year_id": YEAR, "level": "basic"},
+                {"id": "lvl2", "school_id": SCHOOL, "student_id": "s2",
+                 "subject_id": SUBJECT, "school_year_id": YEAR, "level": "basic"},
+            ],
+        })
+        ok, result = sl.save_levels(sb, SCHOOL, SUBJECT, CLASS_A,
+                                    {"s1": "advanced", "s2": "advanced"},
+                                    year_id=YEAR, set_by="admin-1")
+        assert ok is True
+        assert sb.inserts == [], "a pupil who already has a row is never inserted twice"
+        assert not any(u[1].get("level") is None for u in sb.updates)
+        updates = [u for u in sb.updates if u[0] == "student_subject_levels"]
+        assert len(updates) == 1, "both pupils share a level, so one update covers them"
+        assert updates[0][1]["level"] == "advanced"
+        assert result["updated"] == 2 and result["inserted"] == 0
 
     def test_the_roster_defaults_a_pupil_with_no_row_to_basic(self):
         """A class just mapped has no level rows yet; every pupil reads as basic,
