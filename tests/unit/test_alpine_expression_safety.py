@@ -332,3 +332,34 @@ def test_the_scope_rule_bites_on_the_defect_it_describes():
     assert balanced("{ 'dialog': 1 }") is None, "a single-quoted key is legal"
     assert balanced("{ // report's card, an apostrophe in a comment\n a: 1 }") is None
     assert balanced("{ a: 1 ") is not None
+
+
+#: The translation helper, called as if it were a Jinja global. Written without
+#: the literal delimiters so this file does not need the same exemption it checks.
+#: Only a *call* — `{{ t('…','…') }}`. A `{{ "t('Aktif','Active')" if x else … }}`
+#: is Jinja choosing which JS string to emit, which is legal and common; the
+#: output has to start with the call for Jinja to be the one calling it.
+JINJA_T = re.compile(r"\{\{\s*t\s*\(")
+
+#: A Jinja comment paints nothing, so it cannot 500 a page.
+JINJA_COMMENT = re.compile(r"\{#.*?#\}", re.S)
+
+
+def test_translation_never_goes_through_jinja():
+    """`t()` is Alpine's helper, not a Jinja global — and Jinja renders the call
+    as an ``UndefinedError`` only on the branch that reaches it, so a page whose
+    search found nothing (or whose modal shows a year) answers 500 while every
+    test that renders the happy path stays green.
+
+    That is exactly how two of these survived: one in each subjects page, both
+    behind a branch a smoke run never took. The suite is source-level on purpose
+    — the failure is in the template, and it costs nothing to read.
+    """
+    offenders = []
+    for page in pages():
+        source = JINJA_COMMENT.sub("", page.read_text(encoding="utf-8"))
+        for match in JINJA_T.finditer(source):
+            offenders.append(f"{page.relative_to(TEMPLATES)}: {match.group(0).strip()}")
+    assert not offenders, (
+        "`t()` is an Alpine function and cannot be called from Jinja — use "
+        "`x-text=\"t('…','…')\"` instead:\n  " + "\n  ".join(offenders))
