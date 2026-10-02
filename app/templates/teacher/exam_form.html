@@ -694,6 +694,49 @@
                         {% else %}
                         <p class="text-sm text-slate-400 italic" x-text="t('Belum ada kelas. Admin sekolah harus menambahkan kelas terlebih dahulu.','No classes yet. Your school admin has to add classes first.')"></p>
                         {% endif %}
+
+                        {# Per-pupil roster. Everyone in the chosen classes sits the
+                           paper by default; a teacher unchecks only the exceptions.
+                           The list is loaded on demand so the form stays small. #}
+                        <div x-data="examRoster('{{ exam.id if exam else '' }}')" x-init="init()" class="mt-4">
+                            <div class="flex items-center justify-between gap-2 mb-1">
+                                <label class="block text-sm font-extrabold text-slate-700" x-text="t('Murid yang ikut (opsional)','Students taking it (optional)')"></label>
+                                <span class="text-xs font-bold text-slate-500" x-show="total > 0"
+                                      x-text="selected + ' / ' + total + ' ' + t('murid dipilih','students selected')"></span>
+                            </div>
+                            <p class="text-xs text-slate-400 mb-2" x-text="t('Semua murid di kelas terpilih otomatis ikut. Hapus centang hanya untuk murid yang izin atau absen.','Every student in the chosen classes is included. Uncheck only those with permission or absent.')"></p>
+                            <input type="hidden" name="target_present" value="1">
+                            {# Only a roster that actually rendered may be read: without
+                               this, an empty selection would look like "everyone
+                               unchecked" and exclude the whole class. #}
+                            <input type="hidden" name="target_loaded" :value="classes.length > 0 ? '1' : ''">
+                            <p x-show="classes.length === 0" class="text-xs text-slate-400 italic" x-text="t('Pilih kelas dulu untuk melihat daftar murid.','Choose a class first to see its students.')"></p>
+                            <div class="space-y-2">
+                                <template x-for="cls in classes" :key="cls.class_id">
+                                    <details class="rounded-xl border border-slate-200 bg-white" :open="classes.length === 1">
+                                        <summary class="cursor-pointer px-3 py-2 text-sm font-bold text-slate-700 flex items-center justify-between gap-2">
+                                            <span x-text="cls.class_name + ' — ' + countIn(cls) + '/' + cls.students.length"></span>
+                                            <button type="button" class="text-xs text-primary-600 hover:underline shrink-0" @click.prevent="toggleClass(cls)" x-text="t('Pilih semua / kosongkan','Select all / clear')"></button>
+                                        </summary>
+                                        <div class="px-3 pb-3 space-y-0.5">
+                                            <template x-for="s in cls.students" :key="s.student_id">
+                                                <div class="flex items-center gap-2 py-1">
+                                                    <input type="checkbox" name="target_students" :value="s.student_id"
+                                                           class="w-5 h-5 text-primary-600 border-slate-300 rounded focus:ring-primary-500"
+                                                           :checked="s.included" @change="s.included = $event.target.checked; recount()">
+                                                    <span class="text-sm text-slate-700 flex-1 min-w-0 truncate" x-text="s.full_name"></span>
+                                                    <span x-show="s.submitted" class="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded shrink-0" x-text="t('sudah mengerjakan','submitted')"></span>
+                                                    <input type="text" x-show="!s.included" x-cloak x-model="s.reason"
+                                                           :name="'target_reason_' + s.student_id"
+                                                           class="w-28 sm:w-40 px-2 py-1 text-xs border border-slate-200 rounded-lg focus:ring-primary-500"
+                                                           :placeholder="t('izin / sakit','reason')">
+                                                </div>
+                                            </template>
+                                        </div>
+                                    </details>
+                                </template>
+                            </div>
+                        </div>
                     </div>
 
                     {# Progressive disclosure. Everything below still submits and is
@@ -2315,6 +2358,49 @@ function questionManager() {
         // the single implementation shared with the student's exam page, so the
         // preview a teacher checks and the player a pupil gets read a pasted link
         // the same way. See app/static/js/exam-media.js.
+    };
+}
+
+// The Target Classes roster: who, out of the chosen classes, actually sits the
+// paper. Everyone is included by default; the teacher unchecks the exceptions.
+function examRoster(examId) {
+    return {
+        examId: examId || '',
+        classes: [],
+        selected: 0,
+        total: 0,
+        async load() {
+            const ids = Array.from(document.querySelectorAll('input[name="class_ids"]:checked')).map(c => c.value);
+            if (!ids.length) { this.classes = []; this.recount(); return; }
+            const params = new URLSearchParams();
+            ids.forEach(id => params.append('class_id', id));
+            if (this.examId) params.append('exam_id', this.examId);
+            try {
+                const r = await fetch('/teacher/api/exam-roster?' + params.toString(), {headers: {'Accept': 'application/json'}});
+                if (!r.ok) { this.classes = []; this.recount(); return; }
+                const data = await r.json();
+                this.classes = (data.classes || []).map(c => ({
+                    class_id: c.class_id, class_name: c.class_name,
+                    students: (c.students || []).map(s => ({...s})),
+                }));
+                this.recount();
+            } catch (e) { this.classes = []; this.recount(); }
+        },
+        recount() {
+            this.total = this.classes.reduce((n, c) => n + c.students.length, 0);
+            this.selected = this.classes.reduce((n, c) => n + c.students.filter(s => s.included).length, 0);
+        },
+        countIn(cls) { return cls.students.filter(s => s.included).length; },
+        toggleClass(cls) {
+            const all = cls.students.every(s => s.included);
+            cls.students.forEach(s => { s.included = !all; });
+            this.recount();
+        },
+        init() {
+            document.querySelectorAll('input[name="class_ids"]').forEach(cb =>
+                cb.addEventListener('change', () => this.load()));
+            if (document.querySelectorAll('input[name="class_ids"]:checked').length) this.load();
+        },
     };
 }
 

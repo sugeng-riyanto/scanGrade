@@ -27,6 +27,7 @@ from app.services.question_types import (
 from app.services import mark_scheme
 from app.services import assignments as assignments_service
 from app.services import exam_media
+from app.services import exam_targets
 from app.services import invigilation
 from app.services import session_review
 from app.services import teacher_assignments as ta_service
@@ -119,6 +120,25 @@ def _guard_exam(supabase, exam_id, columns="id,teacher_id,school_id", as_json=Tr
                        exam_id, g.user_id, g.get("user_role"))
         return None, _deny(NO_EXAM_ACCESS, as_json, redirect_to)
     return exam, None
+
+
+def _sync_exam_targets(supabase, exam_id, class_ids, form):
+    """Write the per-pupil roster choices for a paper just created or edited.
+
+    Never raises: the exam row is already saved, and a failure to write the
+    *exceptions* must not turn a saved paper into a 500. A form with no target
+    section (an API caller, an older client) is left untouched.
+    """
+    try:
+        sid = g.get("user_school_id")
+        year = ta_service.active_school_year(supabase, sid)
+        return exam_targets.sync_from_form(
+            supabase, exam_id, sid, class_ids, form,
+            set_by=g.user_id, year_id=(year or {}).get("id"))
+    except Exception:
+        current_app.logger.warning("could not sync exam targets for %s", exam_id,
+                                   exc_info=True)
+        return {"skipped": True}
 
 
 def _question_media_from_form(i):
@@ -1199,6 +1219,7 @@ def exam_form():
         res = supabase.table("exams").insert(data).execute()
     exam_id = res.data[0]["id"]
     log_activity("create", "exam", exam_id, new_data={"title": title, "subject": subject, "total_questions": total_questions}, user_id=g.user_id)
+    _sync_exam_targets(supabase, exam_id, class_ids, request.form)
     # Handle PDF upload inline
     pdf_file = request.files.get("pdf")
     if pdf_file and pdf_file.filename:
@@ -1258,6 +1279,78 @@ def exam_form():
     return redirect("/teacher/exams" if action == "publish" else f"/teacher/exams/{exam_id}")
 
 
+@teacher_bp.route("/api/exam-roster")
+@teacher_or_admin_required
+def exam_roster():
+    """The pupils of the classes a teacher picked, for the Target Classes roster.
+
+    Loaded on demand rather than shipped with the form: a school with twenty
+    classes and six hundred pupils would otherwise embed every roster in the page
+    before the teacher has chosen a single class. One request per class selection.
+    """
+    supabase = get_supabase()
+    sid = g.get("user_school_id")
+    class_ids = [c for c in (request.args.getlist("class_id")
+                             or request.args.getlist("class_ids")) if c]
+    exam_id = request.args.get("exam_id") or ""
+    empty = {"classes": [], "totals": {"selected": 0, "total": 0}}
+    if not sid or not class_ids:
+        return jsonify(empty)
+
+    year = ta_service.active_school_year(supabase, sid)
+    # A scoped teacher may only draw a roster from their own assigned classes —
+    # the same line the write side enforces, since a page is not a guard.
+    if assignments_service.is_scoped_role(g.get("user_role")):
+        allowed = ta_service.assigned_class_ids(
+            supabase, sid, g.user_id, (year or {}).get("name"))
+        if not {str(c) for c in class_ids} <= {str(c) for c in allowed}:
+            return jsonify({"error": "Anda tidak ditugaskan untuk kelas terpilih"}), 403
+
+    names = {}
+    try:
+        rows = (supabase.table("classes").select("id, name, grade_level")
+                .eq("school_id", sid).in_("id", class_ids).execute().data or [])
+        names = {str(r["id"]): r for r in rows if r.get("id")}
+    except Exception:
+        current_app.logger.warning("roster: class names read failed", exc_info=True)
+
+    roster = exam_targets.roster_for_classes(
+        supabase, sid, class_ids, (year or {}).get("id"))
+    targets = exam_targets.targets_for_exam(supabase, exam_id) if exam_id else {}
+    submitted = exam_targets.submission_statuses(supabase, exam_id) if exam_id else {}
+
+    grouped: dict = {}
+    for entry in roster:
+        cid = str(entry.get("class_id") or "")
+        stu = str(entry.get("student_id") or "")
+        if not cid or not stu:
+            continue
+        target = targets.get(stu) or {}
+        # No row yet means "everyone" — the default the teacher then unchecks.
+        included = target.get("status") != exam_targets.EXCLUDED
+        grouped.setdefault(cid, []).append({
+            "student_id": stu,
+            "full_name": entry.get("full_name") or "-",
+            "included": included,
+            "reason": target.get("reason") or "",
+            "submitted": submitted.get(stu) in exam_targets.SUBMITTED_STATUSES,
+        })
+
+    classes = []
+    for cid, students in grouped.items():
+        info = names.get(cid) or {}
+        classes.append({
+            "class_id": cid,
+            "class_name": info.get("name") or info.get("grade_level") or "-",
+            "students": sorted(students, key=lambda s: s["full_name"].lower()),
+        })
+    classes.sort(key=lambda c: c["class_name"].lower())
+    total = sum(len(c["students"]) for c in classes)
+    selected = sum(1 for c in classes for s in c["students"] if s["included"])
+    return jsonify({"classes": classes,
+                    "totals": {"selected": selected, "total": total}})
+
+
 @teacher_bp.route("/exams/<exam_id>", methods=["GET", "POST", "DELETE"])
 @subscription_write_required
 @teacher_or_admin_required
@@ -1290,7 +1383,12 @@ def exam_detail(exam_id):
         # the row (it would be expired long before anyone read it again).
         exam_data["question_audio"] = exam_media.with_media_urls(
             exam_data.get("question_audio"), subject=g.user_id, exam_id=exam_id)
+        # The saved per-pupil list, so the roster opens on the state it was left in
+        # rather than resetting to "everyone ticked" (which would silently undo an
+        # exclusion the teacher made).
+        saved_targets = exam_targets.targets_for_exam(supabase, exam_id)
         return render_template("teacher/exam_form.html", exam=exam_data, subjects=subjects, classes=classes,
+                               saved_targets=saved_targets,
                                builder_defaults=_builder_defaults(supabase, g.user_id, subjects, classes))
 
     title = request.form.get("title")
@@ -1420,6 +1518,8 @@ def exam_detail(exam_id):
         for key in ["question_weights", "question_texts", "anti_cheat_enabled", "penalty_per_violation", "max_violations", "auto_submit_on_max", "fullscreen_required", "randomize_questions", "randomize_options", "watermark_name", "block_copy_paste", "block_right_click", "block_screenshot", "allow_calculator", "subject_id", "class_ids", "start_at", "end_at", "auto_submit_on_window_end", "is_template", "source_exam_id", "max_attempts", "publish_mode", "question_pages", "question_cognitive"]:
             data.pop(key, None)
         supabase.table("exams").update(data).eq("id", exam_id).execute()
+
+    _sync_exam_targets(supabase, exam_id, class_ids, request.form)
 
     # Process PDF: upload to Supabase, generate page images for student canvas
     pdf_preview = request.form.get("pdf_preview_url", "")

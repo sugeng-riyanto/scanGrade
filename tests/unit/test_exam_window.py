@@ -31,6 +31,7 @@ from app.utils import exam_window
 ROOT = Path(__file__).resolve().parents[2]
 FORM = (ROOT / "app" / "templates" / "teacher" / "exam_form.html").read_text(encoding="utf-8")
 TEACHER = (ROOT / "app" / "routes" / "teacher.py").read_text(encoding="utf-8")
+EXAM_TARGETS = (ROOT / "app" / "services" / "exam_targets.py").read_text(encoding="utf-8")
 
 NOW = datetime(2026, 9, 19, 12, 0, tzinfo=timezone.utc)
 
@@ -204,10 +205,17 @@ class TestTheFormAndTheRoutesAgree:
     def test_every_checkbox_the_form_posts_is_a_field_the_routes_read(self):
         """"Checklist and unchecklist work" is exactly this: a box the page posts and
         the handler never reads is a toggle that does nothing. Unchecked boxes post
-        nothing at all, so the route's default decides the off state."""
+        nothing at all, so the route's default decides the off state.
+
+        The per-pupil roster (`target_students`) is read by the module that owns the
+        roster, `exam_targets.sync_from_form`, which the grade/handler calls — so the
+        read is looked for there as well as in the teacher routes; a toggle the page
+        posts and *no* module reads is still the failure this guards.
+        """
+        readers = TEACHER + EXAM_TARGETS
         missing = sorted(n for n in self.posted_toggles()
-                         if f'request.form.get("{n}"' not in TEACHER
-                         and f'request.form.getlist("{n}"' not in TEACHER)
+                         if f'get("{n}"' not in readers
+                         and f'getlist("{n}"' not in readers)
         assert not missing, (
             f"the form posts {missing}, which no teacher route reads — the toggle "
             f"would have no effect")

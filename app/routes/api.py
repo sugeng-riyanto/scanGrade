@@ -901,7 +901,7 @@ def student_sync_draft():
         from app.utils.auth import get_supabase as _gs
         _sb = _gs()
         _exam_check = row_or_none(
-            _sb.table("exams").select("school_id, class_ids, is_published, status")
+            _sb.table("exams").select("school_id, class_ids, target_mode, is_published, status")
             .eq("id", exam_id).maybe_single().execute()
         )
         allowed, _why = exam_sitting_allowed(_sb, _exam_check or {}, exam_id, g.user_id)
