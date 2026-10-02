@@ -255,6 +255,29 @@ def owned_subject_ids(supabase, school_id, subject_ids) -> set:
     return {str(r["id"]) for r in rows}
 
 
+def disabled_pairs(supabase, school_id, pairs) -> set:
+    """The *(class, subject)* pairs this school has switched **off**.
+
+    A subject is offered by every class unless a ``class_subjects`` row says it
+    is not (see ``subject_levels.mapped_class_ids``), so the pair is blocked
+    exactly when a row exists with ``is_active = false``. Reading only the
+    subjects in `pairs` keeps it one query for a whole matrix save.
+    """
+    pairs = {_pair_key(c, s) for c, s in (pairs or []) if c and s}
+    subject_ids = sorted({s for _c, s in pairs})
+    if not subject_ids:
+        return set()
+    rows = (supabase.table("class_subjects")
+            .select("class_id, subject_id, is_active")
+            .eq("school_id", school_id).in_("subject_id", subject_ids)
+            .execute().data or [])
+    off = {
+        _pair_key(r.get("class_id"), r.get("subject_id"))
+        for r in rows if not r.get("is_active", True)
+    }
+    return pairs & off
+
+
 def teacher_in_school(supabase, school_id, teacher_id) -> bool:
     rows = (supabase.table("profiles").select("id, role")
             .eq("id", teacher_id).eq("school_id", school_id)
@@ -306,6 +329,12 @@ def validate_targets(supabase, school_id, teacher_id, pairs):
         return "Ada kelas yang bukan milik sekolah ini"
     if not subject_ids <= owned_subject_ids(supabase, school_id, subject_ids):
         return "Ada mata pelajaran yang bukan milik sekolah ini"
+    # A subject can be switched off for one class and offered by the next (a
+    # school unticks Geography for a language class). Assigning it anyway would
+    # put a teacher in a room the subject is not taught in, so it is refused the
+    # same way a foreign-school id is.
+    if disabled_pairs(supabase, school_id, pairs):
+        return "Ada mata pelajaran yang tidak diaktifkan untuk kelasnya"
     return None
 
 

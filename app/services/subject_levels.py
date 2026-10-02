@@ -56,14 +56,38 @@ def _rows(supabase, table, columns, filters=()):
 
 # ── the offering ─────────────────────────────────────────────────────────────
 
-def mapped_class_ids(supabase, school_id, subject_id) -> set:
-    """The classes that currently offer this subject, as ``{class_id}``."""
+def mapped_class_ids(supabase, school_id, subject_id, all_class_ids=None) -> set:
+    """The classes that offer this subject, as ``{class_id}``.
+
+    Two questions, and the `all_class_ids` argument is which one is being asked.
+
+    **Without it**, the caller wants the stored rows: the classes an admin has
+    ticked. This is the narrow question, and it is what a page that only has an
+    id to show asks.
+
+    **With it**, the caller wants the *offering* — and a pair is then offered
+    **unless a row says it is not**. That is what "every subject ticked for every
+    class by default" means honestly: absence means yes. Backfilling every pair
+    for a school would write `M x N` rows on its first day, and the next class a
+    school creates would be missing from the backfill and so silently excluded
+    from every subject. Turning one pair off writes exactly one row, which is the
+    only row anybody needs to write.
+
+    A subject with no rows is therefore offered everywhere, which is also how the
+    page read before it had a mapping at all — so a school that never opens the
+    panel sees nothing change.
+    """
+    eff = [] if all_class_ids is None else [("in_", "class_id", list(all_class_ids))]
     rows = _rows(supabase, "class_subjects", "class_id, is_active", [
         ("eq", "school_id", school_id),
         ("eq", "subject_id", subject_id),
+        *eff,
     ])
-    return {str(r["class_id"]) for r in rows
-            if r.get("class_id") and r.get("is_active", True)}
+    if all_class_ids is None:
+        return {str(r["class_id"]) for r in rows
+                if r.get("class_id") and r.get("is_active", True)}
+    closed = {str(r["class_id"]) for r in rows if not r.get("is_active", True)}
+    return {str(c) for c in all_class_ids if str(c) not in closed}
 
 
 def save_mapping(supabase, school_id, subject_id, class_ids, created_by=None):

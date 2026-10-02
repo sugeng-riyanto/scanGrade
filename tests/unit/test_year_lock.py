@@ -141,6 +141,15 @@ EXEMPT = {
         "which classes a subject is offered to; a mapping, not a year's marks",
     "admin_sekolah_bp /subjects/<subject_id>/levels":
         "a pupil's basic/intermediate/advanced track; a label, not a year's marks",
+    # KKM is year-scoped by *argument* (the running school year), not by a
+    # resource id, so there is no id for the decorator to resolve. The service
+    # asks the question itself: subject_kkm.set_kkm / clear_override call
+    # _year_is_editable and refuse a closed year with reason `year_closed`
+    # before any write.
+    "admin_sekolah_bp /subjects/<subject_id>/kkm":
+        "subject_kkm refuses a closed year itself (year_closed), before writing",
+    "admin_sekolah_bp /subjects/<subject_id>/kkm/<grade_level>/clear":
+        "subject_kkm refuses a closed year itself (year_closed), before clearing",
     "principal_bp /vice-principal/assessment-periods/save":
         "the school's assessment calendar; a period is the subject, not the marks "
         "inside a year",
