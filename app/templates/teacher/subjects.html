@@ -95,7 +95,9 @@
     {% else %}
     <div class="text-center py-12 text-slate-400 font-medium">
         {% if q %}
-        <span>{{ t('Tidak ada mapel dengan nama', 'No subjects matching') }} "{{ q }}"</span>
+        {# `t()` lives in Alpine, not Jinja — calling it from Jinja renders as an
+           UndefinedError the moment this branch is reached. #}
+        <span x-text="t('Tidak ada mapel dengan nama','No subjects matching')"></span> "{{ q }}"
         {% elif can_manage %}
         <span x-text="t('Belum ada mata pelajaran. Klik Tambah Mapel untuk memulai.','No subjects yet. Click Add Subject to get started.')"></span>
         {% else %}

@@ -95,7 +95,10 @@
     {% else %}
     <div class="text-center py-12 text-slate-400 font-medium">
         {% if q %}
-        <span>{{ t('Tidak ada mapel dengan nama','No subject named') }} "{{ q }}"</span>
+        {# `t()` is Alpine's helper, not a Jinja global: calling it from Jinja is
+           an UndefinedError at render, so bilingual copy inside Jinja must go
+           through x-text instead. #}
+        <span x-text="t('Tidak ada mapel dengan nama','No subject named')"></span> "{{ q }}"
         {% else %}
         <span x-text="t('Belum ada mata pelajaran','No subjects yet')"></span>
         {% endif %}
@@ -110,7 +113,7 @@
                     <h3 class="font-extrabold text-stone-800 truncate">
                         <span x-text="t('Kelas & Level','Classes & Level')"></span> — <span x-text="subjectName"></span>
                     </h3>
-                    <p class="text-xs text-stone-500" x-show="yearName" x-text="'{{ t('Tahun ajaran','School year') }}: ' + yearName"></p>
+                    <p class="text-xs text-stone-500" x-show="yearName" x-text="t('Tahun ajaran','School year') + ': ' + yearName"></p>
                     <p class="text-xs text-amber-600" x-show="!yearName" x-text="t('Sekolah ini belum punya tahun ajaran — level disimpan tanpa label tahun.','This school has no year yet — levels are saved without a year label.')"></p>
                 </div>
                 <button type="button" @click="close()" class="text-stone-400 hover:text-stone-700 shrink-0"><i class="fas fa-times"></i></button>
@@ -167,9 +170,9 @@
                                         <span class="text-sm text-stone-700 truncate" x-text="st.full_name"></span>
                                         <select class="text-xs border border-stone-200 rounded-lg px-2 py-1 font-bold text-stone-600 shrink-0"
                                                 :value="st.level" @change="setLevel(cid, st.student_id, $event.target.value)">
-                                            <option value="basic">{{ t('Dasar','Basic') }} (basic)</option>
-                                            <option value="intermediate">{{ t('Menengah','Intermediate') }} (intermediate)</option>
-                                            <option value="advanced">{{ t('Lanjutan','Advanced') }} (advanced)</option>
+                                            <option value="basic" x-text="t('Dasar','Basic') + ' (basic)'"></option>
+                                            <option value="intermediate" x-text="t('Menengah','Intermediate') + ' (intermediate)'"></option>
+                                            <option value="advanced" x-text="t('Lanjutan','Advanced') + ' (advanced)'"></option>
                                         </select>
                                     </div>
                                 </template>
