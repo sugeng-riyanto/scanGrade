@@ -120,3 +120,59 @@ def test_the_blanket_password_line_is_scoped_to_school_accounts():
     assert "Password akun sekolah" in page or "Password for school accounts" in page, (
         "the blanket line was removed without being replaced by a scoped one, so "
         "the school accounts no longer say what their password is")
+
+
+#: `login_link('<url>', …)` — the card's button.
+LOGIN_LINK_RE = re.compile(r"login_link\(\s*'(?P<url>[^']+)'")
+#: The role a card is for, when it names one (`/auth/login-user?role=guru`).
+DOOR_ROLE_RE = re.compile(r"[?&]role=(?P<role>[a-z_]+)")
+
+
+def _wrong_doors(page: str):
+    """Every card whose button walks to a door another role answers."""
+    from app.utils.auth import login_door_for
+
+    wrong = []
+    for match in LOGIN_LINK_RE.finditer(page):
+        url = match.group("url")
+        path = url.split("?", 1)[0]
+        role_match = DOOR_ROLE_RE.search(url)
+        if role_match:
+            expected = login_door_for(role_match.group("role"))
+        else:
+            # The super-admin and school-admin cards carry no `role`: both sign
+            # in at the admin door, and `login_door_for` returns it for both.
+            expected = login_door_for("admin_sekolah")
+        if path != expected:
+            wrong.append((url, expected))
+    return wrong
+
+
+def test_every_card_links_to_the_door_that_role_actually_signs_in_at():
+    """A card is a promise about which page the login works on.
+
+    `/auth/login-user` is the guru/murid door and turns `super_admin` and
+    `admin_sekolah` away *by design* (`login_user_wrong_page`). So an admin card
+    pointing at it invites a trainee to type a correct password on a page that
+    will refuse it — and the refusal reads as "your password is wrong", which is
+    how this class of defect gets reported as broken credentials. It also cost a
+    live measurement an afternoon: every seeded account was probed at one door and
+    four correct logins were reported as failures.
+    """
+    page = DEMO_HTML.read_text(encoding="utf-8")
+    assert LOGIN_LINK_RE.search(page), "no login_link(...) calls found"
+    wrong = _wrong_doors(page)
+    assert not wrong, (
+        "these demo cards link to a door that refuses their role "
+        f"(url, door it needs): {wrong}")
+
+
+def test_the_door_rule_would_catch_the_defect_it_describes():
+    """Pointed at the real text, so the guard above cannot be vacuous."""
+    page = DEMO_HTML.read_text(encoding="utf-8")
+    mutated = page.replace(
+        "{{ login_link('/auth/login-user?role=guru'",
+        "{{ login_link('/auth/login?role=guru'")
+    assert mutated != page, "the guru card moved — update this rule, do not delete it"
+    assert _wrong_doors(mutated), (
+        "a guru card moved onto the admin door and the rule did not notice")
