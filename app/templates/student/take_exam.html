@@ -2323,7 +2323,8 @@ function examApp(duration, totalQ) {
         _heartbeat() {
             if (this.submitted) return;
             fetch('/student/heartbeat/{{ exam.id }}', {
-                method: 'POST', headers: {'Accept': 'application/json'},
+                method: 'POST',
+                headers: {'Accept': 'application/json', 'X-CSRF-Token': this._csrfToken()},
             }).then(r => r.ok ? r.json() : null)
               .then(d => { if (d) this._applyServerClock(d); })
               .catch(() => {});

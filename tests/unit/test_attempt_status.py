@@ -381,6 +381,15 @@ class TestItIsWired:
         src = TEMPLATE.read_text(encoding="utf-8")
         assert "/student/heartbeat/" in src, "the page never sends a heartbeat"
 
+    def test_the_heartbeat_carries_the_csrf_token(self):
+        """A POST without it is a 403 — the ping would never land."""
+        src = TEMPLATE.read_text(encoding="utf-8")
+        block = src[src.index("fetch('/student/heartbeat/"):]
+        block = block[:block.index("})")]
+        assert "X-CSRF-Token" in block, (
+            "the heartbeat POST must send the CSRF token or the server refuses it"
+        )
+
     def test_the_page_resyncs_from_the_status_endpoint(self):
         src = TEMPLATE.read_text(encoding="utf-8")
         assert "/student/attempt-status/" in src, (
