@@ -1742,6 +1742,25 @@ const QUESTION_OPTIONS = {{ (question_options or {}) | tojson | safe }};
 const SG_QT = {{ q_vocabulary() | tojson | safe }};
 function sgIsObjective(type) { return SG_QT.objective.indexOf(type || SG_QT.default) > -1; }
 function sgKind(type) { return SG_QT.kinds[type || SG_QT.default] || SG_QT.kinds[SG_QT.default]; }
+// ── a sitting's own storage ─────────────────────────────────────────────────
+// The draft, the pending submit, the clock stamp, the agreement flag and the tab
+// claim used to be keyed by exam id alone, so every key on this device belonged to
+// *whoever opened this exam last*. A shared classroom machine then hands the next
+// pupil the previous pupil's answers: the draft is restored into the page, and a
+// pending submit is sent as theirs. Each per-sitting key now carries the sitter's
+// own id, so one device holds several pupils' keys and they never meet.
+const SG_EXAM = '{{ exam.id }}';
+const SG_STUDENT = {{ (student_key or '') | tojson }};
+function sgLS(prefix) { return prefix + SG_EXAM + '__' + SG_STUDENT; }
+// A key with no student suffix can only be one a previous pupil wrote — this page
+// never produced one. Remove it once on load, so an upgrade cannot read a stale
+// draft that is not its author's. The server row still holds this pupil's answers.
+(function sgPurgeLegacySittingKeys() {
+    ['exam_draft_', 'exam_pending_submit_', 'exam_started_', 'exam_seen_',
+     'sg_agreed_', 'sg_exam_tab_'].forEach(function (prefix) {
+        try { localStorage.removeItem(prefix + SG_EXAM); } catch (e) {}
+    });
+})();
 // A time signal is a finite number, or it is nothing at all. JavaScript reads
 // `null <= 0` as **true**, so a `server_time_left` that arrived as JSON null used
 // to be read as an expired clock and force-submit the paper; the same coercion made
@@ -1784,11 +1803,11 @@ function examApp(duration, totalQ) {
     // written at the door still carries the student's own start. The server stamps
     // the sitting itself and never reads the claim for the deadline.
     var serverStart = EXAM_STARTED_AT ? new Date(EXAM_STARTED_AT).getTime() : null;
-    var localStart = parseInt(localStorage.getItem('exam_started_' + '{{ exam.id }}'));
+    var localStart = parseInt(localStorage.getItem(sgLS('exam_started_')));
     if (!localStart && serverStart) {
-        localStorage.setItem('exam_started_' + '{{ exam.id }}', String(serverStart));
+        localStorage.setItem(sgLS('exam_started_'), String(serverStart));
     } else if (!localStart && !serverStart) {
-        localStorage.setItem('exam_started_' + '{{ exam.id }}', String(Date.now()));
+        localStorage.setItem(sgLS('exam_started_'), String(Date.now()));
     }
     return {
         timeLeft: sgCountdown(EXAM_SECONDS_LEFT),
@@ -2125,7 +2144,7 @@ function examApp(duration, totalQ) {
             sure: false,
         },
         // Agreement widget
-        showExamAgreement: (function() { try { return !localStorage.getItem('sg_agreed_' + '{{ exam.id }}'); } catch(e) { return true; } })(),
+        showExamAgreement: (function() { try { return !localStorage.getItem(sgLS('sg_agreed_')); } catch(e) { return true; } })(),
         agreed: false,
         examRules: {{ (exam.get('exam_rules') or '') | tojson | safe }},
         // Drafting instruments folded behind one button on a phone (see the
@@ -2308,7 +2327,7 @@ function examApp(duration, totalQ) {
             this.claimExamFocus();
             this.seedViolationCount();
         },
-        _tabKey() { return 'sg_exam_tab_' + '{{ exam.id }}'; },
+        _tabKey() { return sgLS('sg_exam_tab_'); },
         // ─── Exactly one tab enforces ───────────────────────────────────────
         // Two tabs of the same exam each counted the other as a violation, so an
         // accidental second tab could burn through max_violations and auto-submit
@@ -2595,7 +2614,7 @@ function examApp(duration, totalQ) {
         // comes back to a lower number deserves the sentence, whether or not
         // anything was recorded about their absence.
         _awayStampKey() {
-            return 'exam_seen_' + '{{ exam.id }}';
+            return sgLS('exam_seen_');
         },
         // Whether a gap is worth a sentence, and in what it is measured. The two
         // refusals are the two ways this could be a lie: a paper with no deadline
@@ -4101,16 +4120,16 @@ function examApp(duration, totalQ) {
                     console.warn('localStorage draft too large, saving light');
                     const light = this.getAnswersLight();
                     payload.answers = light;
-                    localStorage.setItem('exam_draft_' + '{{ exam.id }}', JSON.stringify(payload));
+                    localStorage.setItem(sgLS('exam_draft_'), JSON.stringify(payload));
                 } else {
-                    localStorage.setItem('exam_draft_' + '{{ exam.id }}', json);
+                    localStorage.setItem(sgLS('exam_draft_'), json);
                 }
             } catch(e) {
                 if (e.name === 'QuotaExceededError' || e.code === 22) {
                     console.warn('localStorage quota exceeded, saving light');
                     try {
                         const light = this.getAnswersLight();
-                        localStorage.setItem('exam_draft_' + '{{ exam.id }}', JSON.stringify({ answers: light, savedAt: Date.now(), examId: '{{ exam.id }}', light: true }));
+                        localStorage.setItem(sgLS('exam_draft_'), JSON.stringify({ answers: light, savedAt: Date.now(), examId: '{{ exam.id }}', light: true }));
                     } catch(e2) {}
                 }
             }
@@ -4210,7 +4229,7 @@ function examApp(duration, totalQ) {
                     }
                 });
             });
-            var ls = localStorage.getItem('exam_started_' + '{{ exam.id }}');
+            var ls = localStorage.getItem(sgLS('exam_started_'));
             if (ls) body.started_at = parseInt(ls);
             fetch('/api/student/sync-draft', {
                 method: 'POST',
@@ -4260,7 +4279,7 @@ function examApp(duration, totalQ) {
             const data = this.getAnswersWithCanvas();
             this._canvasSyncInFlight = true;
             var body = { exam_id: '{{ exam.id }}', answers: data, light: false };
-            var ls = localStorage.getItem('exam_started_' + '{{ exam.id }}');
+            var ls = localStorage.getItem(sgLS('exam_started_'));
             if (ls) body.started_at = parseInt(ls);
             fetch('/api/student/sync-draft', {
                 method: 'POST',
@@ -4273,7 +4292,7 @@ function examApp(duration, totalQ) {
         },
         loadDraft() {
             try {
-                const pendingSubmit = localStorage.getItem('exam_pending_submit_' + '{{ exam.id }}');
+                const pendingSubmit = localStorage.getItem(sgLS('exam_pending_submit_'));
                 if (pendingSubmit) {
                     const parsed = JSON.parse(pendingSubmit);
                     if (navigator.onLine) {
@@ -4282,7 +4301,7 @@ function examApp(duration, totalQ) {
                         return;
                     }
                 }
-                const saved = localStorage.getItem('exam_draft_' + '{{ exam.id }}');
+                const saved = localStorage.getItem(sgLS('exam_draft_'));
                 if (!saved) return;
                 const data = JSON.parse(saved);
                 if (!data.answers) return;
@@ -4373,7 +4392,7 @@ function examApp(duration, totalQ) {
             if (window.markExamSubmitted) window.markExamSubmitted();
             const answers = this.getAnswers();
             if (!navigator.onLine) {
-                localStorage.setItem('exam_pending_submit_' + '{{ exam.id }}', JSON.stringify({ answers_json: answers, timestamp: Date.now() }));
+                localStorage.setItem(sgLS('exam_pending_submit_'), JSON.stringify({ answers_json: answers, timestamp: Date.now() }));
                 this.syncStatus = 'offline';
                 this.setSyncLabel('waiting');
                 alert(sgT('Internet terputus. Jawaban tersimpan lokal dan akan otomatis dikirim saat internet kembali tersedia. JANGAN TUTUP halaman ini.','No connection. Your answers are saved locally and will be sent automatically once the internet is back. DO NOT CLOSE this page.'));
@@ -4391,7 +4410,7 @@ function examApp(duration, totalQ) {
             this._offlinePollTimer = setInterval(() => {
                 if (navigator.onLine) {
                     clearInterval(this._offlinePollTimer);
-                    const pending = localStorage.getItem('exam_pending_submit_' + '{{ exam.id }}');
+                    const pending = localStorage.getItem(sgLS('exam_pending_submit_'));
                     if (pending) {
                         const parsed = JSON.parse(pending);
                         this.syncStatus = 'saving';
@@ -4412,8 +4431,8 @@ function examApp(duration, totalQ) {
             })
             .then(r => {
                 if (r.ok) {
-                    localStorage.removeItem('exam_pending_submit_' + '{{ exam.id }}');
-                    localStorage.removeItem('exam_draft_' + '{{ exam.id }}');
+                    localStorage.removeItem(sgLS('exam_pending_submit_'));
+                    localStorage.removeItem(sgLS('exam_draft_'));
                     window.location.href = '/student/results';
                 } else {
                     return r.json().then(d => {
@@ -4434,7 +4453,7 @@ function examApp(duration, totalQ) {
                 this.submitting = false;
                 this.syncStatus = 'offline';
                 this.setSyncLabel('offline');
-                localStorage.setItem('exam_pending_submit_' + '{{ exam.id }}', JSON.stringify({ answers_json: answers, timestamp: Date.now() }));
+                localStorage.setItem(sgLS('exam_pending_submit_'), JSON.stringify({ answers_json: answers, timestamp: Date.now() }));
                 alert(sgT('Internet terputus. Jawaban tersimpan dan akan otomatis dikirim saat internet kembali. JANGAN TUTUP halaman ini.','No connection. Your answers are saved and will be sent automatically once the internet is back. DO NOT CLOSE this page.'));
                 this._startOfflineSubmitPoll();
             });
@@ -4604,7 +4623,7 @@ function examApp(duration, totalQ) {
         },
         agreeExam() {
             this.showExamAgreement = false;
-            try { localStorage.setItem('sg_agreed_' + '{{ exam.id }}', '1'); } catch(e) {}
+            try { localStorage.setItem(sgLS('sg_agreed_'), '1'); } catch(e) {}
             // Ask for fullscreen first — this click is the user gesture the
             // browser requires — then arm, which is what starts watching it.
             this.requestExamFullscreen();
