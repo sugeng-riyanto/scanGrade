@@ -3289,6 +3289,55 @@ if [ "$HEALTHY" = "1" ] && [ -f "$SMOKE_CONF" ]; then
   esac
 fi
 
+# ── Gate 4b: does the pupil's exam page actually render in a browser? ───────
+# A blank exam page is invisible to every other gate. On 2026-10-03
+# /student/exams/<id> shipped blank: the route answered 200 with the whole paper,
+# the fixture was present, the smoke test read the right panels — and the page was
+# white, because the failure was script *order* in the browser (a deferred helper
+# that Alpine started before it, so `examApp()` threw `ReferenceError: sgExamMedia
+# is not defined` and the whole Alpine scope died). No server-side gate can see
+# that; only a browser can. So this gate opens the demo exam as the demo pupil in a
+# headless browser and asks the rendered DOM.
+#
+# It reuses Gate 4's own credentials and base URL — the smoke test already signs a
+# pupil in, and the demo exam is on that pupil's list — so there is no second conf
+# to keep in step. Exit 2 is "could not measure" (no browser, no sittable demo
+# exam, the page did not load): never a rollback, an unmeasured release is not a
+# bad one, and it is said loudly rather than passed off as a pass. Exit 1 is a real
+# finding and rolls back only when the box is armed to enforce it
+# (RENDER_ENFORCE), the way the smoke and touch gates are.
+if [ "$HEALTHY" = "1" ] && [ -f "$SMOKE_CONF" ]; then
+  RENDER_ENV=()
+  [ -n "${SMOKE_BASE_URL:-}" ] && RENDER_ENV+=("RENDER_BASE_URL=${SMOKE_BASE_URL}")
+  [ -n "${SMOKE_MURID:-}" ] && RENDER_ENV+=("RENDER_STUDENT=${SMOKE_MURID}")
+  [ "${SMOKE_INSECURE:-}" = "true" ] && RENDER_ENV+=("RENDER_INSECURE=true")
+
+  RENDER_OUT=$(as_owner env "${RENDER_ENV[@]}" "$REPO/.venv/bin/python" \
+      "$REPO/deploy/exam_render_gate.py" 2>&1)
+  RENDER_RC=$?
+
+  case "$RENDER_RC" in
+    0)
+      log "$(printf '%s\n' "$RENDER_OUT" | grep -m1 '^exam render gate: OK' || echo 'exam render gate: OK')" ;;
+    2)
+      log "exam render gate could not measure (exit 2) — this release's pupil exam"
+      log "    page was NOT rendered in a browser:"
+      printf '%s\n' "$RENDER_OUT" | grep -E '^    ' | head -3 | sed 's/^/  /' ;;
+    *)
+      if [ "${RENDER_ENFORCE:-false}" = "true" ]; then
+        log "exam render gate FAILED — the pupil's exam page did not render:"
+        printf '%s\n' "$RENDER_OUT" | grep -E '^exam render gate|^    - ' | head -8 | sed 's/^/    /'
+        HEALTHY=0
+        FAIL_REASON="exam render gate (the pupil's exam page did not render)"
+        FAIL_DETAIL=$(printf '%s\n' "$RENDER_OUT" | grep -E '^exam render gate: FAILED|^    - ')
+      else
+        log "exam render gate FAILED but RENDER_ENFORCE is not 'true' — keeping the release:"
+        printf '%s\n' "$RENDER_OUT" | grep -E '^exam render gate|^    - ' | head -8 | sed 's/^/    /'
+        log "    to enforce it: RENDER_ENFORCE=\"true\" in $SMOKE_CONF"
+      fi ;;
+  esac
+fi
+
 # ── Gate 5: do the numbers on the landing page still describe this box? ──────
 # The page publishes a capacity table (concurrent students -> p50, p95, errors)
 # that was measured against this deployment once, by hand, and never again. A

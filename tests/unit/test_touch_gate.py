@@ -199,6 +199,49 @@ class TestFindingABrowser:
         assert gate().locate_browser({"SG_CHROME": "/nope/chrome"}) is None
 
 
+# ── the browser is started where it can actually run ─────────────
+
+
+class TestTheBrowserStartsWithAWritableHome:
+    """Two box facts a developer checkout never sees, both fatal in production.
+
+    Chrome writes under `$HOME` (crash reports, mimeapps, its singleton lock)
+    even when `--user-data-dir` is given. The gates run as the checkout owner via
+    `runuser`, and a service account's home need not exist — on the VPS
+    `scangrade`'s does not — so the browser died before offering a debug target
+    and the gate answered "could not measure" while looking armed. And a browser
+    started as root refuses its own sandbox, so a root-run gate never reaches a
+    debug port either.
+    """
+
+    def test_the_profile_is_the_home_it_is_given(self, tmp_path):
+        argv, env = gate().browser_launch(
+            "/usr/bin/google-chrome", 9222, str(tmp_path)
+        )
+        assert env["HOME"] == str(tmp_path), (
+            "Chrome needs a writable HOME; the gate must hand it the profile it "
+            "already created rather than trusting the account's home to exist"
+        )
+        assert f"--user-data-dir={tmp_path}" in argv
+
+    def test_root_turns_off_the_sandbox(self, monkeypatch):
+        g = gate()
+        monkeypatch.setattr(g.os, "geteuid", lambda: 0, raising=False)
+        argv, _ = g.browser_launch("/usr/bin/google-chrome", 9222, "/tmp/sg-p")
+        assert "--no-sandbox" in argv, (
+            "a root-run browser refuses to start without --no-sandbox, so the gate "
+            "can never see a debug target"
+        )
+
+    def test_a_normal_user_keeps_the_sandbox(self, monkeypatch):
+        g = gate()
+        monkeypatch.setattr(g.os, "geteuid", lambda: 1000, raising=False)
+        argv, _ = g.browser_launch("/usr/bin/google-chrome", 9222, "/tmp/sg-p")
+        assert "--no-sandbox" not in argv, (
+            "the sandbox must stay on for an ordinary deploy user"
+        )
+
+
 # ── exit codes: pass, a finding, or nothing measurable ───────────
 
 

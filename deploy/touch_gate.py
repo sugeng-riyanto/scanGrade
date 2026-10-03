@@ -131,6 +131,46 @@ def locate_browser(env=None, which=shutil.which, exists=None):
     return None
 
 
+def browser_launch(browser, port, profile):
+    """The argv and environment to start a headless browser the gate can drive.
+
+    Two things the box taught, both invisible in a developer checkout:
+
+    * **Chrome needs a writable `HOME`.** It writes crash reports, its mimeapps
+      list and its singleton lock under `$HOME` even when `--user-data-dir` is
+      given. The gates run as the checkout's owner via `runuser`, and a service
+      account's home need not exist — on the VPS `scangrade`'s does not — so
+      Chrome died before offering a debug target and the gate answered "could
+      not measure" on every release while looking armed. The profile the gate
+      already creates is the one directory it knows is writable, so it becomes
+      `HOME` too.
+    * **The sandbox is unavailable to root.** A browser started as root refuses
+      to run it (`Running as root without --no-sandbox is not supported`) and
+      never reaches its debug port. It is turned off only when the gate is root,
+      so an ordinary deploy user keeps the sandbox.
+
+    Returns `(argv, env)`; `profile` is used for both the data dir and `HOME`.
+    """
+    argv = [
+        browser,
+        "--headless=new",
+        f"--remote-debugging-port={port}",
+        f"--user-data-dir={profile}",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--disable-gpu",
+        "--hide-scrollbars",
+        "--force-device-scale-factor=1",
+        "--disable-features=Translate",
+        "about:blank",
+    ]
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        argv.append("--no-sandbox")
+    env = dict(os.environ)
+    env["HOME"] = profile
+    return argv, env
+
+
 def findings(controls):
     """The controls under the floor, each naming the axis that failed.
 
@@ -268,22 +308,12 @@ async def _measure(base_url, browser, cookies, widths):
 
     port = _free_port()
     profile = tempfile.mkdtemp(prefix="sg-touch-")
+    argv, env = browser_launch(browser, port, profile)
     proc = subprocess.Popen(
-        [
-            browser,
-            "--headless=new",
-            f"--remote-debugging-port={port}",
-            f"--user-data-dir={profile}",
-            "--no-first-run",
-            "--no-default-browser-check",
-            "--disable-gpu",
-            "--hide-scrollbars",
-            "--force-device-scale-factor=1",
-            "--disable-features=Translate",
-            "about:blank",
-        ],
+        argv,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
+        env=env,
     )
     try:
         target = None
