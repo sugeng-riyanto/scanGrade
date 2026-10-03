@@ -1725,9 +1725,18 @@ body.sg-exam .sidebar-overlay { display: none !important; }
     </div>
 </div>
 {% endblock %}
+{# Loaded **synchronously**, not `defer`, and that is load-bearing. Alpine itself
+   is loaded with `defer`; by the time a deferred script runs the document is no
+   longer `loading`, so Alpine starts in the very next microtask — *before* the
+   next deferred script executes. `examApp(...)` reads `sgExamMedia` while it is
+   built, so a deferred `exam-media.js` left it undefined and the whole page's
+   Alpine scope died on `ReferenceError: sgExamMedia is not defined` (a blank
+   white exam). A classic script runs during parsing, before Alpine's deferred
+   execution, so the globals exist when `x-data` is evaluated — the same way the
+   exam builder loads this file. See tests/unit/test_exam_script_order.py. #}
 {% block scripts %}
-<script defer src="/static/js/exam-media.js"></script>
-<script defer src="/static/js/tools.js"></script>
+<script src="/static/js/exam-media.js"></script>
+<script src="/static/js/tools.js"></script>
 <script>
 const QUESTION_AUDIO = {{ (exam.question_audio or {}) | tojson | safe }};
 const QUESTION_CANVAS = {{ (exam.question_canvas or {}) | tojson | safe }};
