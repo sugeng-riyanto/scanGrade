@@ -318,6 +318,8 @@ window.sgSavePrefs = function (patch) {
             <a href="/admin-sekolah/classes" class="nav-item {% if request.path == '/admin-sekolah/classes' %}active{% endif %}"><i class="fas fa-school"></i><span x-text="t('Kelas','Classes')"></span></a>
             <a href="/admin-sekolah/subjects" class="nav-item {% if request.path == '/admin-sekolah/subjects' %}active{% endif %}"><i class="fas fa-book"></i><span x-text="t('Mata Pelajaran','Subjects')"></span></a>
             <a href="/admin-sekolah/promote" class="nav-item {% if request.path == '/admin-sekolah/promote' %}active{% endif %}"><i class="fas fa-arrow-up"></i><span x-text="t('Naik Kelas','Promote Students')"></span></a>
+            {# Matriks pengawas ujian, di pintu admin: sekolah tanpa wakil kepala tetap bisa menugaskan pengawas. #}
+            <a href="/admin-sekolah/invigilation" class="nav-item {% if request.path == '/admin-sekolah/invigilation' %}active{% endif %}"><i class="fas fa-clipboard-check"></i><span x-text="t('Jadwal Pengawasan','Invigilation')"></span></a>
             <div class="nav-section-title pt-2"><span x-text="t('Pengguna','Users')"></span></div>
             <a href="/admin-sekolah/teachers" class="nav-item {% if request.path == '/admin-sekolah/teachers' %}active{% endif %}"><i class="fas fa-chalkboard-teacher"></i><span x-text="t('Guru','Teachers')"></span></a>
             <a href="/admin-sekolah/students" class="nav-item {% if request.path == '/admin-sekolah/students' %}active{% endif %}"><i class="fas fa-user-graduate"></i><span x-text="t('Murid','Students')"></span></a>
