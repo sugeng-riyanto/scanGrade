@@ -49,11 +49,15 @@
 #      release and not after: the deploy's own schema gate refuses a release whose
 #      database is behind its code, and it names this exact remedy when it does;
 #   3. runs one release;
-#   4. if the release was refused by a box-local edit, sets that edit aside — with a
-#      patch and a record, never silently — and runs the release once more;
-#   5. if it was refused by the *schema* quarantine that step 2 just answered, lifts
-#      that quarantine once and runs the release once more;
-#   6. verifies: the checkout moved, the app answers, and prints what it recorded.
+#   4. if the release was refused because a box-local edit blocked the merge, sets
+#      that edit aside — with a patch and a record, never silently — and runs the
+#      release once more;
+#   5. if it was refused because the *schema* quarantine that step 2 just answered
+#      held the merge, lifts that quarantine once and runs the release once more;
+#   6. if the box is *unarmed* — the runner refuses a whole run before it fetches
+#      anything when a gate cannot measure, and names the arm script in that refusal —
+#      runs the arm script and runs the release once more;
+#   7. verifies: the checkout moved, the app answers, and prints what it recorded.
 #
 # What it will *not* do, and each refusal is a decision rather than an omission:
 #
@@ -68,6 +72,10 @@
 #     (the served-commit one is the closest call of the four — it *is* about this
 #     box's reload — but a release was never served under that commit, so lifting it
 #     would hand a quarantined release the one thing a gate refused to give it);
+#   * it does not *decide* that the box is armed: it runs the arm script, which runs
+#     the same `--check` the runner runs, so a gate still missing what it needs leaves
+#     the box unarmed and the release refused again — the lever runs the remedy, it
+#     does not stand in for it;
 #   * it applies a migration only after that file's own trial run passed;
 #   * it takes no argument that steers it (only --dry-run and --help), the same rule
 #     the deploy runner holds: this is a thing root runs, not a thing anyone aims.
@@ -91,6 +99,11 @@ RELEASE_FILE="${SG_RELEASE_FILE:-/etc/scangrade-deploy.release}"
 #: stale-baseline refusal can be answered from a console with no browser and no shell
 #: step: the runner re-measures the box, keeps that baseline, and retries once.
 REBASELINE_REQUEST="${SG_REBASELINE_REQUEST:-$STATE_DIR/requests/rebaseline}"
+#: The arm the runner refuses a whole run without. The runner writes $STATE_DIR/unarmed
+#: and exits 15 *before it fetches anything* when a gate cannot measure, and names this
+#: same file as the remedy in that refusal — so this lever runs exactly what the runner
+#: tells an operator to run. It needs root, which this script already is.
+ARM_SCRIPT="${SG_ARM_SCRIPT:-$REPO/deploy/arm-auto-deploy.sh}"
 HEALTH="${SG_HEALTH_URL:-http://127.0.0.1:8000/health}"
 LEDGER="${SG_MIGRATION_LEDGER:-/var/lib/scangrade-migrations}"
 PY="${SG_PYTHON:-$REPO/.venv/bin/python}"
@@ -167,12 +180,15 @@ recover_reason() {
     printf 'quarantined:%s\n' "$(sed -n '3p' "$STATE_DIR/quarantined" 2>/dev/null)"
     return 0
   fi
-  if [ -n "${PORCELAIN:-}" ]; then
-    printf 'box-local edit\n'
-    return 0
-  fi
+  # Before the box-local edit, because the armament preflight runs before the dirty
+  # check: on a box that is both unarmed and dirty, the armament is what refused the
+  # run — the runner never reaches its own dirty check while it is unarmed.
   if [ -f "$STATE_DIR/unarmed" ]; then
     printf 'not armed\n'
+    return 0
+  fi
+  if [ -n "${PORCELAIN:-}" ]; then
+    printf 'box-local edit\n'
     return 0
   fi
   if [ -f "$STATE_DIR/refused-before-merge" ]; then
@@ -348,6 +364,31 @@ recover_may_rebaseline() {
   return 1
 }
 
+recover_arm_box() {
+  # Runs the box's own arm script — the exact file the runner names in the refusal it
+  # writes when it is unarmed (`bash $REPO/deploy/arm-auto-deploy.sh`) — because what
+  # refused the run is the *box*, not a release. The armament preflight runs before
+  # anything is fetched, so no release and no quarantine can clear it; only the
+  # installer that the arm script wraps can.
+  #
+  # It is not a bypass. The arm script ends by re-running the same `--check` the runner
+  # runs, and the runner re-checks the armament on the next tick: if a gate still lacks
+  # what it needs, `unarmed` is written again and the release is refused again. The
+  # lever cannot *make* the box armed — it can only run the thing that does.
+  #
+  # Returns the arm script's own exit code, and 1 when the script is not in this
+  # checkout (a box older than the lever it is running, told to arm by hand instead).
+  local out rc
+  [ -f "$ARM_SCRIPT" ] || return 1
+  printf 'ARM run %s\n' "$ARM_SCRIPT" >> "$RECORD"
+  out="$(bash "$ARM_SCRIPT" 2>&1)"
+  rc=$?
+  printf '%s\n' "$out" >> "$RECORD"
+  printf 'ARM exit %s\n' "$rc" >> "$RECORD"
+  printf '%s\n' "$out" | sed 's/^/   | /'
+  return "$rc"
+}
+
 recover_name_refusal() {
   # Names whatever the runner wrote down when a release did not move. Read *after*
   # the attempt, never at the top of the run: a refusal is a statement about one
@@ -381,6 +422,15 @@ recover_name_refusal() {
     printf 'preflight %s\n' "$gate" >> "$RECORD"
     return 0
   fi
+  # Still unarmed after an attempt that was supposed to arm the box: the arm script
+  # could not give every gate what it needs, and its own output (above) says which.
+  # A refusal about the box, not about the release — and the one a retry cannot move.
+  if [ -f "$STATE_DIR/unarmed" ]; then
+    note "the box is still not armed — the runner refuses a run before it fetches:"
+    sed -n '1,3p' "$STATE_DIR/unarmed" 2>/dev/null | sed 's/^/   | /'
+    printf 'unarmed\n' >> "$RECORD"
+    return 0
+  fi
   return 1
 }
 # recover-logic:end
@@ -394,9 +444,9 @@ for arg in "$@"; do
       cat <<'USAGE'
 usage: sgfix [--dry-run]
 
-  (no arguments)  recover this box: apply the migrations its schema is missing, run
-                  one release, set aside a box-local edit if that is what refused it,
-                  and record why. Needs root.
+  (no arguments)  recover this box: apply the migrations its schema is missing, arm an
+                  unarmed box, run one release, set aside a box-local edit if that is
+                  what blocked the merge, and record why. Needs root.
   --dry-run       report why the box is stuck and what would be done; change nothing.
 
 Everything it does is written to $STATE_DIR/recover/<stamp>.txt (default
@@ -625,9 +675,34 @@ else
       say "refusing"
       note "the gate holding this release is $(sed -n '3p' "$STATE_DIR/quarantined" 2>/dev/null)"
       note "that is a statement about the release, not about this box — this lever can"
-      note "answer only a missing migration and a stale perf baseline. Read the journal."
+      note "answer only a missing migration, a stale perf baseline, and an unarmed box."
+      note "Read the journal."
       exit 1
     fi
+  elif [ -f "$STATE_DIR/unarmed" ]; then
+    # The refusal is about the *box*, and no release can clear it: the runner refuses
+    # the whole run at its armament preflight, before it fetches anything. The runner's
+    # own refusal names the arm script; this runs exactly that, then retries once.
+    say "4/6  the armament this box is missing"
+    note "the runner refuses a run before it fetches, because an unarmed box would"
+    note "deploy code no gate has looked at — so no release and no quarantine can"
+    note "clear this; only arming the box can"
+    if [ ! -f "$ARM_SCRIPT" ]; then
+      printf 'ARM MISSING %s\n' "$ARM_SCRIPT" >> "$RECORD"
+      say "refusing"
+      note "this box is not armed and the arm script is not in this checkout:"
+      note "$ARM_SCRIPT"
+      note "arm it by hand, as root: bash $REPO/deploy/install-auto-deploy.sh"
+      exit 4
+    fi
+    note "running $ARM_SCRIPT"
+    if recover_arm_box; then
+      note "the arm run finished — the runner re-checks the armament on the retry"
+    else
+      note "the arm run reported a problem — its own lines above say which gate"
+    fi
+    say "5/6  a release, on the box this run just armed"
+    recover_try_again "the box is still not armed, or another gate refused the release:"
   elif [ -n "$PORCELAIN" ]; then
     say "4/6  the box-local edit"
     note "setting aside $(printf '%s\n' "$PORCELAIN" | wc -l | tr -d ' ') path(s), recording each first"
@@ -639,12 +714,13 @@ else
     say "5/6  a release, on the restored tree"
     recover_try_again "the set-aside worked, but the checkout still did not move:"
   else
-    note "no quarantine and no box-local edit — the refusal is something else,"
-    note "and the journal above is where it says so"
+    note "no quarantine, no armament record and no box-local edit — the refusal is"
+    note "something else, and the journal above is where it says so"
     recover_name_refusal || true
     printf 'NOT MOVED: no quarantine, clean tree\n' >> "$RECORD"
     say "refusing"
-    note "this lever answers two shapes: a box-local edit, and a schema quarantine."
+    note "this lever answers three shapes: a box-local edit, a schema quarantine, and"
+    note "an unarmed box."
     note "Read the journal above; the reason and this run's evidence are in $RECORD."
     exit 4
   fi

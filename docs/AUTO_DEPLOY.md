@@ -1736,16 +1736,18 @@ of that file is only the fallback on a box that has not ticked yet.
    gate refuses a release whose database is behind its code, so applying them later
    would only earn that refusal;
 3. runs one release;
-4. answers the two refusals it can, and runs the release once more after each: a
+4. answers the refusals it can, and runs the release once more after each: a
    **box-local edit** is set aside — a patch against `HEAD` for a tracked path, the
-   whole file for one `HEAD` has never seen — and the **schema** quarantine step 2
-   just answered is lifted for one attempt. The **perf** gate is answered instead by
-   writing the same re-measurement request the status page's button writes, so the
-   release is judged against a baseline re-taken from the box as it is now;
-5. whenever the checkout *still* did not move, names the gate that refused — read
-   from the runner's own quarantine or `refused-before-merge` record, *after* the
-   attempt, so a retry a gate stops is reported as that gate rather than as "nothing
-   happened";
+   whole file for one `HEAD` has never seen — the **schema** quarantine step 2 just
+   answered is lifted for one attempt, and an **unarmed box** is armed by running the
+   script the runner's own refusal names (`deploy/arm-auto-deploy.sh`). The **perf**
+   gate is answered instead by writing the same re-measurement request the status
+   page's button writes, so the release is judged against a baseline re-taken from
+   the box as it is now;
+5. whenever the checkout *still* did not move, names what refused it — read from the
+   runner's own quarantine, `refused-before-merge` or `unarmed` record, *after* the
+   attempt, so a retry something stops is reported as that thing rather than as
+   "nothing happened";
 6. verifies: the checkout moved, the app answers, and everything it did is in the
    record.
 
@@ -1758,6 +1760,25 @@ button. A refusal record from the *first* attempt is never quoted as a second's:
 reader only trusts a `refused-before-merge` whose bytes differ from the ones already
 there when the retry began.
 
+### The unarmed shape, and why no release can clear it
+
+An unarmed box is the one arrangement refusal the pipeline cannot fix by shipping
+code: the runner writes `/var/lib/scangrade-deploy/unarmed` and exits `15` at its
+armament preflight, **before it fetches anything**, because a box that cannot measure
+a release must not deploy one. So the lever answers it the same way the runner's own
+refusal tells an operator to: it runs `deploy/arm-auto-deploy.sh` (the installer the
+arm script wraps), keeps every line in the record, and runs one release once more.
+
+It is not a bypass. The arm script ends by re-running the same `--check` the runner
+runs, and the runner re-checks the armament on the next tick — so a gate still
+missing what it needs leaves the box unarmed, `unarmed` is written again, and the
+release is refused again. What the lever removes is the *console session*, not the
+check: `arm-auto-deploy.sh` needs root, and `sgfix` is already root, which is exactly
+the hop a noVNC session was doing by hand. This shape ranks above the box-local edit
+in the lever's own precedence, because the runner's armament preflight runs before its
+dirty check — on a box that is both unarmed and dirty, the armament is what refused
+the run.
+
 ### What it refuses, deliberately
 
 * it never resets a branch and never pushes — the checkout only ever moves by the
@@ -1766,13 +1787,13 @@ there when the retry began.
   **before** the tree is touched, an entry that cannot be recorded is left exactly
   where it was, and the run says so. A recovery tool that loses a box's only copy of
   a fix is worse than the console session it replaces;
-* it answers **only two** refusals, and both by doing the thing the gate named rather
-  than by clearing it: the schema gate is answered by applying the migrations it
-  wants (step 2) and retrying; the perf gate by asking the runner to re-measure the
-  box, exactly as the status page's re-baseline button does. Neither is a bypass — the
-  gate runs again and can still refuse a release that is genuinely slower. A theme,
-  smoke or claims refusal is a statement about the release with no action this lever
-  can take, so it is named and the run stops;
+* it answers refusals only by doing the thing the gate named, never by clearing it:
+  the schema gate by applying the migrations it wants (step 2) and retrying; the perf
+  gate by asking the runner to re-measure the box, exactly as the status page's
+  re-baseline button does; the armament by running the arm script and letting the
+  runner's next `--check` decide. None is a bypass — every gate runs again and can
+  still refuse. A theme, smoke or claims refusal is a statement about the release with
+  no action this lever can take, so it is named and the run stops;
 * **Gate 0 does not apply to it.** That gate exists to keep a drifted *runner* from
   deploying from somewhere other than the checkout; the lever runs no gates at all —
   it starts the unit, which is where the gates live — so requiring the block in it
