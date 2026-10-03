@@ -2881,6 +2881,27 @@ WORKER_STALE=0
 RUN_STEP="reload"
 reload_app
 reload_worker || WORKER_STALE=1
+
+# ── Every other long-lived process, from the roster ─────────────────────────────
+# The app and the worker are replaced above by name, because their actions differ
+# (a graceful reload for the one serving students, a restart for the one that holds
+# no request open). Any *other* unit the roster names is restarted here, so a new
+# long-lived process is covered by being added to `deploy/long_lived.py` — one place —
+# rather than by a second edit in this script that then drifts. `--units` prints the
+# roster in order; the two above are skipped because they are already done.
+ROSTER_UNITS=$(as_owner "$REPO/.venv/bin/python" "$REPO/deploy/long_lived.py" --units 2>/dev/null || true)
+for unit in $ROSTER_UNITS; do
+  case "$unit" in
+    "$SERVICE"|"$WORKER_UNIT") continue ;;
+  esac
+  if systemctl cat "$unit" >/dev/null 2>&1; then
+    if systemctl restart "$unit" 2>/dev/null; then
+      log "restarted $unit (named by the roster)"
+    else
+      log "could not restart $unit — it may still be running '$BEFORE' code"
+    fi
+  fi
+done
 sleep 3
 
 # Why a release is about to be rolled back — carried into the quarantine record
@@ -2925,8 +2946,13 @@ RUN_STEP="served"
 if [ "$HEALTHY" != "1" ]; then
   : # already unhealthy; the rollback path owns it
 else
+  # `--repo` and `--unit` are for the refusal's *detail*: when the app answers with
+  # another commit, the gate measures how far off it is and names the unit the
+  # operator should restart, so the quarantine record carries the number and the
+  # action rather than two bare shas.
   SERVED_OUT=$(as_owner "$REPO/.venv/bin/python" "$REPO/deploy/served_commit_gate.py" \
       --base "http://127.0.0.1:$APP_PORT" --commit "$AFTER_FULL" \
+      --repo "$REPO" --unit "$SERVICE" \
       --reporter "$REPO/app/__init__.py" 2>&1)
   SERVED_RC=$?
   # The gate's own verdict lines, or — when it produced none — the tail of its
@@ -2970,14 +2996,14 @@ fi
 #
 # The worker answers over the broker (`app/celery_app.py` registers a `served_commit`
 # control command returning `build_info.snapshot()`), and `deploy/worker_commit_gate.py`
-# broadcasts it. One thing is deliberately different from the app gate: **silence is
-# never a refusal here.** The app always has an HTTP surface, so a release that ships
-# the reading can always name its commit and a body without one means the answering
-# code is not this release. A worker that is *down* and a worker *built before the
-# reading* both answer nothing, and from the client they are indistinguishable — so
-# no answer is exit 2, and only a worker that **answers with another commit** is a
-# refusal. Exit 3, never 1, for the same reason as the app gate: a crashed check must
-# not read as a refusal.
+# broadcasts it. The worker has no HTTP surface, so `deploy/worker_commit_gate.py`
+# reads silence twice: `served_commit`, then Celery's built-in `ping`. Nobody
+# answering either question is a worker that is not running at all — a release with no
+# worker cannot process a single scan — so that is exit 4 and a refusal. An answered
+# `ping` with an unanswered `served_commit` is a worker *built before this reading*,
+# which says nothing about this release and stays exit 2. And a worker that answers
+# with another commit is exit 3, as before. Never 1, for the same reason as the app
+# gate: a crashed check must not read as a refusal.
 # worker-commit-gate:start
 RUN_STEP="worker"
 if [ "$HEALTHY" != "1" ]; then
@@ -2987,7 +3013,7 @@ elif ! systemctl cat "$WORKER_UNIT" >/dev/null 2>&1; then
   log "$WORKER_UNIT is not installed — no worker to ask which commit it runs"
 else
   WORKER_OUT=$(as_owner "$REPO/.venv/bin/python" "$REPO/deploy/worker_commit_gate.py" \
-      --repo "$REPO" --commit "$AFTER_FULL" \
+      --repo "$REPO" --commit "$AFTER_FULL" --unit "$WORKER_UNIT" \
       --reporter "$REPO/app/celery_app.py" 2>&1)
   WORKER_RC=$?
   # The gate's own verdict lines, or — when it produced none — the tail of its
@@ -3010,6 +3036,13 @@ else
       HEALTHY=0
       FAIL_REASON="worker commit (the worker is running a commit other than the one just merged)"
       FAIL_DETAIL=$(worker_detail) ;;
+    4)
+      log "no Celery worker is running at all — the restart above did not bring it back:"
+      worker_detail | sed 's/^/    /'
+      log "    a release with no worker cannot process a single scan — rolling back to $BEFORE"
+      HEALTHY=0
+      FAIL_REASON="worker down (no Celery worker is running the commit just merged)"
+      FAIL_DETAIL=$(worker_detail) ;;
     *)
       log "worker-commit check COULD NOT MEASURE (exit $WORKER_RC) — this release is"
       log "    NOT confirmed as the code the worker runs:"
@@ -3019,6 +3052,60 @@ else
   esac
 fi
 # worker-commit-gate:end
+
+# ── Does *every* long-lived process hold this release? ────────────────────────
+#
+# The three checks above are hand-wired: the app's served commit, then the worker's.
+# Each names one process, so together they answer an incomplete question — the box
+# can run a third long-lived unit (a scheduler, a helper with no HTTP surface) that
+# imported this release's code once and holds it across every reload, and no gate
+# would ask it because no gate knows it exists. `deploy/long_lived.py` is the roster
+# that closes that gap: it names the units that run this checkout and how each is
+# asked, and `deploy/process_commit_gate.py` reads the box's own unit files to
+# **discover** any unit the roster does not carry. An uncovered unit is a refusal,
+# not a shrug — a helper cannot be added to the box without the deploy noticing it.
+#
+# The app and the worker keep their own gates (the roster says `ask: http` and
+# `ask: celery`); a generic helper answers by writing
+# `app/utils/process_attest.py`'s file at start-up, and the gate ties that file to
+# the process systemd is running right now. As with the worker gate, a process that
+# cannot be asked is exit 2 — never a rollback — and only a *readable disagreement*
+# (or an uncovered unit) refuses.
+# process-commit-gate:start
+RUN_STEP="processes"
+if [ "$HEALTHY" != "1" ]; then
+  : # already unhealthy; the rollback path owns it
+else
+  PROCESS_OUT=$(as_owner "$REPO/.venv/bin/python" "$REPO/deploy/process_commit_gate.py" \
+      --repo "$REPO" --commit "$AFTER_FULL" --state-dir "$STATE_DIR" \
+      --app-base "http://127.0.0.1:$APP_PORT" 2>&1)
+  PROCESS_RC=$?
+  process_detail() {
+    local detail
+    detail=$(printf '%s\n' "$PROCESS_OUT" | grep -E '^process commit:')
+    [ -z "$detail" ] && detail=$(printf '%s\n' "$PROCESS_OUT" | grep -vE '^[[:space:]]*$' | tail -n 6)
+    printf '%s\n' "$detail"
+  }
+  case "$PROCESS_RC" in
+    0)
+      log "$(printf '%s\n' "$PROCESS_OUT" | grep -m1 '^process commit: OK' || echo 'process commit: OK')" ;;
+    3)
+      log "a long-lived process is not running the commit this run merged:"
+      process_detail | sed 's/^/    /'
+      log "    a helper holding the previous release is a half-deployed release —"
+      log "    rolling back to $BEFORE"
+      HEALTHY=0
+      FAIL_REASON="process commit (a long-lived process is running a commit other than the one just merged)"
+      FAIL_DETAIL=$(process_detail) ;;
+    *)
+      log "process-commit check COULD NOT MEASURE (exit $PROCESS_RC) — this release is"
+      log "    NOT confirmed as the code every long-lived process runs:"
+      process_detail | sed 's/^/    /'
+      log "    not rolling back: a process that cannot be asked is a property of the"
+      log "    box, and whether it restarted at all is the roster line above." ;;
+  esac
+fi
+# process-commit-gate:end
 
 # ── Gate 4: sign in as each role and open the pages that matter ──────────────
 # The port answering 200 only says gunicorn is up. It says nothing about whether

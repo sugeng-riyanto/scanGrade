@@ -1981,18 +1981,74 @@ like a failing gate.
 
 Three differences from the app gate, each of them a decision:
 
-* **Silence is never a refusal here.** The app always has an HTTP surface, so a
-  release shipping the reading can always name its commit when asked. The worker has
-  no such floor: a worker that is *down* and a worker *built before the reading* both
-  answer nothing over the broker, and from the client they are indistinguishable. So
-  "no worker answered" is exit `2` (never a rollback), and only a worker that
-  **answers and names a different commit** is exit `3`.
+* **Silence is read twice, and a dead worker refuses.** The app always has an HTTP
+  surface, so a release shipping the reading can always name its commit when asked.
+  The worker has no such floor: a worker that is *down* and one *built before the
+  reading* both answer nothing to `served_commit`. They are told apart by a second
+  question — Celery's built-in `ping`, which every worker answers whatever code it
+  loaded, because it is not this reading. **Nobody answering either question is a
+  worker that is not running at all**: a release with no worker cannot process a
+  single scan, so that is exit `4` and a refusal, recorded as `worker down (…)` — a
+  distinct gate key from `worker_commit`, because the remedy is "bring the worker
+  back", not "find the commit it is on". An answered `ping` with an unanswered
+  `served_commit` is a worker built before the reading, which says nothing about *this*
+  release and stays exit `2` (never a rollback), and a worker that **answers and
+  names a different commit** is exit `3` as before.
 * **It is asked, not the CLI.** `celery inspect <command>` cannot see a custom
   command: its argument parser collects the command names when Celery is imported,
   before an application has registered anything. The gate therefore imports the
   worker's own app and uses `control.broadcast`, which reaches the registered command.
 * **A box with no worker unit is not a failure.** `scangrade-celery` missing means
   async OMR simply queues; the block logs that and moves on.
+
+### Every long-lived process, and the roster that closes the set
+
+The two gates above are hand-wired: each names one process, in its own fence, with
+its own command line. That is an arrangement that was true when it was written, and
+nothing keeps it true. A third long-lived unit on the box — a scheduler, a helper
+with no HTTP surface — imports the release once at start-up and holds it across
+every reload, and no gate asks it, because no gate knows it exists. That is the
+`page_index` half-deploy one process further out.
+
+`deploy/long_lived.py` is the **roster**, and it is deliberately closed. It names the
+units that run this checkout and how each is asked:
+
+* `http` — the app publishes the commit it serves on `/health`; the gate reuses
+  `served_commit_gate.py`'s reading;
+* `celery` — the worker answers a control command; the gate reuses
+  `worker_commit_gate.py`;
+* `attestation` — a generic helper writes `app/utils/process_attest.py`'s file at
+  start-up (the commit whose code it loaded, its pid, and when), and the gate ties
+  that file to the pid `systemctl show -p MainPID` is running now — an old file from a
+  previous run does not count.
+
+`deploy/process_commit_gate.py` then reads the box's own unit files
+(`/etc/systemd/system/*.service`) and **discovers** any unit that runs this checkout
+but the roster does not carry (`WorkingDirectory=` or an `Exec*=` under the checkout).
+An uncovered unit is a **refusal** — `process commit (…)`, exit `3` — so a helper
+cannot be added to the box without the deploy noticing it. That is the difference
+from the two gates above: they check that a *known* process is current, and this one
+checks that the set of processes is *known*.
+
+The runner gained a `process-commit-gate` block after the worker block
+(`RUN_STEP="processes"`), and its restart loop now reads the roster
+(`deploy/long_lived.py --units`) so a new unit is restarted by being in the roster
+rather than by a second edit that drifts. The generic helper is not probed for
+liveness the way the worker is, so a process that cannot be asked is exit `2` — never
+a rollback — and only a readable disagreement, or an uncovered unit, refuses.
+
+**A refusal names the process, how far off it is, and the remedy.** The refusal used
+to stop at two shas — "the worker reports `bbbbbbb`" — which told an operator that
+something diverged but not what to do about it. The next move is one of exactly two,
+and they are different: the process missed the reload (**restart the unit**), or the
+box is on history the merged commit never had (**re-baseline the box**).
+`deploy/commit_divergence.py` reads the commit graph and says which one it is:
+*behind* (the unit's commit is an ancestor of the merged one — restart it), *ahead* or
+*diverged* (the box holds newer or other code — re-baseline it), or *unknown* when git
+cannot answer, in which case the sentence says so rather than guessing. The served,
+worker and process gates each append it to their refusal (the runner passes `--repo`
+and `--unit`), so the quarantine record and the card carry e.g. "running `62fa16f`,
+3 commit(s) behind `a8889f8` — … restart `scangrade-celery`" instead of two hashes.
 
 ## The way in: the box installs its own key
 

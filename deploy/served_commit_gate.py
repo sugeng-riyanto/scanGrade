@@ -190,6 +190,27 @@ def reporter_ships(path: str) -> bool:
     return REPORTER_MARKER in text
 
 
+def _with_divergence(why: str, repo: str, served, merged: str, unit: str) -> str:
+    """Append how far the app is from the merged commit, and the remedy.
+
+    Loaded here rather than at import so this module still loads when it is read as
+    text by tests; a module that cannot be loaded leaves the sentence unchanged,
+    because a detail line must never be the reason a gate crashes.
+    """
+    import importlib.util
+    import pathlib
+    import sys
+    try:
+        path = pathlib.Path(__file__).resolve().parent / "commit_divergence.py"
+        spec = importlib.util.spec_from_file_location("commit_divergence", path)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules["commit_divergence"] = module
+        spec.loader.exec_module(module)
+        return module.annotate(why, repo, served, merged, unit=unit)
+    except Exception:
+        return why
+
+
 def fetch(url: str, timeout: float) -> str:
     """The body, or `""` when the box could not be asked. Never raises."""
     try:
@@ -241,6 +262,10 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--gap", type=float, default=DEFAULT_GAP,
                     help="seconds between probes (gunicorn's reload is graceful)")
     ap.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT)
+    ap.add_argument("--repo", default=os.environ.get("SCANGRADE_REPO") or "/opt/scangrade",
+                    help="the checkout the divergence is measured against")
+    ap.add_argument("--unit", default="scangrade",
+                    help="the unit the record should name in its remedy")
     ap.add_argument("--json-out", default="", help="write the readings here")
     return ap
 
@@ -261,6 +286,9 @@ def _run(args) -> int:
     readings = probe_all(args.base, args.path, attempts=args.attempts, gap=args.gap,
                          timeout=args.timeout, merged=args.commit)
     verdict, why = judge(readings, args.commit, reporter_ships=ships)
+    if verdict == VERDICT_MISMATCH:
+        served = next((r.commit for r in readings if r.state == READING_OK), "")
+        why = _with_divergence(why, args.repo, served, args.commit, args.unit)
 
     if args.json_out:
         try:
