@@ -149,10 +149,16 @@ class TestOpeningASitting:
         assert opened is True
         assert created["status"] == "draft"
         assert created["started_at"]
-        # One insert, and nothing else: there is no second code minted here. The
-        # code a lock later asks for is the recovery code (`exam_access_codes`),
-        # issued when the exam page opens — see tests/unit/test_resume_code.py.
-        assert writes(sb.calls) == [("insert", "submissions")], writes(sb.calls)
+        # One insert into `submissions`, and nothing else that touches the row: no
+        # second code is minted here. The code a lock later asks for is the recovery
+        # code (`exam_access_codes`), issued when the exam page opens — see
+        # tests/unit/test_resume_code.py. The one other write is the audit half: the
+        # opening of a sitting is a transition, and it is recorded as one.
+        assert [w for w in writes(sb.calls) if w[1] == "submissions"] == [
+            ("insert", "submissions")], writes(sb.calls)
+        assert ("insert", "attempt_session_events") in writes(sb.calls), (
+            "opening a sitting is a transition and must be on the audit trail"
+        )
 
     def test_an_open_draft_keeps_its_stamp_and_is_not_rewritten(self):
         """The timer survives a refresh — which needs no write at all."""
@@ -168,9 +174,13 @@ class TestOpeningASitting:
         assert opened is True
         assert sitting["status"] == "draft"
         assert sitting["answers"] == {}
-        # Reopened in one write, and no code minted: the code is the recovery code,
-        # issued per (student, exam) by `exam_recovery`, not a column on this row.
-        assert writes(sb.calls) == [("update", "submissions")], writes(sb.calls)
+        # Reopened in one write to the row, and no code minted: the code is the
+        # recovery code, issued per (student, exam) by `exam_recovery`, not a column
+        # on this row. The re-sit is a transition, so it also lands on the audit
+        # trail — a second write that never touches `submissions`.
+        assert [w for w in writes(sb.calls) if w[1] == "submissions"] == [
+            ("update", "submissions")], writes(sb.calls)
+        assert ("insert", "attempt_session_events") in writes(sb.calls)
         assert sb.store["submissions"][0]["status"] == "draft"
         assert "resume_code" not in sb.store["submissions"][0]
 

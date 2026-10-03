@@ -213,6 +213,7 @@ def close_expired(supabase, now=None) -> dict:
             logger.exception("Could not close the expired sitting %s", row.get("id"))
             continue
         row.update(payload)
+        _record_finalized(supabase, row, ended_at, by_clock=True)
         closed.append(row.get("id"))
 
     if closed:
@@ -240,8 +241,26 @@ def finalize_expired(supabase, row, exam, now=None):
         supabase, row.get("exam_id"), row.get("student_id"), payload,
         rows=[{**(row or {}), "exams": exam or {}}], closing=True,
     )
+    _record_finalized(supabase, row, ended_at, by_clock=True)
     (row or {}).update(payload)
     return payload
+
+
+def _record_finalized(supabase, row, ended_at, *, by_clock=False):
+    """One `attempt_finalized` event. Lazy import, best-effort.
+
+    The transition that closes a paper is exactly the one a dispute turns on
+    ("my clock said I still had time"), so it is stamped like the others.
+    """
+    try:
+        from app.services import attempt_status
+        attempt_status.record_event(
+            supabase, (row or {}).get("id"), "attempt_finalized",
+            meta={"by": "clock" if by_clock else "submit",
+                  "deadline": ended_at.isoformat() if ended_at else None},
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning("could not record attempt_finalized for %s", (row or {}).get("id"))
 
 
 # ── the loop ─────────────────────────────────────────────────────────────────

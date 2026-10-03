@@ -600,6 +600,56 @@ def take_exam(exam_id):
     return resp
 
 
+@student_bp.route("/attempt-status/<exam_id>", methods=["GET"])
+@login_required
+@_rate_limit("60 per minute")
+def attempt_status(exam_id):
+    """The server's own answer about this sitting — the one source of truth.
+
+    The page calls this on load and after every reload or visibility regain, takes
+    `server_now` and `seconds_left` from it, and never trusts the device clock. It
+    is **idempotent**: it writes nothing, creates no attempt, and returns the same
+    state for the same condition however many times it is called — which is what
+    makes it safe as the resume door as well as the status door.
+
+    ``?answers=1`` includes the pupil's own saved answers, for a device whose local
+    draft is gone; the ordinary load does not pay for them.
+    """
+    from app.services import attempt_status as status_service
+    supabase = get_supabase()
+    want_answers = request.args.get("answers") in ("1", "true", "yes")
+    try:
+        return jsonify(status_service.get_attempt_status(
+            supabase, exam_id, g.user_id, include_answers=want_answers))
+    except Exception:  # noqa: BLE001 — a status read must never 500 at a pupil
+        current_app.logger.exception(
+            "attempt-status failed for exam %s user %s", exam_id, g.user_id)
+        return jsonify({"ok": False, "status": "missing",
+                        "message_key": "attempt_missing"})
+
+
+@student_bp.route("/heartbeat/<exam_id>", methods=["POST"])
+@login_required
+@_rate_limit("30 per minute")
+def attempt_heartbeat(exam_id):
+    """Record one liveness ping while the paper is open. Never locks anything.
+
+    One lightweight write to `submissions`, and the same status payload the page
+    would otherwise have to fetch separately — so the ping doubles as the clock
+    re-sync. A gap longer than `attempt_status.GAP_SECONDS` is written as an audit
+    event, not as a penalty; only fullscreen/tab-switch can lock a sitting.
+    """
+    from app.services import attempt_status as status_service
+    supabase = get_supabase()
+    try:
+        return jsonify(status_service.heartbeat(supabase, exam_id, g.user_id))
+    except Exception:  # noqa: BLE001 — a failed ping is not a verdict
+        current_app.logger.exception(
+            "heartbeat failed for exam %s user %s", exam_id, g.user_id)
+        return jsonify({"ok": False, "status": "missing",
+                        "message_key": "attempt_missing"})
+
+
 @student_bp.route("/recover")
 @login_required
 def recover_exam_page():
