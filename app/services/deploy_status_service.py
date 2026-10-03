@@ -272,6 +272,17 @@ GATE_KEYS = frozenset({
     #: this run merged: a half-deployed release, the caller new and the worker old.
     #: Recorded by the `worker-commit-gate` block in `deploy/scangrade-deploy.sh`.
     "worker_commit",
+    #: No Celery worker is running at all: it did not answer the `served_commit`
+    #: command or the built-in `ping`, so the restart that brought the app up did
+    #: not bring the worker back. A distinct key from `worker_commit` because the
+    #: remedy is "bring the worker back", not "find the commit it is on". Recorded
+    #: by the `worker-commit-gate` block in `deploy/scangrade-deploy.sh`.
+    "worker_down",
+    #: A long-lived unit runs this checkout and no gate asks it, or a process answered
+    #: with a commit other than the one this run merged. Recorded by the
+    #: `process-commit-gate` block: the roster is closed, so a helper cannot be added
+    #: to the box without the deploy noticing it. `deploy/long_lived.py`.
+    "process_commit",
     "runner_not_armed",
     #: The app refused to be *served from* the checkout it was built from: a path
     #: in it holds bytes no checkout of that commit can produce, so the path reads
@@ -864,6 +875,10 @@ RUN_STEPS = frozenset({
     #: which commit it runs, so a new app with an old Celery worker fails the release
     #: instead of breaking scans silently. See the `worker-commit-gate` block.
     "worker",
+    #: After `worker`: *every* long-lived process the box runs from this checkout is
+    #: asked, and a unit no gate knows is a refusal. See `deploy/long_lived.py` and the
+    #: `process-commit-gate` block.
+    "processes",
     "verify", "done",
 })
 

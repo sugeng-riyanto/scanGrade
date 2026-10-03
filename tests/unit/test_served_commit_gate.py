@@ -620,6 +620,10 @@ def _run_block(tmp_path: Path, repo: Path, rc: int, out: str):
         "set -uo pipefail\n"
         f'REPO="{repo.as_posix()}"\n'
         'APP_PORT=8000\n'
+        # The block names the unit in the gate's `--unit`, so the record's remedy
+        # can say which service to restart; the harness must define it as the
+        # runner does, or `set -u` aborts the block.
+        'SERVICE="scangrade"\n'
         f'AFTER_FULL="{MERGED}"\n'
         f'BEFORE="{PREVIOUS[:7]}"\n'
         'HEALTHY=1\nFAIL_REASON=""\nFAIL_DETAIL=""\nRUN_STEP=""\n'

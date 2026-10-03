@@ -16,14 +16,18 @@ So the worker answers the same question the app answers, over the broker it alre
 uses: a `served_commit` control command registered in `app/celery_app.py`, returning
 `build_info.snapshot()` — the commit whose code the worker loaded, resolved at import.
 
-One thing is deliberately different from the app gate: **silence is never a refusal
-here.** The app always has an HTTP surface, so a release that ships the reading can
-always name its commit when asked, and a body without one means the code answering is
-not this release. The worker has no such floor: a worker that is *down* and a worker
-*built before the reading* both answer nothing over the broker, and from the client
-they are indistinguishable. So the worker gate refuses only when a worker **answers
-and names a different commit** — the exact state that breaks scans — and reports
-everything else as "could not measure", which never rolls a release back.
+One thing is deliberately different from the app gate: **the worker has no HTTP
+surface, so silence has to be read twice.** A worker that is *down* and a worker
+*built before this reading* both answer nothing to the `served_commit` command, and
+once they were indistinguishable — so a dead worker was reported as "could not
+measure" and slipped past the deploy. They are told apart by a second question:
+Celery's built-in `ping`, which every worker answers whatever code it loaded, because
+it is not this reading at all. Nobody answering either question is a worker that is
+not running — a release with no worker cannot process a single scan — so that
+**refuses** (exit 4). An answered `ping` with an unanswered `served_commit` is a
+worker built before the reading, which says nothing about *this* release and stays
+"could not measure" (exit 2). A worker that **answers and names a different commit**
+refuses as before (exit 3), the exact state that breaks scans.
 """
 
 from __future__ import annotations
@@ -49,6 +53,7 @@ TEMPLATE = ROOT / "app" / "templates" / "super_admin" / "deploy_status.html"
 
 MERGED = "a32585a1b2c3d4e5f60718293a4b5c6d7e8f9012"
 PREVIOUS = "0b20b204f5e6d7c8b9a0123456789abcdef01234"
+
 
 
 def _load_gate():
@@ -151,10 +156,30 @@ def test_a_later_probe_naming_the_merged_commit_passes(gate):
     assert gate.judge(readings, MERGED, reporter_ships=True)[0] == gate.VERDICT_OK
 
 
-def test_no_worker_answering_is_never_a_refusal(gate):
-    """A down worker and one built before the reading are indistinguishable."""
-    verdict, why = gate.judge([], MERGED, reporter_ships=True)
+def test_no_worker_answering_and_no_liveness_reading_is_never_a_refusal(gate):
+    """Liveness not measured: an unconfirmed silence is not evidence."""
+    verdict, why = gate.judge([], MERGED, reporter_ships=True, worker_alive=None)
     assert verdict == gate.VERDICT_UNMEASURED
+    assert verdict != gate.VERDICT_MISMATCH
+
+
+def test_a_worker_that_is_down_refuses_the_release(gate):
+    """Nobody answered the commit question, and nobody answered `ping` either."""
+    verdict, why = gate.judge([], MERGED, reporter_ships=True, worker_alive=False)
+    assert verdict == gate.VERDICT_DOWN, why
+    assert verdict != gate.VERDICT_UNMEASURED, (
+        "a genuinely dead worker slipped past the release")
+
+
+def test_a_worker_built_before_the_reading_is_not_a_down_worker(gate):
+    """`ping` answered but `served_commit` did not: old code, not a dead process."""
+    reading = gate.Reading(gate.READING_ABSENT, None, "a release from before the check")
+    verdict, why = gate.judge([reading], MERGED, reporter_ships=True, worker_alive=True)
+    assert verdict == gate.VERDICT_UNMEASURED, why
+
+
+def test_a_dead_worker_is_never_read_as_a_commit_mismatch(gate):
+    verdict, why = gate.judge([], MERGED, reporter_ships=True, worker_alive=False)
     assert verdict != gate.VERDICT_MISMATCH
 
 
@@ -170,8 +195,13 @@ def test_a_missing_commit_to_compare_against_is_not_a_refusal(gate):
 
 # ── the gate as a program ───────────────────────────────────────────────────
 
-def _run_main(gate, monkeypatch, replies, *, argv):
+def _run_main(gate, monkeypatch, replies, *, argv, alive=None):
     monkeypatch.setattr(gate, "worker_replies", lambda repo, *, timeout: list(replies))
+    # Liveness is its own broadcast; a test that only fixed the commit answers must
+    # not fall through to a real broker. `None` is "not measured", the safe default.
+    monkeypatch.setattr(
+        gate, "workers_alive",
+        lambda repo, *, timeout, attempts=None, gap=None: alive)
     monkeypatch.setattr(gate, "reporter_ships", lambda path: True)
     monkeypatch.setattr(sys, "argv", ["worker_commit_gate.py", *argv])
     return gate.main()
@@ -194,9 +224,41 @@ def test_the_gate_refuses_when_the_worker_runs_another_commit(gate, monkeypatch,
 
 
 def test_the_gate_does_not_refuse_a_worker_that_did_not_answer(gate, monkeypatch, capsys):
-    rc = _run_main(gate, monkeypatch, [], argv=["--commit", MERGED, "--attempts", "1"])
+    rc = _run_main(gate, monkeypatch, [], argv=["--commit", MERGED, "--attempts", "1"],
+                   alive=None)
     assert rc == gate.EXIT_UNMEASURED
     assert "CANNOT MEASURE" in capsys.readouterr().out
+
+
+def test_the_gate_refuses_when_no_worker_is_alive(gate, monkeypatch, capsys):
+    rc = _run_main(gate, monkeypatch, [], argv=["--commit", MERGED, "--attempts", "1"],
+                   alive=False)
+    assert rc == gate.EXIT_DOWN, (
+        "a genuinely dead worker did not fail the release")
+    assert "REFUSED" in capsys.readouterr().out
+
+
+def test_the_gate_keeps_a_worker_built_before_the_reading(gate, monkeypatch, capsys):
+    rc = _run_main(gate, monkeypatch, [], argv=["--commit", MERGED, "--attempts", "1"],
+                   alive=True)
+    assert rc == gate.EXIT_UNMEASURED, (
+        "a worker built before the reading refused a release")
+    assert "CANNOT MEASURE" in capsys.readouterr().out
+
+
+def test_the_gate_keeps_a_release_when_liveness_could_not_be_read(gate, monkeypatch,
+                                                                  capsys):
+    rc = _run_main(gate, monkeypatch, [], argv=["--commit", MERGED, "--attempts", "1"],
+                   alive=None)
+    assert rc == gate.EXIT_UNMEASURED, "an unreadable liveness probe refused a release"
+
+
+def test_the_down_code_is_neither_a_crash_nor_the_mismatch_code(gate):
+    assert gate.EXIT_DOWN != 1, (
+        "python exits 1 on an uncaught exception, so a crashed gate would be read as "
+        "a refusal")
+    assert gate.EXIT_DOWN != gate.EXIT_REFUSED, (
+        "a dead worker and a mismatched worker are two different findings")
 
 
 def test_the_refusal_code_is_not_the_one_a_crash_produces(gate):
@@ -349,6 +411,14 @@ class TestTheRunnerActsOnTheVerdict:
             "the refusal names no step, so the last-stop record cannot say where the "
             "run died")
 
+    def test_a_down_worker_is_not_reported_as_the_mismatch_gate(self, tmp_path):
+        run = _run_block(tmp_path, _runner_harness(tmp_path), 4,
+                         "worker commit: REFUSED — no Celery worker answered")
+        assert "worker commit (" not in run.stdout, (
+            "a dead worker is reported under the mismatch reason, which tells the "
+            "operator to look for a wrong commit rather than a worker that is down: "
+            + run.stdout)
+
     def test_the_call_it_makes_names_the_merged_commit_the_reporter_and_the_repo(self, tmp_path):
         _run_block(tmp_path, _runner_harness(tmp_path), 0, "worker commit: OK")
         called = (tmp_path / "called-with.txt").read_text(encoding="utf-8")
@@ -363,6 +433,19 @@ class TestTheRunnerActsOnTheVerdict:
         assert "healthy=1" in run.stdout and "reason=[]" in run.stdout, (
             "a worker that cannot be asked rolls the release back — a box property "
             "quarantining a commit: " + run.stdout)
+
+    def test_a_down_worker_marks_the_release_unhealthy_and_names_the_gate(self,
+                                                                          tmp_path):
+        run = _run_block(tmp_path, _runner_harness(tmp_path), 4,
+                         "worker commit: REFUSED — no Celery worker answered the "
+                         "liveness probe: the worker is down")
+        assert run.returncode == 0, run.stderr
+        assert "healthy=0" in run.stdout, (
+            "a genuinely dead worker did not reach the rollback path: " + run.stdout)
+        assert "worker down (" in run.stdout, run.stdout
+        assert "step=[worker]" in run.stdout, (
+            "the refusal names no step, so the last-stop record cannot say where the "
+            "run died")
 
     def test_a_gate_that_crashed_is_not_read_as_a_refusal(self, tmp_path):
         run = _run_block(tmp_path, _runner_harness(tmp_path), 1,

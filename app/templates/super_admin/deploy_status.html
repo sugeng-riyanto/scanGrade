@@ -637,6 +637,7 @@
                                 {% elif ls.step_key == 'reload' %}<span x-text="t('me-reload gunicorn dan worker','reloading gunicorn and the worker')"></span>
                                 {% elif ls.step_key == 'served' %}<span x-text="t('menanyakan commit mana yang sedang dilayani (reload benar-benar terjadi)','asking which commit is being served (did the reload take)')"></span>
                                 {% elif ls.step_key == 'worker' %}<span x-text="t('menanyakan commit mana yang dijalankan worker latar belakang (worker ikut memakai rilis ini)','asking which commit the background worker runs (the worker is on this release too)')"></span>
+                                {% elif ls.step_key == 'processes' %}<span x-text="t('menanyakan commit tiap proses panjang umur, dan apakah ada unit yang tidak ditanya siapa pun','asking every long-lived process which commit it holds, and whether any unit goes unasked')"></span>
                                 {% elif ls.step_key == 'verify' %}<span x-text="t('masuk sebagai tiap peran dan membuka halaman penting (Gate 4–6)','signing in as each role and opening the pages that matter (Gates 4–6)')"></span>
                                 {% elif ls.step_key == 'done' %}<span x-text="t('selesai — rilis terverifikasi dan melayani','finished — the release is verified and serving')"></span>
                                 {% else %}<span x-text="t('langkah dari runner yang lebih baru','a step from a newer runner')"></span>
@@ -741,6 +742,8 @@
                                 {% elif q.gate_key == 'app_did_not_come_up_after_the_reload' %}<span x-text="t('aplikasi tidak hidup setelah reload','the app did not come up after the reload')"></span>
                                 {% elif q.gate_key == 'served_commit' %}<span x-text="t('commit yang dilayani bukan yang baru di-merge','the app is not serving the commit that was merged')"></span>
                                 {% elif q.gate_key == 'worker_commit' %}<span x-text="t('worker latar belakang menjalankan commit lain — rilis setengah jadi','the background worker is running another commit — a half-deployed release')"></span>
+                                {% elif q.gate_key == 'worker_down' %}<span x-text="t('worker latar belakang tidak berjalan sama sekali — tidak ada tugas latar yang bisa diproses','the background worker is not running at all — no background task can be processed')"></span>
+                                {% elif q.gate_key == 'process_commit' %}<span x-text="t('ada proses panjang umur yang menjalankan commit lain, atau tidak ada gate yang bertanya padanya','a long-lived process is running another commit, or no gate asks it')"></span>
                                 {% elif q.gate_key == 'runner_not_armed' %}<span x-text="t('runner belum armed','the runner is not armed')"></span>
                                 {% elif q.gate_key == 'checkout_not_reproducible' %}<span x-text="t('checkout tidak bisa mereproduksi commit-nya sendiri','the checkout cannot reproduce its own commit')"></span>
                                 {% elif q.gate_key == 'theme_gate' %}<span x-text="t('gerbang tema','the theme gate')"></span>

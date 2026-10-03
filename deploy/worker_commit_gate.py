@@ -14,14 +14,18 @@ uses. `app/celery_app.py` registers a `served_commit` control command that retur
 `build_info.snapshot()` — the commit whose code the worker loaded, resolved at import.
 This gate broadcasts that command and compares the answers with the merged commit.
 
-**Where it deliberately differs from the app gate: silence is never a refusal.**
-The app always has an HTTP surface, so a release that ships the reading can always
-name its commit when asked, and a body without one means the code answering is not
-this release. The worker has no such floor. A worker that is *down* and a worker
-*built before the reading* both answer nothing over the broker, and from here they
-are indistinguishable — so "no worker answered" is exit 2, not a rollback. The gate
-refuses only when a worker **answers and names a different commit**, which is exactly
-the state that breaks scans.
+**The worker has no HTTP surface, so silence is read twice.** A worker that is
+*down* and a worker *built before this reading* both answer nothing to `served_commit`,
+and once they were indistinguishable — so a dead worker was "could not measure" and
+slipped past a release that had, in fact, just killed it. They are told apart by a
+second question: Celery's built-in `ping`, which every worker answers whatever code it
+loaded, because it is not this reading at all. Nobody answering either question is a
+worker that is not running — a release with no worker cannot process a single scan,
+and the restart that was supposed to bring it back did not — so that **refuses**
+(exit 4). An answered `ping` with an unanswered `served_commit` is a worker built
+before the reading, which says nothing about *this* release and stays exit 2. And a
+worker that **answers and names a different commit** refuses as before (exit 3): the
+exact state that breaks scans.
 
 (The `celery inspect` subcommand cannot be used: its argument parser collects command
 names when Celery is imported, before any application command exists, so a custom
@@ -29,8 +33,8 @@ command is reachable from the Python API — `app.control.broadcast` — and not
 CLI. This gate therefore imports the worker's own app and broadcasts.)
 
 **Exit codes**, chosen so a crash cannot mimic a refusal: `0` pass, `3` a worker
-answered with a different commit, `2` could not measure. Never `1`: python exits `1`
-on an uncaught exception.
+answered with a different commit, `4` no worker is running at all, `2` could not
+measure. Never `1`: python exits `1` on an uncaught exception.
 """
 
 from __future__ import annotations
@@ -47,9 +51,14 @@ EXIT_OK = 0
 #: exits 1 on an uncaught exception, and the runner must never read a crash as a
 #: refusal.
 EXIT_REFUSED = 3
+#: No worker answered *either* question: the process is not running. A release with
+#: no worker cannot process a single scan, so this refuses — it is a finding about
+#: the release, not a box property. Kept distinct from EXIT_REFUSED so the record
+#: names the right thing to restart.
+EXIT_DOWN = 4
 #: No worker could be asked, or answered in a way this gate cannot read. Never a
-#: rollback: a down worker and a worker built before the reading are the same answer
-#: from here.
+#: rollback: an alive worker built before the reading is a box property, not a
+#: release defect.
 EXIT_UNMEASURED = 2
 
 READING_OK = "ok"
@@ -64,6 +73,10 @@ READING_UNREADABLE = "unreadable"
 
 VERDICT_OK = "ok"
 VERDICT_MISMATCH = "mismatch"
+#: No worker is running: neither the commit question nor the liveness probe was
+#: answered. A distinct verdict because the remedy is "bring the worker back", not
+#: "find the commit it is on".
+VERDICT_DOWN = "down"
 VERDICT_UNMEASURED = "unmeasured"
 
 #: The fence in `app/celery_app.py` that registers the reading. Spelled in exactly
@@ -72,6 +85,12 @@ REPORTER_MARKER = "worker-commit:start"
 
 #: The control command the worker registers and this gate broadcasts.
 COMMAND = "served_commit"
+
+#: Celery's built-in liveness command. Every worker answers it whatever commit it
+#: loaded, because it is not this reading — which is the one property that lets a
+#: *down* worker be told from one **built before the reading**. Spelled exactly as
+#: Celery spells it.
+COMMAND_ALIVE = "ping"
 
 DEFAULT_REPO = os.environ.get("SCANGRADE_REPO") or "/opt/scangrade"
 DEFAULT_ATTEMPTS = 3
@@ -118,21 +137,19 @@ def reading_of(payload) -> Reading:
     return Reading(READING_OK, str(commit), "the worker named it")
 
 
-def judge(readings: list, merged: str, *, reporter_ships: bool) -> tuple[str, str]:
+def judge(readings: list, merged: str, *, reporter_ships: bool,
+          worker_alive: bool | None = None) -> tuple[str, str]:
     """What those answers mean for this release.
 
     Returns `(verdict, why)`, with `why` a sentence the runner quotes into the
     quarantine record. The order is the design: a readable disagreement is the
-    finding, and everything else is "could not measure" — never a rollback.
+    finding; then a liveness probe that says nobody is running at all is a finding
+    too (the release has no worker); everything else is "could not measure" — never
+    a rollback. `worker_alive` is `True`/`False` from the `ping` probe, or `None`
+    when that probe itself could not be read, which is never a refusal.
     """
     if not merged:
         return VERDICT_UNMEASURED, "no commit to compare against was given"
-    if not readings:
-        return VERDICT_UNMEASURED, (
-            "no worker answered over the broker; a worker that is down and one built "
-            "before this reading are indistinguishable from here, so this is not read "
-            "as a release defect" + ("" if reporter_ships else
-                                     " (and this release does not ship the reading)"))
 
     named = [r for r in readings if r.state == READING_OK]
     for reading in named:
@@ -145,9 +162,24 @@ def judge(readings: list, merged: str, *, reporter_ships: bool) -> tuple[str, st
             "none of %d worker(s) reported %s; the worker reports %s"
             % (len(readings), merged[:7], seen))
 
-    # No worker named a commit. An unreadable or unnamed answer is a box property,
-    # and a reply without the block is a worker that is not running this reading —
-    # neither is evidence about *this* release, so both are "could not measure".
+    # No worker named a commit. Now the liveness probe decides whether that silence
+    # is a dead process or merely code older than this reading.
+    if worker_alive is False:
+        return VERDICT_DOWN, (
+            "no Celery worker answered the liveness probe (%s) either: the worker is "
+            "down, not merely running code from before this reading, so this release "
+            "has no worker at all" % COMMAND_ALIVE)
+
+    if not readings:
+        return VERDICT_UNMEASURED, (
+            "no worker answered over the broker; a worker that is down and one built "
+            "before this reading are indistinguishable from here, so this is not read "
+            "as a release defect" + ("" if reporter_ships else
+                                     " (and this release does not ship the reading)"))
+
+    # A worker is alive (or liveness could not be read): an unreadable or unnamed
+    # answer is a box property, and a reply without the block is a worker that is not
+    # running this reading — neither is evidence about *this* release.
     return VERDICT_UNMEASURED, readings[-1].why
 
 
@@ -160,20 +192,44 @@ def reporter_ships(path: str) -> bool:
     return REPORTER_MARKER in text
 
 
-def worker_replies(repo: str, *, timeout: float) -> list:
-    """Every worker's answer to the command. `[]` when none answered. Never raises.
+def _with_divergence(why: str, repo: str, served, merged: str, unit: str) -> str:
+    """Append how far the worker is from the merged commit, and the remedy.
+
+    The refusal this gate writes is the one an operator acts on, so it must say
+    whether the worker merely missed the reload (restart it) or the box is on the
+    wrong history (re-baseline it), not just name the two shas. Loaded here so the
+    module still imports when read as text; a load failure leaves the sentence alone.
+    """
+    import importlib.util
+    import pathlib
+    import sys
+    try:
+        path = pathlib.Path(__file__).resolve().parent / "commit_divergence.py"
+        spec = importlib.util.spec_from_file_location("commit_divergence", path)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules["commit_divergence"] = module
+        spec.loader.exec_module(module)
+        return module.annotate(why, repo, served, merged, unit=unit)
+    except Exception:
+        return why
+
+
+def _ask(repo: str, command: str, *, timeout: float):
+    """Broadcast one control command: the replies, or `None` if unaskable.
 
     The worker's own app is imported so the broadcast goes over the broker the box
     already uses. Importing it here is the same import the worker does at start-up;
-    a failure (no broker address, a broken install) is "no answer", not a crash.
+    a failure (no broker address, a broken install) is `None` — "could not even
+    ask" — which is deliberately different from "asked and nobody answered" (`[]`),
+    because only the second is a statement about a worker.
     """
     if repo and repo not in sys.path:
         sys.path.insert(0, repo)
     try:
         from app.celery_app import celery_app
-        replies = celery_app.control.broadcast(COMMAND, reply=True, timeout=timeout)
+        replies = celery_app.control.broadcast(command, reply=True, timeout=timeout)
     except Exception:
-        return []
+        return None
     out: list = []
     for item in (replies or []):
         if isinstance(item, dict):
@@ -182,6 +238,40 @@ def worker_replies(repo: str, *, timeout: float) -> list:
         else:
             out.append(item)
     return out
+
+
+def worker_replies(repo: str, *, timeout: float) -> list:
+    """Every worker's answer to the commit command. `[]` when none answered.
+
+    Never raises, and never `None`: this is the reading the rest of the gate treats
+    as "which commit is each worker on", and "could not ask" and "nobody answered"
+    are the same thing *for a commit* — neither names a commit. Liveness is where
+    the two are told apart, in `workers_alive`.
+    """
+    replies = _ask(repo, COMMAND, timeout=timeout)
+    return replies if replies is not None else []
+
+
+def workers_alive(repo: str, *, timeout: float, attempts: int = DEFAULT_ATTEMPTS,
+                  gap: float = DEFAULT_GAP) -> bool | None:
+    """Is any worker answering *at all*? `True`/`False`, or `None` if unaskable.
+
+    `ping` is built into every Celery worker, so it is the one question a worker can
+    answer whatever commit it loaded — which is exactly what lets a genuinely dead
+    worker be told apart from one built before the reading. Retried like the commit
+    probe: a worker still coming up after a restart registers late. `None` (the ask
+    failed — no broker address, a broken import) is "could not measure" and must
+    never be read as "down".
+    """
+    for index in range(max(1, attempts)):
+        replies = _ask(repo, COMMAND_ALIVE, timeout=timeout)
+        if replies is None:
+            return None
+        if replies:
+            return True
+        if index + 1 < attempts:
+            time.sleep(gap)
+    return False
 
 
 def probe_all(ask, *, attempts: int, gap: float, merged: str) -> list[Reading]:
@@ -216,6 +306,8 @@ def build_parser() -> argparse.ArgumentParser:
                     help="seconds between broadcasts (a restarted worker registers late)")
     ap.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT,
                     help="seconds to wait for each broadcast's replies")
+    ap.add_argument("--unit", default="scangrade-celery",
+                    help="the unit the record should name in its remedy")
     ap.add_argument("--json-out", default="", help="write the readings here")
     return ap
 
@@ -235,13 +327,24 @@ def _run(args) -> int:
     ships = reporter_ships(args.reporter) if args.reporter else False
     readings = probe_all(lambda: worker_replies(args.repo, timeout=args.timeout),
                          attempts=args.attempts, gap=args.gap, merged=args.commit)
-    verdict, why = judge(readings, args.commit, reporter_ships=ships)
+    # Only ask the second question when the first named nothing: a worker that named
+    # the merged commit is alive by definition, and a worker that named *another*
+    # commit is a stronger finding than "down".
+    worker_alive: bool | None = None
+    if not any(r.state == READING_OK for r in readings):
+        worker_alive = workers_alive(args.repo, timeout=args.timeout,
+                                     attempts=args.attempts, gap=args.gap)
+    verdict, why = judge(readings, args.commit, reporter_ships=ships,
+                         worker_alive=worker_alive)
+    if verdict == VERDICT_MISMATCH:
+        served = next((r.commit for r in readings if r.state == READING_OK), "")
+        why = _with_divergence(why, args.repo, served, args.commit, args.unit)
 
     if args.json_out:
         try:
             with open(args.json_out, "w", encoding="utf-8") as handle:
                 json.dump({"verdict": verdict, "why": why, "merged": args.commit,
-                           "reporter_ships": ships,
+                           "reporter_ships": ships, "worker_alive": worker_alive,
                            "readings": [r.__dict__ for r in readings]}, handle)
         except OSError:
             pass
@@ -252,6 +355,9 @@ def _run(args) -> int:
     if verdict == VERDICT_MISMATCH:
         print("worker commit: REFUSED — %s" % why)
         return EXIT_REFUSED
+    if verdict == VERDICT_DOWN:
+        print("worker commit: REFUSED — %s" % why)
+        return EXIT_DOWN
     print("worker commit: CANNOT MEASURE — %s" % why)
     return EXIT_UNMEASURED
 
