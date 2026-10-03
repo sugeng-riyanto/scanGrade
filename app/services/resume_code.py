@@ -208,6 +208,9 @@ def lock(supabase, row: dict, exam: dict, *, violations: int = 0,
     if not written:
         return {"ok": False, "action": LOCK, "reason": "write_failed"}
     row.update(payload)
+    _record(supabase, row, "attempt_locked", {
+        "violations": violations, "resume_limit": payload.get("resume_limit"),
+    })
     return {"ok": True, "action": LOCK, "reason": "", "payload": payload}
 
 
@@ -260,4 +263,16 @@ def unlock(supabase, row: dict, exam: dict, *, student_id: str, code: str,
     if not written:
         return {"ok": False, "action": NONE, "reason": "write_failed"}
     row.update(payload)
+    _record(supabase, row, "attempt_resumed", {
+        "resume_count_used": payload.get("resume_count_used"),
+    })
     return {"ok": True, "action": RESUMED, "reason": "", "payload": payload}
+
+
+def _record(supabase, row, kind, meta=None):
+    """One lifecycle event for this attempt. Lazily imported, best-effort."""
+    try:
+        from app.services import attempt_status
+        attempt_status.record_event(supabase, (row or {}).get("id"), kind, meta=meta)
+    except Exception:  # noqa: BLE001
+        logger.warning("resume_code: could not record %s for %s", kind, (row or {}).get("id"))

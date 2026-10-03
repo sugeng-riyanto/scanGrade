@@ -1798,6 +1798,11 @@ const SG_AWAY_NOTICE_SECONDS = 60;
 // document — and a write per second is a write per second on a phone, so it goes
 // out on a cadence and at each departure rather than on every tick.
 const SG_AWAY_STAMP_MS = 15000;
+// How often the page tells the server it is still here. 25 seconds: often enough
+// to tell a dropped signal from an abandoned paper, rare enough to stay quiet on
+// the 1-vCPU box. The server treats a gap larger than its own threshold as a
+// transition event, never as a lock.
+const SG_HEARTBEAT_MS = 25000;
 
 function examApp(duration, totalQ) {
     // The countdown is the server's own number, or there is no countdown at all.
@@ -2114,6 +2119,7 @@ function examApp(duration, totalQ) {
         _awayBeganAt: 0,
         _stampedAt: 0,
         stampTimer: null,
+        heartbeatTimer: null,
         lastSyncAt: Date.now(),
         pendingSync: false,
         dirty: false,
@@ -2198,6 +2204,11 @@ function examApp(duration, totalQ) {
             }, 1000);
             this.autoSaveTimer = setInterval(() => this.periodicSync(), 60000);
             this.canvasSyncTimer = setInterval(() => this.periodicCanvasSync(), 15000);
+            // The server's clock, once at load and then on the liveness cadence.
+            // The device clock is never the source of truth: a wrong phone clock
+            // counts toward the wrong deadline, so the offset is re-read here.
+            this._resyncClock();
+            this.heartbeatTimer = setInterval(() => this._heartbeat(), SG_HEARTBEAT_MS);
             this.$watch('currentQ', (val, oldVal) => {
                 if (oldVal !== undefined) this.closeAllTools(oldVal);
                 // Move the paper only when the question does not live on the page
@@ -2294,6 +2305,35 @@ function examApp(duration, totalQ) {
                 this.armAntiCheat();
                 if (this.antiCheat.watermark_name) this.startWatermark();
             });
+        },
+        // ── The server's clock, and the liveness ping ────────────────────────
+        // `seconds_left` and `server_now` come from the one status service, so the
+        // number on screen is the number the server enforces. The ping is
+        // observation: the server records that this pupil is still here and lets
+        // the teacher tell "signal dropped" from "left the paper" — it can never
+        // end or lock a sitting, and a missed ping is not a violation.
+        _applyServerClock(data) {
+            if (!data) return;
+            var left = sgCountdown(data.seconds_left);
+            if (left === null) return;
+            // Adopt a materially different number only, so a ping landing a second
+            // after the tick does not make the visible count jump backwards.
+            if (this.timeLeft === null || Math.abs(left - this.timeLeft) > 5) this.timeLeft = left;
+        },
+        _heartbeat() {
+            if (this.submitted) return;
+            fetch('/student/heartbeat/{{ exam.id }}', {
+                method: 'POST', headers: {'Accept': 'application/json'},
+            }).then(r => r.ok ? r.json() : null)
+              .then(d => { if (d) this._applyServerClock(d); })
+              .catch(() => {});
+        },
+        _resyncClock() {
+            fetch('/student/attempt-status/{{ exam.id }}', {
+                headers: {'Accept': 'application/json'},
+            }).then(r => r.ok ? r.json() : null)
+              .then(d => { if (d && d.ok) this._applyServerClock(d); })
+              .catch(() => {});
         },
         onGoOnline() {
             this.isOnline = true;

@@ -108,9 +108,12 @@ def open_sitting(supabase, exam_id, student_id):
             or []
         )
         if created:
+            _record_started(supabase, created[0].get("id"))
             return created[0], True
         # The API answered without a representation; the row exists either way.
         rows = sitting_rows(supabase, exam_id, student_id)
+        if rows:
+            _record_started(supabase, rows[0].get("id"))
         return (rows[0] if rows else {}), True
     if row.get("status") in STANDING_STATUSES:
         return row, False
@@ -122,7 +125,22 @@ def open_sitting(supabase, exam_id, student_id):
         # leaves no second row to hold them (see the module docstring).
         patch["answers"] = {}
     supabase.table("submissions").update(patch).eq("id", row["id"]).execute()
+    _record_started(supabase, row["id"])
     return {**row, **patch}, True
+
+
+def _record_started(supabase, attempt_id):
+    """One `attempt_started` event, lazily imported so the writer cannot cycle.
+
+    `attempt_status` imports this module for its status vocabulary, so the import
+    lives inside the function: the audit trail is worth a lazy import, not a
+    circular one. Best-effort — a missing event must never cost a sitting.
+    """
+    try:
+        from app.services import attempt_status
+        attempt_status.record_event(supabase, attempt_id, "attempt_started")
+    except Exception:  # noqa: BLE001
+        logger.warning("could not record attempt_started for %s", attempt_id)
 
 
 def _school_of(row):
