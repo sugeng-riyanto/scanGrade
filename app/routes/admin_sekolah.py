@@ -28,6 +28,7 @@ from app.services import school_officials as officials_service
 from app.services.subject_service import (subject_usage, usage_confirmation_needed,
                                           usage_message)
 from app.services import analysis_scope
+from app.services import invigilation
 from app.services import login_cards
 from app.services import account_emails
 from app.services import enrollment
@@ -3435,3 +3436,124 @@ def admin_analytics_pdf():
 @admin_sekolah_required
 def admin_analytics_print():
     return _analytics_page(print_mode=True)
+
+
+# ── Jadwal pengawasan ujian (matriks pengawas) ────────────────────────────────
+#
+# Matriks yang sama yang disusun wakil kepala sekolah, dibuka juga untuk admin
+# sekolah. Pelaksanaan ujian milik *sekolah*, bukan milik jabatannya: sekolah yang
+# belum membuat akun wakil kepala tidak boleh kehilangan kemampuan menugaskan
+# pengawas sama sekali. Halaman yang sama dirender dengan `can_write=True`, dan
+# tujuan setiap formulirnya adalah prefiks admin sendiri (`invigilation_base`) —
+# bukan prefiks wakil kepala — sehingga `principal/invigilation.html` tetap satu
+# halaman untuk kedua penulis.
+#
+# Wewenangnya tidak bergantung pada template: keempat route di bawah berada di
+# prefiks `/admin-sekolah/invigilation` di belakang `@admin_sekolah_required`.
+# Sekolahnya selalu dari sesi (`_school_id()`), dan `invigilation` mensyaratkan
+# `school_id` itu di setiap baca/tulis — jadi tidak ada sekolah yang bisa
+# dititipkan lewat parameter.
+
+@admin_sekolah_bp.route("/invigilation")
+@admin_sekolah_required
+def invigilation_page():
+    """Admin sekolah: jadwal pengawasan sekolahnya, plus wewenang menyusunnya."""
+    sid = _school_id()
+    if not sid:
+        return redirect("/auth/login")
+    supabase = get_supabase()
+    return render_template(
+        "principal/invigilation.html",
+        role="admin_sekolah",
+        base="/admin-sekolah",
+        invigilation_base="/admin-sekolah",
+        retake_decide_base="/admin-sekolah",
+        can_write=True,
+        school=None,
+        schedules=invigilation.list_schedules(supabase, sid),
+        requests=invigilation.retake_requests(supabase, sid),
+        options=invigilation.form_options(supabase, sid),
+    )
+
+
+@admin_sekolah_bp.route("/invigilation/save", methods=["POST"])
+@admin_sekolah_required
+@open_year_required("exam_id")
+def invigilation_save():
+    """Create or move one sitting. The school is the session's, never the form's."""
+    sid = _school_id()
+    if not sid:
+        return redirect("/auth/login")
+    out = invigilation.save_schedule(
+        get_supabase(), sid,
+        exam_id=request.form.get("exam_id", ""),
+        class_id=request.form.get("class_id", ""),
+        scheduled_at=request.form.get("scheduled_at", ""),
+        room=request.form.get("room", ""),
+        notes=request.form.get("notes", ""),
+        actor_id=g.get("user_id"),
+    )
+    _invigilation_refused(out)
+    return redirect("/admin-sekolah/invigilation")
+
+
+@admin_sekolah_bp.route("/invigilation/<schedule_id>/assign", methods=["POST"])
+@admin_sekolah_required
+@open_year_required("schedule_id")
+def invigilation_assign(schedule_id: str):
+    """Put a teacher on a sitting, or make them its lead."""
+    sid = _school_id()
+    if not sid:
+        return redirect("/auth/login")
+    out = invigilation.assign_invigilator(
+        get_supabase(), sid,
+        schedule_id=schedule_id,
+        teacher_id=request.form.get("teacher_id", ""),
+        is_lead=request.form.get("is_lead") in ("1", "true", "on"),
+        actor_id=g.get("user_id"),
+    )
+    _invigilation_refused(out)
+    return redirect("/admin-sekolah/invigilation")
+
+
+@admin_sekolah_bp.route("/invigilation/assignments/<assignment_id>/remove",
+                        methods=["POST"])
+@admin_sekolah_required
+@open_year_required("assignment_id")
+def invigilation_unassign(assignment_id: str):
+    """Take a teacher off a sitting."""
+    sid = _school_id()
+    if not sid:
+        return redirect("/auth/login")
+    _invigilation_refused(invigilation.remove_assignment(
+        get_supabase(), sid, assignment_id))
+    return redirect("/admin-sekolah/invigilation")
+
+
+@admin_sekolah_bp.route("/retake-requests/<request_id>/decide", methods=["POST"])
+@admin_sekolah_required
+@open_year_required("request_id")
+def retake_decide(request_id: str):
+    """Decide a retake request as the school's own authority."""
+    sid = _school_id()
+    if not sid:
+        return redirect("/auth/login")
+    out = invigilation.decide_retake(
+        get_supabase(), sid, request_id,
+        decision=request.form.get("decision", ""),
+        actor_id=g.get("user_id"),
+        note=request.form.get("note", ""),
+    )
+    _invigilation_refused(out)
+    return redirect("/admin-sekolah/invigilation")
+
+
+def _invigilation_refused(out: dict) -> bool:
+    """Flash whatever the write refused, as a key the page translates."""
+    if not out.get("ok"):
+        flash(out.get("reason") or "write_failed", "error")
+        return False
+    if out.get("reason"):
+        flash(out["reason"], "error")
+        return False
+    return True

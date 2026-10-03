@@ -347,17 +347,28 @@ def vice_principal_progress():
 # `vice_principal_required`, so a page that drew the form anyway would still be
 # refused by the route.
 
-def _invigilation_page(role: str):
-    """The schedule, its invigilators, and the retake requests waiting on someone."""
+def _invigilation_page(role: str, *, base: str | None = None,
+                       can_write: bool | None = None):
+    """The schedule, its invigilators, and the retake requests waiting on someone.
+
+    Two doors open this page — the deputy's and, since a school without a deputy
+    still has to staff its sittings, the school admin's. Because of that the
+    *destination* of every form comes from the caller (`base`) rather than being
+    written dead into the template, exactly as the assessment calendar does it: one
+    page for two writers, and the write routes on each writer's own prefix.
+    """
     school_id = _school_id()
     if not school_id:
         return redirect("/auth/login")
     supabase = get_supabase()
+    base = base or _base(role)
     return render_template(
         "principal/invigilation.html",
         role=role,
-        base=_base(role),
-        can_write=role == "vice_principal",
+        base=base,
+        invigilation_base=base,
+        retake_decide_base=base,
+        can_write=can_write if can_write is not None else role == "vice_principal",
         school=_school(supabase, school_id),
         schedules=invigilation.list_schedules(supabase, school_id),
         requests=invigilation.retake_requests(supabase, school_id),

@@ -610,8 +610,13 @@ class TestThePagesCanSayWhy:
         # The official page can create a sitting and assign an invigilator; the teacher
         # page lists their duties and can decide. The route paths themselves are the
         # assertion, so a form pointing at a path that does not exist fails here.
-        assert '/vice-principal/invigilation/save' in official
-        assert '/vice-principal/invigilation/' in official, "no sitting can be assigned"
+        # The prefix is the caller's since the admin school gained the same page, so
+        # the page names `invigilation_base` and the routes name their own prefixes.
+        assert '{{ invigilation_base }}/invigilation/save' in official
+        assert '{{ invigilation_base }}/invigilation/' in official, "no sitting can be assigned"
+        principal = PRINCIPAL_ROUTES.read_text(encoding="utf-8")
+        assert '/vice-principal/invigilation/save' in principal
+        assert '/vice-principal/invigilation/' in principal
         assert 'options.teachers' in official, "the assign form has no teachers to pick"
         assert 'invigilators' in official
         assert 'tasks' in teacher, "the teacher's page does not list their duties"

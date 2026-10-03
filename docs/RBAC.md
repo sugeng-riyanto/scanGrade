@@ -149,6 +149,9 @@ tombol bernama sama di seksi Admin Sekolah.
 | `/principal/progress` — kalender bulan, tren mingguan & bulanan, per guru | ✅ | ❌ | ❌ |
 | `/vice-principal/progress` | ❌ | ✅ | ❌ |
 | `/admin-sekolah/officials` (+ `/create`, `/<id>/edit`, `/<id>/delete`, `/<id>/reset-password`) | ❌ | ❌ | hanya `admin_sekolah` |
+| `/principal/invigilation` — matriks pengawas sekolah | ✅ baca | ❌ | ❌ |
+| `/vice-principal/invigilation` (+ `/save`, `/<id>/assign`, `/assignments/<id>/remove`) — matriks pengawas, wakil kepala menyusun | ❌ | ✅ | ❌ |
+| `/admin-sekolah/invigilation` (+ `/save`, `/<id>/assign`, `/assignments/<id>/remove`, `/retake-requests/<id>/decide`) — **matriks yang sama**, disusun admin sekolah | ❌ | ❌ | hanya `admin_sekolah` |
 
 Satu view melayani dua alamat; yang berbeda hanya peran pembacanya, dan judul halaman
 menyebut peran itu. **Tidak ada satu pun route tulis di `/principal/*` dan
