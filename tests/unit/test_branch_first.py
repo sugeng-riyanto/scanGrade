@@ -110,9 +110,15 @@ def test_it_is_not_read_where_it_cannot_be(tmp_path):
     pause = script.index('if [ -e "$PAUSE_FILE" ]')
     assert "branch_read_refs" not in script[pause:script.index("exit 0", pause)]
     # No checkout at all: there is nothing to read, and the guard says so first.
-    assert '[ -d "$REPO/.git" ] || return 0' in _block("branch-first-logic"), (
+    # It lives in the shared reader now — three callers share one fetch — so the
+    # guard is asserted where the fetch is, not where it used to be.
+    block = _block("branch-first-logic")
+    assert '[ -d "$REPO/.git" ] || return 1' in block, (
         "the read no longer checks for a checkout, so it would fetch in a directory "
         "that is not one")
+    assert "branch_refs_read() {" in block, (
+        "the fetch moved out of the block the refusal path composes, so a refusal "
+        "would run a reader that is not defined")
 
 
 def test_the_armament_sentence_stops_claiming_nothing_was_fetched():

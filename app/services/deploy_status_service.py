@@ -273,6 +273,12 @@ GATE_KEYS = frozenset({
     #: Recorded by the `worker-commit-gate` block in `deploy/scangrade-deploy.sh`.
     "worker_commit",
     "runner_not_armed",
+    #: The app refused to be *served from* the checkout it was built from: a path
+    #: in it holds bytes no checkout of that commit can produce, so the path reads
+    #: as modified however many times it is restored and the merge fast-forward
+    #: refuses over it for ever. Recorded at the construct gate, which is the step
+    #: the deploy's own probe reaches (see `app/utils/checkout_integrity.py`).
+    "checkout_not_reproducible",
     "theme_gate",
     "smoke_test",
     "claims_gate",
@@ -910,6 +916,160 @@ SITUATION_ACTIONS = frozenset({SITUATION_WAIT, SITUATION_RELEASE,
 #: `rebaseline` writes `requests/rebaseline`; both mean something to the runner, and
 #: both are only offered while a commit is actually held for them to act on.
 SITUATION_BUTTON_ACTIONS = frozenset({SITUATION_RELEASE, SITUATION_REBASELINE})
+
+# ── a dirty checkout is two different problems ──────────────────────────────
+# The runner refuses a dirty checkout, and the page said only that: "the checkout
+# has uncommitted changes". Two states hide behind it, and their remedies are
+# opposites:
+#
+#   * a **hand edit** — somebody changed a tracked file, the box's version is worth
+#     keeping, and the heal sets it aside as a patch before the merge;
+#   * a **blob no checkout can reproduce** — the commit stores bytes the path's own
+#     `.gitattributes` filter would never produce (this project shipped 108 carriage
+#     returns inside `app/routes/admin_sekolah.py`, a file promised `eol=lf`).
+#     `git checkout`, `git restore` and `git stash` all write *through* the filter,
+#     so the path reads as modified however many times it is restored and the merge
+#     fast-forward refuses for that reason, forever. Its heal is not a restore at
+#     all: HEAD's own bytes go in verbatim and the filter is overridden for that one
+#     path.
+#
+# `mixed` is its own answer rather than a rounding, because a box holding both needs
+# both remedies. The measurement is made here, read-only, and deliberately not by the
+# runner: the box that needs it most runs a runner old enough to refuse a dirty
+# checkout outright and will never write this classification down, while `git
+# status`, `git check-attr` and `git cat-file` are all the page needs — and all three
+# are reads.
+DIRTY_NONE = "none"
+DIRTY_HAND = "hand"
+DIRTY_BLOB = "blob"
+DIRTY_MIXED = "mixed"
+DIRTY_UNREADABLE = "unreadable"
+DIRTY_KIND_KEYS = frozenset({DIRTY_NONE, DIRTY_HAND, DIRTY_BLOB, DIRTY_MIXED,
+                             DIRTY_UNREADABLE})
+#: How many dirty paths are measured one by one. Each classification is two git
+#: calls, and this page is served from a 1-vCPU box that is also serving students —
+#: so a pathological tree is capped, and the cap is *reported* rather than silently
+#: shortening the list (`truncated`).
+DIRTY_PATHS_LIMIT = 12
+#: How long one `git` call here may take. `_run` already refuses to raise; this is
+#: what keeps a wedged git from holding the page.
+DIRTY_GIT_TIMEOUT = 8
+
+
+def _porcelain_path(line: str) -> str | None:
+    """The path in one `git status --porcelain` line.
+
+    Porcelain v1 is `XY <path>`, two status characters and a space, and a rename is
+    `R  <old> -> <new>` — the path that changed is the new one. Quotes are how git
+    escapes a path with spaces or non-ASCII bytes; strip them rather than hand the
+    shell something it will re-split.
+    """
+    if len(line) < 4:
+        return None
+    body = line[3:]
+    if " -> " in body:
+        body = body.split(" -> ", 1)[1]
+    return body.strip().strip('"') or None
+
+
+def _dirty_path_kind(git: str, repo: pathlib.Path, path: str) -> str:
+    """`hand` or `blob` for one dirty path — read-only, and never a guess from a name.
+
+    The question is not "does this file contain a CR" but "could this path's own
+    attributes have produced the blob git stored". So `git check-attr text eol` is
+    read first: without a text attribute there is no filter to defeat and the file is
+    the box's edit; `eol=crlf` is the one setting for which a stored CR is the
+    expected shape. Only then is the blob itself read, and a CR in it is the defect —
+    under `eol=lf` it is bytes no checkout of that path can ever reproduce.
+    """
+    rc, attrs = _run([git, "-C", str(repo), "check-attr", "text", "eol", "--", path],
+                     timeout=DIRTY_GIT_TIMEOUT)
+    if rc != 0:
+        return DIRTY_HAND
+    text_attr = eol_attr = None
+    for line in attrs.splitlines():
+        parts = line.rsplit(": ", 2)
+        if len(parts) != 3:
+            continue
+        _path, name, value = parts
+        if name == "text":
+            text_attr = value.strip()
+        elif name == "eol":
+            eol_attr = value.strip()
+    if eol_attr == "crlf":
+        return DIRTY_HAND
+    if text_attr not in ("set", "auto"):
+        return DIRTY_HAND
+    # Read as **bytes**. `_run` decodes with universal newlines, which turns a
+    # `\r\n` in the blob into `\n` and hides the very byte this is looking for — the
+    # first version of this probe classified the carriage-return blob as a hand edit
+    # for exactly that reason. `git cat-file blob` writes the stored bytes untouched,
+    # so reading them undecoded is what makes the measurement the blob's own.
+    rc, blob = _run_bytes([git, "-C", str(repo), "cat-file", "blob", f"HEAD:{path}"],
+                          timeout=DIRTY_GIT_TIMEOUT)
+    if rc != 0:
+        # HEAD has no such blob: an added path is the box's own file, plain and simple.
+        return DIRTY_HAND
+    return DIRTY_BLOB if b"\r" in blob else DIRTY_HAND
+
+
+def dirty_kinds_state(repo, *, now: _dt.datetime, git: str | None = None,
+                      paths: list[str] | None = None,
+                      limit: int = DIRTY_PATHS_LIMIT) -> dict:
+    """What kind of dirty the checkout's uncommitted changes are.
+
+    `paths` lets the caller hand in a `git status` it has already read (the checkout
+    card does), so the page does not ask git the same question twice. A tree nobody
+    could read is `unreadable`, never `none`: "clean" is a claim, and it is not one
+    an unreadable tree earns.
+    """
+    repo = pathlib.Path(repo)
+    state: dict = {
+        "path": str(repo), "key": DIRTY_NONE, "hand": 0, "blob": 0, "total": 0,
+        "truncated": 0, "paths": [], "reason": None,
+        "measured_at": now.isoformat(timespec="seconds"),
+    }
+    if git is None:
+        git = _git()
+    if git is None:
+        state["key"] = DIRTY_UNREADABLE
+        state["reason"] = "no_git"
+        return state
+    if not (repo / ".git").exists():
+        state["key"] = DIRTY_UNREADABLE
+        state["reason"] = "not_a_checkout"
+        return state
+
+    if paths is None:
+        # `_git_raw`, not `_git_out`: porcelain is `XY <path>` — three columns, the
+        # first of which is a space — and `_git_out` trims the output, so `line[3:]`
+        # in `_porcelain_path` walked one character into the first path of every
+        # listing (`app/cr.py` read as `pp/cr.py`). The startup check in
+        # `app/utils/checkout_integrity.py` caught the same peel in its own reader,
+        # and this half had to follow: one rule, one reading, wherever it is used.
+        rc, out = _git_raw(git, repo, "status", "--porcelain")
+        if rc != 0:
+            state["key"] = DIRTY_UNREADABLE
+            state["reason"] = out or "git status exited non-zero with no output"
+            return state
+        paths = [p for p in (_porcelain_path(ln) for ln in out.splitlines() if ln.strip())
+                 if p]
+
+    state["total"] = len(paths)
+    measured = paths[:max(0, limit)]
+    state["truncated"] = max(0, len(paths) - len(measured))
+    for path in measured:
+        kind = _dirty_path_kind(git, repo, path)
+        state["paths"].append({"path": path, "kind": kind})
+        state[kind] += 1
+
+    if state["blob"] and state["hand"]:
+        state["key"] = DIRTY_MIXED
+    elif state["blob"]:
+        state["key"] = DIRTY_BLOB
+    elif state["hand"]:
+        state["key"] = DIRTY_HAND
+    return state
 
 #: The performance gate's reading, named the same way the three records above are.
 PERF_NONE = "none"
@@ -1881,6 +2041,20 @@ def _git() -> str | None:
     return None
 
 
+def _run_bytes(argv: list[str], timeout: int = 10) -> tuple[int, bytes]:
+    """`_run` without the decode, for output whose *bytes* are the question.
+
+    `text=True` decodes with universal newlines, so a carriage return in a blob is
+    normalised away before any caller can see it. Anything asking "what byte is in
+    this" has to read it undecoded — that is the whole point of `dirty_kinds_state`.
+    """
+    try:
+        done = subprocess.run(argv, capture_output=True, timeout=timeout)
+    except (OSError, subprocess.SubprocessError):
+        return 255, b""
+    return done.returncode, (done.stdout or b"")
+
+
 def _run(argv: list[str], timeout: int = 10) -> tuple[int, str]:
     """(returncode, stdout). Never raises: a command that cannot run is a reason."""
     try:
@@ -2346,6 +2520,12 @@ def checkout_state(repo: pathlib.Path, *, now: _dt.datetime,
         "head_date": None, "origin": None, "behind": None, "ahead": None,
         "dirty": None, "origin_updated_at": None, "origin_age_seconds": None,
         "detached": False,
+        # Filled once the tree can be read. Defaulted to `unreadable` rather than
+        # `none` so an early return cannot read as "the checkout is clean": the
+        # card only shows this when the checkout itself was readable, but a caller
+        # reaching for `dirty_kinds` directly must not be told a clean tree either.
+        "dirty_kinds": {"key": DIRTY_UNREADABLE, "hand": 0, "blob": 0, "total": 0,
+                        "truncated": 0, "paths": [], "reason": None},
     }
     state["running"] = _running_base(running, now=now)
     _place_running(state["running"], None, repo, None)
@@ -2397,7 +2577,14 @@ def checkout_state(repo: pathlib.Path, *, now: _dt.datetime,
     # answerable from here too.
     rc, porcelain = _git_out(git, repo, "status", "--porcelain")
     if rc == 0:
-        state["dirty"] = len([ln for ln in porcelain.splitlines() if ln.strip()])
+        dirty_paths = [p for p in (_porcelain_path(ln)
+                                  for ln in porcelain.splitlines() if ln.strip()) if p]
+        state["dirty"] = len(dirty_paths)
+        # Which *kind* of dirty it is, from the same listing — see
+        # `dirty_kinds_state`: a restore cannot clear a blob the filters never made,
+        # and an operator cannot tell that from a hand edit by looking.
+        state["dirty_kinds"] = dirty_kinds_state(repo, now=now, git=git,
+                                                 paths=dirty_paths)
 
     for ref in ORIGIN_REFS:
         ref_file = repo / ".git" / ref

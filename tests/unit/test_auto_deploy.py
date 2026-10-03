@@ -734,7 +734,12 @@ def test_the_deploy_refuses_a_copy_before_it_touches_anything():
             f"the copy check runs after {later!r} — by then the checkout has moved "
             "and a stale runner has already deployed with old logic"
         )
-    assert "install-auto-deploy.sh" in script[refusal - 400:refusal + 900], \
+    # Searched inside Gate 0's own delimiters rather than in a ±window around the
+    # word: the block has grown twice now (a nested adoption check, an adopted-hash
+    # comparison), and a character count that other work keeps moving is a test that
+    # fails for a reason unrelated to the property it holds.
+    identity = script[script.index(IDENTITY_START):script.index(IDENTITY_END)]
+    assert "install-auto-deploy.sh" in identity[identity.index("REFUSING"):], \
         "the refusal has to name the one command that fixes it"
 
 

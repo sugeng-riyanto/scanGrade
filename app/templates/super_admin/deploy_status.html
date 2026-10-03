@@ -124,6 +124,30 @@
                     <span x-text="t('Runner sudah benar, tetapi checkout tertinggal dari origin/main.','The runner is right, but the checkout is behind origin/main.')"></span>
                     {% elif v.key == 'dirty' %}
                     <span x-text="t('Checkout ini punya perubahan yang belum di-commit, dan deploy menolak checkout yang kotor.','This checkout has uncommitted changes, and the deploy refuses a dirty checkout.')"></span>
+                    {#
+                        "Dirty" is two problems wearing one word, and the remedies are
+                        opposite. A hand edit is a patch the runner can set aside; a blob
+                        the path's own filter could never produce survives every restore,
+                        and the only heal is writing HEAD's own bytes in verbatim. An
+                        operator cannot tell them apart without reading bytes, so the page
+                        classifies the tree read-only and says which one it is holding.
+                        Missing before this block: the classification was measured but
+                        never shown, so an operator read the generic sentence and reached
+                        for a restore that does nothing on a blob.
+                    #}
+                    {% if status.checkout.dirty_kinds is defined %}
+                    {% if status.checkout.dirty_kinds.key == 'none' %}
+                    <span class="block" x-text="t('Tidak ada perubahan yang tersisa saat halaman ini dibaca — checkout ini bersih sekarang.','No change is left as this page is read — this checkout is clean now.')"></span>
+                    {% elif status.checkout.dirty_kinds.key == 'hand' %}
+                    <span class="block" x-text="t('Ini suntingan tangan: runner bisa menyingkirkannya sebagai patch, menyimpannya, lalu melanjutkan rilis.','This is a hand edit: the runner can set it aside as a patch, keep it, and carry on with the release.')"></span>
+                    {% elif status.checkout.dirty_kinds.key == 'blob' %}
+                    <span class="block" x-text="t('Ini byte blob yang tidak bisa direproduksi checkout mana pun: git checkout, git restore dan git stash semuanya menulis lewat filter-nya, jadi berkas ini tetap terbaca sebagai berubah. Satu-satunya obat adalah menulis byte milik HEAD apa adanya untuk berkas itu.','This is a byte blob no checkout can reproduce: git checkout, git restore and git stash all write through its filter, so the path keeps reading as modified. The only heal is writing HEAD’s own bytes verbatim for that path.')"></span>
+                    {% elif status.checkout.dirty_kinds.key == 'mixed' %}
+                    <span class="block" x-text="t('Ada dua-duanya sekaligus: sebagian suntingan tangan yang bisa disingkirkan, sebagian byte blob yang tidak. Tangani satu per satu.','Both at once: some hand edits a restore can replace, some byte blobs it cannot. Handle them one path at a time.')"></span>
+                    {% elif status.checkout.dirty_kinds.key == 'unreadable' %}
+                    <span class="block" x-text="t('Kotak ini tidak bisa dibaca saat halaman ini dimuat, jadi jenis perubahannya belum diketahui.','The box could not be read when this page loaded, so the kind of change is not yet known.')"></span>
+                    {% endif %}
+                    {% endif %}
                     {% elif v.key == 'paused' %}
                     <span x-text="t('Runner sudah benar, tetapi deploy sedang dibekukan oleh file pause.','The runner is right, but deploys are frozen by the pause file.')"></span>
                     {% elif v.key == 'absent' %}
@@ -718,6 +742,7 @@
                                 {% elif q.gate_key == 'served_commit' %}<span x-text="t('commit yang dilayani bukan yang baru di-merge','the app is not serving the commit that was merged')"></span>
                                 {% elif q.gate_key == 'worker_commit' %}<span x-text="t('worker latar belakang menjalankan commit lain — rilis setengah jadi','the background worker is running another commit — a half-deployed release')"></span>
                                 {% elif q.gate_key == 'runner_not_armed' %}<span x-text="t('runner belum armed','the runner is not armed')"></span>
+                                {% elif q.gate_key == 'checkout_not_reproducible' %}<span x-text="t('checkout tidak bisa mereproduksi commit-nya sendiri','the checkout cannot reproduce its own commit')"></span>
                                 {% elif q.gate_key == 'theme_gate' %}<span x-text="t('gerbang tema','the theme gate')"></span>
                                 {% elif q.gate_key == 'smoke_test' %}<span x-text="t('uji asap setelah deploy','the post-deploy smoke test')"></span>
                                 {% elif q.gate_key == 'claims_gate' %}<span x-text="t('gerbang klaim','the claims gate')"></span>
