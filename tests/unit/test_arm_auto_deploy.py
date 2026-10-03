@@ -18,13 +18,15 @@ page reports: a launcher that renders from the checkout (armed), one that was
 never rendered, and a *copy* of the deploy script — which deploys every release
 while running no gate at all, the state this whole wrapper exists to make loud.
 
-Mutation-checked, **11/11 injected defects caught**
+Mutation-checked, **12/12 injected defects caught**
 (`.freebuff/mutate_arm_auto_deploy.py`): the copy state read as armed, the
 unrendered state read as armed, a missing snapshot a missing conf a missing roster
 and a missing `DIRECT_URL` each read as armed, the no-terminal refusal removed, the
 elevation loop guard removed, the roster validated only after the password prompt,
-the installer run without keeping its log, and the roster counted by entries
-instead of by role.
+the installer run without keeping its log, the roster counted by entries instead of
+by role, and the After report judged with the pre-pull copy of the checker — the
+last one the defect that made a box read ARMED in one breath and NOT ARMED in the
+next.
 """
 import json
 import os
@@ -320,3 +322,25 @@ class TestTheFileItself:
         assert 'bash "$INSTALLER" 2>&1 | tee "$LOG"' in text, \
             "the installer's output is not kept — the run cannot be read back"
         assert "rc=${PIPESTATUS[0]}" in text, "the installer's exit code is thrown away"
+
+    def test_the_after_report_uses_the_checkouts_file_not_this_process_copy(self):
+        """The installer pulls origin/main, and "armed" can have *grown* in that
+        pull — so the After report has to be taken with the pulled rules, not the
+        rules this process started with. Measured on a box where the two disagreed:
+        "After" printed ARMED (four gate blocks, no schema check) while the very
+        next deploy tick printed NOT ARMED (five, plus the schema/DIRECT_URL
+        requirement), and the operator was left holding two verdicts about one box.
+        """
+        text = SCRIPT.read_text(encoding="utf-8")
+        after = text[text.index('say "After"'):]
+        assert 'bash "$REPO/deploy/arm-auto-deploy.sh" --check' in after, (
+            "the After report judges with the code this process loaded, so it can "
+            "print ARMED for a box its own runner will refuse")
+        check_at = after.index('bash "$REPO/deploy/arm-auto-deploy.sh" --check')
+        # The *call*, not the word: the comment above it names `report_state` too.
+        assert after.index("elif report_state; then") > check_at, (
+            "the in-process report_state is still reached first, so the checkout's "
+            "pulled rules are never consulted")
+        assert '[ -f "$REPO/deploy/arm-auto-deploy.sh" ]' in after, (
+            "nothing guards the fallback, so a checkout with no checker would fail "
+            "here instead of reporting")
