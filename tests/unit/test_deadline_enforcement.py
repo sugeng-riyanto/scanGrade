@@ -436,3 +436,54 @@ class TestItRunsWithoutABrowser:
         assert row["status"] == "graded"
         assert row["score"] == 55.0
         assert row["final_score"] == 50.0
+
+
+# ── 6. a locked sitting is still the clock's to close ────────────────────────
+
+class TestALockedSittingIsClosedByTheClock:
+    """A lock is not a pause. The clock keeps running, so the clock still ends it.
+
+    Without this the lock would be the one status the deadline never reaches:
+    `close_expired` only ever looked at `draft`, so a pupil locked a minute before
+    the end would sit past their own deadline forever, held out of a paper that is
+    over. The lock and the clock must agree that the sitting has ended — and the
+    locked sitting is closed on the answers it already holds.
+    """
+
+    def _locked(self, started, **exam_over):
+        row = draft(started, status="locked_pending_resume",
+                    exams=exam(**exam_over))
+        return FakeClient({"submissions": [row]}), row
+
+    def test_a_locked_sitting_past_its_deadline_is_closed(self):
+        client, row = self._locked(NOW - timedelta(hours=2))
+        outcome = D.close_expired(client, now=NOW)
+        assert outcome["closed"] == 1
+        assert row["status"] == "submitted"
+
+    def test_a_locked_sitting_inside_the_grace_is_left_locked(self):
+        """The grace belongs to both halves: the clock has not run out yet."""
+        client, row = self._locked(NOW - timedelta(minutes=60, seconds=30))
+        assert D.close_expired(client, now=NOW)["closed"] == 0
+        assert row["status"] == "locked_pending_resume"
+
+    def test_a_locked_sitting_is_closed_on_its_own_answers(self):
+        client, row = self._locked(NOW - timedelta(hours=2))
+        D.close_expired(client, now=NOW)
+        assert row["answers"] == {"0": "A"}
+        assert row["status"] == "submitted"
+
+    def test_finalize_expired_closes_one_locked_sitting_on_demand(self):
+        """The sweep runs on a timer; the lock screen and resume door cannot wait
+        for the next tick to tell a pupil their paper is over."""
+        row = draft(NOW - timedelta(hours=2), status="locked_pending_resume")
+        payload = D.finalize_expired(FakeClient({"submissions": [row]}), row, exam())
+        assert row["status"] == "submitted"
+        assert payload["status"] == "submitted"
+
+    def test_the_locked_close_goes_through_the_one_writer(self):
+        """PATCH-vs-POST stays decided in `finish_sitting`, not here."""
+        source = (ROOT / "app" / "services" / "deadline_service.py").read_text(encoding="utf-8")
+        assert "closing=True" in source, (
+            "the sweep does not tell the one writer that a locked sitting is being "
+            "closed, so `finish_sitting` refuses it and the locked paper is never closed")

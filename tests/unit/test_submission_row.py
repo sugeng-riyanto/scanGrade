@@ -23,6 +23,7 @@ from supabase import create_client
 
 from app.services.submission_service import (
     LIVE_STATUSES,
+    LOCKED_STATUS,
     finish_sitting,
     open_sitting,
     sitting_target,
@@ -148,7 +149,10 @@ class TestOpeningASitting:
         assert opened is True
         assert created["status"] == "draft"
         assert created["started_at"]
-        assert writes(sb.calls) == [("insert", "submissions")]
+        # One insert, and nothing else: there is no second code minted here. The
+        # code a lock later asks for is the recovery code (`exam_access_codes`),
+        # issued when the exam page opens — see tests/unit/test_resume_code.py.
+        assert writes(sb.calls) == [("insert", "submissions")], writes(sb.calls)
 
     def test_an_open_draft_keeps_its_stamp_and_is_not_rewritten(self):
         """The timer survives a refresh — which needs no write at all."""
@@ -164,8 +168,11 @@ class TestOpeningASitting:
         assert opened is True
         assert sitting["status"] == "draft"
         assert sitting["answers"] == {}
-        assert writes(sb.calls) == [("update", "submissions")]
+        # Reopened in one write, and no code minted: the code is the recovery code,
+        # issued per (student, exam) by `exam_recovery`, not a column on this row.
+        assert writes(sb.calls) == [("update", "submissions")], writes(sb.calls)
         assert sb.store["submissions"][0]["status"] == "draft"
+        assert "resume_code" not in sb.store["submissions"][0]
 
     def test_a_draft_without_a_stamp_gets_one(self):
         sb = _FakeSupabase([row("draft", started_at=None)])
@@ -180,6 +187,29 @@ class TestOpeningASitting:
         assert opened is False
         assert sitting["status"] == status
         assert writes(sb.calls) == []
+
+    def test_a_locked_attempt_is_never_reopened_as_a_draft(self):
+        """The clock-reset hole the lock screen would otherwise sit on top of.
+
+        `open_sitting` reuses any row that is neither live nor an open draft, and
+        rewrites it to `status: draft, started_at: now()`. A locked sitting must
+        not be in that set: reopening it both bypasses the lock the server just
+        applied and moves `started_at` — the sole input to the deadline — so the
+        pupil's timer would silently start over.
+        """
+        sb = _FakeSupabase([row(LOCKED_STATUS)])
+        sitting, opened = open_sitting(sb, EXAM, STUDENT)
+        assert opened is False
+        assert sitting["status"] == LOCKED_STATUS
+        assert writes(sb.calls) == [], (
+            "opening a locked sitting wrote to it — bypassing the lock and "
+            "re-stamping the clock")
+        assert sb.store["submissions"][0]["started_at"] == row(LOCKED_STATUS)["started_at"]
+
+    def test_a_locked_attempt_is_not_a_submit_target(self):
+        assert sitting_target([row(LOCKED_STATUS)]) is None, (
+            "a locked sitting is a live attempt for write purposes: submitting "
+            "into it would overwrite the paper the lock is holding")
 
     def test_an_answer_without_a_representation_is_read_back(self):
         """supabase-py can answer an insert with no body; the row still exists."""

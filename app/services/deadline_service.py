@@ -52,15 +52,20 @@ from app.services.anti_cheat_service import (
     calculate_graduated_penalty, count_penalized_violations,
 )
 from app.services.question_types import default_weights, earned_points, objective_result
-from app.services.submission_service import finish_sitting
+from app.services.submission_service import LOCKED_STATUS, finish_sitting
 from app.utils import exam_window
 from app.utils.logger import get_logger
 
 logger = get_logger("deadline")
 
-#: Only a `draft` is a sitting still in progress. A live row is a result, and a
-#: result is not the sweep's to rewrite.
+#: The statuses that are still a *sitting* — a paper the clock may still close.
+#: A `draft` is the ordinary case. `locked_pending_resume` is still a sitting, not
+#: a result: locking is not a pause, the clock keeps running, so the clock still
+#: ends it. Leaving the locked status out was how a pupil locked a minute before
+#: the end could sit past their own deadline forever. A live row is a result, and
+#: a result is not the sweep's to rewrite.
 DRAFT_STATUS = "draft"
+OPEN_STATUSES = (DRAFT_STATUS, LOCKED_STATUS)
 
 #: How many drafts one pass looks at. Bounds the read on a busy box; anything
 #: beyond it is picked up by the next tick, and the deadline arithmetic — not this
@@ -123,12 +128,12 @@ def _as_json(value):
 
 
 def _candidates(supabase, now):
-    """Drafts old enough that a deadline could have passed. One round-trip."""
+    """Sittings old enough that a deadline could have passed. One round-trip."""
     cutoff = (now - timedelta(seconds=MIN_SITTING_SECONDS)).isoformat()
     return (
         supabase.table("submissions")
         .select(SUBMISSION_COLUMNS)
-        .eq("status", DRAFT_STATUS)
+        .in_("status", list(OPEN_STATUSES))
         .lt("started_at", cutoff)
         .order("started_at")
         .limit(SCAN_LIMIT)
@@ -201,7 +206,8 @@ def close_expired(supabase, now=None) -> dict:
         try:
             payload = _closed_payload(supabase, row, exam, ended_at)
             finish_sitting(
-                supabase, row.get("exam_id"), row.get("student_id"), payload, rows=[row]
+                supabase, row.get("exam_id"), row.get("student_id"), payload,
+                rows=[row], closing=True,
             )
         except Exception:  # noqa: BLE001 — one paper must not stop the sweep
             logger.exception("Could not close the expired sitting %s", row.get("id"))
@@ -212,6 +218,30 @@ def close_expired(supabase, now=None) -> dict:
     if closed:
         logger.info("Deadline sweep closed %d expired sitting(s)", len(closed))
     return {"closed": len(closed), "ids": closed}
+
+
+def finalize_expired(supabase, row, exam, now=None):
+    """Close one locked sitting whose deadline has passed, on its stored answers.
+
+    The on-demand half of the sweep, for the two doors that cannot wait for the
+    next tick: the lock screen and the resume endpoint. A pupil staring at a "your
+    paper is locked" screen must be told the clock has ended *now*, not up to a
+    minute later — and a correct code typed after the deadline must be refused with
+    the same instant, before the sweep gets there.
+
+    The mark is built by `_closed_payload`, so a locked sitting the clock ended and
+    a draft the clock ended carry the same score and the same penalty. It is
+    written through the one writer with `closing=True`, which is the door that
+    lets a locked row be closed without reopening it.
+    """
+    ended_at = sitting_end(exam or {}, (row or {}).get("started_at")) or _now(now)
+    payload = _closed_payload(supabase, row, exam or {}, ended_at)
+    finish_sitting(
+        supabase, row.get("exam_id"), row.get("student_id"), payload,
+        rows=[{**(row or {}), "exams": exam or {}}], closing=True,
+    )
+    (row or {}).update(payload)
+    return payload
 
 
 # ── the loop ─────────────────────────────────────────────────────────────────
