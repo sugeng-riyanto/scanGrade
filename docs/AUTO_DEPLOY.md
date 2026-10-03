@@ -750,6 +750,21 @@ a log line, and the `DIRECT_URL` the schema gate reads the live catalogue with.
 `arm-auto-deploy.sh` itself is the definition of "armed" for all five gates; the
 deploy prints its report verbatim rather than keeping a second copy of the judgement.
 
+Two consequences worth stating, because both bit a real box:
+
+* **The wrapper's "After" report runs the checkout's checker, not its own copy.**
+  The installer pulls `origin/main`, and "armed" can have *grown* in that pull. A box
+  whose arming ran the four-gate rules it started with printed `ARMED — … all four
+  gates` while the very next deploy tick, running the pulled rules, printed
+  `NOT ARMED` — two verdicts about one box. So after the installer the wrapper execs
+  `bash "$REPO/deploy/arm-auto-deploy.sh" --check` from disk, and the in-process
+  `report_state` is only the fallback for a checkout too old to carry the checker.
+* **`schema : MISSING` is a refusal, not a warning.** The `DIRECT_URL` in
+  `/opt/scangrade/.env` (or `DATABASE_URL`) is the only credential the schema gate
+  needs, and presence is the whole question — a `.env` still carrying the dashboard
+  placeholder `[YOUR-PASSWORD]` counts as missing. Put the session-mode pooler URL
+  there, from Supabase's *Project Settings → Database*, and re-run `--check`.
+
 ### Seeing it without a shell
 
 The refusal writes the checker's report to

@@ -313,7 +313,19 @@ rc=${PIPESTATUS[0]}
 echo "   installer exit: $rc    log: $LOG"
 
 say "After"
-if report_state; then state=0; else state=1; fi
+# The *checkout's* checker, not this process's copy of `report_state`. The installer
+# above pulled origin/main, and "armed" can have grown in that pull: measured on a box
+# whose "After" printed "ARMED — … all four gates" (the four-gate rules this process
+# started with) while the very next deploy tick printed "NOT ARMED" (the pulled rules,
+# which add the schema/DIRECT_URL requirement). One of those two sentences described the
+# same box wrongly, and an After report is the last place that may happen. Running the
+# file now on disk is what makes "After" describe the box as its own runner will.
+state=1
+if [ -f "$REPO/deploy/arm-auto-deploy.sh" ]; then
+  bash "$REPO/deploy/arm-auto-deploy.sh" --check && state=0
+elif report_state; then
+  state=0
+fi
 
 echo
 if [ "$rc" != "0" ]; then
