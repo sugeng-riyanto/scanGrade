@@ -111,6 +111,42 @@ INSTALLED_RECOVER="$INSTALLED_BIN_DIR/sgfix"
 #: Where the lever read out of `origin/$BRANCH` is kept, and the tree the installed
 #: name is rendered against. Deliberately not the checkout: a lever pointing at a
 #: checkout that cannot be updated is the stale tool the fetch has just beaten.
+# ── The pipeline's way in: a plan out of the branch, and the branch's runner ──
+#
+# Two things this box obeys that are *not* a release, both read out of the commit it
+# has already fetched: the branch's runner (adopted before anything is judged, so a
+# box can never be commanded by logic older than its commander) and a plan
+# (`deploy/control/plan`) obeyed before the release decision, including while the box
+# is paused. See `control-plan-logic` for why each sits where it does.
+CONTROL_FILE="deploy/control/plan"
+CONTROL_DIR="${SG_CONTROL_DIR:-$STATE_DIR/control}"
+#: How many applied plans to keep. Bounded for the same reason the refusal history is:
+#: a record an operator reads, not a transcript that grows with every published plan.
+CONTROL_KEEP=10
+#: Refilled by each tick: the staged plan, and what it asks for.
+CONTROL_STAGE=""
+CONTROL_COMMAND=""
+CONTROL_ISSUED=""
+CONTROL_NOTE=""
+#: The plan's own content hash — its identity, and therefore its one-shot key. Two
+#: ticks that read the same bytes obey it once; a re-issued command differs by its
+#: `issued:` stamp and is obeyed again.
+CONTROL_NONCE=""
+#: The request file the current command would write. Set by the dispatch, used by
+#: `control_request_write`, and empty otherwise so a write with no target is refused.
+CONTROL_REQUEST_FILE=""
+#: What the command did, written into the record. A global rather than an argument:
+#: a positional parameter anywhere in this script reads root's own argv.
+CONTROL_OUTCOME=""
+#: Whether this tick has already read refs. Both readers share one `git fetch`, and
+#: the release's own fetch consults this, so a tick pays one round-trip rather than
+#: three — this runs every two minutes on a box that is not short of work.
+REFS_FETCHED=0
+#: git's own words when that fetch fails, kept for whichever reader has to report it.
+REFS_FETCH_OUT=""
+#: The file this process is running, resolved. The adoption compares the branch's
+#: runner against it and the identity gate judges it, so it is resolved once.
+RUNNER_SELF=""
 LEVER_DIR="${SG_LEVER_DIR:-$STATE_DIR/lever}"
 BACKUP_DIR="/var/backups/scangrade"
 BACKUP_KEEP=5
@@ -1675,12 +1711,29 @@ materialise_lever_from_origin() {
 #
 # One global for the same reason the block above takes none: no helper in this script
 # reads a positional parameter, which is what keeps it unsteerable.
+# The fetch itself, shared with the plan reader and the adoption — both of which run
+# earlier in the tick, on every path rather than only on a refusal. Whoever gets there
+# first pays it; the others find it done. Three readers paying three round-trips to
+# GitHub for one branch, every two minutes, is a cost with nothing bought.
+#
+# `$REFS_FETCH_OUT` is emptied before the checkout guard, not after, so a caller can
+# always print git's own words: a fetch that never ran must report as "nothing was
+# read" rather than as an unbound variable under `set -u`.
+branch_refs_read() {
+  REFS_FETCH_OUT=""
+  [ -d "$REPO/.git" ] || return 1
+  [ "${REFS_FETCHED:-0}" = "1" ] && return 0
+  if ! REFS_FETCH_OUT=$(as_owner git -C "$REPO" fetch --quiet origin "$BRANCH" 2>&1); then
+    return 1
+  fi
+  REFS_FETCHED=1
+  return 0
+}
+
 branch_read_refs() {
-  [ -d "$REPO/.git" ] || return 0
-  local out
-  if ! out=$(as_owner git -C "$REPO" fetch --quiet origin "$BRANCH" 2>&1); then
+  if ! branch_refs_read; then
     log "branch read: git fetch failed (network or credentials) — the next tick will try again"
-    [ -n "$out" ] && printf '%s\n' "$out" | sed 's/^/    /'
+    [ -n "$REFS_FETCH_OUT" ] && printf '%s\n' "$REFS_FETCH_OUT" | sed 's/^/    /'
     return 0
   fi
   materialise_lever_from_origin
@@ -1808,17 +1861,10 @@ deploy_keys_install() {
 deploy_keys_install
 # deploy-key-logic:end
 
-# ── Maintenance window ───────────────────────────────────────────────────────
-# Create the file to freeze deploys (e.g. during exam week) without touching the
-# timer; remove it to let the next tick catch up.
-if [ -e "$PAUSE_FILE" ]; then
-  log "paused by $PAUSE_FILE — not deploying"
-  exit 0
-fi
-
 # ── Act as whoever owns the checkout ─────────────────────────────────────────
-# Hoisted above every arrangement refusal, because the branch is now read *before*
-# this box refuses (see branch-first-logic) and that read runs git as the owner.
+# Hoisted above every arrangement refusal *and* above the pause check, because the
+# branch is read before this box refuses (see branch-first-logic) and the pipeline's
+# plan is read before the pause (see control-plan-logic) — both run git as the owner.
 # Kept where it is otherwise: git and pip must never hit "dubious ownership", and
 # root must never leave root-owned files in a tree another user has to use.
 OWNER=$(stat -c '%U' "$REPO" 2>/dev/null)
@@ -1833,6 +1879,341 @@ OWNER=$(stat -c '%U' "$REPO" 2>/dev/null)
 OWNER_HOME=$(getent passwd "$OWNER" | cut -d: -f6)
 [ -n "$OWNER_HOME" ] || OWNER_HOME=/tmp
 as_owner() { runuser -u "$OWNER" -- env HOME="$OWNER_HOME" GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/bin/true "$@"; }
+
+# ── The pipeline's way into a box that cannot deploy ─────────────────────────
+# control-plan-logic:start
+# The box pulls, so the only thing that ever reaches it is a release — and a release
+# is exactly what a stuck box refuses. `sgfix` answered that for a human at a console,
+# which is not a channel: on the VPS the console is a noVNC window where a long command
+# has to be typed by hand, and a box held for days by one hand edit was reached only
+# that way. Two mechanisms remove the console, and each answers a shape of stuck the
+# other cannot.
+#
+# **The branch's runner is adopted before anything is judged.** A box can only be
+# commanded by the runner it is running, so a runner older than the command set is a
+# box the pipeline cannot reach — the same deadlock one level up. Measured: 25 commits
+# behind, held by arrangement refusals that ran *before* its own fetch, with the fix
+# and the lever both travelling in releases the refusal was holding. Comparing the
+# branch's runner with the one in hand and re-executing it makes every merged change
+# reach such a box on the next tick: no release, no reload, no console.
+#
+# **A plan is obeyed before the release decision.** `deploy/control/plan` is read out
+# of the same fetched commit and names something to do — `recover`, `release`,
+# `rebaseline`, `pause`, `resume`, or `none`. It is read *before* the pause check,
+# because a paused box is the one state with no other way out: the pause check exits,
+# so a `resume` read after it could never arrive. And it runs on every tick rather than
+# only on the arrangement refusals the lever already answers, so a box that is merely
+# behind still reads its orders.
+#
+# Five properties decide the shape, and each one is why the code looks the way it does:
+#
+#   * **Nothing is merged to read it.** `git show` of a fetched blob; the working tree,
+#     the index and HEAD are untouched. That is what makes the channel work on a
+#     checkout that is dirty, rolled back, quarantined or frozen — the four states in
+#     which a release cannot land and an operator most needs to say something.
+#   * **One fetch serves the tick.** Both readers share `branch_refs_read`, and the
+#     release's own fetch consults it. This runs every two minutes; a second reader
+#     paying a second round-trip to GitHub is a cost with nothing bought.
+#   * **A plan is obeyed once per exact content.** The key is the plan's hash, so the
+#     same plan is obeyed once rather than every two minutes forever — a `recover` that
+#     re-ran on every tick would be a box under a load test, not a box being recovered.
+#     Re-issuing means changing something, and the publisher changes `issued:` every
+#     run, which is what makes "do that again" mean anything.
+#   * **An unknown command is refused by name and recorded.** Never ignored: a plan the
+#     reader silently skips is a box nobody can command *and* nobody can tell is
+#     uncommanded, which is worse than an error because nobody looks again.
+#   * **It cannot make the box worse.** Every write is one of the things an operator
+#     would have typed anyway — the pause file, a request the runner already reads, or
+#     the lever. It merges nothing, resets nothing and reloads nothing, and a failure
+#     to read a plan is not a reason to refuse a release.
+#: The plan, staged out of the fetched commit. `$CONTROL_NONCE` is set here rather
+#: than parsed out of the file: the plan's identity is its bytes, so a hand edit that
+#: changes the wording of a `note:` is a new plan and is obeyed again, and a plan that
+#: forgot its `issued:` stamp cannot be re-obeyed by accident.
+control_plan_stage() {
+  CONTROL_STAGE=""
+  CONTROL_NONCE=""
+  local staged="$CONTROL_DIR/.plan.$$"
+  mkdir -p "$CONTROL_DIR" 2>/dev/null || return 1
+  if ! as_owner git -C "$REPO" show "origin/$BRANCH:$CONTROL_FILE" \
+       > "$staged" 2>/dev/null; then
+    rm -f "$staged" 2>/dev/null || true
+    return 1
+  fi
+  if [ ! -s "$staged" ]; then
+    rm -f "$staged" 2>/dev/null || true
+    return 1
+  fi
+  CONTROL_STAGE="$staged"
+  CONTROL_NONCE=$(sha1sum "$staged" 2>/dev/null | cut -d' ' -f1)
+  [ -n "$CONTROL_NONCE" ] || CONTROL_NONCE="unhashed-plan"
+  return 0
+}
+
+#: `key: value` lines, `#` and blanks ignored. One field is required — the command.
+#: A plan that names none is answered with one journal line and no record: there is
+#: nothing to key a record on, and an operator editing the file needs the sentence
+#: more than they need a footnote about it.
+control_plan_parse() {
+  CONTROL_COMMAND=""
+  CONTROL_ISSUED=""
+  CONTROL_NOTE=""
+  local line key value
+  while IFS= read -r line || [ -n "$line" ]; do
+    line=${line%$'\r'}
+    case "$line" in ''|'#'*) continue ;; esac
+    key=${line%%:*}
+    [ "$key" = "$line" ] && continue
+    value=${line#*:}
+    key=$(printf '%s' "$key" | tr -d '[:space:]')
+    value=$(printf '%s' "$value" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+    case "$key" in
+      command) CONTROL_COMMAND="$value" ;;
+      issued)  CONTROL_ISSUED="$value" ;;
+      note)    CONTROL_NOTE="$value" ;;
+    esac
+  done < "$CONTROL_STAGE"
+  [ -n "$CONTROL_COMMAND" ] || return 1
+  return 0
+}
+
+control_plan_prune() {
+  local keep="${CONTROL_KEEP:-10}" n=0 name=""
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    n=$((n + 1))
+    [ "$n" -le "$keep" ] && continue
+    rm -f "$CONTROL_DIR/$name" 2>/dev/null || true
+  done < <(ls -1t "$CONTROL_DIR" 2>/dev/null | grep '\.applied$')
+}
+
+#: What was asked and what happened, keyed by the plan's hash. Written after the
+#: command has been obeyed, so a tick killed mid-command re-obeyes it rather than
+#: recording a plan it never carried out. A record that cannot be written is ignored:
+#: it must never stop the command, which is the thing an operator is waiting for.
+#:
+#: The outcome arrives in `$CONTROL_OUTCOME`, not as an argument, for the reason the
+#: refresh helper does: a positional parameter anywhere in this script reads root's
+#: own argv, which `test_deploy_script_takes_no_arguments` refuses — and it is right to.
+control_plan_record() {
+  [ -n "$CONTROL_NONCE" ] || return 0
+  mkdir -p "$CONTROL_DIR" 2>/dev/null || return 0
+  chmod 0755 "$CONTROL_DIR" 2>/dev/null || true
+  {
+    printf 'command: %s\n' "$CONTROL_COMMAND"
+    printf 'outcome: %s\n' "${CONTROL_OUTCOME:-unrecorded}"
+    printf 'issued:  %s\n' "${CONTROL_ISSUED:-unknown}"
+    printf 'seen:    %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  } > "$CONTROL_DIR/$CONTROL_NONCE.applied" 2>/dev/null || return 0
+  chmod 0644 "$CONTROL_DIR/$CONTROL_NONCE.applied" 2>/dev/null || true
+  control_plan_prune
+  return 0
+}
+
+control_plan_clear() {
+  [ -n "$CONTROL_STAGE" ] && rm -f "$CONTROL_STAGE" 2>/dev/null
+  CONTROL_STAGE=""
+  return 0
+}
+
+#: Hand a request to the runner the way the page does: the file's *existence* is all
+#: that is read, so nothing a plan can carry is ever executed. The directory is created
+#: only when it is missing, and owned the way `install-auto-deploy.sh` owns it — a
+#: root-owned directory there would leave the page unable to write the very requests it
+#: writes, which is a channel broken by the thing that delivered one.
+#: Globals rather than arguments, like every other helper here: what keeps this script
+#: unsteerable is that nothing in it is influenced by what it was invoked with.
+control_request_write() {
+  [ -n "$CONTROL_REQUEST_FILE" ] || return 1
+  if [ ! -d "$REQUEST_DIR" ]; then
+    mkdir -p "$REQUEST_DIR" 2>/dev/null || return 1
+    chown "${OWNER:-root}" "$REQUEST_DIR" 2>/dev/null || true
+    chmod 0750 "$REQUEST_DIR" 2>/dev/null || true
+  fi
+  : > "$CONTROL_REQUEST_FILE" 2>/dev/null
+}
+
+#: The tick's entry point for the channel. Returns 0 whatever happened: a plan that
+#: could not be read, or that the runner does not understand, is not a reason to hold a
+#: release — the two are independent, and conflating them would let a typo in a plan
+#: stop a deploy.
+control_apply_plan() {
+  [ -d "$REPO/.git" ] || return 0
+  branch_refs_read || return 0
+  control_plan_stage || return 0
+  if ! control_plan_parse; then
+    log "control: the plan names no command — ignored"
+    control_plan_clear
+    return 0
+  fi
+  if [ -f "$CONTROL_DIR/$CONTROL_NONCE.applied" ]; then
+    control_plan_clear
+    return 0
+  fi
+
+  case "$CONTROL_COMMAND" in
+    none)
+      log "control: plan is a no-op (issued ${CONTROL_ISSUED:-unknown})"
+      CONTROL_OUTCOME="nothing was asked"; control_plan_record
+      ;;
+    pause)
+      if : > "$PAUSE_FILE" 2>/dev/null; then
+        log "control: PAUSED from the branch — deploys are frozen by $PAUSE_FILE"
+        CONTROL_OUTCOME="paused"; control_plan_record
+      else
+        log "control: cannot create $PAUSE_FILE — the box was NOT paused"
+        CONTROL_OUTCOME="refused: cannot write the pause file"; control_plan_record
+      fi
+      ;;
+    resume)
+      rm -f "$PAUSE_FILE" 2>/dev/null
+      log "control: RESUMED from the branch — $PAUSE_FILE is gone"
+      CONTROL_OUTCOME="resumed"; control_plan_record
+      ;;
+    release)
+      CONTROL_REQUEST_FILE="$RELEASE_REQUEST"
+      if control_request_write; then
+        log "control: release requested from the branch — the held commit is tried once more"
+        CONTROL_OUTCOME="release requested"; control_plan_record
+      else
+        log "control: cannot write $RELEASE_REQUEST — no release was requested"
+        CONTROL_OUTCOME="refused: cannot write the request"; control_plan_record
+      fi
+      ;;
+    rebaseline)
+      CONTROL_REQUEST_FILE="$REBASELINE_REQUEST"
+      if control_request_write; then
+        log "control: rebaseline requested from the branch — the perf gate re-measures the box"
+        CONTROL_OUTCOME="rebaseline requested"; control_plan_record
+      else
+        log "control: cannot write $REBASELINE_REQUEST — nothing was requested"
+        CONTROL_OUTCOME="refused: cannot write the request"; control_plan_record
+      fi
+      ;;
+    recover)
+      # Recorded before the lever runs, and the tick ends here: the lever runs a
+      # release of its own, so carrying on would deploy twice for one command. A lever
+      # that cannot be installed is recorded too — the operator has to know that
+      # `recover` reached a box with no lever on it.
+      CONTROL_OUTCOME="the recovery lever was run"; control_plan_record
+      log "control: RECOVER from the branch — running the box's own lever"
+      materialise_lever_from_origin
+      if [ ! -f "$LEVER_DIR/deploy/scangrade-recover.sh" ]; then
+        log "control: no lever at $LEVER_DIR/deploy/scangrade-recover.sh — nothing was run"
+        control_plan_clear
+        return 0
+      fi
+      control_plan_clear
+      bash "$LEVER_DIR/deploy/scangrade-recover.sh"
+      exit 0
+      ;;
+    *)
+      log "control: REFUSING the plan — \"$CONTROL_COMMAND\" is not a command this runner knows"
+      log "control:    known: none recover release rebaseline pause resume"
+      log "control:    recorded and NOT obeyed, so it is visible rather than merely absent"
+      CONTROL_OUTCOME="refused: unknown command"; control_plan_record
+      ;;
+  esac
+  control_plan_clear
+  return 0
+}
+
+#: The file this process is running. Resolved once, and overridable for the tests
+#: for the same reason `SCANGRADE_AUTHORIZED_KEYS` is: a harness needs to be judged
+#: against a file it chose.
+runner_self_resolve() {
+  local self="${SCANGRADE_RUNNER_SELF:-$0}"
+  printf '%s' "$(readlink -f "$self" 2>/dev/null || echo "$self")"
+}
+
+#: Run the branch's runner instead of the one in hand, once.
+#:
+#: This is what makes the channel permanent rather than a one-time install: a runner
+#: older than the plan's vocabulary cannot read a plan, so without adoption every
+#: future command set would need a console for exactly the boxes that need it most.
+#:
+#: Four properties, and each is why it looks the way it does:
+#:
+#:   * **one level only.** `SCANGRADE_RUNNER_ADOPTED` is exported before the handover,
+#:     and the adopted runner returns immediately if it is set. Without that, a branch
+#:     whose runner kept differing from the file in hand would re-exec itself forever.
+#:   * **identical bytes are the steady state, and cost nothing.** On a box that has
+#:     caught up, the checkout's runner *is* the branch's, so `cmp` agrees and no log
+#:     line, no write and no exec happen.
+#:   * **it parses before it is trusted.** This runs on a box already in trouble; a
+#:     branch whose runner is mid-edit must leave the working one running.
+#:   * **the lock is released before the handover.** `flock` is per open file
+#:     description, so a re-exec that kept fd 9 would hand the adopted runner a lock
+#:     this process already holds, and it would answer "another deploy is already
+#:     running" and give up — an adoption that always fails, looking like a working one.
+runner_adopt_from_origin() {
+  [ -z "${SCANGRADE_RUNNER_ADOPTED:-}" ] || return 0
+  [ -d "$REPO/.git" ] || return 0
+  branch_refs_read || return 0
+
+  RUNNER_SELF=$(runner_self_resolve)
+  local dir="$LEVER_DIR/deploy"
+  local staged="$dir/.scangrade-deploy.adopted.$$"
+  local target="$dir/scangrade-deploy.sh"
+  mkdir -p "$dir" 2>/dev/null || return 0
+
+  if ! as_owner git -C "$REPO" show "origin/$BRANCH:deploy/scangrade-deploy.sh" \
+       > "$staged" 2>/dev/null; then
+    rm -f "$staged" 2>/dev/null || true
+    return 0
+  fi
+  if [ ! -s "$staged" ]; then
+    rm -f "$staged" 2>/dev/null || true
+    return 0
+  fi
+  if cmp -s "$staged" "$RUNNER_SELF"; then
+    rm -f "$staged" 2>/dev/null || true
+    return 0
+  fi
+  if ! bash -n "$staged" 2>/dev/null; then
+    rm -f "$staged" 2>/dev/null || true
+    log "runner: origin/$BRANCH's runner does not parse — keeping the one that is running"
+    return 0
+  fi
+  if ! chmod 0755 "$staged" 2>/dev/null; then
+    rm -f "$staged" 2>/dev/null || true
+    return 0
+  fi
+  chown root:root "$staged" 2>/dev/null || true
+  if ! mv -f "$staged" "$target" 2>/dev/null; then
+    rm -f "$staged" 2>/dev/null || true
+    log "runner: could not stage origin/$BRANCH's runner — keeping the one that is running"
+    return 0
+  fi
+
+  # The identity gate below refuses a runner that is not the checkout's, because a
+  # copy stops receiving fixes. The adopted file is the branch's own code to the byte,
+  # so what that gate is handed is the hash of what was adopted — not a permission to
+  # run anything this script happens to have written.
+  SCANGRADE_RUNNER_ADOPTED=$(git hash-object --no-filters "$target" 2>/dev/null)
+  if [ -z "$SCANGRADE_RUNNER_ADOPTED" ]; then
+    log "runner: cannot hash the adopted runner — keeping the one that is running"
+    return 0
+  fi
+  log "runner: adopting origin/$BRANCH's runner — this box was running an older one"
+  export SCANGRADE_RUNNER_ADOPTED
+  exec 9>&- 2>/dev/null || true
+  exec bash "$target"
+}
+# control-plan-logic:end
+
+RUNNER_SELF=$(runner_self_resolve)
+runner_adopt_from_origin
+control_apply_plan
+
+# ── Maintenance window ───────────────────────────────────────────────────────
+# Create the file to freeze deploys (e.g. during exam week) without touching the
+# timer; remove it to let the next tick catch up. It is read *after* the plan for the
+# same reason `resume` exists: a frozen box has no other way out than a console.
+if [ -e "$PAUSE_FILE" ]; then
+  log "paused by $PAUSE_FILE — not deploying"
+  exit 0
+fi
 
 # runner-identity:start
 # /usr/local/bin/scangrade-deploy is a launcher that execs this file, so what
@@ -1859,10 +2240,27 @@ as_owner() { runuser -u "$OWNER" -- env HOME="$OWNER_HOME" GIT_TERMINAL_PROMPT=0
 # It sits after the pause check deliberately: a frozen box is deploying nothing,
 # and a fault in a file nobody is running is not worth a journal line every two
 # minutes.
+# `$RUNNER_SELF` when the tick resolved it already, and this file's own path otherwise:
+# the block is also lifted out and run on its own by the tests, so it stays answerable
+# without help from the main flow.
 RUN_STEP="identity"
-SELF=$(readlink -f "$0" 2>/dev/null || echo "$0")
+SELF="${RUNNER_SELF:-$(readlink -f "$0" 2>/dev/null || echo "$0")}"
 REPO_RUNNER=$(readlink -f "$REPO/deploy/scangrade-deploy.sh" 2>/dev/null || echo "$REPO/deploy/scangrade-deploy.sh")
+# An *adopted* runner is not a copy that stopped receiving fixes — it is the branch's
+# own code, byte for byte, taken from the commit this tick fetched because the
+# checkout's copy is older than it. What is accepted is a file whose hash is the hash
+# that was adopted (`runner_adopt_from_origin` puts it in the environment), so the
+# condition is still "your bytes are the branch's", which is what this gate always
+# meant. A copy that differs from the branch is refused exactly as before.
+ADOPTED_HASH=""
+if [ -n "${SCANGRADE_RUNNER_ADOPTED:-}" ]; then
+  ADOPTED_HASH=$(git hash-object --no-filters "$SELF" 2>/dev/null)
+fi
 if [ "$SELF" != "$REPO_RUNNER" ] && ! cmp -s "$SELF" "$REPO_RUNNER"; then
+  if [ -n "${SCANGRADE_RUNNER_ADOPTED:-}" ] \
+     && [ "$ADOPTED_HASH" = "${SCANGRADE_RUNNER_ADOPTED}" ]; then
+    log "runner: running origin/$BRANCH's runner (adopted this tick); the checkout's copy is behind"
+  else
   log "REFUSING: this is an installed COPY of the runner, not the checkout's"
   log "    running : $SELF"
   log "    checkout: $REPO_RUNNER"
@@ -1871,9 +2269,11 @@ if [ "$SELF" != "$REPO_RUNNER" ] && ! cmp -s "$SELF" "$REPO_RUNNER"; then
   log "    gates that have since been added or corrected."
   log "    fix once, as root:  bash $REPO/deploy/install-auto-deploy.sh"
   # Read the branch before refusing, so the crate this box actually needs — the
-  # newest lever — is installed from it. See branch-first-logic.
+  # newest lever, and now the newest runner — is installed from it. See
+  # branch-first-logic and control-plan-logic.
   branch_read_refs
   exit 14
+  fi
 fi
 # runner-identity:end
 
@@ -2005,7 +2405,12 @@ BEFORE=$(as_owner git -C "$REPO" rev-parse --short HEAD)
 # status page is for an operator with no shell to read that journal from.
 RUN_STEP="fetch"
 FETCH_OUT=""
-if ! FETCH_OUT=$(as_owner git -C "$REPO" fetch --quiet origin "$BRANCH" 2>&1); then
+# Skipped when the tick already read the branch — the plan reader and the adoption
+# above share one fetch, and refs read a moment ago on this same tick are the same
+# refs. The failure is reported here rather than there, because this is the reader
+# whose failure has to stop a release; a plan that could not be read does not.
+if [ "${REFS_FETCHED:-0}" != "1" ] && ! branch_refs_read; then
+  FETCH_OUT="${REFS_FETCH_OUT:-}"
   log "git fetch failed (network or credentials) — will retry next tick"
   [ -n "$FETCH_OUT" ] && printf '%s\n' "$FETCH_OUT" | sed 's/^/    /'
   PREFLIGHT_GATE=fetch_failed PREFLIGHT_EXIT=5 \
@@ -2253,6 +2658,17 @@ if [ "$CONSTRUCT_RC" -ne 0 ]; then
     log "the app refused to be deployed by a runner that is not armed — rolling back"
     log "    to $BEFORE. Fix the runner (install-auto-deploy.sh), not the app."
     FAIL_REASON="runner not armed (the app refused to be deployed by it)"
+  elif printf '%s\n' "$CONSTRUCT_OUT" | grep -q 'SCANGRADE-UNREPRODUCIBLE'; then
+    # The app's own verdict about the checkout it was built from: a path in it
+    # holds bytes no checkout of this commit can produce, so the path reads as
+    # modified however many times it is restored and the merge fast-forward
+    # refuses over it for ever. Rolling back keeps the previous commit serving,
+    # and the remedy is HEAD's own bytes rather than a restore — the set-aside
+    # heal writes them (see `box_edits_restore_verbatim`), and so does the
+    # console lever. The app names the paths in FAIL_DETAIL below.
+    log "the checkout cannot reproduce its own commit — rolling back to $BEFORE"
+    log "    the app refused to serve it; a restore will not clear it"
+    FAIL_REASON="checkout not reproducible (the app refused to serve it)"
   else
     log "app failed to construct — rolling back to $BEFORE"
     FAIL_REASON="app did not construct (exit 9)"

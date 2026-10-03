@@ -92,6 +92,35 @@ def create_app(env=None):
     app.config.from_object(cfg)
     cfg.validate()
 
+    # ── the code being served must be the code of its own commit ─────────────
+    #
+    # A checkout can hold a path the commit it is on cannot produce — a blob
+    # committed around its own `.gitattributes` filter, which this project shipped
+    # once as 108 carriage returns inside `app/routes/admin_sekolah.py`. Every
+    # checkout of that commit reads the path as modified for ever, so the release
+    # can neither be merged nor explained while the site keeps answering 200.
+    #
+    # Asked of the app about to serve, not only of the deploy's probe, and that is
+    # the difference from the armament check below: a release refused there keeps
+    # the previous commit up, but the same state in a *serving* process is code
+    # nobody can reconcile with the commit it reports — and silence about that is
+    # exactly how the box stayed stuck for hours. Only measured evidence refuses;
+    # see `app/utils/checkout_integrity.py` for why a hand edit, an untracked file
+    # and a box with no git do not take the site down.
+    from app.utils import checkout_integrity
+
+    _unreproducible = checkout_integrity.unreproducible_reason()
+    if _unreproducible:
+        message = (
+            f"{checkout_integrity.MARKER}: refusing to serve a checkout its own "
+            f"commit cannot reproduce.\n"
+            f"{_unreproducible}\n"
+            f"The code this process would serve is not the code of the commit it "
+            f"would report, so it does not serve at all."
+        )
+        print(message)
+        raise SystemExit(1)
+
     # ── the deploy's probe is refused when this box cannot check a release ────
     #
     # A runner that is an installed *copy* of an older deploy script cannot judge

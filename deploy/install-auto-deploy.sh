@@ -172,6 +172,10 @@ echo "   and the only thing installed here whose name is short on purpose"
 echo "   the runner re-points it at the lever it reads out of origin/main on every"
 echo "   tick, so a box that cannot land a release can still obtain it (see"
 echo "   fetch-lever-logic in deploy/scangrade-deploy.sh)"
+echo "   the runner also adopts origin/main's runner before it judges anything, and"
+echo "   obeys deploy/control/plan out of the same fetched commit — so the pipeline"
+echo "   can reach this box without a console (see control-plan-logic)"
+echo "   publish an order with: bash $REPO/deploy/scangrade-plan.sh <command>"
 
 # ── 2b. Where the snapshots go.
 #       The deploy captures a release that changes supabase/migrations — but

@@ -1400,6 +1400,34 @@ grep -l -I --cached -e $'\r'`, refuses to read a `git` that could not be asked a
 "clean", and names `0afc68e` as the commit that caused this. A scripted commit that
 builds blobs with `hash-object --no-filters` is the thing it exists to catch.
 
+### And the app refuses to *serve* such a checkout
+
+Everything above is about a release landing. The gap that was left is the other
+half: a box can be **serving** code whose own commit it cannot reproduce — the CR
+blob is in `HEAD`, the runner refuses, and the site answers `200` for hours while
+nothing says why. So the app asks at construction:
+
+* **the rule is the page's own.** `dirty_kinds_state` already answers *which kind*
+  of dirty the checkout is holding, so the startup check calls it rather than
+  writing a second classifier — two implementations of one rule eventually disagree
+  about the box, on the page that exists to explain it.
+* **only measured evidence refuses.** A hand edit (the runner sets it aside as a
+  patch), an untracked file (no blob to blame), a path whose attribute *asks* for
+  CRLF, a directory that is not a checkout and a box with no `git` all pass. This is
+  deliberately more forgiving than the armament check, and the reason is that it
+  runs where the students are: a server is not taken down because `git` was busy.
+* **the journal names it.** The app prints `SCANGRADE-UNREPRODUCIBLE`, the runner
+  greps for it at the construct gate, and the release is quarantined under
+  `checkout not reproducible (the app refused to serve it)` — which the
+  deploy-status page has its own bilingual sentence for. Without the marker the
+  refusal would read as "app did not construct" and send the next reader hunting for
+  a Python fault that is not there.
+
+One honest consequence: on a box with no `DIRECT_URL` the schema gate is already
+blind, and this check is another thing a *serving* process can refuse for. It refuses
+only on a measured blob, so it cannot fire on a healthy box — but a box in the strand
+now says so instead of serving quietly, which is the whole point.
+
 ### The step it stopped at, whatever stopped it
 
 Everything above is written by a branch somebody wrote for a refusal they thought
@@ -1553,6 +1581,81 @@ The fetch is the one step that succeeds on a dirty, rolled-back, `refused-before
 or quarantined checkout — it writes refs and never the tree — which is why this is the
 step the lever hangs off. The block moves nothing: no merge, no reset, no reload. It is
 safe to run on every tick precisely because of that.
+
+### The pipeline can reach the box: a plan, and the branch's own runner
+
+`sgfix` still needs somebody at a console, and on the VPS that console is a noVNC
+window where a long command has to be typed by hand — which is not a channel. So two
+things the box obeys are read out of the commit it has already fetched
+(`control-plan-logic`), and neither needs a release, a reload, an inbound connection or
+a key:
+
+**`deploy/control/plan`** — an order, obeyed **before** the release decision and
+**before** the pause check. That ordering is the point: a box whose release is refused,
+quarantined or frozen is exactly the box a push cannot reach, because the thing that
+would apply the push is the thing that is refusing. Reading it before the pause check
+is what makes `resume` mean anything — the pause check exits, so a command read after
+it could never arrive — and reading it on *every* tick, rather than only on the
+arrangement refusals the lever already answers, is what lets a box that is merely
+behind still be told what to do.
+
+| command | what the box does |
+|---|---|
+| `recover` | runs its own lever (`sgfix`'s code, installed from the same fetched commit) and ends that tick — the lever runs a release, so carrying on would deploy twice for one order |
+| `release` | writes the same `requests/release` the status page writes, so the quarantine on the held commit is lifted |
+| `rebaseline` | writes `requests/rebaseline`, so the perf gate re-measures the box instead of comparing against a stale baseline |
+| `pause` / `resume` | creates and removes `/etc/scangrade-deploy.pause` — the exam-week freeze, set and lifted from the pipeline |
+| `none` | the no-op, so the channel has a state meaning "nothing is being asked" rather than an absent file |
+
+Publish one — one word, no arguments to remember:
+
+```bash
+bash deploy/scangrade-plan.sh recover "the schema gate is holding 2162e18"
+```
+
+It writes the plan, commits it and pushes, refusing a command the runner does not know
+(so a typo stops here rather than at the far end of a push), refusing to publish from a
+branch the box does not read, and never forcing. The box reads it on its next tick, at
+most one timer interval away.
+
+A plan is **content-addressed**: the runner keys its record on the plan's own hash and
+obeys it once, so a `recover` does not re-run every two minutes. `issued:` is what makes
+a re-issued order a *new* plan, which is why the publisher stamps a fresh one every run.
+An unknown command is refused **by name and recorded** — never ignored, because a plan
+the reader silently skips is a box nobody can command *and* nobody can tell is
+uncommanded. The record of what was obeyed lands in
+`/var/lib/scangrade-deploy/control/<plan-hash>.applied`, newest few kept.
+
+**The branch's runner is adopted before anything is judged.** A box can only be
+commanded by the runner it is running, so a runner older than the plan's vocabulary is
+a box the pipeline cannot reach — the same deadlock one level up. Before the pause check
+the runner therefore compares itself with `origin/main:deploy/scangrade-deploy.sh` and,
+when they differ, re-executes the branch's copy. On a box that has caught up the bytes
+are identical, so this costs one `cmp` and does nothing; on a stuck box it means every
+merged change reaches it on the next tick, with no release and no console.
+
+Three details decide whether that handover works or quietly fails:
+
+* **one level only.** `SCANGRADE_RUNNER_ADOPTED` is exported before the handover and the
+  adopted runner returns immediately when it is set, so a branch whose runner kept
+  differing cannot re-exec itself forever;
+* **the lock is released first.** `exec 9>&-` — `flock` is per *open file description*,
+  so a re-exec that kept fd 9 would hand the adopted runner a lock this process already
+  holds, and it would answer "another deploy is already running" and give up. An
+  adoption that always fails, looking like one that worked;
+* **Gate 0 is not weakened.** The refusal of an installed copy is unchanged; what it now
+  also accepts is a file whose bytes hash to the blob that was adopted — which is the
+  same condition it always held, "your bytes are the branch's", and not a permission to
+  run whatever the runner last wrote.
+
+A branch whose runner does not parse leaves the working one running (this runs on a box
+already in trouble), and a tick pays **one** `git fetch`: the plan read, the adoption and
+`branch_refs_read` all share it, and the release's own fetch consults the same flag.
+
+What this does *not* claim: a box whose runner predates this block cannot read a plan or
+adopt one, so it still needs the one console line — `sgfix`, or the `git show`
+one-liner in `deploy/scangrade-recover.sh`'s header. That is the last console session
+the arrangement should ever need, because after it the adoption keeps the box current.
 
 The visible consequence: `/usr/local/bin/sgfix` execs
 `/var/lib/scangrade-deploy/lever/deploy/scangrade-recover.sh`, and the checkout's copy

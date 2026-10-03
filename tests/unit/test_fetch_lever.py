@@ -345,23 +345,31 @@ def test_it_runs_after_the_fetch_and_before_anything_is_decided():
     up-to-date box whose lever is missing is exactly a box that needs one; and long
     before the merge, which is the step a stuck box cannot reach.
 
-    Two call sites now: the main one inside that window, and the one in
+    Three call sites now: the main one inside that window; the one in
     `branch_read_refs`, which materialises from a fetch that happens before every
-    arrangement refusal. That second site is the whole point of branch-first-logic —
-    a box whose runner refuses before its own fetch still ends up holding the newest
-    lever — and it necessarily sits *before* the release's fetch.
+    arrangement refusal; and the one a `recover` plan runs, which is how the pipeline
+    reaches a box with no console and no release. The second is the whole point of
+    branch-first-logic — a box whose runner refuses before its own fetch still ends up
+    holding the newest lever — and it necessarily sits *before* the release's fetch. So
+    is the third, which is why the release's own call is located from the fetch rather
+    than from the top of the file.
     """
     script = _text(RUNNER)
-    assert script.count("materialise_lever_from_origin") == 3, (
-        "expected the definition and exactly two call sites (the branch read and "
-        "the release's own)")
+    assert script.count("materialise_lever_from_origin") == 4, (
+        "expected the definition and exactly three call sites (the branch read, the "
+        "release's own, and the control plan's recover)")
     fetch = script.index('RUN_STEP="fetch"')
-    call = script.index("\nmaterialise_lever_from_origin\n")
+    call = script.index("\nmaterialise_lever_from_origin\n", fetch)
     nothing_new = script.index('if [ "$BEFORE" = "$AFTER" ]; then')
     merge = script.index('RUN_STEP="merge"')
     assert fetch < call < nothing_new < merge, (
         "the lever is materialised outside the window that makes it reachable on a "
         "box whose release is refused")
+    # And the plan's copy, which is what the pipeline reaches a stuck box with.
+    recover = script.index('      materialise_lever_from_origin\n')
+    assert recover < fetch, (
+        "`recover` materialises the lever after the release fetch, so a plan obeyed "
+        "before the release decision would find no lever to run")
     # And the branch read's copy, ahead of the release fetch it is meant to survive.
     branch_call = script.index("  materialise_lever_from_origin\n",
                                script.index(BRANCH_FIRST_START))
