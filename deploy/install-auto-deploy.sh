@@ -261,6 +261,74 @@ else
   echo "   Fix the accounts in $SMOKE_CONF, then re-run this installer to arm the gate."
 fi
 
+# ── 3ab. The two DOM gates: a real browser on every release.
+#       The touch gate (the exam builder's finger floor) and the render gate (the
+#       pupil's exam page actually laying out) both measure in a headless browser.
+#       Without one each answers "could not measure" and keeps the release — a skip,
+#       not a pass — so a box with no browser ships every release having laid out no
+#       page. Both are armed only after a real measurement on THIS box passes, the
+#       same discipline the smoke credentials above use, because a gate armed against
+#       a broken measurement would reject good releases.
+say "The browser gates (finger floor, pupil exam render)"
+for pair in 'SG_CHROME=""' 'TOUCH_ENFORCE="false"' 'RENDER_ENFORCE="false"'; do
+  key=${pair%%=*}
+  grep -q "^$key=" "$SMOKE_CONF" || printf '%s\n' "$pair" >> "$SMOKE_CONF"
+done
+
+# `locate_browser` is the gates' own locator, imported rather than restated.
+BROWSER=$(as_owner "$REPO/.venv/bin/python" -B -c 'import sys; sys.path.insert(0, sys.argv[1]);
+from touch_gate import locate_browser
+print(locate_browser() or "")' "$REPO/deploy" 2>/dev/null)
+if [ -z "$BROWSER" ]; then
+  echo "   no Chrome/Chromium found — the finger-floor and exam render gates will"
+  echo "   skip every release. Install one (apt-get install -y chromium) and re-run"
+  echo "   this installer to arm them."
+else
+  echo "   browser: $BROWSER"
+  sed -i "s|^SG_CHROME=.*|SG_CHROME=\"$BROWSER\"|" "$SMOKE_CONF"
+  set -a
+  # shellcheck disable=SC1090
+  . "$SMOKE_CONF"
+  set +a
+
+  # One real measurement of each, before anything is armed.
+  set +e
+  TOUCH_OUT=$(as_owner env TOUCH_BASE_URL="$SMOKE_BASE_URL" TOUCH_TEACHER="$SMOKE_GURU" \
+      TOUCH_INSECURE="${SMOKE_INSECURE:-false}" "$REPO/.venv/bin/python" \
+      "$REPO/deploy/touch_gate.py" 2>&1)
+  TOUCH_RC=$?
+  RENDER_OUT=$(as_owner env RENDER_BASE_URL="$SMOKE_BASE_URL" RENDER_STUDENT="$SMOKE_MURID" \
+      RENDER_INSECURE="${SMOKE_INSECURE:-false}" "$REPO/.venv/bin/python" \
+      "$REPO/deploy/exam_render_gate.py" 2>&1)
+  RENDER_RC=$?
+  set -e
+  echo "$TOUCH_OUT" | tail -3 | sed 's/^/   /'
+  echo "$RENDER_OUT" | tail -3 | sed 's/^/   /'
+
+  case "$TOUCH_RC" in
+    0)
+      sed -i 's/^TOUCH_ENFORCE=.*/TOUCH_ENFORCE="true"/' "$SMOKE_CONF"
+      echo "   the finger floor measured -> TOUCH_ENFORCE=true" ;;
+    2)
+      echo "   the finger floor could not measure (exit 2) -> TOUCH_ENFORCE stays false."
+      echo "   Not a verdict on the page; fix what the reason above names, then re-run." ;;
+    *)
+      echo "   a control is under the floor (exit $TOUCH_RC) -> TOUCH_ENFORCE stays false."
+      echo "   Fix the page, then re-run this installer to arm the gate." ;;
+  esac
+  case "$RENDER_RC" in
+    0)
+      sed -i 's/^RENDER_ENFORCE=.*/RENDER_ENFORCE="true"/' "$SMOKE_CONF"
+      echo "   the pupil exam rendered -> RENDER_ENFORCE=true" ;;
+    2)
+      echo "   the pupil exam could not be rendered (exit 2) -> RENDER_ENFORCE stays false."
+      echo "   Not a verdict on the page; fix what the reason above names, then re-run." ;;
+    *)
+      echo "   the pupil exam did NOT render (exit $RENDER_RC) -> RENDER_ENFORCE stays false."
+      echo "   Fix the page, then re-run this installer to arm the gate." ;;
+  esac
+fi
+
 # ── 3b. The published capacity claims.
 #       The landing page publishes a capacity table measured against this
 #       deployment once. The deploy re-measures the page's lowest rung on every

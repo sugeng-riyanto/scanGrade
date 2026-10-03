@@ -89,7 +89,7 @@ def _python_shim(repo: Path) -> Path:
 
 
 def scratch(tmp_path, *, runner=COPY, gates=True, snapshot=True, claims=True,
-            perf=True, smoke=True, roster=ROSTER, env=True):
+            perf=True, smoke=True, roster=ROSTER, env=True, browser=True):
     """A tree shaped like the box, with only the paths under test populated."""
     repo = tmp_path / "repo"
     (repo / "deploy").mkdir(parents=True, exist_ok=True)
@@ -130,6 +130,15 @@ def scratch(tmp_path, *, runner=COPY, gates=True, snapshot=True, claims=True,
     if perf:
         (etc / "perf.conf").write_text('PERF_ENFORCE="true"\n', encoding="utf-8")
 
+    # The two DOM gates (touch_gate.py's finger floor and exam_render_gate.py's
+    # blank-exam check) measure in a real browser. They answer "could not measure"
+    # and keep the release without one, so a box with no browser ships every
+    # release having laid out no page — the same silent skip the confs answer for.
+    # `locate_browser` is the gates' own locator, so the checker imports it rather
+    # than restating it; the scratch tree carries the module for the same reason.
+    (repo / "deploy" / "touch_gate.py").write_bytes(
+        (ROOT / "deploy" / "touch_gate.py").read_bytes())
+
     roster_src = tmp_path / "lt_roster.json"
     dst = repo / ".freebuff" / "lt_roster.json"
     if roster is not None:
@@ -152,6 +161,14 @@ def scratch(tmp_path, *, runner=COPY, gates=True, snapshot=True, claims=True,
         "SG_ROSTER_SRC": str(roster_src),
         "SG_LOG": str(tmp_path / "installer.log"),
     }
+    if browser:
+        chrome = repo / "deploy" / "google-chrome"
+        chrome.write_text("#!/bin/sh\n", encoding="utf-8")
+        env["SG_CHROME"] = str(chrome)
+    else:
+        # An explicit empty is the gates' own escape hatch: authoritative, so a box
+        # with no browser cannot be read as armed by whatever the CI machine has.
+        env["SG_CHROME"] = ""
     # ROSTER_DST is deliberately not overridable: it is the path the installer and
     # both gates already agree on, and pointing it elsewhere would arm nothing.
     return repo, bin_dir, ran, env
@@ -210,6 +227,7 @@ class TestEveryMissingPieceIsNamed:
         ("perf", "perf       : MISSING"),
         ("roster", "cannot measure"),
         ("env", "schema     : MISSING"),
+        ("browser", "browser    : MISSING"),
     ])
     def test_one_missing_piece_is_enough_to_say_not_armed(self, tmp_path, broken, expected):
         kwargs = {"roster": None} if broken == "roster" else {broken: False}
@@ -218,6 +236,22 @@ class TestEveryMissingPieceIsNamed:
         assert r.returncode == 1, f"{broken} missing and --check still said armed"
         assert expected in r.stdout, r.stdout
         assert "NOT ARMED" in r.stdout
+
+    def test_a_box_with_a_browser_says_the_dom_gates_can_lay_a_page_out(self, tmp_path):
+        """The browser is what makes the touch and render gates measure rather than
+        skip; the line names it, so "armed" and "the DOM gates can run" are one
+        claim, not two."""
+        _, _, _, env = scratch(tmp_path, runner=LAUNCHER)
+        r = run(env, "--check")
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert "browser    : present" in r.stdout, r.stdout
+
+    def test_the_browser_missing_line_names_the_fix(self, tmp_path):
+        _, _, _, env = scratch(tmp_path, runner=LAUNCHER, browser=False)
+        r = run(env, "--check")
+        assert r.returncode == 1
+        assert "no Chrome/Chromium" in r.stdout, r.stdout
+        assert "SG_CHROME" in r.stdout, r.stdout
 
     def test_the_schema_line_names_direct_url_as_the_thing_that_arms_it(self, tmp_path):
         """A box with a .env that names a database is armed for the schema gate; the

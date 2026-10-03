@@ -188,6 +188,32 @@ report_state() {
     fi
   done
 
+  # A browser is what the two DOM gates measure in — the touch gate's finger floor
+  # and the render gate's blank-exam check. Both answer "could not measure" and keep
+  # the release without one, so a box with no browser ships every release having laid
+  # out no page, exactly the silent skip the confs above are counted for. The gates'
+  # own `locate_browser` is imported rather than restated, so a box this check calls
+  # armed is armed by their own definition — `SG_CHROME` authoritative, then the
+  # usual names and install paths.
+  local browser=""
+  if [ -x "$PY" ] && [ -f "$REPO/deploy/touch_gate.py" ]; then
+    # `-B`: the import must not leave a __pycache__ in the checkout, which is a
+    # write `--check` promises not to make anywhere.
+    browser=$("$PY" -B -c 'import sys; sys.path.insert(0, sys.argv[1]);
+from touch_gate import locate_browser
+print(locate_browser() or "")' "$REPO/deploy" 2>/dev/null)
+  fi
+  if [ -n "$browser" ]; then
+    printf '   %-10s : present (%s) — the DOM gates can lay a page out\n' \
+      "browser" "$browser"
+  else
+    printf '   %-10s : MISSING — no Chrome/Chromium, so the finger-floor and exam\n' \
+      "browser"
+    echo "                render gates skip every release without laying out a page."
+    echo "                install one, or set SG_CHROME"
+    armed=0
+  fi
+
   local count
   if [ -f "$ROSTER_DST" ] && [ -x "$PY" ]; then
     count=$("$PY" -c 'import json,collections,sys

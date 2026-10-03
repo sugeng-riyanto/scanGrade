@@ -762,15 +762,66 @@ finding no release could fix. Hidden controls are skipped for the same reason.
 | a control under the floor (exit 1), not armed | keep the release, but say so |
 | no browser, the account refused, the page did not render (exit 2) | keep the release, and say loudly it was **not measured** |
 
-Exit 2 is deliberately not a rollback: a box without a browser (this project's
-box has none by default) must not refuse every good release over a tool it does
-not have. It is said in the journal as a skip, never passed off as a pass. The
-finding arm is armed with `TOUCH_ENFORCE=true` in `/etc/scangrade-smoke.conf`, so
-a browser that produces a false positive cannot take the site down on its own.
+Exit 2 is deliberately not a rollback: a box that cannot start the browser (none
+installed, the account refused, the page did not load) must not refuse every good
+release over a tool it does not have. It is said in the journal as a skip, never
+passed off as a pass. The finding arm is armed with `TOUCH_ENFORCE=true` in
+`/etc/scangrade-smoke.conf`, so a browser that produces a false positive cannot
+take the site down on its own.
 
-To make it *measure* on a box, give it a browser: `apt-get install -y chromium`
-(or point `SG_CHROME` at any Chrome/Chromium binary) and arm it. Unarmed, the gate
-still runs and still reports; it is the rollback it withholds.
+To make it *measure* on a box, give it a browser — `apt-get install -y chromium`
+or point `SG_CHROME` at any Chrome/Chromium binary — and arm it (`TOUCH_ENFORCE=true`,
+and for the render gate below, `RENDER_ENFORCE=true`). The browser is now part of
+the armament preflight (see "An unarmed box deploys nothing"), so a box without one
+does not deploy at all rather than shipping every release unmeasured.
+
+## The pupil's exam page, laid out on every release
+
+`deploy/exam_render_gate.py` is the second browser gate, and it exists because a
+blank exam page is invisible to every other one.
+
+On 2026-10-03 `/student/exams/<id>` shipped **blank**: `take_exam.html` loaded its
+helper scripts (`exam-media.js`, `tools.js`) with `defer`, and `base.html` also
+loads Alpine with `defer` — a deferred script runs after `DOMContentLoaded`, so
+Alpine started on the next microtask *before* the next deferred script executed.
+`x-data="examApp(...)"` read `sgExamMedia` while building, threw
+`ReferenceError: sgExamMedia is not defined`, and Alpine abandoned the whole exam
+subtree. The route answered **200** with the full paper, the fixture was present,
+and the smoke test read the right panels. **Every gate passed.** Only a browser saw
+it.
+
+So this gate signs in as the demo pupil the smoke test already uses, opens the
+demo exam from the pupil's own list (the same fixture the smoke test reads, so no
+second conf), and asks the **rendered DOM**: did any question control render
+(`button.q-btn`), any answer block (`.exam-answers > div`), and did the browser
+report a page error while loading? Any of those is a finding.
+
+| Result | Outcome |
+|---|---|
+| the exam rendered, with questions and no page error (exit 0) | log one line |
+| blank, or a page error (exit 1), `RENDER_ENFORCE=true` | roll back, quoting the measurement |
+| blank, or a page error (exit 1), not armed | keep the release, but say so |
+| no browser, no sittable demo exam, the page did not load (exit 2) | keep the release, and say loudly it was **not measured** |
+
+A redirect *away* from the exam (a dead session, a refused sitting) is exit 2, not
+a finding: that is a page the gate did not get to look at, not a rendering
+regression. The finding arm is `RENDER_ENFORCE=true` in
+`/etc/scangrade-smoke.conf`.
+
+Both browser gates start Chrome through one shared helper,
+`touch_gate.browser_launch`. It exists because two box facts are invisible in a
+developer checkout and each one left the gates answering "could not measure" while
+looking armed:
+
+* **Chrome needs a writable `HOME`.** It writes crash reports, mimeapps and its
+  singleton lock under `$HOME` even when `--user-data-dir` is given. The gates run
+  as the checkout's owner via `runuser`, and a service account's home need not
+  exist — on the VPS `scangrade`'s does not — so Chrome died before offering a
+  debug target. The profile the gate already creates is handed over as `HOME` too.
+* **The sandbox is unavailable to root.** A browser started as root refuses to run
+  it (`Running as root without --no-sandbox is not supported`) and never reaches
+  its debug port. `--no-sandbox` is added only when the gate is root, so an
+  ordinary deploy user keeps the sandbox.
 
 ## An unarmed box deploys nothing
 
