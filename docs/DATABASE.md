@@ -79,6 +79,32 @@ fails if one comes back.
 | is_published | BOOLEAN | Grades visible to student |
 | submitted_at | TIMESTAMPTZ | |
 
+**One row per `(student_id, exam_id)`, and that is the whole answer-isolation
+boundary.** `submissions_student_exam_unique` (013) is unique for *every* status,
+not only a live attempt, so a pupil can never own two rows for one exam and one
+pupil's write can never land in another's row. All of a sitting's answers —
+including the structured ones a matching, drag-and-drop or complex multiple-choice
+question writes (`{"3": {"pairs": [...]}}`, `{"4": {"order": [...]}}`) — live in
+that one row's `answers` JSONB, so there is no per-question row that could be
+misfiled under the wrong pupil.
+
+Every write goes through `app/services/submission_service.py`, which reads the row
+by `(exam_id, student_id)` and patches it by `id` (`open_sitting`, `finish_sitting`).
+No route writes `submissions` itself; `tests/unit/test_submission_row.py` and
+`tests/unit/test_answer_isolation.py` fail if one starts to. A duplicate INSERT is
+not an error — `finish_sitting` catches the unique violation (`23505`) and writes
+into the row that won — so two tabs, or an offline poll racing a send, produce one
+recorded submission rather than a 500 or a second row.
+
+**The exam page's own `localStorage` keys are per sitter too.** The draft, the
+pending submit, the clock stamp, the away stamp, the agreement flag and the tab
+claim are built by `sgLS(prefix)` as `prefix + exam.id + '__' + student_key`, not
+from the exam id alone: on a shared classroom device a key without the pupil's id
+would hand the next pupil the previous pupil's draft. `student_key` is the render
+context the `take_exam` route passes (`g.user_id`); a legacy key with no suffix is
+removed on load. `tests/unit/test_answer_isolation.py` sweeps the template for a
+reintroduced bare key.
+
 ### Related Tables
 
 - **classes**: name, school_id, grade_level, school_year_id (007), teacher_id (wali kelas), created_by

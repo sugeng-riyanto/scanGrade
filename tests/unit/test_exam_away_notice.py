@@ -95,6 +95,15 @@ def _constants(html: str) -> list[str]:
         match = re.search(r"const " + name + r" = ([0-9]+);", html)
         assert match, f"the page no longer declares {name}"
         out.append(f"const {name} = {match.group(1)};")
+    # The away stamp is addressed through the page's own per-sitter key helper
+    # (`sgLS`), so the sandbox needs the same three names the page declares. Read
+    # from the rendered page, not hardcoded: this is the page's own namespace.
+    for name, pattern in (("SG_EXAM", r"const SG_EXAM = ('[^']*');"),
+                          ("SG_STUDENT", r"const SG_STUDENT = (\"[^\"]*\");")):
+        match = re.search(pattern, html)
+        assert match, f"the page no longer declares {name}"
+        out.append(f"const {name} = {match.group(1)};")
+    out.append("function sgLS(prefix) { return prefix + SG_EXAM + '__' + SG_STUDENT; }")
     return out
 
 
@@ -112,6 +121,7 @@ def _render_page(app):
         "deadline_reason": "duration", "seconds_left": 1800, "window_end": None,
         "away_grace_seconds": 15, "away_grace_chances": 2,
         "student_name": "Ahmad", "student_class_label": "7A",
+        "student_key": "stu-1",
     }
     with app.test_request_context("/student/exams/e1"):
         g.user_id, g.user_name, g.user_role = "stu-1", "Murid Uji", "murid"
@@ -248,11 +258,11 @@ class TestTheGapSurvivesTheDocumentThatMeasuredIt:
         got = _run(html, (
             "const out = [10 * 60, 30, null].map(function (age) {\n"
             "  const seed = {};\n"
-            "  if (age !== null) seed['exam_seen_e1'] = NOW - age * 1000;\n"
+            "  if (age !== null) seed['exam_seen_e1__stu-1'] = NOW - age * 1000;\n"
             "  const s = fresh({}, seed);\n"
             "  s._startAwayWatch();\n"
             "  const v = s.awayNoticeMinutes;\n"
-            "  const wrote = globalThis.localStorage._raw['exam_seen_e1'];\n"
+            "  const wrote = globalThis.localStorage._raw['exam_seen_e1__stu-1'];\n"
             "  s._restore();\n"
             "  return [v, wrote];\n"
             "});\n"
@@ -265,16 +275,18 @@ class TestTheGapSurvivesTheDocumentThatMeasuredIt:
             f"measure it: {got}")
 
     @needs_node
-    def test_the_stamp_belongs_to_one_exam(self, app):
+    def test_the_stamp_belongs_to_one_exam_and_one_sitter(self, app):
         """A stamp shared between papers would report the gap since the *other*
-        exam was last open."""
+        exam was last open; a stamp shared between pupils on a school device would
+        report one pupil's absence as the next pupil's."""
         html = _render_page(app)
         got = _run(html, (
             "const s = fresh({});\n"
             "const key = s._awayStampKey(); s._restore();\n"
             "console.log(JSON.stringify(key));\n"
         ))
-        assert got == "exam_seen_e1", f"the stamp is not per exam: {got!r}"
+        assert got == "exam_seen_e1__stu-1", (
+            f"the stamp is not keyed by exam *and* sitter: {got!r}")
 
     @needs_node
     def test_a_departure_is_written_at_once_and_not_left_to_the_cadence(self, app):
@@ -287,7 +299,7 @@ class TestTheGapSurvivesTheDocumentThatMeasuredIt:
             "const first = {at: 0, stamp: null};\n"
             "s._markAway();\n"
             "first.at = s._awayBeganAt;\n"
-            "first.stamp = globalThis.localStorage._raw['exam_seen_e1'];\n"
+            "first.stamp = globalThis.localStorage._raw['exam_seen_e1__stu-1'];\n"
             "s._markSeen();\n"
             "s._awayBeganAt = NOW;\n"
             "s._markAway();\n"
