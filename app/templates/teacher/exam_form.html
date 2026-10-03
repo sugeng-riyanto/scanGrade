@@ -456,10 +456,15 @@
                         try {
                             this.loadingText = sgT('🤖 Menganalisis soal dengan AI...', '🤖 Analysing the questions with AI...');
                             this.loadingStep = 2;
-                            const r = await fetch('/teacher/exams/parse-pdf', { method: 'POST', body: fd });
+                            const r = await fetch('/teacher/exams/parse-pdf', {
+                                method: 'POST', body: fd,
+                                // Read JSON, so an ended session answers `401 {"error": ...}`
+                                // instead of redirecting to the login page's HTML.
+                                headers: {'Accept': 'application/json'},
+                            });
                             this.loadingText = sgT('🔑 Membuat kunci jawaban...', '🔑 Building the answer key...');
                             this.loadingStep = 3;
-                            const d = await r.json();
+                            const d = await sgJsonReply(r);
                             if (this._timer) { clearInterval(this._timer); this._timer = null; }
                             this.loadingProgress = 100;
                             if (d.error) { this.errorMsg = d.error; this.loading = false; window.dispatchEvent(new CustomEvent('pdf-error')); return; }
@@ -599,14 +604,15 @@
                 try {
                     const r = await fetch('/teacher/exams/generate-key', {
                         method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
+                        headers: {'Content-Type': 'application/json',
+                                  'Accept': 'application/json'},
                         body: JSON.stringify({
                             markdown: _scanData.markdown,
                             questions: _scanData._questions || [],
                             lang: _scanData.lang || 'en'
                         })
                     });
-                    const d = await r.json();
+                    const d = await sgJsonReply(r);
                     if (d.success) {
                         _scanData.answerKey = d.answer_key;
                         _scanData.answerKeyGenerated = true;
@@ -1640,6 +1646,35 @@ function sgNearestScope(el, key) {
         }
     }
     return {};
+}
+// ── reading a reply that is not always JSON ───────────────────────────────────
+//
+// A `fetch(...).then(r => r.json())` on this page breaks in two ways it has
+// actually hit, and both surface as the *same* unhelpful sentence:
+// "Unexpected token '<', \"<!DOCTYPE\" ... is not valid JSON" — a message that
+// names the parser rather than the problem. The 302 is the common one: when a
+// teacher's session has ended, the role guard answers a *redirect to the login
+// page*, and the fetch follows it and gets HTML. The guard already answers JSON
+// instead for a caller that says it reads JSON (`_wants_json`), so the fetch
+// sends `Accept: application/json` — and this reads the body as text first, which
+// also covers the reply that is HTML no matter what: a PDF over the 50MB limit is
+// the framework's own error page.
+function sgHttpReason(status) {
+    if (status === 401) return sgT('Sesi Anda berakhir. Masuk lagi, lalu unggah PDF-nya sekali lagi.',
+                                   'Your session has expired. Sign in again, then upload the PDF once more.');
+    if (status === 413) return sgT('PDF terlalu besar (maksimal 50MB).', 'The PDF is too large (50MB maximum).');
+    if (status === 403) return sgT('Anda tidak berwenang melakukan ini.', 'You are not allowed to do this.');
+    return sgT('Server menjawab kode galat', 'The server answered with an error code') + ' (' + status + ')';
+}
+async function sgJsonReply(r) {
+    var text = await r.text();
+    var data = null;
+    try { data = text ? JSON.parse(text) : {}; } catch (e) { data = null; }
+    if (data === null || typeof data !== 'object') data = {};
+    // A readiness failure with no sentence of its own gets one a teacher can act
+    // on; a JSON error the server already wrote is left exactly as it is.
+    if (!r.ok && !data.error) data.error = sgHttpReason(r.status);
+    return data;
 }
 function sgPct(score) { return Math.round((+score || 0) * 100) + '%'; }
 
