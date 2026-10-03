@@ -74,6 +74,39 @@ def issue_code(supabase, student_id, exam_id):
         return None
 
 
+def matches(supabase, student_id, exam_id, code) -> bool:
+    """Is `code` *this* student's code for *this* exam — asked without redeeming it?
+
+    `redeem_code` below trades a code for the exam it points at, which is what the
+    recover page needs. The lock-out flow needs a different answer: the pupil is
+    already on their own exam page, so the exam is known and the only question is
+    whether the number they typed is their session's. Sharing the lookup would have
+    meant either redeeming the code as a side effect of a failed unlock (stamping a
+    code as used for a paper it never opened) or a second implementation of "is this
+    code theirs", which is how two answers to one question start.
+
+    Scoped to ``student_id`` exactly as `redeem_code` is: another student's rows are
+    never searched, so a guess cannot learn anything about anyone else's session and
+    no shared secret has to be kept between students.
+    """
+    code = (code or "").strip()
+    if len(code) != CODE_DIGITS or not code.isdigit():
+        return False
+    try:
+        row = row_or_none(
+            supabase.table("exam_access_codes")
+            .select("exam_id")
+            .eq("student_id", student_id).eq("code", code)
+            .order("created_at", desc=True).limit(1).maybe_single().execute()
+        )
+    except Exception:
+        logger.exception("Recovery code lookup failed")
+        return False
+    if not row or not row.get("exam_id"):
+        return False
+    return str(row["exam_id"]) == str(exam_id)
+
+
 def redeem_code(supabase, student_id, code):
     """Return the exam id this student's code points at, or ``None``.
 

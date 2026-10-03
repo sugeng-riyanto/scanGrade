@@ -194,6 +194,43 @@ def _check_rate_limit(row, server_now, min_interval=5):
     return not (0 <= age < min_interval)
 
 
+def _violation_outcome(supabase, exam, row, charged, penalty_info) -> dict:
+    """What a charged violation does *besides* raising the penalty: lock the sitting.
+
+    The threshold is not this function's and not new: `exams.max_violations` has
+    ended a sitting since migration 011, through the ladder's `auto_submit_on_max`,
+    and this is the one place that already charges. So there is no second counter
+    here — the count and the exam row are handed in, and the only question asked is
+    whether this exam has chosen to *lock* at that threshold instead of ending the
+    paper (`app/services/resume_code.decide`).
+
+    Two rules, both of which a caller could get wrong by hand:
+
+    * **The lock replaces the instruction rather than joining it.** The page is told
+      either "submit now" or "you are locked", never both — two terminal states in
+      one response is a race whose winner is whichever handler runs first.
+    * **A refusal is reported as a refusal.** If the lock write fails, or the row
+      moved under it, the pupil is *not* locked and saying so would strand them on a
+      screen with a code that does nothing.
+
+    Locking is opt-in per exam and refused at or past the deadline, where the
+    ladder's terminal behaviour is the honest one — a paper waiting on a resume that
+    can never be granted is a pupil held out of an exam that is already over.
+    """
+    from app.services import resume_code as rc
+
+    if not row:
+        return {"locked": False}
+    if rc.decide(exam, row, charged) != rc.LOCK:
+        return {"locked": False}
+    if not rc.lock(supabase, row, exam, violations=charged).get("ok"):
+        return {"locked": False}
+    # No code travels with this answer on purpose. The pupil's code is the recovery
+    # code already on their own screen (see app/services/resume_code.py), and echoing
+    # it into a JSON response would put it in a place the exam page never asked for.
+    return {"locked": True, "auto_submit": False}
+
+
 @api_bp.route("/violation/log", methods=["POST"])
 @login_required
 @open_year_required("exam_id")
@@ -244,7 +281,9 @@ def log_violation():
             # penalty the server will not charge (or hide one it will).
             exam = row_or_none(
                 supabase.table("exams")
-                .select("anti_cheat_enabled, penalty_per_violation, max_violations, auto_submit_on_max")
+                .select("anti_cheat_enabled, penalty_per_violation, max_violations,"
+                        " auto_submit_on_max, lock_pending_resume, resume_code_limit,"
+                        " duration_minutes, start_at, end_at, auto_submit_on_window_end")
                 .eq("id", exam_id).maybe_single().execute()
             ) or {}
             total_count = count_penalized_violations(supabase, g.user_id, exam_id)
@@ -253,12 +292,23 @@ def log_violation():
             # screen agrees with the score, without ever double-charging: the value
             # is the ladder's total, not another increment.
             try:
-                sub = supabase.table("submissions").select("id").eq("exam_id", exam_id).eq("student_id", g.user_id).order("created_at", desc=True).limit(1).execute()
+                sub = supabase.table("submissions").select(
+                    "id,status,started_at,resume_limit,resume_count_used"
+                ).eq("exam_id", exam_id).eq("student_id", g.user_id).order(
+                    "created_at", desc=True).limit(1).execute()
                 if sub.data:
                     supabase.table("submissions").update({"violations": total_count, "penalty": penalty_info["penalty"]}).eq("id", sub.data[0]["id"]).execute()
             except Exception:
                 current_app.logger.exception("Could not sync penalty for exam %s", exam_id)
-            results.append({"logged": True, "violation_count": total_count, **penalty_info})
+                sub = None
+            # The sitting is read for the lock as well as for the penalty sync, and
+            # the lock is decided here because this is the moment the count crossed
+            # the threshold — the same moment the ladder used to end the paper.
+            outcome = _violation_outcome(
+                supabase, exam, (sub.data[0] if sub is not None and sub.data else None),
+                total_count, penalty_info)
+            results.append({"logged": True, "violation_count": total_count,
+                            **penalty_info, **outcome})
         else:
             results.append({"logged": False, "reason": valid.get("reason")})
 

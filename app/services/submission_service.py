@@ -28,6 +28,16 @@ logger = get_logger("submission_service")
 # An attempt that stands. Never overwritten: a duplicate submit answers
 # "already submitted" instead.
 LIVE_STATUSES = ("submitted", "graded", "published")
+# A sitting the server locked pending its pupil's own recovery code. It *stands*
+# like a live attempt, and for a stronger reason: being outside `LIVE_STATUSES`
+# alone is not enough, because `open_sitting` reopens any status that is neither
+# live nor an open draft by rewriting it to `draft` with a fresh `started_at`.
+# That would both bypass the lock and move the one input the deadline is derived
+# from, restarting a timer the pupil has already partly spent.
+LOCKED_STATUS = "locked_pending_resume"
+#: Statuses `open_sitting` must return untouched, and `sitting_target` must never
+#: write a finished attempt into.
+STANDING_STATUSES = LIVE_STATUSES + (LOCKED_STATUS,)
 # A row that may be reused: the sitting continues, or a voided attempt is reopened.
 # The exam relation is embedded because the attempt summary is scoped to a school
 # and this is the read that tells it which one.
@@ -65,7 +75,7 @@ def sitting_target(rows):
         if row.get("status") == "draft":
             return row
     for row in rows:
-        if row.get("status") not in LIVE_STATUSES:
+        if row.get("status") not in STANDING_STATUSES:
             return row
     return None
 
@@ -102,7 +112,7 @@ def open_sitting(supabase, exam_id, student_id):
         # The API answered without a representation; the row exists either way.
         rows = sitting_rows(supabase, exam_id, student_id)
         return (rows[0] if rows else {}), True
-    if row.get("status") in LIVE_STATUSES:
+    if row.get("status") in STANDING_STATUSES:
         return row, False
     if row.get("status") == "draft" and row.get("started_at"):
         return row, False
@@ -151,7 +161,7 @@ def _record_summary(supabase, row, exam_id, student_id, submission):
         )
 
 
-def finish_sitting(supabase, exam_id, student_id, submission, rows=None):
+def finish_sitting(supabase, exam_id, student_id, submission, rows=None, closing=False):
     """Write a finished attempt into this (student, exam)'s row.
 
     Returns the id written to, or ``"already_submitted"`` when a live attempt owns
@@ -163,6 +173,13 @@ def finish_sitting(supabase, exam_id, student_id, submission, rows=None):
     row in between, so the write goes into that row instead. That is the whole
     point: the student pressed Send twice, and the answer is one recorded
     submission, not a 500.
+
+    ``closing`` is the clock's own door, and only the deadline sweep and the lock
+    screen use it. `sitting_target` refuses a `locked_pending_resume` row so a stray
+    submit cannot overwrite the paper the lock is holding; but the *clock* still
+    ends that sitting, and the pupil must not be held out of a paper that is over.
+    Closing a locked row writes the closed result into it — the same one writer, the
+    same mark scheme, no second PATCH-vs-POST decision.
     """
     rows = sitting_rows(supabase, exam_id, student_id) if rows is None else rows
     target = sitting_target(rows)
@@ -171,6 +188,13 @@ def finish_sitting(supabase, exam_id, student_id, submission, rows=None):
         _record_summary(supabase, target, exam_id, student_id, submission)
         return target["id"]
     if rows:
+        if closing:
+            locked = [r for r in rows if r.get("status") == LOCKED_STATUS]
+            if locked:
+                supabase.table("submissions").update(submission).eq(
+                    "id", locked[0]["id"]).execute()
+                _record_summary(supabase, locked[0], exam_id, student_id, submission)
+                return locked[0]["id"]
         # The only row this student has for this exam is a live attempt.
         return "already_submitted"
     try:
