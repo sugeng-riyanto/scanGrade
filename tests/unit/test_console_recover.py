@@ -90,6 +90,7 @@ GAPS_HEADER=__GAPS__
 MISSING_MARK=__MISSING__
 SCHEMA_GATE_WORD=__SCHEMA__
 PERF_GATE_WORD=__PERF__
+ARM_SCRIPT=__ARM__
 gitdo() { git -C "$REPO" "$@"; }
 # The runner's real script defines this as `runuser -u <owner> -- env …`; here the
 # block already runs as the checkout's owner, so it is the identity — and it must be
@@ -103,7 +104,8 @@ note() { printf '   %s\\n' "$*"; }
 
 def _run_logic(tmp_path: pathlib.Path, repo: pathlib.Path, state: pathlib.Path,
                tail: str, *, record: pathlib.Path | None = None,
-               hold: pathlib.Path | None = None) -> subprocess.CompletedProcess:
+               hold: pathlib.Path | None = None,
+               arm: pathlib.Path | None = None) -> subprocess.CompletedProcess:
     state.mkdir(parents=True, exist_ok=True)
     record = record if record is not None else state / "recover" / "r.txt"
     hold = hold if hold is not None else state / "recover" / "r"
@@ -116,7 +118,8 @@ def _run_logic(tmp_path: pathlib.Path, repo: pathlib.Path, state: pathlib.Path,
               .replace("__GAPS__", shlex.quote(_constant("GAPS_HEADER")))
               .replace("__MISSING__", shlex.quote(_constant("MISSING_MARK")))
               .replace("__SCHEMA__", shlex.quote(_constant("SCHEMA_GATE_WORD")))
-              .replace("__PERF__", shlex.quote(_constant("PERF_GATE_WORD"))))
+              .replace("__PERF__", shlex.quote(_constant("PERF_GATE_WORD")))
+              .replace("__ARM__", shlex.quote((arm or tmp_path / "no-arm.sh").as_posix())))
     script = tmp_path / "harness.sh"
     script.write_text(header + _logic_block() + tail, encoding="utf-8", newline="\n")
     return subprocess.run([BASH, str(script)], capture_output=True, text=True,
@@ -1064,3 +1067,125 @@ class TestTheLeverCanBeReadOutOfTheFetchedCommit:
         assert "STALE-FROM-LAST-TIME" not in both, (
             "the line ran a file left over from an earlier attempt: " + both)
         assert LEVER_NEW_MARK in both, both
+
+
+# ── 7. a not-armed box, which no release can clear ────────────────────────────
+#
+# The runner refuses the *whole run* at its armament preflight — before it fetches
+# anything — because an unarmed box deploys code no gate has looked at. So no release
+# and no quarantine can clear it: the one thing that does is the arm script the runner
+# itself names as the remedy (`bash $REPO/deploy/arm-auto-deploy.sh`). `sgfix` runs
+# exactly that, then retries once. It is not a bypass: the arm script re-runs the same
+# `--check` the runner runs, and the runner re-checks on the next tick.
+
+def test_an_unarmed_box_is_the_reason_before_a_hand_edit(tmp_path):
+    """The armament preflight runs before the dirty check, so on a box that is both
+    unarmed and dirty, the armament is what refused the run."""
+    state = tmp_path / "state"
+    state.mkdir(parents=True)
+    (state / "unarmed").write_text("some checker output\n", encoding="utf-8")
+    assert _reason(tmp_path, state, porcelain=" M app/routes/admin_sekolah.py") == \
+        "not armed", (
+            "a box that is unarmed and dirty reports the hand edit, which is not what "
+            "refused it — the runner never reaches its dirty check when unarmed")
+
+
+def test_the_lever_runs_the_arm_script_and_keeps_its_output(tmp_path):
+    repo, state = _repo(tmp_path), tmp_path / "state"
+    marker = tmp_path / "armed.marker"
+    arm = tmp_path / "arm-fake.sh"
+    arm.write_text(
+        "#!/usr/bin/env bash\necho FAKE-ARM-RAN\ntouch "
+        + shlex.quote(marker.as_posix()) + "\n", encoding="utf-8", newline="\n")
+
+    run = _run_logic(tmp_path, repo, state,
+                     "recover_arm_box\nprintf 'RC %s\\n' \"$?\"\n", arm=arm)
+
+    assert "RC 0" in run.stdout, run.stdout + run.stderr
+    assert marker.exists(), "the arm script was never run"
+    assert "FAKE-ARM-RAN" in run.stdout, "the arm script's own output was discarded"
+    record = (state / "recover" / "r.txt").read_text(encoding="utf-8")
+    assert "FAKE-ARM-RAN" in record, "the arm script's output is not in the record"
+
+
+def test_the_lever_refuses_to_arm_when_the_script_is_missing(tmp_path):
+    repo, state = _repo(tmp_path), tmp_path / "state"
+    run = _run_logic(tmp_path, repo, state,
+                     "recover_arm_box\nprintf 'RC %s\\n' \"$?\"\n",
+                     arm=tmp_path / "not-here.sh")
+    assert "RC 1\n" in run.stdout, run.stdout + run.stderr
+
+
+def test_the_arm_script_is_the_runners_own_named_remedy():
+    """One path, two files: the lever runs what the runner tells operators to run."""
+    runner = _text(RUNNER)
+    assert "bash $REPO/deploy/arm-auto-deploy.sh" in runner, (
+        "the runner no longer names the arm script as the remedy for this refusal")
+    assert "deploy/arm-auto-deploy.sh" in _constant("ARM_SCRIPT"), (
+        "the lever's arm script has drifted from the one the runner names")
+
+
+def test_a_not_armed_refusal_is_answered_by_arming_and_retrying():
+    source = _text(RECOVER)
+    ladder = source[source.index('say "3/6  a release"'):
+                    source.index("# ── 6. did it land")]
+    assert '"$STATE_DIR/unarmed"' in ladder, (
+        "the ladder never looks at the armament record")
+    assert "recover_arm_box" in ladder, (
+        "a not-armed refusal is named but nothing arms the box")
+    assert ladder.index("recover_arm_box") < ladder.index(
+        'recover_try_again "the box is still not armed'), (
+        "the lever retries without running the arm script it just claimed to run")
+    assert ladder.index('"$STATE_DIR/unarmed"') < ladder.index('elif [ -n "$PORCELAIN" ]'), (
+        "a box that is unarmed *and* dirty is treated as dirty only, so the hand edit "
+        "is set aside and the release is refused again for the armament")
+
+
+def test_a_retry_that_is_still_unarmed_names_the_armament(tmp_path):
+    repo, state = _repo(tmp_path), tmp_path / "state"
+    state.mkdir(parents=True)
+    (state / "unarmed").write_text("checker says: roster MISSING\n", encoding="utf-8")
+    run = _run_logic(tmp_path, repo, state,
+                     "\nrecover_name_refusal\nprintf 'RC %s\\n' \"$?\"\n")
+    assert "RC 0" in run.stdout, run.stdout + run.stderr
+    assert "not armed" in run.stdout.lower() or "unarmed" in run.stdout.lower(), (
+        "a second attempt that is still unarmed reports nothing about the armament")
+    assert "unarmed" in (state / "recover" / "r.txt").read_text(encoding="utf-8")
+
+
+def test_the_lever_arms_a_not_armed_box_and_the_retry_lands(tmp_path):
+    """As the box runs it: refused for armament, the arm script runs, the retry lands.
+
+    The shim `systemctl start` stands in for the runner: it moves HEAD only once the
+    arm marker exists, which is the whole shape of this recovery — arming is what lets
+    the next tick deploy.
+    """
+    repo = _repo(tmp_path)
+    (repo / "deploy").mkdir()
+    state = tmp_path / "state"
+    state.mkdir()
+    (state / "unarmed").write_text("checker says: not armed\n", encoding="utf-8")
+    marker = state / "armed.marker"
+    arm = tmp_path / "arm-fake.sh"
+    arm.write_text(
+        "#!/usr/bin/env bash\necho FAKE-ARM-RAN\ntouch "
+        + shlex.quote(marker.as_posix()) + "\n", encoding="utf-8", newline="\n")
+    systemctl = ("if [ \"$1\" = start ] && [ -f " + shlex.quote(marker.as_posix()) + " ]; then\n"
+                 "  git -C \"$SG_REPO\" -c user.email=t@example.com -c user.name=t "
+                 "commit --allow-empty -q -m release\n"
+                 "fi\n"
+                 "exit 0")
+    shim = _shim_dir(tmp_path, id=AS_ROOT, stat="echo root", journalctl="exit 0",
+                     runuser="exit 0", curl="exit 0", systemctl=systemctl)
+    env = _shimmed_env(tmp_path, shim)
+    env["SG_ARM_SCRIPT"] = str(arm)
+
+    run = subprocess.run([BASH, str(RECOVER)], capture_output=True, text=True,
+                         cwd=str(repo), env=env)
+    both = run.stdout + run.stderr
+    assert run.returncode == 0, both
+    assert marker.exists(), "the lever never ran the arm script"
+    assert "the checkout moved" in both, both
+    records = list((state / "recover").glob("*.txt"))
+    assert records and "FAKE-ARM-RAN" in records[0].read_text(encoding="utf-8"), (
+        "the arm script's output is not in the recovery record")
