@@ -264,7 +264,7 @@ def dashboard():
     # *twice* here with an identical filter, and the second answer overwrote the
     # first.)
     student_class = None
-    subject_count = 0
+    class_subjects = []
     if student_class_id:
         student_class = class_row(student_class_id) or None
     if student_school_id:
@@ -275,7 +275,13 @@ def dashboard():
         # a pupil in a past year's class reads against that class's offering. A
         # school with 23 subjects and 306 assignment rows was being told it had
         # 306; a class that offers 10 of them should read 10.
-        subject_count = len(subjects_for_class(student_school_id, student_class_id))
+        #
+        # The list is kept, not just its length: a pupil whose class has some
+        # subjects switched off cannot tell *which* from a number, and the list is
+        # what they were actually asking for. The count is `len()` of this same
+        # read, so the number and the names can never describe different classes.
+        class_subjects = subjects_for_class(student_school_id, student_class_id)
+    subject_count = len(class_subjects)
 
     # Active whiteboards for student's class (only if the school has it enabled).
     # The feature flag rides on the cached school row; the board list is cached
@@ -295,6 +301,7 @@ def dashboard():
         "user_name": user_name,
         "student_class": student_class,
         "subject_count": subject_count,
+        "class_subjects": class_subjects,
         "active_whiteboards": active_whiteboards,
         "subject_averages": subject_averages,
         "chart_points": _chart_points(completed_exams),

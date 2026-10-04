@@ -87,6 +87,52 @@ class TestTheSubjectCount:
         assert re.search(r"t\('", html), "the guide carries no i18n helper"
 
 
+# ── the subjects, by name ───────────────────────────────────────────────────
+
+class TestTheSubjectsAreNamed:
+    """A count cannot show *which* subjects a class offers.
+
+    Requested: show the pupil's offered subjects by name, so a class-specific list
+    is visible rather than a number. The count the card shows is `len()` of the
+    same list the card must now print, so the two cannot disagree about the class.
+    """
+
+    def test_the_route_hands_the_list_to_the_template(self):
+        src = STUDENT_ROUTES.read_text(encoding="utf-8")
+        body = src.split("def dashboard(")[1].split("\ndef ")[0]
+        assert re.search(r"class_subjects\s*=\s*subjects_for_class\(", body), (
+            "the route does not keep the subject list it already fetched — the "
+            "dashboard can only print names it was given")
+        assert "len(class_subjects)" in body, (
+            "the count must be the length of the very list the card prints, or the "
+            "number and the names can describe different classes")
+        assert re.search(r'"class_subjects"\s*:', body), (
+            "the list is fetched and then dropped from the template data")
+
+    def test_the_template_names_every_offered_subject(self):
+        html = DASHBOARD.read_text(encoding="utf-8")
+        loop = re.search(
+            r"{%\s*for\s+(\w+)\s+in\s+class_subjects\s*%}(.*?){%\s*endfor\s*%}",
+            html, re.S)
+        assert loop, "the dashboard has no loop over the class's subjects"
+        assert f"{{{{ {loop.group(1)}.name }}}}" in loop.group(2), (
+            "the loop does not print each subject's name, so the list is anonymous")
+
+    def test_the_named_list_is_bilingual(self):
+        html = DASHBOARD.read_text(encoding="utf-8")
+        card = html.split("class_subjects", 1)[1][:2000]
+        assert "t('" in card, (
+            "the new subject card carries no i18n helper, so one language only")
+
+    def test_the_list_is_the_class_offering_not_the_school(self):
+        """The whole point: the names must be the pupil's class list, not the
+        school's whole list and not the assignment rows."""
+        html = DASHBOARD.read_text(encoding="utf-8")
+        assert "school_subjects" not in html, (
+            "the dashboard prints the school's whole subject list, so a subject the "
+            "admin switched off for this class still shows")
+
+
 # ── the guide documents the lock and the retake ─────────────────────────────
 
 class TestTheGuideDocumentsTheLock:
