@@ -49,7 +49,8 @@ EXPECTED: dict[str, list[tuple[str, list[str]]]] = {
     "admin_sekolah": [
         ("Utama", ["/admin-sekolah/dashboard", "/admin-sekolah/profile"]),
         ("Akademik", ["/admin-sekolah/school-years", "/admin-sekolah/classes",
-                      "/admin-sekolah/subjects", "/admin-sekolah/promote",
+                      "/admin-sekolah/subjects", "/admin-sekolah/grade-weights",
+                      "/admin-sekolah/promote",
                       "/admin-sekolah/assessment-periods",
                       "/admin-sekolah/invigilation"]),
         ("Pengguna", ["/admin-sekolah/teachers", "/admin-sekolah/students",

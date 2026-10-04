@@ -1,55 +1,164 @@
 {% set content_lang = 'id' %}
 {% extends "base.html" %}
-{% block title %}Siswa - ScanGrade{% endblock %}
-{% block page_title %}Daftar Siswa{% endblock %}
+{% block title %}Nilai Murid - ScanGrade{% endblock %}
+{% block page_title %}Nilai Murid{% endblock %}
 {% block content %}
-<div class="space-y-6" x-data="{ search: '' }">
-    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div>
-            <h2 class="text-2xl font-extrabold text-slate-800" x-text="lang==='en'?'Student Roster':'Daftar Siswa'"></h2>
-            <p class="text-sm text-slate-500 font-medium mt-0.5" :lang="lang" x-text="'{{ students|length }} ' + t('siswa','students')"></p>
+{% set qs = '?subject_id=' ~ subject_id %}
+<script>
+// The grade table's state: the server's rows, plus the search and sort the
+// reader applies on top. The rows arrive already computed (weighted final and
+// its per-component breakdown), so the client only filters and orders them —
+// it never recomputes a mark.
+function gradeTable() {
+    return {
+        rows: {{ students|tojson }},
+        search: '',
+        sortKey: 'class_name',
+        sortDir: 'asc',
+        showDetail: null,
+        visible() {
+            let list = this.rows;
+            if (this.search) {
+                const q = this.search.toLowerCase();
+                list = list.filter(r => (r.full_name||'').toLowerCase().includes(q)
+                    || (r.nisn||'').toLowerCase().includes(q)
+                    || (r.nis||'').toLowerCase().includes(q)
+                    || (r.class_name||'').toLowerCase().includes(q));
+            }
+            const dir = this.sortDir === 'asc' ? 1 : -1;
+            const key = this.sortKey;
+            return list.slice().sort((a,b) => {
+                let x = a[key], y = b[key];
+                if (key === 'final') {
+                    x = (x === null || x === undefined) ? -1 : x;
+                    y = (y === null || y === undefined) ? -1 : y;
+                }
+                if (typeof x === 'string' || typeof y === 'string') {
+                    x = (x||'').toString().toLowerCase();
+                    y = (y||'').toString().toLowerCase();
+                    return x < y ? -dir : (x > y ? dir : 0);
+                }
+                return (x - y) * dir;
+            });
+        },
+        setSort(k) {
+            if (this.sortKey === k) { this.sortDir = this.sortDir === 'asc' ? 'desc' : 'asc'; }
+            else { this.sortKey = k; this.sortDir = 'asc'; }
+        }
+    };
+}
+</script>
+<div class="space-y-6" :lang="lang" x-data="gradeTable()">
+
+    <div class="flex flex-col gap-4">
+        <div class="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
+            <div>
+                <h2 class="text-2xl font-extrabold text-slate-800" x-text="lang==='en'?'Student Grades':'Nilai Murid'"></h2>
+                <p class="text-sm text-slate-500 font-medium mt-0.5">
+                    <span x-text="visible().length"></span>
+                    <span x-text="t('murid','students')"></span>
+                    {% if subject %} · <span class="font-bold">{{ subject.name }}</span>{% endif %}
+                    {% if year_name %} · <span>{{ year_name }}</span>{% endif %}
+                </p>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+                {% if subjects %}
+                <select onchange="location.href='/teacher/students?subject_id=' + this.value"
+                        class="px-3 py-2 border border-slate-200 rounded-xl text-sm font-semibold focus:ring-2 focus:ring-brand-500">
+                    {% for s in subjects %}
+                    <option value="{{ s.id }}" {% if s.id == subject_id %}selected{% endif %}>{{ s.name }}</option>
+                    {% endfor %}
+                </select>
+                {% endif %}
+                {% if subject_id %}
+                <a href="/teacher/students/export.xlsx{{ qs }}" class="px-3 py-2 rounded-xl bg-emerald-600 text-white text-sm font-bold hover:bg-emerald-700"><i class="fas fa-file-excel mr-1"></i>XLSX</a>
+                <a href="/teacher/students/export.pdf{{ qs }}" class="px-3 py-2 rounded-xl bg-rose-600 text-white text-sm font-bold hover:bg-rose-700"><i class="fas fa-file-pdf mr-1"></i>PDF</a>
+                {% endif %}
+            </div>
         </div>
-        <input type="text" x-model="search" :placeholder="lang==='en'?'Search students...':'Cari siswa...'" class="sm:w-64 px-4 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition">
+
+        <div class="flex flex-col sm:flex-row gap-2">
+            <input type="text" x-model="search" :placeholder="lang==='en'?'Search name, NISN or class...':'Cari nama, NISN, atau kelas...'"
+                   class="sm:w-72 px-4 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition">
+            <button type="button" @click="sortDir = sortDir==='asc'?'desc':'asc'"
+                    class="px-3 py-2 border border-slate-200 rounded-xl text-sm font-semibold text-slate-600 hover:bg-slate-50">
+                <i class="fas" :class="sortDir==='asc' ? 'fa-arrow-up-a-z' : 'fa-arrow-down-z-a'"></i>
+                <span x-text="sortDir==='asc' ? t('Naik','Ascending') : t('Turun','Descending')"></span>
+            </button>
+        </div>
     </div>
 
-    {% if students %}
+    {% if not subject_id %}
+    <div class="card p-12 text-center text-slate-400">
+        <i class="fas fa-chalkboard-teacher text-5xl mb-4"></i>
+        <p class="text-lg font-bold" x-text="lang==='en'?'No assigned subjects yet':'Belum ada mapel yang ditugaskan'"></p>
+        <p class="text-sm font-medium mt-1" x-text="lang==='en'?'A subject appears once the school assigns you to a class.':'Mapel muncul setelah sekolah menugaskan Anda ke sebuah kelas.'"></p>
+    </div>
+    {% else %}
+    {% if components %}
+    <div class="card p-4 text-xs font-semibold text-slate-600 flex flex-wrap items-center gap-2">
+        <span class="text-slate-400" x-text="t('Bobot nilai:','Grade weights:')"></span>
+        {% for c in components %}
+        <span class="px-2 py-1 rounded-lg bg-brand-50 text-brand-700">{{ c.name }} {{ c.weight }}%</span>
+        {% endfor %}
+        <span class="text-slate-400">· <span x-text="t('KKM','Minimum Mastery')"></span> {{ kkm }}</span>
+    </div>
+    {% else %}
+    <div class="card p-3 text-xs font-semibold text-amber-700 bg-amber-50 border border-amber-200">
+        <i class="fas fa-circle-info mr-1"></i>
+        <span x-text="t('Sekolah belum mengatur bobot nilai untuk mapel ini — Nilai Akhir memakai rata-rata sederhana.', 'The school has not configured grade weights for this subject — the Final Mark uses a simple mean.')"></span>
+    </div>
+    {% endif %}
+
     <div class="card overflow-hidden">
         <div class="overflow-x-auto">
-            <table class="w-full text-sm min-w-[480px]">
+            <table class="w-full text-sm min-w-[560px]">
                 <thead><tr class="text-left text-slate-500 bg-slate-50 border-b border-slate-100">
-                    <th class="px-5 py-3 font-semibold" x-text="lang==='en'?'Name':'Nama'"></th>
-                    <th class="px-5 py-3 font-semibold">Phone</th>
-                    <th class="px-5 py-3 font-semibold" x-text="lang==='en'?'Submissions':'Pengumpulan'"></th>
-                    <th class="px-5 py-3 font-semibold" x-text="lang==='en'?'Avg Score':'Rata-rata'"></th>
+                    <th class="px-4 py-3 font-semibold cursor-pointer select-none" @click="setSort('class_name')" x-text="t('Kelas','Class')"></th>
+                    <th class="px-4 py-3 font-semibold cursor-pointer select-none" @click="setSort('full_name')" x-text="t('Nama','Name')"></th>
+                    <th class="px-4 py-3 font-semibold cursor-pointer select-none" @click="setSort('nisn')">NISN</th>
+                    <th class="px-4 py-3 font-semibold cursor-pointer select-none text-right" @click="setSort('final')" x-text="t('Nilai Akhir','Final Mark')"></th>
                 </tr></thead>
                 <tbody>
-                    {% for s in students %}
-                    <tr class="border-b border-slate-50 last:border-0 hover:bg-slate-50 transition"
-                        x-show="!search || '{{ (s.full_name or '')|lower }}'.includes(search.toLowerCase()) || '{{ (s.phone or '')|lower }}'.includes(search.toLowerCase())">
-                        <td class="px-5 py-3">
-                            <div class="flex items-center gap-3">
-                                <div class="w-8 h-8 rounded-full bg-brand-50 text-brand-600 flex items-center justify-center font-bold text-xs shrink-0">
-                                    {{ (s.full_name or 'S')[:1]|upper }}
+                    <template x-for="s in visible()" :key="s.id">
+                        <tr class="border-b border-slate-50 last:border-0 hover:bg-slate-50 transition">
+                            <td class="px-4 py-3 text-slate-500 font-semibold" x-text="s.class_name || '-'"></td>
+                            <td class="px-4 py-3 font-semibold text-slate-700" x-text="s.full_name || '-'"></td>
+                            <td class="px-4 py-3 text-slate-500" x-text="s.nisn || s.nis || '-'"></td>
+                            <td class="px-4 py-3 text-right">
+                                <div class="inline-flex items-center gap-2">
+                                    <span x-show="s.untagged > 0" :title="t('Ada ujian tanpa komponen nilai yang tidak ikut dihitung','Some exams have no grade component and are not counted')"
+                                          class="px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 text-[10px] font-bold">
+                                        <i class="fas fa-triangle-exclamation"></i>
+                                    </span>
+                                    <span class="font-bold"
+                                          :class="(s.final===null) ? 'text-slate-300' : (s.final >= {{ kkm }} ? 'text-emerald-600' : 'text-red-500')"
+                                          x-text="s.final===null ? '-' : s.final"></span>
+                                    <button type="button" x-show="s.final!==null" @click="showDetail = (showDetail===s.id ? null : s.id)"
+                                            class="text-slate-300 hover:text-brand-600"><i class="fas fa-circle-info"></i></button>
                                 </div>
-                                <span class="font-semibold text-slate-700">{{ s.full_name or '-' }}</span>
-                            </div>
-                        </td>
-                        <td class="px-5 py-3 text-slate-500 font-medium">{{ s.phone or '-' }}</td>
-                        <td class="px-5 py-3 text-slate-600">{{ s.sub_count or 0 }}</td>
-                        <td class="px-5 py-3 font-bold {% if (s.avg_score or 0) >= 70 %}text-emerald-600{% elif (s.avg_score or 0) >= 50 %}text-amber-600{% else %}text-red-500{% endif %}">
-                            {{ s.avg_score if s.avg_score is not none else '-' }}
-                        </td>
+                                <div x-show="showDetail===s.id" x-cloak
+                                     class="mt-2 text-[11px] text-left bg-slate-50 rounded-lg p-2 font-medium text-slate-600 space-y-0.5">
+                                    <template x-if="s.mode==='simple'">
+                                        <div x-text="t('Rata-rata sederhana (bobot belum dikonfigurasi sekolah)','Simple mean (weights not configured by the school)')"></div>
+                                    </template>
+                                    <template x-for="d in s.detail" :key="d.component_id">
+                                        <div class="flex justify-between gap-3">
+                                            <span x-text="d.name || '?'"></span>
+                                            <span x-text="(d.average===null ? t('belum ada nilai','no score yet') : d.average) + ' · ' + d.weight + '%'"></span>
+                                        </div>
+                                    </template>
+                                </div>
+                            </td>
+                        </tr>
+                    </template>
+                    <tr x-show="visible().length === 0">
+                        <td colspan="4" class="px-4 py-10 text-center text-slate-400 font-medium"
+                            x-text="t('Tidak ada murid pada mapel ini.','No students in this subject.')"></td>
                     </tr>
-                    {% endfor %}
                 </tbody>
             </table>
         </div>
-    </div>
-    {% else %}
-    <div class="card p-12 text-center text-slate-400">
-        <i class="fas fa-user-graduate text-5xl mb-4"></i>
-        <p class="text-lg font-bold" x-text="lang==='en'?'No students yet':'Belum ada siswa'"></p>
-        <p class="text-sm font-medium mt-1" x-text="lang==='en'?'Students will appear here after they submit exams':'Siswa akan muncul setelah mengumpulkan ujian'"></p>
     </div>
     {% endif %}
 </div>

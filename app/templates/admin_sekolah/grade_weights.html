@@ -1,0 +1,178 @@
+{% set content_lang = 'id' %}
+{% extends "base.html" %}
+{% block title %}Nilai Berbobot - ScanGrade{% endblock %}
+{% block page_title %}Nilai Berbobot{% endblock %}
+{% block content %}
+<script>
+// The school's grade policy: its components, and the weight each carries per
+// subject. A save only succeeds when a row reaches 100%, so the total is shown
+// live and the Save button stays disabled until it adds up.
+function gradeWeights() {
+    return {
+        components: {{ components|tojson }},
+        subjects: {{ subjects|tojson }},
+        weights: {{ matrix|tojson }},
+        totals: {{ totals|tojson }},
+        compNames: {{ comp_names|tojson }},
+        required: {{ required_total }},
+        closed: {{ 'true' if year_status == 'closed' else 'false' }},
+        newName: '',
+        saving: '',
+        msg: '',
+        ok: false,
+
+        activeComponents() { return this.components.filter(c => c.is_active); },
+        row(subjectId) { return this.weights[subjectId] || (this.weights[subjectId] = {}); },
+        cell(subjectId, compId) { const v = this.row(subjectId)[compId]; return (v === undefined ? '' : v); },
+        setCell(subjectId, compId, value) {
+            const r = this.row(subjectId);
+            const n = parseInt(value, 10);
+            if (isNaN(n) || n <= 0) { delete r[compId]; } else { r[compId] = n; }
+            this.totals[subjectId] = Object.values(r).reduce((a, b) => a + b, 0);
+        },
+        total(subjectId) { return this.totals[subjectId] || 0; },
+        canSave(subjectId) { const r = this.row(subjectId); return Object.keys(r).length === 0 || this.total(subjectId) === this.required; },
+
+        addComponent() {
+            if (!this.newName.trim()) { return; }
+            this.post('/admin-sekolah/grade-weights/components', { name: this.newName.trim() })
+                .then(d => {
+                    if (d.ok) { this.components.push(d.data.component); this.newName = ''; }
+                    this.flash(d.ok, d.ok ? this.t('Komponen ditambahkan.','Component added.') : (d.data.error || this.t('Gagal.','Failed.')));
+                });
+        },
+        rename(c) {
+            const name = prompt(this.t('Nama komponen','Component name'), c.name);
+            if (name === null || !name.trim() || name.trim() === c.name) { return; }
+            this.post('/admin-sekolah/grade-weights/components/' + c.id + '/update', { name: name.trim() })
+                .then(d => {
+                    if (d.ok) { c.name = name.trim(); this.compNames[c.id] = name.trim(); }
+                    this.flash(d.ok, d.ok ? this.t('Tersimpan.','Saved.') : (d.data.error || this.t('Gagal.','Failed.')));
+                });
+        },
+        toggle(c) {
+            this.post('/admin-sekolah/grade-weights/components/' + c.id + '/update', { is_active: !c.is_active })
+                .then(d => {
+                    if (d.ok) { c.is_active = !c.is_active; }
+                    this.flash(d.ok, d.ok ? this.t('Tersimpan.','Saved.') : (d.data.error || this.t('Gagal.','Failed.')));
+                });
+        },
+        saveRow(subjectId) {
+            this.saving = subjectId; this.msg = '';
+            const body = { weights: this.row(subjectId) };
+            this.post('/admin-sekolah/grade-weights/' + subjectId, body)
+                .then(d => {
+                    this.flash(d.ok, d.ok ? this.t('Bobot tersimpan.','Weights saved.') : (d.data.error || this.t('Gagal.','Failed.')));
+                    this.saving = '';
+                });
+        },
+        clearRow(subjectId) {
+            if (!confirm(this.t('Kosongkan bobot mapel ini? Nilai Akhir kembali rata-rata sederhana.','Clear this subject\'s weights? The Final Mark returns to a simple mean.'))) { return; }
+            this.weights[subjectId] = {}; this.totals[subjectId] = 0;
+            this.saveRow(subjectId);
+        },
+        post(url, body) {
+            return fetch(url, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
+                body: JSON.stringify(body || {}),
+            }).then(r => r.json().then(data => ({ok: r.ok && !data.error, data})))
+              .catch(() => ({ok: false, data: {error: this.t('Gagal menyimpan.','Could not save.')}}));
+        },
+        flash(ok, text) { this.ok = ok; this.msg = text; },
+    };
+}
+</script>
+<div class="space-y-6" :lang="lang" x-data="gradeWeights()">
+    <div class="card p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+        <div>
+            <h2 class="text-lg font-extrabold text-slate-800" x-text="t('Komponen & Bobot Nilai','Grade Components & Weights')"></h2>
+            <p class="text-xs text-slate-500 font-medium" x-text="t('Komponen = bagian nilai (Tugas, UTS, UAS). Bobot diatur per mapel per tahun ajaran; totalnya harus 100%.','A component is a share of the mark (Coursework, Mid-term, Final). Weights are per subject per year; the total must reach 100%.')"></p>
+        </div>
+        <span class="text-xs font-bold px-2 py-1 rounded-lg bg-slate-100 text-slate-600" x-show="'{{ year_name }}'">{{ year_name or t('Tanpa tahun aktif','No active year') }}</span>
+    </div>
+
+    <div x-show="msg" x-cloak class="p-3 rounded-xl text-sm font-bold"
+         :class="ok ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-red-50 text-red-600 border border-red-200'"
+         x-text="msg"></div>
+
+    <div x-show="closed" class="p-3 rounded-xl text-sm font-bold bg-amber-50 text-amber-700 border border-amber-200"
+         x-text="t('Tahun ajaran ini sudah ditutup — bobot hanya bisa dilihat.','This school year is closed — weights can only be viewed.')"></div>
+
+    <div class="card p-5">
+        <div class="flex items-center justify-between gap-2 mb-3">
+            <h3 class="text-sm font-extrabold text-slate-700" x-text="t('Komponen Nilai','Grade Components')"></h3>
+            <div class="flex gap-2" x-show="!closed">
+                <input type="text" x-model="newName" @keydown.enter="addComponent()"
+                       :placeholder="t('mis. Proyek','e.g. Project')"
+                       class="px-3 py-1.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-brand-500">
+                <button type="button" @click="addComponent()" class="px-3 py-1.5 rounded-xl bg-brand-600 text-white text-sm font-bold hover:bg-brand-700">
+                    <i class="fas fa-plus mr-1"></i><span x-text="t('Tambah','Add')"></span>
+                </button>
+            </div>
+        </div>
+        <div class="flex flex-wrap gap-2">
+            <template x-for="c in components" :key="c.id">
+                <div class="flex items-center gap-2 px-3 py-1.5 rounded-xl border"
+                     :class="c.is_active ? 'bg-brand-50 border-brand-200 text-brand-700' : 'bg-slate-50 border-slate-200 text-slate-500 line-through'">
+                    <span class="text-sm font-bold" x-text="c.name"></span>
+                    <button type="button" x-show="!closed" @click="rename(c)" class="text-slate-400 hover:text-brand-700"><i class="fas fa-pen text-xs"></i></button>
+                    <button type="button" x-show="!closed" @click="toggle(c)" class="text-slate-400 hover:text-brand-700"><i class="fas" :class="c.is_active ? 'fa-toggle-on' : 'fa-toggle-off'"></i></button>
+                </div>
+            </template>
+            <span x-show="components.length === 0" class="text-sm text-slate-400 italic"
+                  x-text="t('Belum ada komponen. Tambahkan dulu.','No components yet. Add one first.')"></span>
+        </div>
+    </div>
+
+    <div class="card p-5">
+        <h3 class="text-sm font-extrabold text-slate-700 mb-3" x-text="t('Matriks Bobot per Mapel','Weight Matrix per Subject')"></h3>
+        <template x-if="activeComponents().length === 0">
+            <p class="text-sm text-slate-400 italic" x-text="t('Tambahkan minimal satu komponen aktif untuk mengatur bobot.','Add at least one active component to set weights.')"></p>
+        </template>
+        <template x-if="activeComponents().length > 0">
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm min-w-[640px]">
+                    <thead><tr class="text-left text-slate-500 bg-slate-50 border-b border-slate-100">
+                        <th class="px-3 py-2 font-semibold" x-text="t('Mapel','Subject')"></th>
+                        <template x-for="c in activeComponents()" :key="c.id">
+                            <th class="px-2 py-2 font-semibold text-center" x-text="c.name"></th>
+                        </template>
+                        <th class="px-2 py-2 font-semibold text-center" x-text="t('Total','Total')"></th>
+                        <th class="px-3 py-2"></th>
+                    </tr></thead>
+                    <tbody>
+                        <template x-for="s in subjects" :key="s.id">
+                            <tr class="border-b border-slate-50 last:border-0">
+                                <td class="px-3 py-2 font-semibold text-slate-700" x-text="s.name"></td>
+                                <template x-for="c in activeComponents()" :key="c.id">
+                                    <td class="px-1 py-2 text-center">
+                                        <input type="number" min="0" max="100" :disabled="closed"
+                                               :value="cell(s.id, c.id)"
+                                               @change="setCell(s.id, c.id, $event.target.value)"
+                                               class="w-16 text-center border border-slate-200 rounded-lg px-1 py-1 text-sm font-bold disabled:bg-slate-100">
+                                    </td>
+                                </template>
+                                <td class="px-2 py-2 text-center font-extrabold"
+                                    :class="total(s.id) === 0 ? 'text-slate-300' : (total(s.id) === required ? 'text-emerald-600' : 'text-red-500')">
+                                    <span x-text="total(s.id) + '%'"></span>
+                                </td>
+                                <td class="px-3 py-2 text-right whitespace-nowrap" x-show="!closed">
+                                    <button type="button" @click="saveRow(s.id)" :disabled="!canSave(s.id)"
+                                            class="px-3 py-1.5 rounded-lg bg-brand-600 text-white text-xs font-bold hover:bg-brand-700 disabled:opacity-40 disabled:cursor-not-allowed">
+                                        <i class="fas fa-save mr-1"></i><span x-text="t('Simpan','Save')"></span>
+                                    </button>
+                                    <button type="button" @click="clearRow(s.id)" x-show="total(s.id) > 0"
+                                            class="ml-1 px-2 py-1.5 rounded-lg bg-slate-100 text-slate-600 text-xs font-bold hover:bg-slate-200">
+                                        <i class="fas fa-eraser"></i>
+                                    </button>
+                                </td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+        </template>
+    </div>
+</div>
+{% endblock %}

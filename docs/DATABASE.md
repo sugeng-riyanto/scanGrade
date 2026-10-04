@@ -170,6 +170,21 @@ skip the lock.
 
 All tables have Row Level Security enabled. See `docs/SECURITY_RLS_MATRIX.md` for full matrix.
 
+## Weighted grade components (migration 057)
+
+- **grade_component_type**: school_id, name, sort_order, is_active, created_by.
+  Unique `(school_id, lower(name))`. The school's own list of grade components
+  ("Tugas Kelas", "UTS", …).
+- **grade_weight_config**: school_id, subject_id, school_year_id, component_id,
+  weight_percent (0-100), is_active, updated_by. Unique
+  `(subject_id, school_year_id, component_id)` so re-saving updates the row rather
+  than stacking a second one. The `SUM(weight_percent) = 100` rule for an active
+  subject/year is enforced **in the application** (`grade_weighting.save_config`),
+  not by a CHECK — a CHECK cannot sum rows.
+- **exams.grade_component_type_id** (nullable, `ON DELETE SET NULL`): which
+  weighted component a paper is counted under. NULL means uncategorised; the paper
+  is excluded from a weighted total and reported as `untagged`.
+
 ## Migrations
 
 Migration naming: `YYYYMMDD_descriptive_name.sql`

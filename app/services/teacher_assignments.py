@@ -142,9 +142,10 @@ def assigned_class_ids(supabase, school_id, teacher_id, year_name=None) -> set:
     return ids
 
 
-#: The profile columns a pupil needs on a class roster — the same set the old
-#: whole-school query named, so the page is unchanged except for the narrowing.
-STUDENT_COLUMNS = "id, full_name, phone, role, class_id"
+#: The profile columns a pupil needs on a class roster. `nisn` and `nis` were
+#: added for the teacher's grade table (NISN is the identity a parent recognises),
+#: so the read is one query rather than a second lookup per row.
+STUDENT_COLUMNS = "id, full_name, phone, nisn, nis, role, class_id, school_id"
 
 
 def students_in_classes(supabase, school_id, class_ids) -> list:

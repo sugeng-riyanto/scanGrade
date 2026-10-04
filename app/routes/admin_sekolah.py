@@ -38,6 +38,7 @@ from app.services import academic_year
 from app.services import identity_names
 from app.services import subject_levels as sl_service
 from app.services import subject_kkm as kkm_service
+from app.services import grade_weighting
 from app.services import assessment_periods
 
 def _gen_password(length=12) -> str:
@@ -1942,6 +1943,111 @@ def admin_subject_levels_save(subject_id):
                      new_data={"class_id": class_id, "saved": result.get("saved")},
                      user_id=g.user_id)
     return jsonify({"success": True, **result})
+
+
+# ─── NILAI BERBOBOT (komponen + matriks bobot) ─────────────
+#
+# A final mark is a policy: a school names its components (Tugas 30%, UTS 30%,
+# UAS 40%) and the weight each carries per subject per year. Editing a weight is
+# editing what a mark *means*, so the total must reach 100% before it is saved,
+# and a component that stops being weighted is deactivated rather than deleted —
+# the mark it already decided is history.
+
+@admin_sekolah_bp.route("/grade-weights")
+@admin_sekolah_required
+def admin_grade_weights():
+    """Manage the school's grade components and their per-subject weights."""
+    sid = _school_id()
+    supabase = get_supabase()
+    year = ta_service.active_school_year(supabase, sid) or {}
+    year_id = year.get("id")
+    components = grade_weighting.list_components(supabase, sid, active_only=False)
+    subjects = (supabase.table("subjects").select("id, name, code, is_active")
+                .eq("school_id", sid).eq("is_active", True)
+                .order("name").execute().data or [])
+    configs = grade_weighting.configs_for_school(supabase, sid, year_id)
+    comp_names = {str(c["id"]): c.get("name") or "?" for c in components
+                  if c.get("is_active")}
+    # ``{subject_id: {component_id: weight}}`` and the derived totals, so the
+    # matrix can render "87%" in red without the reader adding up columns.
+    matrix = {sid_: {cid: w for cid, w in (weights or {}).items()
+                     if cid in comp_names}
+              for sid_, weights in configs.items()}
+    totals = {s: sum(w.values()) for s, w in matrix.items()}
+    year_status = ""
+    if year_id:
+        flags = (supabase.table("school_years").select("status").eq("id", year_id)
+                 .eq("school_id", sid).execute().data or [])
+        year_status = (flags[0].get("status") if flags else "") or ""
+    return render_template(
+        "admin_sekolah/grade_weights.html",
+        components=components, subjects=subjects, matrix=matrix, totals=totals,
+        comp_names=comp_names, year=year, year_name=year.get("name") or "",
+        year_status=year_status, required_total=grade_weighting.REQUIRED_TOTAL,
+    )
+
+
+@admin_sekolah_bp.route("/grade-weights/components", methods=["POST"])
+@admin_sekolah_required
+def admin_grade_component_create():
+    """Add a grade component to the school's list."""
+    sid = _school_id()
+    supabase = get_supabase()
+    payload = request.get_json(silent=True) or {}
+    ok, out = grade_weighting.create_component(
+        supabase, sid, payload.get("name"), actor_id=g.user_id)
+    if not ok:
+        return jsonify(out), out.get("status", 400)
+    log_activity("create", "grade_component_type", (out.get("component") or {}).get("id"),
+                 new_data={"name": payload.get("name")}, user_id=g.user_id)
+    return jsonify({"success": True, **out})
+
+
+@admin_sekolah_bp.route("/grade-weights/components/<component_id>/update", methods=["POST"])
+@admin_sekolah_required
+def admin_grade_component_update(component_id):
+    """Rename, reorder or (de)activate one of the school's components."""
+    sid = _school_id()
+    supabase = get_supabase()
+    payload = request.get_json(silent=True) or {}
+    ok, out = grade_weighting.update_component(
+        supabase, sid, component_id, name=payload.get("name"),
+        sort_order=payload.get("sort_order"), is_active=payload.get("is_active"))
+    if not ok:
+        return jsonify(out), out.get("status", 400)
+    log_activity("update", "grade_component_type", component_id,
+                 new_data=payload, user_id=g.user_id)
+    return jsonify({"success": True, **out})
+
+
+@admin_sekolah_bp.route("/grade-weights/<subject_id>", methods=["POST"])
+@admin_sekolah_required
+@require_school_access("subjects", "subject_id")
+def admin_grade_weight_save(subject_id):
+    """Set one subject's weights for the running year.
+
+    The body is ``{"weights": {"<component_id>": 30, ...}}``. A set that does
+    not reach 100% is refused; an empty set clears the subject back to the simple
+    mean. CRUD here is the school admin's alone — a teacher cannot decide what a
+    subject mark means.
+    """
+    sid = _school_id()
+    supabase = get_supabase()
+    payload = request.get_json(silent=True) or {}
+    year = ta_service.active_school_year(supabase, sid) or {}
+    year_id = payload.get("year_id") or year.get("id")
+    if not year_id:
+        return jsonify({"error": "Tahun ajaran aktif tidak ditemukan"}), 400
+    ok, out = grade_weighting.save_config(
+        supabase, sid, subject_id, year_id, payload.get("weights") or {},
+        actor_id=g.user_id)
+    if not ok:
+        return jsonify(out), out.get("status", 400)
+    invalidate_school(sid)
+    log_activity("update", "grade_weight_config", subject_id,
+                 new_data={"weights": out.get("weights"), "cleared": out.get("cleared")},
+                 user_id=g.user_id)
+    return jsonify({"success": True, **out})
 
 
 # ─── PROMOTE (Naik Kelas) ────────────────────────────

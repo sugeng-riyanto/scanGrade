@@ -39,6 +39,8 @@ from app.services import attempt_timeline
 from app.services import invigilation
 from app.services import session_review
 from app.services import teacher_assignments as ta_service
+from app.services import grade_weighting
+from app.services import subject_kkm as kkm_service
 from app.services.anti_cheat_service import (
     events_for_exam, events_for_student, leaving_summary,
 )
@@ -1141,6 +1143,7 @@ def exam_form():
                 if not classes:
                     classes = supabase.table("classes").select("*").eq("school_id", sid).order("name").execute().data or []
         return render_template("teacher/exam_form.html", exam=None, subjects=subjects, classes=classes,
+                               grade_components=_grade_components_by_subject(supabase, sid),
                                builder_defaults=_builder_defaults(supabase, g.user_id, subjects, classes))
 
     title = request.form.get("title")
@@ -1247,6 +1250,8 @@ def exam_form():
         if media:
             question_audio[str(i)] = media
 
+    grade_component_id = _resolve_grade_component(
+        supabase, g.get("user_school_id"), request.form.get("grade_component_type_id"))
     data = {
         "teacher_id": g.user_id,
         "school_id": g.get("user_school_id"),
@@ -1290,11 +1295,12 @@ def exam_form():
         "allow_calculator": allow_calculator,
         "lock_pending_resume": lock_pending_resume,
         "resume_code_limit": resume_code_limit,
+        "grade_component_type_id": grade_component_id,
     }
     try:
         res = supabase.table("exams").insert(data).execute()
     except Exception:
-        for key in ["question_weights", "question_texts", "anti_cheat_enabled", "penalty_per_violation", "max_violations", "auto_submit_on_max", "fullscreen_required", "randomize_questions", "randomize_options", "watermark_name", "block_copy_paste", "block_right_click", "block_screenshot", "allow_calculator", "lock_pending_resume", "resume_code_limit", "subject_id", "class_ids", "start_at", "end_at", "assessment_period_id", "auto_submit_on_window_end", "is_template", "source_exam_id", "max_attempts", "publish_mode", "question_pages", "question_cognitive"]:
+        for key in ["question_weights", "question_texts", "anti_cheat_enabled", "penalty_per_violation", "max_violations", "auto_submit_on_max", "fullscreen_required", "randomize_questions", "randomize_options", "watermark_name", "block_copy_paste", "block_right_click", "block_screenshot", "allow_calculator", "lock_pending_resume", "resume_code_limit", "grade_component_type_id", "subject_id", "class_ids", "start_at", "end_at", "assessment_period_id", "auto_submit_on_window_end", "is_template", "source_exam_id", "max_attempts", "publish_mode", "question_pages", "question_cognitive"]:
             data.pop(key, None)
         res = supabase.table("exams").insert(data).execute()
     exam_id = res.data[0]["id"]
@@ -1469,6 +1475,7 @@ def exam_detail(exam_id):
         saved_targets = exam_targets.targets_for_exam(supabase, exam_id)
         return render_template("teacher/exam_form.html", exam=exam_data, subjects=subjects, classes=classes,
                                saved_targets=saved_targets,
+                               grade_components=_grade_components_by_subject(supabase, sid),
                                builder_defaults=_builder_defaults(supabase, g.user_id, subjects, classes))
 
     title = request.form.get("title")
@@ -1582,6 +1589,8 @@ def exam_detail(exam_id):
     # only the explicit publish button (or the visibility toggle) changes it. See
     # `_publication_state`.
     publication = _publication_state(exam_row, action)
+    grade_component_id = _resolve_grade_component(
+        supabase, g.get("user_school_id"), request.form.get("grade_component_type_id"))
     data = {
         "teacher_id": g.user_id,
         "school_id": g.get("user_school_id"),
@@ -1624,11 +1633,12 @@ def exam_detail(exam_id):
         "allow_calculator": allow_calculator,
         "lock_pending_resume": lock_pending_resume,
         "resume_code_limit": resume_code_limit,
+        "grade_component_type_id": grade_component_id,
     }
     try:
         supabase.table("exams").update(data).eq("id", exam_id).execute()
     except Exception:
-        for key in ["question_weights", "question_texts", "anti_cheat_enabled", "penalty_per_violation", "max_violations", "auto_submit_on_max", "fullscreen_required", "randomize_questions", "randomize_options", "watermark_name", "block_copy_paste", "block_right_click", "block_screenshot", "allow_calculator", "lock_pending_resume", "resume_code_limit", "subject_id", "class_ids", "start_at", "end_at", "assessment_period_id", "auto_submit_on_window_end", "is_template", "source_exam_id", "max_attempts", "publish_mode", "question_pages", "question_cognitive"]:
+        for key in ["question_weights", "question_texts", "anti_cheat_enabled", "penalty_per_violation", "max_violations", "auto_submit_on_max", "fullscreen_required", "randomize_questions", "randomize_options", "watermark_name", "block_copy_paste", "block_right_click", "block_screenshot", "allow_calculator", "lock_pending_resume", "resume_code_limit", "grade_component_type_id", "subject_id", "class_ids", "start_at", "end_at", "assessment_period_id", "auto_submit_on_window_end", "is_template", "source_exam_id", "max_attempts", "publish_mode", "question_pages", "question_cognitive"]:
             data.pop(key, None)
         supabase.table("exams").update(data).eq("id", exam_id).execute()
 
@@ -4473,41 +4483,277 @@ def ai_reset_prompt():
     return redirect("/teacher/ai-settings")
 
 
-@teacher_bp.route("/students")
-@teacher_or_admin_required
-def students():
-    supabase = get_supabase()
-    school_id = g.get("user_school_id")
-    if g.get("user_role") == "admin_sekolah" or not school_id:
-        # The admin runs the school, so the whole-school roster is theirs to see.
-        query = supabase.table("profiles").select("id,full_name,phone,role,class_id").eq("role", "murid")
+def _resolve_grade_component(supabase, school_id, raw):
+    """A component id the school owns, or ``None``.
+
+    A posted id is untrusted: another school's component would be a cross-tenant
+    write, and a stale id would be a dangling reference. Anything not in this
+    school's own list is dropped to ``None`` (an uncategorised paper), which is a
+    valid state — the paper just falls back out of the weighted sum.
+    """
+    cid = (raw or "").strip()
+    if not cid or not school_id:
+        return None
+    return cid if cid in grade_weighting.component_ids(supabase, school_id) else None
+
+
+def _grade_components_by_subject(supabase, school_id):
+    """``{subject_id: [components]}`` for a school's whole weight config.
+
+    Read once for the builder, so its component picker can follow whichever
+    subject the teacher selects without a request per change.
+    """
+    if not school_id:
+        return {}
+    year = ta_service.active_school_year(supabase, school_id) or {}
+    configs = grade_weighting.configs_for_school(supabase, school_id, year.get("id"))
+    if not configs:
+        return {}
+    comps = {str(c["id"]): c for c in grade_weighting.list_components(supabase, school_id)}
+    out = {}
+    for subject_id, weights in configs.items():
+        out[str(subject_id)] = [
+            {"id": cid, "name": (comps.get(cid) or {}).get("name") or "?",
+             "weight": weights[cid]}
+            for cid in weights if cid in comps
+        ]
+    return out
+
+
+def _grade_roster_context(supabase, school_id, role_name):
+    """Which subjects and pupils this viewer may see, and in which classes.
+
+    A guru is bounded by their own active assignments: the subjects come from
+    ``teacher_assignments`` (the same rows the dashboard and the exam builder
+    trust), and each subject carries only the classes it is taught in, so a pupil
+    in a class the guru does not teach this subject to is not in the table. The
+    school admin runs the building and sees the whole roster.
+
+    Returns ``(subjects, class_map, class_ids_by_subject, whole_school)``:
+    ``class_ids_by_subject`` is ``{subject_id: set(class_id)}`` for a guru and
+    ``None`` for an admin, whose answer is every class.
+    """
+    classes = school_classes(school_id)
+    class_map = {str(c["id"]): c for c in classes}
+    if role_name == "admin_sekolah" or not school_id:
+        return school_subjects(school_id), class_map, None, True
+    year_name = (ta_service.active_school_year(supabase, school_id) or {}).get("name")
+    pairs = ta_service.current_pairs(supabase, school_id, g.user_id, year_name)
+    subject_ids = sorted({s for _c, s in pairs})
+    if not subject_ids:
+        return [], class_map, {}, False
+    rows = (supabase.table("subjects").select("*")
+            .eq("school_id", school_id).in_("id", subject_ids)
+            .order("name").execute().data or [])
+    by_subject: dict[str, set] = {}
+    for class_id, subject_id in pairs:
+        by_subject.setdefault(subject_id, set()).add(class_id)
+    return rows, class_map, by_subject, False
+
+
+def _grade_table(supabase, school_id, role_name, requested):
+    """One context for the grade table, shared by the page and both exports.
+
+    The final mark is not a plain mean. It is the school's own policy, computed by
+    :func:`grade_weighting.subject_finals` — the same read the XLSX and PDF use, so
+    the number on screen and the number in a spreadsheet cannot disagree. A school
+    that configured no weights gets the simple mean back, marked ``"simple"``.
+
+    Scoping, stated so no caller can widen it: a guru's subjects and classes come
+    from their active assignments; a requested subject the viewer does not teach
+    falls back to their default rather than leaking another subject's roster.
+    """
+    year = ta_service.active_school_year(supabase, school_id) if school_id else None
+    year_id = (year or {}).get("id")
+    subjects, class_map, classes_by_subject, whole_school = _grade_roster_context(
+        supabase, school_id, role_name)
+    subjects = sorted(subjects, key=lambda s: (s.get("name") or "").lower())
+
+    allowed_subjects = {str(s["id"]): s for s in subjects}
+    subject_id = requested if requested in allowed_subjects else (
+        str(subjects[0]["id"]) if subjects else "")
+    subject = allowed_subjects.get(subject_id)
+
+    if whole_school:
+        query = supabase.table("profiles").select(ta_service.STUDENT_COLUMNS)\
+            .eq("role", "murid")
         if school_id:
             query = query.eq("school_id", school_id)
         students = query.execute().data or []
+    elif subject_id:
+        students = ta_service.students_in_classes(
+            supabase, school_id, classes_by_subject.get(subject_id, set()))
     else:
-        # A teacher sees the pupils in the classes they are assigned to — not the
-        # whole school. Same rule as the dashboard and the exam builder
-        # (`ta_service.row_is_active`: active status AND the active year), so the
-        # class list here cannot disagree with the one on the dashboard.
-        year = ta_service.active_school_year(supabase, school_id)
-        class_ids = ta_service.assigned_class_ids(
-            supabase, school_id, g.user_id, (year or {}).get("name"))
-        students = ta_service.students_in_classes(supabase, school_id, class_ids)
-    exam_ids = [e["id"] for e in supabase.table("exams").select("id").eq("teacher_id", g.user_id).execute().data or []]
-    if exam_ids:
-        subs = supabase.table("submissions").select("student_id,score,final_score").in_("exam_id", exam_ids).execute().data or []
-        sub_map = {}
-        for s in subs:
-            sid = s["student_id"]
-            if sid not in sub_map:
-                sub_map[sid] = []
-            sc = float(s.get("final_score") or s.get("score") or 0)
-            sub_map[sid].append(sc)
-        for st in students:
-            st_scores = sub_map.get(st["id"], [])
-            st["sub_count"] = len(st_scores)
-            st["avg_score"] = round(sum(st_scores) / len(st_scores), 1) if st_scores else None
-    return render_template("teacher/students.html", students=students)
+        students = []
+
+    marks = {}
+    if subject_id and students:
+        marks = grade_weighting.subject_finals(
+            supabase, school_id, subject_id, year_id, [s["id"] for s in students])
+
+    kkm = subject and kkm_service.effective(
+        supabase, school_id, subject_id, year_id=year_id) or kkm_service.DEFAULT_KKM
+
+    weights = grade_weighting.config_for(supabase, school_id, subject_id, year_id) \
+        if subject_id else {}
+    comp_names = {str(c["id"]): (c.get("name") or "?")
+                  for c in grade_weighting.list_components(supabase, school_id)} \
+        if weights else {}
+
+    rows = []
+    for st in students:
+        cid = str(st.get("class_id") or "")
+        cls = class_map.get(cid)
+        mark = marks.get(str(st["id"])) or grade_weighting.compute([], {})
+        detail = [dict(d, name=comp_names.get(str(d.get("component_id")), "?"))
+                  for d in (mark.get("detail") or [])]
+        rows.append({
+            "id": st["id"],
+            "full_name": st.get("full_name") or "",
+            "nisn": st.get("nisn") or "",
+            "nis": st.get("nis") or "",
+            "class_id": cid,
+            "class_name": (cls or {}).get("name") or "",
+            "grade_level": (cls or {}).get("grade_level"),
+            "final": mark.get("final"),
+            "mode": mark.get("mode"),
+            "detail": detail,
+            "untagged": mark.get("untagged") or 0,
+        })
+    rows.sort(key=lambda r: (r["class_name"], r["full_name"].lower()))
+
+    components = [{"name": comp_names.get(cid, "?"), "weight": weights[cid]}
+                  for cid in weights if cid in comp_names]
+    return {
+        "rows": rows, "subjects": subjects, "subject": subject,
+        "subject_id": subject_id, "components": components, "kkm": kkm,
+        "year": year, "year_name": (year or {}).get("name") or "",
+        "class_count": len({r["class_id"] for r in rows if r["class_id"]}),
+    }
+
+
+@teacher_bp.route("/students")
+@teacher_or_admin_required
+def students():
+    """The teacher's grade table: class, name, NISN and the weighted final mark."""
+    supabase = get_supabase()
+    school_id = g.get("user_school_id")
+    ctx = _grade_table(supabase, school_id, g.get("user_role"),
+                       (request.args.get("subject_id") or "").strip())
+    return render_template(
+        "teacher/students.html", students=ctx["rows"], subjects=ctx["subjects"],
+        subject=ctx["subject"], subject_id=ctx["subject_id"],
+        components=ctx["components"], kkm=ctx["kkm"], year_name=ctx["year_name"],
+        is_admin=(g.get("user_role") == "admin_sekolah"),
+        class_count=ctx["class_count"],
+    )
+
+
+@teacher_bp.route("/students/export.xlsx")
+@teacher_or_admin_required
+def students_export_xlsx():
+    """The roster as a spreadsheet, with one column per weighted component."""
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment
+    supabase = get_supabase()
+    school_id = g.get("user_school_id")
+    ctx = _grade_table(supabase, school_id, g.get("user_role"),
+                       (request.args.get("subject_id") or "").strip())
+    weighted = bool(ctx["components"])
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Nilai"
+    head = ["Kelas", "Nama", "NISN"]
+    if weighted:
+        head += [c["name"] for c in ctx["components"]]
+    head += ["Nilai Akhir" if weighted else "Rata-rata"]
+    ws.append(head)
+    for cell in ws[1]:
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill("solid", fgColor="4F46E5")
+        cell.alignment = Alignment(horizontal="center")
+    by_id = {c["name"]: c for c in ctx["components"]}
+    for r in ctx["rows"]:
+        line = [r["class_name"], r["full_name"], r["nisn"] or r["nis"]]
+        if weighted:
+            detail = {d["name"]: d for d in r["detail"]}
+            line += [(detail.get(c["name"]) or {}).get("average") for c in ctx["components"]]
+        line.append(r["final"])
+        ws.append(line)
+    ws.freeze_panes = "A2"
+    ws.column_dimensions["A"].width = 12
+    ws.column_dimensions["B"].width = 28
+    ws.column_dimensions["C"].width = 16
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    safe = (ctx["subject"].get("name") if ctx["subject"] else "mapel").replace(" ", "_")
+    return send_file(buf, as_attachment=True,
+                     download_name=f"nilai_{safe}.xlsx",
+                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
+@teacher_bp.route("/students/export.pdf")
+@teacher_or_admin_required
+def students_export_pdf():
+    """The roster as a printable report, with the weights named in the footer."""
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib import colors
+    from reportlab.lib.units import mm
+    from reportlab.platypus import (SimpleDocTemplate, Table, TableStyle, Paragraph,
+                                    Spacer)
+    from reportlab.lib.styles import getSampleStyleSheet
+    supabase = get_supabase()
+    school_id = g.get("user_school_id")
+    ctx = _grade_table(supabase, school_id, g.get("user_role"),
+                       (request.args.get("subject_id") or "").strip())
+    weighted = bool(ctx["components"])
+    subject_name = (ctx["subject"] or {}).get("name") or ""
+    head = ["Kelas", "Nama", "NISN"]
+    if weighted:
+        head += [c["name"] for c in ctx["components"]]
+    head += ["Nilai Akhir" if weighted else "Rata-rata"]
+    data = [head]
+    for r in ctx["rows"]:
+        line = [r["class_name"], r["full_name"], r["nisn"] or r["nis"]]
+        if weighted:
+            detail = {d["name"]: d for d in r["detail"]}
+            line += ["" if (detail.get(c["name"]) or {}).get("average") is None
+                     else str((detail.get(c["name"]) or {}).get("average"))
+                     for c in ctx["components"]]
+        line.append("" if r["final"] is None else str(r["final"]))
+        data.append(line)
+    buf = io.BytesIO()
+    pagesize = landscape(A4) if len(head) > 5 else A4
+    doc = SimpleDocTemplate(buf, pagesize=pagesize, topMargin=14 * mm,
+                            bottomMargin=12 * mm, leftMargin=12 * mm, rightMargin=12 * mm)
+    styles = getSampleStyleSheet()
+    title = f"Nilai {subject_name}" + (f" — {ctx['year_name']}" if ctx["year_name"] else "")
+    story = [Paragraph(title, styles["Title"]), Spacer(1, 6)]
+    table = Table(data, repeatRows=1)
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#4F46E5")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#cbd5e1")),
+        ("ALIGN", (3, 1), (-1, -1), "CENTER"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+    ]))
+    story.append(table)
+    if weighted:
+        weights = ", ".join(f"{c['name']} {c['weight']}%" for c in ctx["components"])
+        story.append(Spacer(1, 8))
+        story.append(Paragraph(f"Bobot: {weights} · KKM {ctx['kkm']}", styles["Normal"]))
+    else:
+        story.append(Spacer(1, 8))
+        story.append(Paragraph("Sekolah belum mengatur bobot — rata-rata sederhana.",
+                               styles["Normal"]))
+    doc.build(story)
+    buf.seek(0)
+    safe = (subject_name or "mapel").replace(" ", "_")
+    return send_file(buf, as_attachment=True, download_name=f"nilai_{safe}.pdf",
+                     mimetype="application/pdf")
 
 
 @teacher_bp.route("/classes")

@@ -657,6 +657,23 @@
                             <p class="text-sm text-slate-400 italic" x-text="t('Belum ada mata pelajaran yang diassign.','No subjects have been assigned yet.')"></p>
                             {% endif %}
                         </div>
+                        {# Nilai Akhir is the weighted sum of a subject's components,
+                           so a paper is filed under the component the school
+                           configured for its subject. Optional: a school with no
+                           weights sees this hidden and papers stay uncategorised. #}
+                        <div x-data="gradeComponentPicker()" x-init="init()" x-show="hasAny" x-cloak>
+                            <label class="block text-sm font-extrabold text-slate-700 mb-1"
+                                   x-text="t('Komponen Nilai','Grade Component')"></label>
+                            <select name="grade_component_type_id" x-ref="sel"
+                                    class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-500 font-bold transition">
+                                <option value="" x-text="t('Belum dikategorikan','Uncategorised')"></option>
+                                <template x-for="c in current" :key="c.id">
+                                    <option :value="c.id" x-text="c.name + ' (' + c.weight + '%)'"></option>
+                                </template>
+                            </select>
+                            <p class="text-[10px] text-slate-400 mt-1"
+                               x-text="t('Ujian ini akan dihitung pada komponen berbobot tersebut di Nilai Akhir.','This paper counts under that weighted component in the Final Mark.')"></p>
+                        </div>
                         <div>
                             <label class="block text-sm font-extrabold text-slate-700 mb-1">
                                 <span x-text="t('Durasi','Duration')"></span>
@@ -2469,6 +2486,37 @@ function examRoster(examId) {
 }
 
 function antiCheatSettings(cfg) { return cfg; }
+
+// The grade-component picker. A component belongs to a subject's weight policy,
+// so the list follows whichever subject radio is checked. The saved value is
+// applied once on open; when the subject changes, a component that does not
+// belong to the new subject is cleared rather than silently kept.
+function gradeComponentPicker() {
+    const bySubject = {{ (grade_components or {})|tojson }};
+    const initial = '{{ (exam.get('grade_component_type_id') if exam else '') or '' }}';
+    return {
+        bySubject: bySubject,
+        current: [],
+        initial: initial,
+        get hasAny() { return Object.keys(this.bySubject).length > 0; },
+        init() {
+            let applied = false;
+            const sync = () => {
+                const checked = document.querySelector('input[name="subject_id"]:checked');
+                const sid = checked ? checked.value : '';
+                this.current = this.bySubject[sid] || [];
+                this.$nextTick(() => {
+                    const sel = this.$refs.sel;
+                    if (!sel) return;
+                    if (!applied) { sel.value = this.initial; applied = true; }
+                    else if (!this.current.some(c => String(c.id) === sel.value)) { sel.value = ''; }
+                });
+            };
+            document.querySelectorAll('input[name="subject_id"]').forEach(r => r.addEventListener('change', sync));
+            sync();
+        }
+    };
+}
 
 function prepareSubmit() {
     return true;
