@@ -1423,6 +1423,8 @@
                     auto_submit_on_max: {{ 'true' if (exam.get('auto_submit_on_max') if exam else True) else 'false' }},
                     allow_calculator: {{ 'true' if (exam.get('allow_calculator') if exam else False) else 'false' }},
                     block_screenshot: {{ 'true' if (exam.get('block_screenshot') if exam else False) else 'false' }},
+                    lock_pending_resume: {{ 'true' if (exam.get('lock_pending_resume') if exam else False) else 'false' }},
+                    resume_code_limit: {{ exam.get('resume_code_limit', 2) if exam else 2 }},
                 })">
                     <div class="flex items-center justify-between">
                         <h2 class="text-lg font-extrabold text-slate-800 flex items-center gap-2">
@@ -1438,6 +1440,10 @@
                         <label class="flex items-center gap-2">
                             <span class="font-bold text-slate-600" x-text="t('Maks Pelanggaran:','Max violations:')"></span>
                             <input type="number" name="max_violations" x-model="max_violations" min="1" max="20" class="w-16 text-center border-2 border-slate-200 rounded-lg px-2 py-1 font-bold">
+                        </label>
+                        <label class="flex items-center gap-2">
+                            <span class="font-bold text-slate-600" x-text="t('Batas kode resume:','Resume code limit:')"></span>
+                            <input type="number" name="resume_code_limit" x-model="resume_code_limit" min="0" max="10" class="w-16 text-center border-2 border-slate-200 rounded-lg px-2 py-1 font-bold">
                         </label>
                     </div>
                     {# The switches are on screen, never behind an expander: a
@@ -1486,6 +1492,11 @@
                                :class="block_screenshot ? 'border-primary-300 bg-primary-50' : 'border-slate-200'">
                             <input type="checkbox" x-model="block_screenshot" name="block_screenshot" value="true" class="w-4 h-4 text-primary-600 rounded">
                             <span class="font-bold text-slate-700" x-text="t('Cegah Screenshot','Block screenshot')"></span>
+                        </label>
+                        <label class="flex items-center gap-2 p-2.5 rounded-xl border-2 cursor-pointer transition"
+                               :class="lock_pending_resume ? 'border-primary-300 bg-primary-50' : 'border-slate-200'">
+                            <span class="font-bold text-slate-700" x-text="t('Kunci saat Ambang','Lock at threshold')"></span>
+                            <input type="checkbox" x-model="lock_pending_resume" name="lock_pending_resume" value="true" class="w-4 h-4 text-primary-600 rounded">
                         </label>
                     </div>
                 </div>

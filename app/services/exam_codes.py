@@ -30,6 +30,8 @@ from __future__ import annotations
 
 import logging
 
+from app.services.submission_service import LOCKED_STATUS
+
 logger = logging.getLogger(__name__)
 
 
@@ -77,10 +79,28 @@ def codes_for_exams(supabase, school_id: str, exam_ids) -> list[dict]:
                                  .eq("school_id", school_id)
                                  .in_("id", student_ids))}
 
-    return [dict(c,
-                 exam_title=exams.get(str(c.get("exam_id")), ""),
-                 student_name=pupils.get(str(c.get("student_id")), ""))
-            for c in codes]
+    # Which of these sittings is *locked right now*. A staff page that offers to
+    # reopen a paper must know which papers are locked, or it draws the button on
+    # every pupil and the invigilator guesses. One read over the same pairs the
+    # codes already name, keyed by (exam, pupil) — the unique constraint makes that
+    # pair the sitting's identity, so the answer cannot be about another paper.
+    sittings = {}
+    if exam_ids_present and student_ids:
+        for r in _rows(supabase.table("submissions")
+                       .select("exam_id, student_id, status")
+                       .in_("exam_id", exam_ids_present)
+                       .in_("student_id", student_ids)):
+            sittings[(str(r.get("exam_id")), str(r.get("student_id")))] = r.get("status")
+
+    out = []
+    for c in codes:
+        status = sittings.get((str(c.get("exam_id")), str(c.get("student_id"))))
+        out.append(dict(c,
+                        exam_title=exams.get(str(c.get("exam_id")), ""),
+                        student_name=pupils.get(str(c.get("student_id")), ""),
+                        sitting_status=status,
+                        is_locked=(status == LOCKED_STATUS)))
+    return out
 
 
 __all__ = ["codes_for_exams"]

@@ -657,6 +657,70 @@ def attempt_heartbeat(exam_id):
                         "message_key": "attempt_missing"})
 
 
+@student_bp.route("/exams/<exam_id>/resume", methods=["POST"])
+@login_required
+@_rate_limit("20 per minute")
+def resume_locked_exam(exam_id):
+    """The pupil's own door back into a sitting the server locked.
+
+    The lock is written by the violation ladder (see `app/services/resume_code.py`),
+    and the only way back used to be a code that led nowhere: `unlock` existed and
+    had no caller. This is that caller, and three rules are why it is short.
+
+    * **The pupil is the session's, never the request's.** The row is read by
+      ``eq("student_id", g.user_id)`` and nothing here looks at a pupil id off the
+      wire, so a crafted body cannot reopen somebody else's paper.
+    * **The gate owns the decision.** This route asks `resume_code.unlock` — code,
+      allowance, status and deadline in the order that module documents — rather
+      than re-testing any of them.
+    * **A paper the clock already ended is closed, not left locked.** When the gate
+      answers FINALIZE (a correct code typed after the deadline), the paper is
+      finalised on what was saved, so the pupil is not left staring at a lock screen
+      for an exam that is over. This is the only place besides the sweep that closes
+      one, and it goes through the same writer.
+
+    It writes no clock column: `unlock` and `finalize_expired` own that, and a resume
+    that bought time would reward leaving the paper's fullscreen. The reply carries a
+    `message_key`, not a sentence — the words live in the browser.
+    """
+    from app.services import attempt_status as status_service
+    from app.services import resume_code as rc
+    supabase = get_supabase()
+    body = request.get_json(silent=True) or {}
+    code = str(body.get("code") or request.form.get("code") or "").strip()
+    exam = status_service.exam_row(supabase, exam_id)
+    row = status_service.sitting_row(supabase, exam_id, g.user_id)
+    if row is None:
+        return jsonify({"ok": False, "action": rc.NONE, "reason": rc.NOT_LOCKED,
+                        "message_key": rc.reason_key(rc.NOT_LOCKED)})
+
+    out = rc.unlock(supabase, row, exam, student_id=g.user_id, code=code)
+    if out.get("action") == rc.FINALIZE:
+        try:
+            from app.services import deadline_service
+            deadline_service.finalize_expired(supabase, row, exam)
+        except Exception:  # noqa: BLE001 — the refusal is the answer; closing is best-effort
+            current_app.logger.exception(
+                "Could not finalise the locked sitting for exam %s user %s",
+                exam_id, g.user_id)
+
+    status = status_service.get_attempt_status(
+        supabase, exam_id, g.user_id, exam=exam, row=row)
+    payload = {
+        "ok": bool(out.get("ok")),
+        "action": out.get("action"),
+        "reason": out.get("reason") or "",
+        "message_key": rc.reason_key(out.get("reason")),
+        "status": status.get("status"),
+        "deadline": status.get("deadline"),
+        "server_now": status.get("server_now"),
+        "seconds_left": status.get("seconds_left"),
+        "resume_used": status.get("resume_used"),
+        "resume_limit": status.get("resume_limit"),
+    }
+    return jsonify(payload)
+
+
 @student_bp.route("/recover")
 @login_required
 def recover_exam_page():
