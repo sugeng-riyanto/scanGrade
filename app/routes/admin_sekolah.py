@@ -1965,14 +1965,22 @@ def admin_grade_weights():
     subjects = (supabase.table("subjects").select("id, name, code, is_active")
                 .eq("school_id", sid).eq("is_active", True)
                 .order("name").execute().data or [])
-    configs = grade_weighting.configs_for_school(supabase, sid, year_id)
+    custom = grade_weighting.configs_for_school(supabase, sid, year_id)
+    defaults = grade_weighting.default_config(supabase, sid)
     comp_names = {str(c["id"]): c.get("name") or "?" for c in components
                   if c.get("is_active")}
-    # ``{subject_id: {component_id: weight}}`` and the derived totals, so the
-    # matrix can render "87%" in red without the reader adding up columns.
-    matrix = {sid_: {cid: w for cid, w in (weights or {}).items()
-                     if cid in comp_names}
-              for sid_, weights in configs.items()}
+    # Every subject is shown. One that has its own distribution uses it; one the
+    # admin never touched is *pre-filled* from the school default so the matrix
+    # answers "what does this subject weigh?" for every row, not only the touched
+    # ones. `custom_subjects` says which rows are a deliberate override, so the
+    # page can label the rest "follows the default".
+    custom_subjects = [s for s in custom if custom[s]]
+    matrix = {}
+    for subject in subjects:
+        sid_ = str(subject["id"])
+        own = custom.get(sid_) or {}
+        base = {cid: w for cid, w in (own or defaults).items() if cid in comp_names}
+        matrix[sid_] = base
     totals = {s: sum(w.values()) for s, w in matrix.items()}
     year_status = ""
     if year_id:
@@ -1982,9 +1990,34 @@ def admin_grade_weights():
     return render_template(
         "admin_sekolah/grade_weights.html",
         components=components, subjects=subjects, matrix=matrix, totals=totals,
+        defaults=defaults, custom_subjects=custom_subjects,
         comp_names=comp_names, year=year, year_name=year.get("name") or "",
         year_status=year_status, required_total=grade_weighting.REQUIRED_TOTAL,
     )
+
+
+@admin_sekolah_bp.route("/grade-weights/defaults", methods=["POST"])
+@admin_sekolah_required
+def admin_grade_defaults_save():
+    """Set the school-wide default distribution every subject follows.
+
+    The body is ``{"weights": {"<component_id>": 30, ...}}``. A set that does not
+    reach 100% is refused; an empty set clears the default, so subjects without a
+    custom distribution fall back to the simple mean again. This is the school
+    admin's write alone.
+    """
+    sid = _school_id()
+    supabase = get_supabase()
+    payload = request.get_json(silent=True) or {}
+    ok, out = grade_weighting.save_defaults(
+        supabase, sid, payload.get("weights") or {}, actor_id=g.user_id)
+    if not ok:
+        return jsonify(out), out.get("status", 400)
+    invalidate_school(sid)
+    log_activity("update", "grade_component_type", sid,
+                 new_data={"defaults": out.get("weights"), "cleared": out.get("cleared")},
+                 user_id=g.user_id)
+    return jsonify({"success": True, **out})
 
 
 @admin_sekolah_bp.route("/grade-weights/components", methods=["POST"])

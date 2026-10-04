@@ -4511,21 +4511,33 @@ def _resolve_grade_component(supabase, school_id, raw):
 
 
 def _grade_components_by_subject(supabase, school_id):
-    """``{subject_id: [components]}`` for a school's whole weight config.
+    """``{subject_id: [components]}`` for a school's whole weight policy.
 
     Read once for the builder, so its component picker can follow whichever
-    subject the teacher selects without a request per change.
+    subject the teacher selects without a request per change. Every subject is
+    listed: a subject the admin never touched follows the school default (058), so
+    its picker offers the same categories as a customised one — this is why the
+    dropdown no longer only ever shows Classwork.
     """
     if not school_id:
         return {}
     year = ta_service.active_school_year(supabase, school_id) or {}
-    configs = grade_weighting.configs_for_school(supabase, school_id, year.get("id"))
-    if not configs:
+    custom = grade_weighting.configs_for_school(supabase, school_id, year.get("id"))
+    defaults = grade_weighting.default_config(supabase, school_id)
+    if not custom and not defaults:
         return {}
-    comps = {str(c["id"]): c for c in grade_weighting.list_components(supabase, school_id)}
+    comps = {str(c["id"]): c for c in grade_weighting.list_components(supabase, school_id)
+             if c.get("is_active")}
+    subjects = (supabase.table("subjects").select("id")
+                .eq("school_id", school_id).eq("is_active", True)
+                .execute().data or [])
     out = {}
-    for subject_id, weights in configs.items():
-        out[str(subject_id)] = [
+    for subject in subjects:
+        sid = str(subject["id"])
+        weights = custom.get(sid) or defaults
+        if not weights:
+            continue
+        out[sid] = [
             {"id": cid, "name": (comps.get(cid) or {}).get("name") or "?",
              "weight": weights[cid]}
             for cid in weights if cid in comps
@@ -4607,7 +4619,7 @@ def _grade_table(supabase, school_id, role_name, requested):
     kkm = subject and kkm_service.effective(
         supabase, school_id, subject_id, year_id=year_id) or kkm_service.DEFAULT_KKM
 
-    weights = grade_weighting.config_for(supabase, school_id, subject_id, year_id) \
+    weights = grade_weighting.effective_config(supabase, school_id, subject_id, year_id) \
         if subject_id else {}
     comp_names = {str(c["id"]): (c.get("name") or "?")
                   for c in grade_weighting.list_components(supabase, school_id)} \

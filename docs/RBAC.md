@@ -432,10 +432,12 @@ Aturan yang ditegakkan server, bukan UI:
 
 ## Nilai berbobot (migration 057)
 
-- Hanya **admin_sekolah** yang boleh mengelola komponen nilai dan matriks bobot
+- Hanya **admin_sekolah** yang boleh mengelola komponen nilai, **bobot default
+  sekolah** (`POST /admin-sekolah/grade-weights/defaults`), dan matriks bobot
   (`/admin-sekolah/grade-weights*`), dan hanya untuk sekolahnya sendiri
-  (`@require_school_access("subjects", "subject_id")` pada simpan bobot). Guru tidak
-  bisa memutuskan apa arti sebuah nilai mapel.
+  (`@require_school_access("subjects", "subject_id")` pada simpan bobot per mapel).
+  Guru tidak bisa memutuskan apa arti sebuah nilai mapel; ia hanya membacanya
+  (efektif: konfigurasi mapelnya, atau default sekolah).
 - Guru hanya melihat tabel nilai (`/teacher/students`) dan ekspornya untuk murid
   di kelas yang **ia pegang untuk mapel terpilih**; admin sekolah melihat seluruh
   daftar. Mapel yang diminta tetapi tidak diajar jatuh kembali ke mapel default
