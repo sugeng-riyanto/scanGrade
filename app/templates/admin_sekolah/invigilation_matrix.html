@@ -1,0 +1,279 @@
+{% extends "base.html" %}
+{% block title %}Matriks Pengawas - ScanGrade{% endblock %}
+{% block page_title %}Matriks Pengawas Ujian{% endblock %}
+{% import "shared/_invigilation_reasons.html" as reasons %}
+{% block content %}
+<div class="max-w-7xl mx-auto space-y-6">
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+    {% for cat, msg in messages %}
+    <div class="p-3 rounded-xl text-sm font-semibold flex items-center gap-2 {% if cat == 'success' %}bg-emerald-50 text-emerald-700 border border-emerald-200{% elif cat == 'warning' %}bg-amber-50 text-amber-700 border border-amber-200{% else %}bg-red-50 text-red-700 border border-red-200{% endif %}">
+        <i class="fas fa-circle-info"></i>{{ reasons.reason_note(msg) }}
+    </div>
+    {% endfor %}
+    {% endif %}
+    {% endwith %}
+
+    {# The outcome of a bulk apply. It sits outside the preview because a successful
+       apply clears the preview, and the operator would otherwise see no trace of what
+       they just did. #}
+    {% if applied is not none and applied != '' %}
+    <div class="card p-4 border border-emerald-200 bg-emerald-50/60" id="matrix-outcome">
+        <p class="text-sm font-bold text-emerald-800">
+            <i class="fas fa-check-double mr-1"></i>
+            <span x-text="t('Unggahan selesai diproses:','Upload processed:')"></span>
+            <span class="font-mono">{{ applied }}</span> <span x-text="t('baris diterapkan','rows applied')"></span>,
+            <span class="font-mono">{{ refused }}</span> <span x-text="t('baris ditolak (bentrok atau tidak valid)','rows refused (conflict or invalid)')"></span>
+        </p>
+    </div>
+    {% endif %}
+
+    <!-- Header: the day being planned -->
+    <div class="card p-5">
+        <div class="flex flex-wrap items-start justify-between gap-4">
+            <div class="min-w-0">
+                <h2 class="font-extrabold text-stone-800" x-text="t('Matriks Pengawas','Invigilator Matrix')"></h2>
+                <p class="text-sm text-stone-500 mt-1 max-w-2xl"
+                   x-text="t('Baris = periode (slot waktu), kolom = ruangan, isi sel = guru yang mengawas. Satu guru hanya bisa berada di satu ruangan pada satu periode di hari yang sama.','Rows are periods (time slots), columns are rooms, and a cell holds the teacher on duty. A teacher can only stand in one room per period on a given day.')"></p>
+            </div>
+            <div class="flex items-center gap-2 flex-wrap">
+                <a href="/admin-sekolah/invigilation"
+                   class="px-3 py-2 rounded-lg bg-surface-100 text-surface-700 text-xs font-bold hover:bg-surface-200 transition">
+                    <i class="fas fa-calendar-check mr-1"></i><span x-text="t('Jadwal pengawasan','Invigilation schedule')"></span>
+                </a>
+                <a href="/admin-sekolah/invigilation/matrix/template.xlsx"
+                   class="px-3 py-2 rounded-lg bg-emerald-50 text-emerald-700 text-xs font-bold hover:bg-emerald-100 transition">
+                    <i class="fas fa-file-excel mr-1"></i><span x-text="t('Unduh template Excel','Download Excel template')"></span>
+                </a>
+            </div>
+        </div>
+        <form method="GET" action="/admin-sekolah/invigilation/matrix" class="mt-4 flex items-end gap-3 flex-wrap">
+            <label class="block">
+                <span class="text-xs font-bold text-stone-500" x-text="t('Tanggal ujian','Exam date')"></span>
+                <input type="date" name="date" value="{{ exam_date }}" max="{{ today }}"
+                       class="mt-1 px-3 py-2 border border-surface-200 rounded-lg text-sm">
+            </label>
+            <button type="submit" class="px-4 py-2.5 bg-primary-600 text-white rounded-lg text-xs font-bold hover:bg-primary-700 transition"
+                    x-text="t('Tampilkan','Show')"></button>
+            <a href="/admin-sekolah/invigilation/matrix?date={{ today }}"
+               class="px-4 py-2.5 bg-surface-100 text-surface-700 rounded-lg text-xs font-bold hover:bg-surface-200 transition"
+               x-text="t('Hari ini','Today')"></a>
+        </form>
+    </div>
+
+    <!-- The two axes: periods and rooms -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div class="card p-5" id="matrix-periods">
+            <h3 class="font-bold text-stone-800"><i class="fas fa-clock text-primary-500 mr-1.5"></i><span x-text="t('Periode (slot waktu)','Periods (time slots)')"></span></h3>
+            <p class="text-xs text-stone-500 mt-1" x-text="t('Contoh: Sesi 1 (07:30-09:30). Urutan menentukan baris matriks dari atas ke bawah.','e.g. Session 1 (07:30-09:30). The order decides the matrix rows from top to bottom.')"></p>
+            <ul class="mt-3 space-y-1.5">
+                {% for p in periods %}
+                <li class="flex items-center justify-between gap-2 text-sm">
+                    <span class="font-semibold text-stone-700">{{ p.name }}
+                        {% if p.starts_at or p.ends_at %}<span class="text-xs text-stone-400 ml-1">{{ (p.starts_at or '')[:5] }}-{{ (p.ends_at or '')[:5] }}</span>{% endif %}
+                        {% if not p.is_active %}<span class="text-[10px] px-2 py-0.5 rounded-full bg-surface-100 text-surface-500 ml-1" x-text="t('nonaktif','inactive')"></span>{% endif %}
+                    </span>
+                </li>
+                {% else %}
+                <li class="text-xs text-stone-400" x-text="t('Belum ada periode. Tambahkan minimal satu.','No period yet. Add at least one.')"></li>
+                {% endfor %}
+            </ul>
+            <form method="POST" action="/admin-sekolah/invigilation/matrix/periods" class="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="date" value="{{ exam_date }}">
+                <input type="text" name="name" required maxlength="60" placeholder="Sesi 1"
+                       class="px-3 py-2 border border-surface-200 rounded-lg text-sm sm:col-span-2">
+                <input type="text" name="starts_at" placeholder="07:30" class="px-3 py-2 border border-surface-200 rounded-lg text-sm">
+                <input type="text" name="ends_at" placeholder="09:30" class="px-3 py-2 border border-surface-200 rounded-lg text-sm">
+                <input type="number" name="sort_order" placeholder="1" class="px-3 py-2 border border-surface-200 rounded-lg text-sm">
+                <button type="submit" class="px-3 py-2 bg-primary-600 text-white rounded-lg text-xs font-bold hover:bg-primary-700 transition"
+                        x-text="t('Tambah periode','Add period')"></button>
+            </form>
+        </div>
+
+        <div class="card p-5" id="matrix-rooms">
+            <h3 class="font-bold text-stone-800"><i class="fas fa-door-open text-primary-500 mr-1.5"></i><span x-text="t('Ruangan ujian','Exam rooms')"></span></h3>
+            <p class="text-xs text-stone-500 mt-1" x-text="t('Kapasitas membantu memeriksa apakah ruangan cukup untuk jumlah murid target.','Capacity helps check whether a room is large enough for its target candidates.')"></p>
+            <ul class="mt-3 space-y-1.5">
+                {% for r in rooms %}
+                <li class="flex items-center justify-between gap-2 text-sm">
+                    <span class="font-semibold text-stone-700">{{ r.name }}
+                        {% if r.capacity %}<span class="text-xs text-stone-400 ml-1">{{ r.capacity }} <span x-text="t('kursi','seats')"></span></span>{% endif %}
+                        {% if not r.is_active %}<span class="text-[10px] px-2 py-0.5 rounded-full bg-surface-100 text-surface-500 ml-1" x-text="t('nonaktif','inactive')"></span>{% endif %}
+                    </span>
+                </li>
+                {% else %}
+                <li class="text-xs text-stone-400" x-text="t('Belum ada ruangan. Tambahkan minimal satu.','No room yet. Add at least one.')"></li>
+                {% endfor %}
+            </ul>
+            <form method="POST" action="/admin-sekolah/invigilation/matrix/rooms" class="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="date" value="{{ exam_date }}">
+                <input type="text" name="name" required maxlength="60" placeholder="Ruang 1"
+                       class="px-3 py-2 border border-surface-200 rounded-lg text-sm">
+                <input type="number" name="capacity" min="1" placeholder="30" class="px-3 py-2 border border-surface-200 rounded-lg text-sm">
+                <button type="submit" class="px-3 py-2 bg-primary-600 text-white rounded-lg text-xs font-bold hover:bg-primary-700 transition sm:col-span-2"
+                        x-text="t('Tambah ruangan','Add room')"></button>
+            </form>
+        </div>
+    </div>
+
+    <!-- The grid itself -->
+    <div class="card p-5">
+        <h3 class="font-bold text-stone-800"><i class="fas fa-table-cells-large text-primary-500 mr-1.5"></i><span x-text="t('Matriks','Matrix')"></span></h3>
+        {% if grid.periods and grid.rooms %}
+        <div class="overflow-x-auto mt-3">
+            <table class="w-full text-xs min-w-[640px]">
+                <thead>
+                    <tr class="text-stone-500">
+                        <th class="text-left py-2 pr-3 font-bold" x-text="t('Periode','Period')"></th>
+                        {% for r in grid.rooms %}
+                        <th class="text-left py-2 pr-3 font-bold">{{ r.name }}</th>
+                        {% endfor %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for p in grid.periods %}
+                    <tr class="border-t border-surface-100 align-top">
+                        <td class="py-2 pr-3 font-semibold text-stone-700 whitespace-nowrap">
+                            {{ p.name }}
+                            {% if p.starts_at or p.ends_at %}<div class="text-[10px] text-stone-400">{{ (p.starts_at or '')[:5] }}-{{ (p.ends_at or '')[:5] }}</div>{% endif %}
+                        </td>
+                        {% for r in grid.rooms %}
+                        {% set cell = (grid.cells.get(p.id|string) or {}).get(r.id|string) %}
+                        <td class="py-2 pr-3" data-cell="{{ p.id }}-{{ r.id }}">
+                            {% if cell %}
+                            <div class="flex items-center gap-2">
+                                <span class="font-semibold text-stone-700">{{ cell.teacher_name }}</span>
+                                {% if cell.source == 'excel_upload' %}
+                                <span class="text-[10px] px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 font-bold" x-text="t('unggahan','uploaded')"></span>
+                                {% endif %}
+                                <form method="POST" action="/admin-sekolah/invigilation/matrix/clear" class="inline">
+                                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                                    <input type="hidden" name="duty_id" value="{{ cell.id }}">
+                                    <input type="hidden" name="exam_date" value="{{ exam_date }}">
+                                    <button type="submit" class="text-red-400 hover:text-red-600 transition" title="Kosongkan">
+                                        <i class="fas fa-xmark"></i>
+                                    </button>
+                                </form>
+                            </div>
+                            {% else %}
+                            <form method="POST" action="/admin-sekolah/invigilation/matrix/assign" class="flex items-center gap-1">
+                                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                                <input type="hidden" name="exam_date" value="{{ exam_date }}">
+                                <input type="hidden" name="period_id" value="{{ p.id }}">
+                                <input type="hidden" name="room_id" value="{{ r.id }}">
+                                <select name="teacher_id" class="px-2 py-1 border border-surface-200 rounded-lg text-[11px] max-w-[180px]">
+                                    <option value="" x-text="t('— pilih guru —','— pick a teacher —')"></option>
+                                    {% for t in available.get(p.id|string, []) %}
+                                    <option value="{{ t.id }}">{{ t.name }}</option>
+                                    {% endfor %}
+                                </select>
+                                <button type="submit" class="px-2 py-1 bg-primary-50 text-primary-700 rounded-lg font-bold text-[10px] hover:bg-primary-100 transition"
+                                        x-text="t('Isi','Set')"></button>
+                            </form>
+                            {% endif %}
+                        </td>
+                        {% endfor %}
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="mt-3 text-sm text-stone-500" x-text="t('Tambahkan minimal satu periode dan satu ruangan di atas untuk mulai menyusun matriks.','Add at least one period and one room above to start building the matrix.')"></p>
+        {% endif %}
+
+        {% if grid.load_named %}
+        <div class="mt-4 pt-4 border-t border-surface-100">
+            <h4 class="text-xs font-bold text-stone-500" x-text="t('Beban pengawasan hari ini','Duty load today')"></h4>
+            <div class="mt-2 flex flex-wrap gap-2">
+                {% for row in grid.load_named %}
+                <span class="text-[11px] px-2 py-1 rounded-full bg-surface-100 text-surface-700">
+                    {{ row.name }} <span class="font-mono font-bold">{{ row.count }}</span>
+                </span>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Bulk upload -->
+    <div class="card p-5" id="matrix-upload">
+        <h3 class="font-bold text-stone-800"><i class="fas fa-upload text-primary-500 mr-1.5"></i><span x-text="t('Unggah Excel (penugasan massal)','Upload Excel (bulk assignment)')"></span></h3>
+        <p class="text-xs text-stone-500 mt-1 max-w-3xl"
+           x-text="t('Unduh template di atas, isi barisnya, lalu unggah. Baris yang salah dilaporkan per baris dan tidak diterapkan. Berkas hanya dibaca untuk diambil isinya lalu dibuang — tidak disimpan di server.','Download the template above, fill the rows, then upload. A bad row is reported by line and never applied. The file is read for its contents and then dropped — it is not stored on the server.')"></p>
+        <form method="POST" action="/admin-sekolah/invigilation/matrix/upload" enctype="multipart/form-data" class="mt-3 flex items-end gap-3 flex-wrap">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="date" value="{{ exam_date }}">
+            <label class="block">
+                <span class="text-xs font-bold text-stone-500" x-text="t('Berkas Excel (.xlsx)','Excel file (.xlsx)')"></span>
+                <input type="file" name="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required
+                       class="mt-1 block text-xs">
+            </label>
+            <button type="submit" class="px-4 py-2.5 bg-emerald-600 text-white rounded-lg text-xs font-bold hover:bg-emerald-700 transition"
+                    x-text="t('Pratinjau baris','Preview rows')"></button>
+        </form>
+    </div>
+
+    {% if preview %}
+    <div class="card p-5 border border-sky-200 bg-sky-50/40" id="matrix-preview">
+        <h3 class="font-bold text-sky-800"><i class="fas fa-list-check mr-1.5"></i><span x-text="t('Pratinjau unggahan','Upload preview')"></span></h3>
+        <p class="text-sm text-sky-800 mt-1">
+            <span class="font-mono font-bold">{{ preview.total }}</span> <span x-text="t('baris dibaca','rows read')"></span>,
+            <span class="font-mono font-bold text-emerald-700">{{ preview.valid }}</span> <span x-text="t('valid','valid')"></span>,
+            <span class="font-mono font-bold text-red-600">{{ preview.errors|length }}</span> <span x-text="t('bermasalah','with problems')"></span>.
+            <span x-text="t('Hanya baris valid yang akan diterapkan.','Only valid rows will be applied.')"></span>
+        </p>
+        <div class="overflow-x-auto mt-3">
+            <table class="w-full text-xs min-w-[640px]">
+                <thead class="text-sky-700">
+                    <tr>
+                        <th class="text-left py-2 pr-3 font-bold" x-text="t('Baris','Row')"></th>
+                        <th class="text-left py-2 pr-3 font-bold" x-text="t('Tanggal','Date')"></th>
+                        <th class="text-left py-2 pr-3 font-bold" x-text="t('Periode','Period')"></th>
+                        <th class="text-left py-2 pr-3 font-bold" x-text="t('Ruangan','Room')"></th>
+                        <th class="text-left py-2 pr-3 font-bold" x-text="t('Guru','Teacher')"></th>
+                        <th class="text-left py-2 font-bold" x-text="t('Masalah','Problems')"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in preview.rows %}
+                    <tr class="border-t border-sky-200/60 {% if not row.valid %}bg-red-50/50{% endif %}">
+                        <td class="py-2 pr-3 font-mono">{{ row.row }}</td>
+                        <td class="py-2 pr-3 font-mono">{{ row.exam_date or '—' }}</td>
+                        <td class="py-2 pr-3">{{ row.period_name or '—' }}</td>
+                        <td class="py-2 pr-3">{{ row.room_name or '—' }}</td>
+                        <td class="py-2 pr-3">{{ row.teacher_name or row.teacher_email or '—' }}</td>
+                        <td class="py-2">
+                            {% if row.valid %}
+                            <span class="text-[10px] font-bold text-emerald-700" x-text="t('siap diterapkan','ready to apply')"></span>
+                            {% else %}
+                            <span class="text-[10px] font-bold text-red-600">
+                                {% for problem in row.problems %}{{ reasons.reason_note(problem.reason) }}{% if not loop.last %} · {% endif %}{% endfor %}
+                            </span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% set valid_rows = preview.rows | selectattr('valid') | list %}
+        {% if valid_rows %}
+        <form method="POST" action="/admin-sekolah/invigilation/matrix/apply" class="mt-4">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="date" value="{{ exam_date }}">
+            <input type="hidden" name="rows" value="{{ valid_rows | tojson | forceescape }}">
+            <button type="submit" class="px-4 py-2.5 bg-sky-600 text-white rounded-lg text-xs font-bold hover:bg-sky-700 transition">
+                <i class="fas fa-check mr-1"></i>{{ valid_rows | length }} <span x-text="t('baris valid akan diterapkan','valid rows will be applied')"></span>
+            </button>
+        </form>
+        {% else %}
+        <p class="mt-3 text-xs font-bold text-red-600" x-text="t('Tidak ada baris valid untuk diterapkan. Perbaiki berkasnya lalu unggah ulang.','There are no valid rows to apply. Fix the file and upload it again.')"></p>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
