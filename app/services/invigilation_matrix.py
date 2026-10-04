@@ -454,6 +454,68 @@ def _counts_after(supabase, school_id: str, exam_date: str, period_id: str) -> d
             "max_per_room": MAX_PER_ROOM, "max_per_teacher": MAX_PER_TEACHER}
 
 
+def set_cells(supabase, school_id: str, *, exam_date: str, period_id: str,
+              teacher_id: str, room_ids, mode: str,
+              actor_id: str | None = None) -> dict:
+    """One intent — this teacher, every room of this run, all the same way.
+
+    Shift-clicking the grid says *"and the rooms in between, too"*. ``mode`` is
+    ``"set"`` or ``"clear"``, and the caller takes it from the anchor cell's own
+    result, so a run extends the click the operator already made rather than
+    inventing a rule of its own.
+
+    A run is convenience, never a licence. Each room still goes through the same
+    :func:`assign` a single click uses (and a clear goes through the same scoped
+    delete), so a run that would cross a cap lands what it can and names the room
+    that was refused — the grid then paints exactly what the database holds. Every
+    room is attempted, so one already-full room does not silently swallow the rest
+    of the run.
+    """
+    if mode not in ("set", "clear"):
+        return {"ok": False, "reason": "write_failed", "results": [],
+                "applied": 0, "refused": 0, "action": ""}
+    if not _row(supabase, "exam_period", school_id, period_id):
+        return {"ok": False, "reason": "period_not_in_school", "results": [],
+                "applied": 0, "refused": 0, "action": mode}
+    if not _row(supabase, "teachers", school_id, teacher_id):
+        return {"ok": False, "reason": "teacher_not_in_school", "results": [],
+                "applied": 0, "refused": 0, "action": mode}
+
+    seated = {str(d.get("room_id")) for d in duties_for_date(supabase, school_id, exam_date)
+              if str(d.get("period_id")) == str(period_id)
+              and str(d.get("teacher_id")) == str(teacher_id)}
+
+    results: list[dict] = []
+    for room_id in dict.fromkeys(str(r) for r in room_ids if str(r or "").strip()):
+        if not _row(supabase, "exam_room", school_id, room_id):
+            results.append({"room_id": room_id, "ok": False, "reason": "room_not_in_school",
+                            "action": ""})
+            continue
+        if mode == "clear":
+            for duty in duties_for_date(supabase, school_id, exam_date):
+                if (str(duty.get("period_id")) == str(period_id)
+                        and str(duty.get("room_id")) == room_id
+                        and str(duty.get("teacher_id")) == str(teacher_id)):
+                    clear_cell(supabase, school_id, duty["id"])
+            results.append({"room_id": room_id, "ok": True, "reason": "", "action": ""})
+            continue
+        if room_id in seated:
+            results.append({"room_id": room_id, "ok": True, "reason": "", "action": "set"})
+            continue
+        out = assign(supabase, school_id, exam_date=exam_date, period_id=period_id,
+                     room_id=room_id, teacher_id=teacher_id, source="manual",
+                     actor_id=actor_id)
+        results.append({"room_id": room_id, "ok": bool(out.get("ok")),
+                        "reason": out.get("reason", ""),
+                        "action": "set" if out.get("ok") else ""})
+
+    refused = [r for r in results if not r["ok"]]
+    return {"ok": True, "reason": refused[0]["reason"] if refused else "",
+            "action": mode, "results": results,
+            "applied": len(results) - len(refused), "refused": len(refused),
+            **_counts_after(supabase, school_id, exam_date, period_id)}
+
+
 def auto_fill(supabase, school_id: str, *, exam_date: str, period_id: str,
               actor_id: str | None = None) -> dict:
     """Give every room of one session that has nobody at least one teacher.
