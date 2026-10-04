@@ -504,3 +504,173 @@ class TestTheDoors:
             encoding="utf-8")
         assert "/admin-sekolah/invigilation/matrix" in schedule_page, (
             "the schedule page does not link the matrix, so an operator has to know the URL")
+
+
+# ── 10. seeding rooms and sessions from the school's own classes ────────────
+
+
+def _seed_tables() -> dict:
+    """A school with two classes of two and one pupils, and nothing seeded yet."""
+    return {
+        "classes": [
+            {"id": "c1", "school_id": SCHOOL, "name": "7A", "grade_level": "7"},
+            {"id": "c2", "school_id": SCHOOL, "name": "7B", "grade_level": "7"},
+            {"id": "c9", "school_id": OTHER, "name": "9Z", "grade_level": "9"},
+        ],
+        "profiles": [
+            {"id": "p1", "school_id": SCHOOL, "role": "murid", "class_id": "c1"},
+            {"id": "p2", "school_id": SCHOOL, "role": "murid", "class_id": "c1"},
+            {"id": "p3", "school_id": SCHOOL, "role": "murid", "class_id": "c2"},
+            {"id": "p9", "school_id": OTHER, "role": "murid", "class_id": "c9"},
+        ],
+        "exam_period": [],
+        "exam_room": [],
+    }
+
+
+class TestSeedingFromClasses:
+    def test_class_rooms_counts_the_pupils_of_each_class(self):
+        rooms = im.class_rooms(_DB(_seed_tables()), SCHOOL)
+        by_name = {c["name"]: c for c in rooms}
+        assert by_name["7A"]["pupil_count"] == 2
+        assert by_name["7B"]["pupil_count"] == 1
+        assert "9Z" not in by_name, "another school's class leaked into the seed"
+
+    def test_seeding_makes_one_room_per_class_with_its_pupil_count(self):
+        db = _DB(_seed_tables())
+        out = im.seed_from_classes(db, SCHOOL)
+        assert out["ok"] and out["rooms"] == 2, out
+        assert {r["name"] for r in db.tables["exam_room"]} == {"7A", "7B"}
+        assert {r["capacity"] for r in db.tables["exam_room"]} == {2, 1}
+        assert all(r["school_id"] == SCHOOL for r in db.tables["exam_room"])
+
+    def test_seeding_makes_three_sessions(self):
+        db = _DB(_seed_tables())
+        out = im.seed_from_classes(db, SCHOOL)
+        assert out["periods"] == 3, out
+        assert {p["name"] for p in db.tables["exam_period"]} == {"Sesi 1", "Sesi 2", "Sesi 3"}
+
+    def test_seeding_twice_changes_nothing(self):
+        db = _DB(_seed_tables())
+        im.seed_from_classes(db, SCHOOL)
+        again = im.seed_from_classes(db, SCHOOL)
+        assert again["rooms"] == 0 and again["periods"] == 0, again
+        assert len(db.tables["exam_room"]) == 2
+        assert len(db.tables["exam_period"]) == 3
+
+    def test_seeding_without_classes_is_refused_with_a_reason(self):
+        db = _DB({**_seed_tables(), "classes": [], "profiles": []})
+        out = im.seed_from_classes(db, SCHOOL)
+        assert out["reason"] == "no_classes", out
+        assert db.tables["exam_room"] == []
+
+    def test_seeding_leaves_another_schools_rooms_alone(self):
+        db = _DB({**_seed_tables(),
+                  "exam_room": [{"id": "r9", "school_id": OTHER, "name": "Ruang 1",
+                                 "capacity": 9, "is_active": True}]})
+        im.seed_from_classes(db, SCHOOL)
+        other = [r for r in db.tables["exam_room"] if r["school_id"] == OTHER]
+        assert len(other) == 1 and other[0]["id"] == "r9"
+
+
+# ── 11. the click grid: one teacher x one room, per session ─────────────────
+
+class TestClickingACell:
+    def test_clicking_an_empty_cell_assigns_the_teacher(self):
+        db = _DB(_tables())
+        out = im.set_cell(db, SCHOOL, exam_date="2026-10-01", period_id="p1",
+                          room_id="r1", teacher_id="t1", actor_id="a1")
+        assert out["ok"] and out["action"] == "set", out
+        assert [d["teacher_id"] for d in db.tables["invigilation_duty"]] == ["t1"]
+
+    def test_clicking_the_same_cell_again_clears_it(self):
+        db = _DB(_tables())
+        im.set_cell(db, SCHOOL, exam_date="2026-10-01", period_id="p1",
+                    room_id="r1", teacher_id="t1")
+        out = im.set_cell(db, SCHOOL, exam_date="2026-10-01", period_id="p1",
+                          room_id="r1", teacher_id="t1")
+        assert out["ok"] and out["action"] == "cleared", out
+        assert db.tables["invigilation_duty"] == []
+
+    def test_clicking_a_taken_room_moves_its_teacher_out(self):
+        db = _DB(_tables())
+        db.tables["invigilation_duty"].append(_duty("d1", room="r1", teacher="t1"))
+        out = im.set_cell(db, SCHOOL, exam_date="2026-10-01", period_id="p1",
+                          room_id="r1", teacher_id="t2")
+        assert out["ok"] and out["action"] == "set", out
+        assert [d["teacher_id"] for d in db.tables["invigilation_duty"]] == ["t2"]
+
+    def test_clicking_moves_the_teacher_out_of_their_other_room(self):
+        db = _DB(_tables())
+        db.tables["invigilation_duty"].append(_duty("d1", room="r1", teacher="t1"))
+        im.set_cell(db, SCHOOL, exam_date="2026-10-01", period_id="p1",
+                    room_id="r2", teacher_id="t1")
+        pairs = [(d["room_id"], d["teacher_id"]) for d in db.tables["invigilation_duty"]]
+        assert pairs == [("r2", "t1")], pairs
+
+    def test_a_click_never_touches_another_period(self):
+        db = _DB(_tables())
+        db.tables["invigilation_duty"].append(_duty("d1", period="p2", room="r1", teacher="t1"))
+        im.set_cell(db, SCHOOL, exam_date="2026-10-01", period_id="p1",
+                    room_id="r1", teacher_id="t1")
+        kept = [d for d in db.tables["invigilation_duty"] if d["period_id"] == "p2"]
+        assert len(kept) == 1, "a click in one session changed another session"
+
+    def test_a_foreign_room_is_refused_and_writes_nothing(self):
+        db = _DB(_tables())
+        out = im.set_cell(db, SCHOOL, exam_date="2026-10-01", period_id="p1",
+                          room_id="r9", teacher_id="t1")
+        assert out["reason"] == "room_not_in_school", out
+        assert db.tables["invigilation_duty"] == []
+
+
+# ── 12. auto-fill: every empty room of a session, one free teacher each ──────
+
+class TestAutoFill:
+    def test_auto_fill_puts_a_free_teacher_in_every_empty_room(self):
+        db = _DB(_tables())
+        out = im.auto_fill(db, SCHOOL, exam_date="2026-10-01", period_id="p1")
+        assert out["ok"] and out["applied"] == 2, out
+        assert {d["room_id"] for d in db.tables["invigilation_duty"]} == {"r1", "r2"}
+        assert {d["teacher_id"] for d in db.tables["invigilation_duty"]} == {"t1", "t2"}
+
+    def test_auto_fill_leaves_a_filled_room_alone(self):
+        db = _DB(_tables())
+        db.tables["invigilation_duty"].append(_duty("d1", room="r1", teacher="t1"))
+        out = im.auto_fill(db, SCHOOL, exam_date="2026-10-01", period_id="p1")
+        assert out["applied"] == 1, out
+        occupied = {d["room_id"]: d["teacher_id"] for d in db.tables["invigilation_duty"]}
+        assert occupied["r1"] == "t1"
+
+    def test_auto_fill_never_puts_one_teacher_in_two_rooms(self):
+        db = _DB(_tables())
+        im.auto_fill(db, SCHOOL, exam_date="2026-10-01", period_id="p1")
+        teachers = [d["teacher_id"] for d in db.tables["invigilation_duty"]]
+        assert len(teachers) == len(set(teachers))
+
+    def test_auto_fill_refuses_another_schools_period(self):
+        db = _DB(_tables())
+        out = im.auto_fill(db, SCHOOL, exam_date="2026-10-01", period_id="p9")
+        assert out["reason"] == "period_not_in_school", out
+
+
+# ── 13. the new doors and the page's new controls ───────────────────────────
+
+class TestTheNewDoors:
+    def test_the_new_routes_are_guarded_and_scoped_to_the_session(self):
+        source = ADMIN_ROUTES.read_text(encoding="utf-8")
+        for path in ('"/invigilation/matrix/seed"', '"/invigilation/matrix/cell"',
+                     '"/invigilation/matrix/auto-fill"'):
+            assert path in source, f"{path} is missing"
+            block = next(b for b in _route_blocks(source)
+                         if f"@admin_sekolah_bp.route({path}" in b)
+            assert "@admin_sekolah_required" in block, f"{path} is unguarded"
+            assert "_matrix_school()" in block or "_school_id()" in block, (
+                f"{path} does not read the school from the session")
+            assert 'form.get("school_id")' not in block, f"{path} trusts a school id from the form"
+
+    def test_the_page_offers_the_seed_autofill_and_click_cells(self):
+        page = PAGE.read_text(encoding="utf-8")
+        assert "/admin-sekolah/invigilation/matrix/seed" in page, "no 'build from classes' button"
+        assert "/admin-sekolah/invigilation/matrix/auto-fill" in page, "no auto-fill button"
+        assert "/admin-sekolah/invigilation/matrix/cell" in page, "no click-to-assign cell"
