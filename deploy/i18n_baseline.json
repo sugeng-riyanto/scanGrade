@@ -446,7 +446,7 @@
       "frozen": false
     },
     "super_admin/dashboard.html": {
-      "pairs": 65,
+      "pairs": 108,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false

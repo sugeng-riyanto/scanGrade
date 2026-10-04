@@ -49,10 +49,12 @@ TABLE_FOR = {
 
 #: The columns the plan reads from each table. `profiles` has no `subject_id`, and
 #: naming a column a table does not have makes PostgREST answer 400, not "absent".
+#: The quarantined column itself is read too, so the audit record can name the value a
+#: quarantine *replaced* — which is what makes a restore a restore rather than a guess.
 COLUMNS_FOR = {
     CLASS_PUPIL: "id, class_id, school_id",
-    PAIR: "id, class_id, subject_id, school_id",
-    ASSIGNMENT: "id, class_id, subject_id, teacher_id, school_id",
+    PAIR: "id, class_id, subject_id, school_id, is_active",
+    ASSIGNMENT: "id, class_id, subject_id, teacher_id, school_id, status",
 }
 
 #: Refusal keys, translated by the page. Fixed strings, never sentences: the language
@@ -71,12 +73,24 @@ ROW_CHANGED = "row_changed"
 REASON_REQUIRED = "reason_required"
 NOTHING_TO_QUARANTINE = "nothing_to_quarantine"
 
+#: The inverse door's refusals. It only ever undoes a quarantine it can *read back*,
+#: so a row with no record, a record missing the value to restore, and a row already
+#: back on are three separate, honest answers rather than one "could not".
+NOTHING_TO_RESTORE = "nothing_to_restore"
+NO_PRIOR_VALUE = "no_prior_value"
+ALREADY_RESTORED = "already_restored"
+
 #: The shortest reason that is a reason. `x` is a keystroke, not a record.
 MIN_REASON_LENGTH = 4
 
 OK = "ok"
 REPOINTED = "repointed"
 QUARANTINED = "quarantined"
+RESTORED = "restored"
+
+#: How many quarantined rows the operator's list carries. A page that lists every
+#: quarantine the box ever made is a log, not a door.
+MAX_QUARANTINES = 25
 
 #: How each kind is *detached* when it can never be re-pointed, expressed the way the
 #: app itself removes a link: a subject is taken off a class by closing the offering
@@ -86,6 +100,25 @@ QUARANTINED = "quarantined"
 #: mistaken quarantine is reversible and no paper loses its home. The *kind* picks the
 #: column and value, so a request can never name one.
 QUARANTINE_FOR = {
+    CLASS_PUPIL: ("class_id", None),
+    PAIR: ("is_active", False),
+    ASSIGNMENT: ("status", "inactive"),
+}
+
+#: The inverse of `QUARANTINE_FOR`: the column and the value that turns a link back
+#: on. A pupil needs the class they were detached from, which is not a constant — the
+#: audit record carries it, so `NEEDS_PRIOR` marks the value that comes from there.
+NEEDS_PRIOR = "__prior__"
+RESTORE_FOR = {
+    CLASS_PUPIL: ("class_id", NEEDS_PRIOR),
+    PAIR: ("is_active", True),
+    ASSIGNMENT: ("status", "active"),
+}
+
+#: What a row looks like *while quarantined*. The restore write is guarded on this, so
+#: a row somebody already turned back on reports `already_restored` instead of being
+#: clobbered — the same discipline the repair door's school guard uses.
+QUARANTINED_AS = {
     CLASS_PUPIL: ("class_id", None),
     PAIR: ("is_active", False),
     ASSIGNMENT: ("status", "inactive"),
@@ -106,6 +139,10 @@ REASON_KEYS = {
     REASON_REQUIRED: "repair_reason_required",
     NOTHING_TO_QUARANTINE: "repair_nothing_to_quarantine",
     QUARANTINED: "repair_quarantined",
+    NOTHING_TO_RESTORE: "repair_nothing_to_restore",
+    NO_PRIOR_VALUE: "repair_no_prior_value",
+    ALREADY_RESTORED: "repair_already_restored",
+    RESTORED: "repair_restored",
 }
 
 
@@ -435,38 +472,225 @@ def quarantine(supabase, kind: str, row_id, reason, actor_id) -> dict:
     if not written:
         return {**base, "ok": False, "reason": ROW_CHANGED, "action": None}
 
-    _audit_quarantine(table, row_id, proposed, text, actor_id)
+    _audit_quarantine(table, row_id, row, proposed, text, actor_id)
     _invalidate(kind, row, proposed)
     return {**proposed, "ok": True, "reason": OK, "action": QUARANTINED,
             "quarantine_column": column}
 
 
-def _audit_quarantine(table: str, row_id, proposed: dict, reason: str, actor_id) -> None:
-    """One record per quarantine: which row, who, and — the whole point — why.
+def _audit_quarantine(table: str, row_id, row: dict, proposed: dict, reason: str,
+                      actor_id) -> None:
+    """One record per quarantine: which row, who, why — and what it replaced.
 
     The reason is stored verbatim. It is the only thing that tells a later reader
     whether a link was closed because it was mis-wired or because somebody tidied
-    the wrong table, which is exactly what an audit trail is for.
+    the wrong table, which is exactly what an audit trail is for. The **prior value of
+    the column the quarantine changed** is stored beside it, because that is the only
+    thing that can turn the link back on later — a `class_id` a human made disappear
+    cannot be recovered from anywhere else.
     """
+    column = QUARANTINE_FOR.get(proposed.get("kind"), (None, None))[0]
+    old_data = {"school_id": proposed.get("from_school_id")}
+    if column:
+        old_data[column] = (row or {}).get(column)
     try:
         log_activity(
             "update", table, row_id,
-            old_data={"school_id": proposed.get("from_school_id")},
+            old_data=old_data,
             new_data={"quarantine": "cross_school", "kind": proposed.get("kind"),
-                      "reason": reason},
+                      "reason": reason,
+                      "class_id": (row or {}).get("class_id"),
+                      "teacher_id": (row or {}).get("teacher_id")},
             user_id=actor_id)
     except Exception as exc:                              # noqa: BLE001 — the write stands
         logger.warning("cross_school_repair: quarantine audit failed for %s %s: %s",
                        table, row_id, exc)
 
 
+# ── the inverse door: turn a quarantined link back on, from its own record ──
+
+def quarantine_records(logs) -> list[dict]:
+    """The cross-school quarantines in a batch of audit rows, ready to be listed or
+    restored: which row, which kind, the reason, and the value the quarantine replaced.
+
+    Pure on purpose. Both the page that lists them and the door that restores them read
+    this one shape, so the list can never show a row the door cannot find.
+    """
+    out = []
+    for row in logs or []:
+        new = row.get("new_data") or {}
+        if new.get("quarantine") != "cross_school":
+            continue
+        kind = new.get("kind")
+        column = RESTORE_FOR.get(kind, (None, None))[0]
+        old = row.get("old_data") or {}
+        out.append({
+            "kind": kind,
+            "row_id": row.get("entity_id"),
+            "table": row.get("entity_type"),
+            "reason": new.get("reason"),
+            "actor_id": row.get("user_id"),
+            "at": row.get("created_at"),
+            "column": column,
+            "prior": old.get(column) if column else None,
+            "class_id": new.get("class_id"),
+            "teacher_id": new.get("teacher_id"),
+            "school_id": old.get("school_id"),
+        })
+    return out
+
+
+def restore_plan(record: dict | None) -> dict:
+    """The write that turns a quarantined link back on, or the reason there is none.
+
+    Pure: no reads, no writes, no clock. The caller supplies the record, so the rule
+    can be read and tested without a database — the same shape `plan()` uses.
+    """
+    rec = record or {}
+    kind = rec.get("kind")
+    base = {"kind": kind, "row_id": rec.get("row_id"), "table": rec.get("table")}
+    if kind not in RESTORE_FOR:
+        return {**base, "ok": False, "reason": UNKNOWN_KIND, "action": None}
+
+    column, value = RESTORE_FOR[kind]
+    # A no-op quarantine is not undone: if the link was already detached, "restoring"
+    # it would turn on a link the operator never turned off.
+    _q_column, quarantined_value = QUARANTINED_AS[kind]
+    if rec.get("prior") is not None and str(rec.get("prior")) == str(quarantined_value):
+        return {**base, "ok": False, "reason": NOTHING_TO_RESTORE, "action": None}
+
+    if value == NEEDS_PRIOR:
+        value = rec.get("prior")
+        if value in (None, ""):
+            return {**base, "ok": False, "reason": NO_PRIOR_VALUE, "action": None}
+
+    return {**base, "ok": True, "reason": OK, "action": RESTORED,
+            "column": column, "value": value, "reason_text": rec.get("reason")}
+
+
+def recent_quarantines(supabase, limit: int = MAX_QUARANTINES) -> list[dict]:
+    """The quarantined rows an operator can bring back, newest first, one per row.
+
+    The findings list cannot show them: a quarantined row is no longer cross-school
+    (it is detached), so it drops out of the sweep. The audit trail is where they live,
+    and this reads it — bounded to the three tables the door ever touches, so it does
+    not pull the whole log.
+    """
+    try:
+        logs = (supabase.table("audit_logs")
+                .select("entity_type, entity_id, old_data, new_data, user_id, created_at")
+                .in_("entity_type", list(TABLE_FOR.values()))
+                .order("created_at", desc=True)
+                .limit(200).execute().data) or []
+    except Exception as exc:                              # noqa: BLE001 — a page, not a gate
+        logger.warning("cross_school_repair: could not read quarantines: %s", exc)
+        return []
+
+    seen, out = set(), []
+    for rec in quarantine_records(logs):
+        key = (rec.get("table"), str(rec.get("row_id")))
+        if not rec.get("row_id") or key in seen:
+            continue
+        seen.add(key)
+        out.append(rec)
+        if len(out) >= max(1, int(limit)):
+            break
+    return out
+
+
+def _latest_record(supabase, table: str, row_id):
+    """The most recent quarantine of one row, read from the audit trail."""
+    logs = (supabase.table("audit_logs")
+            .select("entity_type, entity_id, old_data, new_data, user_id, created_at")
+            .eq("entity_type", table).eq("entity_id", str(row_id))
+            .order("created_at", desc=True).limit(20).execute().data) or []
+    records = quarantine_records(logs)
+    return records[0] if records else None
+
+
+def restore(supabase, kind: str, row_id, actor_id) -> dict:
+    """Turn a quarantined link back on — from its own record, never from the request.
+
+    The caller names only *which* row. The column and the value come from the quarantine
+    record in the audit trail, so a forged form cannot turn on a link, a class, or a
+    column of its choosing: the door only ever replays a detach that really happened.
+    The write is guarded on the quarantined state, so a row already back on reports
+    `already_restored` rather than being clobbered.
+    """
+    table = TABLE_FOR.get(kind)
+    base = {"kind": kind, "table": table, "row_id": row_id}
+    if table is None:
+        return {**base, "ok": False, "reason": UNKNOWN_KIND, "action": None}
+
+    try:
+        record = _latest_record(supabase, table, row_id)
+    except Exception as exc:                              # noqa: BLE001
+        logger.warning("cross_school_repair: could not read quarantine record for %s %s: %s",
+                       table, row_id, exc)
+        return {**base, "ok": False, "reason": READ_FAILED, "action": None}
+
+    if not record:
+        return {**base, "ok": False, "reason": NOTHING_TO_RESTORE, "action": None}
+
+    proposed = restore_plan(record)
+    if not proposed.get("ok"):
+        return {**base, **proposed}
+
+    column = proposed["column"]
+    _q_column, quarantined_value = QUARANTINED_AS[kind]
+    try:
+        query = supabase.table(table).update({column: proposed["value"]}).eq("id", row_id)
+        if quarantined_value is None:
+            query = query.is_(column, "null")
+        else:
+            query = query.eq(column, quarantined_value)
+        written = query.execute().data or []
+    except Exception as exc:                              # noqa: BLE001
+        logger.warning("cross_school_repair: could not restore %s %s: %s", table, row_id, exc)
+        return {**base, "ok": False, "reason": WRITE_FAILED, "action": None}
+
+    if not written:
+        # Somebody already turned it back on (or changed it). Not an error, not a
+        # restore: report it so the operator reloads rather than assumes it landed.
+        return {**base, "ok": False, "reason": ALREADY_RESTORED, "action": None}
+
+    _audit_restore(table, row_id, record, proposed, actor_id)
+    _invalidate_restore(kind, record, proposed)
+    return {**base, "ok": True, "reason": OK, "action": RESTORED, "column": column}
+
+
+def _audit_restore(table: str, row_id, record: dict, proposed: dict, actor_id) -> None:
+    """One record per restore: the quarantine undone, by whom, and why it had been made."""
+    try:
+        log_activity(
+            "update", table, row_id,
+            old_data={proposed["column"]: QUARANTINED_AS.get(record.get("kind"), (None, None))[1]},
+            new_data={"restore": "cross_school", "kind": record.get("kind"),
+                      "restored_column": proposed["column"],
+                      "quarantine_reason": record.get("reason")},
+            user_id=actor_id)
+    except Exception as exc:                              # noqa: BLE001 — the write stands
+        logger.warning("cross_school_repair: restore audit failed for %s %s: %s",
+                       table, row_id, exc)
+
+
+def _invalidate_restore(kind: str, record: dict, proposed: dict) -> None:
+    """Drop the cached reads a restored row feeds — the same ones the quarantine dropped."""
+    row = {"class_id": record.get("class_id"), "teacher_id": record.get("teacher_id")}
+    school_id = record.get("school_id")
+    _invalidate(kind, row, {"from_school_id": school_id, "to_school_id": school_id})
+
+
 __all__ = [
     "ASSIGNMENT", "CLASS_PUPIL", "PAIR", "TABLE_FOR", "COLUMNS_FOR",
-    "QUARANTINE_FOR", "MIN_REASON_LENGTH",
+    "QUARANTINE_FOR", "RESTORE_FOR", "QUARANTINED_AS", "MAX_QUARANTINES",
+    "MIN_REASON_LENGTH",
     "ROW_NOT_FOUND", "TARGET_UNKNOWN", "TWO_SCHOOLS", "ALREADY_CONSISTENT",
     "UNKNOWN_KIND", "READ_FAILED", "WRITE_FAILED", "ROW_CHANGED",
     "REASON_REQUIRED", "NOTHING_TO_QUARANTINE",
-    "OK", "REPOINTED", "QUARANTINED",
+    "NOTHING_TO_RESTORE", "NO_PRIOR_VALUE", "ALREADY_RESTORED",
+    "OK", "REPOINTED", "QUARANTINED", "RESTORED",
+    "quarantine_records", "restore_plan", "recent_quarantines", "restore",
     "REASON_KEYS", "reason_key", "finding_row_id", "row_from_finding",
     "plan", "preview", "apply", "quarantine",
 ]

@@ -99,6 +99,10 @@
         'repair_nothing_to_quarantine': ['Baris ini sudah konsisten — tidak ada yang perlu dikarantina.', 'This row is already consistent — nothing to quarantine.'],
         'repair_quarantined': ['Baris dikarantina: ditautkan keluar dari data aktif, tidak dihapus.', 'The row was quarantined: detached from live data, not deleted.'],
         'repair_quarantine_failed': ['Karantina tidak bisa dilakukan.', 'The quarantine could not be done.'],
+        'repair_nothing_to_restore': ['Baris ini tidak punya catatan karantina — tidak ada yang bisa dipulihkan.', 'This row has no quarantine record — there is nothing to restore.'],
+        'repair_no_prior_value': ['Catatan karantina tidak menyimpan kelas asalnya, jadi kelas tujuan tidak bisa dipastikan.', 'The quarantine record does not carry the class it removed, so the target cannot be worked out.'],
+        'repair_already_restored': ['Baris sudah dipulihkan pihak lain lebih dulu — muat ulang.', 'The row was already restored by someone else — reload.'],
+        'repair_restored': ['Tautan dikembalikan: baris aktif lagi dengan nilai yang tercatat saat dikarantina.', 'The link was restored: the row is active again with the value recorded at quarantine time.'],
     } %}
     {# The last quarantine's outcome, beside the repair outcome and for the same reason:
        a successful quarantine removes the finding, so the card vanishes and the
@@ -109,6 +113,18 @@
             <i class="fas fa-box-archive mr-1"></i>
             {% set _qn = IG_REPAIR.get(quarantine_note, ['Karantina tidak bisa dilakukan.', 'The quarantine could not be done.']) %}
             <span x-text="t('{{ _qn[0] }}','{{ _qn[1] }}')"></span>
+        </p>
+    </div>
+    {% endif %}
+    {# The last restore's outcome, beside the quarantine outcome and for the same reason:
+       a successful restore removes the row from the quarantine list, so the operator
+       would otherwise see no trace of what they just did. #}
+    {% if restored is not none and restored != '' %}
+    <div class="card p-4 border {% if restored == '1' %}border-emerald-200 bg-emerald-50/60{% else %}border-red-200 bg-red-50/60{% endif %}" id="restore-outcome">
+        <p class="text-sm font-bold {% if restored == '1' %}text-emerald-800{% else %}text-red-700{% endif %}">
+            <i class="fas fa-rotate-left mr-1"></i>
+            {% set _rn = IG_REPAIR.get(restore_note, ['Pemulihan tidak bisa dilakukan.', 'The restore could not be done.']) %}
+            <span x-text="t('{{ _rn[0] }}','{{ _rn[1] }}')"></span>
         </p>
     </div>
     {% endif %}
@@ -241,6 +257,55 @@
                     <span class="text-[10px] text-amber-700/80" x-text="t('Baris yang ambiguous (kelas dan mapel dari sekolah berbeda) dilewati, bukan ditebak.','Ambiguous rows (class and subject from different schools) are skipped, not guessed.')"></span>
                 </form>
                 {% endif %}
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    {# The quarantined rows, read back from the audit trail. They are not in the findings
+       list above — a quarantined row is detached, so it drops out of the sweep — and the
+       reason the operator typed at quarantine time lives only in that trail. This is the
+       one place it is read back, and the one door that can turn a link back on. #}
+    {% if quarantines %}
+    <div class="card p-5 border border-sky-200 bg-sky-50/50" id="cross-school-quarantines">
+        <div class="flex items-start gap-4">
+            <i class="fas fa-box-archive text-sky-600 text-2xl mt-0.5"></i>
+            <div class="min-w-0 flex-1">
+                <h3 class="font-extrabold text-sky-800" x-text="t('Baris dikarantina','Quarantined rows')"></h3>
+                <p class="text-sm text-sky-800 mt-1 leading-relaxed"
+                   x-text="t('Baris ini dulu ditautkan keluar dari data aktif karena kelas dan mapelnya tidak bisa disatukan ke satu sekolah. Pemulihan mengembalikannya ke nilai yang tercatat saat dikarantina — kelas asalnya untuk murid, tautan aktif untuk penawaran, status aktif untuk penugasan. Tidak ada nilai yang ditebak.','These rows were detached from live data because their class and subject could not be agreed on a single school. A restore replays the value recorded at quarantine time — the pupil&rsquo;s own class, an active offering, an armed assignment. No value is ever guessed.')"></p>
+                <div class="overflow-x-auto mt-3">
+                    <table class="w-full text-xs min-w-[560px]">
+                        <thead class="text-sky-700">
+                            <tr>
+                                <th class="text-left py-2 pr-3 font-bold" x-text="t('Jenis','Kind')"></th>
+                                <th class="text-left py-2 pr-3 font-bold" x-text="t('Baris','Row')"></th>
+                                <th class="text-left py-2 pr-3 font-bold" x-text="t('Alasan dikarantina','Quarantine reason')"></th>
+                                <th class="text-left py-2 font-bold" x-text="t('Pemulihan','Restore')"></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for q in quarantines %}
+                            {% set qkind = IG_KINDS.get(q.kind, [q.kind, q.kind]) %}
+                            <tr class="border-t border-sky-200/60" data-quarantine="{{ q.kind }}">
+                                <td class="py-2 pr-3 font-bold text-sky-800" x-text="t('{{ qkind[0] }}','{{ qkind[1] }}')"></td>
+                                <td class="py-2 pr-3 font-mono text-[10px] text-sky-700 break-all">{{ q.row_id or '-' }}</td>
+                                <td class="py-2 pr-3 text-sky-800 break-words max-w-[16rem]">{{ q.reason or '-' }}</td>
+                                <td class="py-2">
+                                    <form method="POST" action="/integrity/restore" class="flex items-center gap-2">
+                                        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                                        <input type="hidden" name="kind" value="{{ q.kind }}">
+                                        <input type="hidden" name="row_id" value="{{ q.row_id }}">
+                                        <button type="submit"
+                                                class="px-2 py-1 bg-sky-600 text-white rounded-lg font-bold text-[10px] hover:bg-sky-700 transition"
+                                                x-text="t('Pulihkan','Restore')"></button>
+                                    </form>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </div>
