@@ -66,6 +66,14 @@ EXEMPT: dict[str, str] = {
     "/admin/compliance/pdp":
         "the data-protection reference the compliance page above links to; same "
         "legacy panel, with no door of its own",
+    # A teacher's bulk student import: the register belongs to the school admin,
+    # who imports it at `/admin-sekolah/import`. The guru page is the older door
+    # to the same act and had no business in the teacher's menu, so its link was
+    # removed and it is left reachable only by its address.
+    "/students/import":
+        "a legacy bulk-register import that duplicates the school admin's "
+        "`/admin-sekolah/import`; it was removed from the teacher menu, so it sits "
+        "outside the navigable surface by design",
 }
 
 

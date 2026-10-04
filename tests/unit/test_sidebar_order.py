@@ -32,8 +32,10 @@ BASE = (ROOT / "app" / "templates" / "base.html").read_text(encoding="utf-8")
 #: the result — the order the work actually happens.
 EXPECTED: dict[str, list[tuple[str, list[str]]]] = {
     "guru": [
+        # No `/students/import`: bulk import is the school admin's page
+        # (`/admin-sekolah/import`), so a teacher's menu does not offer it.
         ("Utama", ["/teacher/dashboard", "/teacher/classes", "/teacher/subjects",
-                   "/teacher/students", "/students/import"]),
+                   "/teacher/students"]),
         ("Ujian", ["/teacher/exams", "/teacher/exams/new"]),
         ("Koreksi", ["/teacher/scan", "/teacher/grading", "/teacher/ai-settings",
                      "/teacher/retractions", "/teacher/invigilation",
