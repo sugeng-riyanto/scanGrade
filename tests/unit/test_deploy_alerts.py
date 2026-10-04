@@ -1025,3 +1025,165 @@ class TestTheAuthRetryTick:
 
     def test_the_default_retry_threshold_is_a_few_not_a_dozen(self):
         assert 1 < alerts.DEFAULT_MIN_AUTH_RETRIES <= 10
+
+
+# ── 6. mixed-school rows, on the same channel ────────────────────────────────
+#
+# `school_integrity.cross_school_findings` answers the fault behind a week of
+# "the number looks wrong" reports — a row whose `school_id` disagrees with the
+# school of the people it points at. It ran only when a super admin opened the
+# dashboard, so the *reason* the mixing hid was the same one the runner staleness
+# hid: the page needed somebody to open it. So the sweep runs on this timer and
+# its findings ride the same channel: same recipients, same claim, same
+# one-mail-per-new-state record.
+
+def integrity_reading(*, findings=None, ok=True, errors=None, truncated=False,
+                      checked=None) -> dict:
+    """Shaped like `school_integrity.cross_school_findings()` returns one."""
+    return {
+        "ok": ok,
+        "findings": list(findings or []),
+        "errors": list(errors or []),
+        "truncated": truncated,
+        "checked": dict(checked or {"classes": 4, "subjects": 9,
+                                    "class_subjects": 12, "teacher_assignments": 7,
+                                    "profiles": 40}),
+    }
+
+
+def a_mixture(*, n=1) -> list:
+    return [{"kind": "class_pupil_mismatch", "table": "profiles",
+             "class_id": f"c{i}", "class_name": f"11A-{i}",
+             "class_school_id": "sch-1", "pupil_id": f"p{i}",
+             "pupil_school_id": "sch-2"} for i in range(n)]
+
+
+class TestTheCrossSchoolPolicy:
+    def test_a_clean_sweep_is_silence(self):
+        assert alerts.staleness(report_of(), integrity=integrity_reading()) is None
+
+    def test_no_sweep_at_all_is_silence(self):
+        assert alerts.staleness(report_of(), integrity=None) is None
+
+    def test_a_finding_alerts(self):
+        found = alerts.staleness(report_of(),
+                                 integrity=integrity_reading(findings=a_mixture()))
+        assert found["kind"] == alerts.KIND_CROSS_SCHOOL
+        assert found["findings"] == 1
+
+    def test_it_carries_how_bad_it_is_and_what_it_saw(self):
+        found = alerts.staleness(report_of(), integrity=integrity_reading(
+            findings=a_mixture(n=3), truncated=True, checked={"classes": 4}))
+        detail = found["detail"]
+        assert found["findings"] == 3
+        assert detail["count"] == 3
+        assert detail["by_kind"]["class_pupil_mismatch"] == 3
+        assert detail["truncated"] is True
+        assert detail["checked"] == {"classes": 4}
+        assert detail["examples"], "the mail names none of the rows it found"
+
+    def test_a_worse_mixture_is_a_new_event(self):
+        one = alerts.staleness(report_of(),
+                               integrity=integrity_reading(findings=a_mixture(n=1)))
+        worse = alerts.staleness(report_of(),
+                                 integrity=integrity_reading(findings=a_mixture(n=9)))
+        assert alerts.alert_key(one) != alerts.alert_key(worse)
+        assert alerts.should_send(worse, {"key": alerts.alert_key(one),
+                                          "sent_at": NOW.isoformat()}, now=NOW)
+
+    def test_a_sweep_that_could_not_finish_still_alerts(self):
+        """"Could not read" is not "clean" — that is the whole reason the sweep
+        exists, and a permanently blind guard must not go quiet."""
+        found = alerts.staleness(report_of(), integrity=integrity_reading(
+            ok=False, errors=[{"table": "profiles", "error": "timeout"}]))
+        assert found["kind"] == alerts.KIND_CROSS_SCHOOL_UNCHECKED
+        assert found["errors"] == 1
+
+    def test_a_completed_sweep_that_found_nothing_is_quiet_even_with_zero_errors(self):
+        assert alerts.staleness(report_of(), integrity=integrity_reading(
+            ok=True, errors=[])) is None
+
+    def test_the_deploy_reading_is_judged_before_the_mixture(self):
+        found = alerts.staleness(report_of({"origin_behind": 40}),
+                                 integrity=integrity_reading(findings=a_mixture()))
+        assert found["kind"] == alerts.KIND_RUNNER_BEHIND
+
+    def test_the_mixture_is_judged_before_the_auth_retries(self):
+        """A proven mixture is a fact; a retry count is a leading indicator."""
+        found = alerts.staleness(report_of(),
+                                 auth=auth_reading(retries=40),
+                                 integrity=integrity_reading(findings=a_mixture()))
+        assert found["kind"] == alerts.KIND_CROSS_SCHOOL
+
+
+class TestTheCrossSchoolTick:
+    def test_a_mixture_sends_through_the_same_channel(self, tmp_path):
+        sends = []
+        outcome, _ = check(tmp_path, report_of(), sends=sends,
+                           integrity=integrity_reading(findings=a_mixture(n=2)),
+                           recipients_info={"emails": ["ops@x"], "source": "setting"})
+        assert outcome["outcome"] == alerts.OUTCOME_SENT
+        assert [s[0] for s in sends] == ["ops@x"]
+        record = alerts.read_state(tmp_path / "deploy_alerts.json")
+        assert record["kind"] == alerts.KIND_CROSS_SCHOOL
+        assert record["findings"] == 2
+
+    def test_the_same_mixture_is_not_sent_again(self, tmp_path):
+        sends = []
+        recipients = {"emails": ["ops@x"], "source": "setting"}
+        reading = integrity_reading(findings=a_mixture(n=2))
+        check(tmp_path, report_of(), sends=sends, integrity=reading,
+              recipients_info=recipients)
+        outcome, _ = check(tmp_path, report_of(), sends=sends, integrity=reading,
+                           recipients_info=recipients, now=NOW + timedelta(hours=6))
+        assert outcome["outcome"] == alerts.OUTCOME_ALREADY_SENT
+        assert len(sends) == 1
+
+    def test_a_clean_sweep_does_not_send(self, tmp_path):
+        sends = []
+        outcome, _ = check(tmp_path, report_of(), sends=sends,
+                           integrity=integrity_reading(),
+                           recipients_info={"emails": ["ops@x"], "source": "setting"})
+        assert outcome["outcome"] == alerts.OUTCOME_NOT_STALE
+        assert sends == []
+
+    def test_check_runs_the_sweep_when_it_is_not_given_one(self, tmp_path,
+                                                          monkeypatch):
+        """The wiring, not just the policy: an injected reading proves the rule, a
+        default proves the box actually looks."""
+        from app.services import school_integrity
+        from app.utils import supabase_client
+
+        monkeypatch.setattr(supabase_client, "get_supabase", lambda: object())
+        monkeypatch.setattr(school_integrity, "cross_school_findings",
+                            lambda *a, **k: integrity_reading(findings=a_mixture(n=2)))
+        sends = []
+        outcome = alerts.check(report=report_of(), now=NOW,
+                               send=lambda a, s, h: sends.append((a, s, h)) or True,
+                               state=tmp_path / "deploy_alerts.json",
+                               recipients_info={"emails": ["ops@x"],
+                                                "source": "setting"})
+        assert outcome["outcome"] == alerts.OUTCOME_SENT
+        assert "cross-school" in outcome["subject"].lower()
+
+    def test_a_sweep_that_raises_is_silence_not_a_crash(self, tmp_path, monkeypatch):
+        from app.services import school_integrity
+        from app.utils import supabase_client
+
+        def boom(*_a, **_k):
+            raise RuntimeError("supabase is down")
+
+        monkeypatch.setattr(supabase_client, "get_supabase", lambda: object())
+        monkeypatch.setattr(school_integrity, "cross_school_findings", boom)
+        sends = []
+        outcome, _ = check(tmp_path, report_of(), sends=sends)
+        assert outcome["outcome"] == alerts.OUTCOME_NOT_STALE
+        assert sends == []
+
+    def test_the_sweep_runs_on_the_same_timer_as_the_rest(self):
+        """The schedule is the point: no second loop, no second channel."""
+        src = (ROOT / "app" / "services" / "deploy_alert_service.py").read_text(
+            encoding="utf-8")
+        assert "school_integrity" in src, (
+            "the alert service never runs the cross-school sweep")
+        assert "cross_school_findings" in src
