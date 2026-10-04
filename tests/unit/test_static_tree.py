@@ -34,6 +34,7 @@ checker that cannot see must never be the reason a release is refused.
 """
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -55,9 +56,30 @@ SOURCE_SUFFIXES = {".py", ".html", ".css", ".js", ".json", ".svg"}
 EXTRA_SOURCES = ("tailwind.config.js", "package.json")
 
 
+#: The variables git exports to a hook so that a `git` a hook spawns resolves the
+#: repository the hook is for. A subprocess that inherits them ignores its own
+#: ``cwd``: measured, a linked worktree hands the pre-commit hook an ABSOLUTE
+#: ``GIT_DIR`` and ``GIT_INDEX_FILE`` (``…/.git/worktrees/<name>/index``), so a
+#: scratch ``git add`` in a ``tmp_path`` repo wrote its fixtures into THIS checkout's
+#: index — which then failed the very gate that had just run this file. Cleared for
+#: every ``git`` spawned here so each resolves a repository from ``cwd``, the only
+#: thing the caller meant.
+_GIT_REPO_ENV = ("GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE", "GIT_PREFIX",
+                 "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY",
+                 "GIT_ALTERNATE_OBJECT_DIRECTORIES")
+
+
+def _git_env() -> dict:
+    """The environment for a spawned `git`, minus any inherited repo selection."""
+    env = dict(os.environ)
+    for name in _GIT_REPO_ENV:
+        env.pop(name, None)
+    return env
+
+
 def _git(*args: str, cwd: Path) -> subprocess.CompletedProcess:
-    return subprocess.run(["git", *args], cwd=cwd, capture_output=True,
-                          text=True, check=False)
+    return subprocess.run(["git", *args], cwd=cwd, env=_git_env(),
+                          capture_output=True, text=True, check=False)
 
 
 def _prefix(static: Path, root: Path) -> str:
@@ -320,7 +342,8 @@ def _checkout(tmp_path: Path) -> Path:
         "// a script\n", encoding="utf-8")
     (repo / "app" / "templates" / "page.html").write_text(
         '<script src="/static/js/thing.js"></script>\n', encoding="utf-8")
-    subprocess.run(["git", "init", "-q", str(repo)], capture_output=True, text=True)
+    subprocess.run(["git", "init", "-q", str(repo)], env=_git_env(),
+                   capture_output=True, text=True)
     _git("add", "-A", cwd=repo)
     _commit(repo)
     return repo
@@ -428,6 +451,36 @@ class TestTheReadingIsWideEnough:
         assert not [rel for rel in texts if "/uploads/" in rel], (
             "a file the app writes at runtime is being read as a source; it is "
             "not in the release and it is not an asset's reference")
+
+
+@needs_git
+class TestAScratchRepoIsItsOwn:
+    """A `git` this file spawns must not inherit the hook's repository choice.
+
+    The pre-commit hook runs this file with git's own ``GIT_DIR``/``GIT_INDEX_FILE``
+    set, and a linked worktree makes them **absolute** paths into the real checkout.
+    A scratch repo built under that environment used to ``git add`` into the real
+    index, leaving the fixtures above in a tree that then failed the very gate which
+    had just run them.
+    """
+
+    def test_an_inherited_index_does_not_capture_the_scratch_add(self, tmp_path, monkeypatch):
+        victim = _checkout(tmp_path / "victim")
+        scratch = _checkout(tmp_path / "scratch")
+        (scratch / "app" / "static" / "js" / "leak.js").write_text(
+            "// scratch\n", encoding="utf-8")
+
+        # Exactly what git hands the hook, pointed at the OTHER repository.
+        monkeypatch.setenv("GIT_DIR", str(victim / ".git"))
+        monkeypatch.setenv("GIT_INDEX_FILE", str(victim / ".git" / "index"))
+
+        _git("add", "app/static/js/leak.js", cwd=scratch)
+
+        assert "js/leak.js" not in _listed(victim / "app" / "static", victim), (
+            "an inherited GIT_INDEX_FILE captured a scratch `git add` — the helper "
+            "must clear the hook's repository variables before spawning git")
+        assert "js/leak.js" in _listed(scratch / "app" / "static", scratch), (
+            "the add did not land in the repository it was aimed at")
 
 
 # ── this checkout ────────────────────────────────────────────────────────────
