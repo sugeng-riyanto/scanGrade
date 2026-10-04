@@ -646,13 +646,21 @@ def take_exam(exam_id):
     # the unique constraint. One call where there were three reads and a blind
     # INSERT (see app/services/submission_service.py for what that cost a student).
     exam_started_at = None
+    sitting_id = None
     try:
         sitting, _opened = open_sitting(supabase, exam_id, g.user_id)
         exam_started_at = sitting.get("started_at") or None
+        sitting_id = sitting.get("id") or None
     except Exception:
         current_app.logger.exception(
             "Could not open a sitting for exam %s user %s", exam_id, g.user_id
         )
+    # How many times each question's media has already been played, read from the
+    # sitting's own event log (`app/services/media_plays.py`). The page draws its
+    # players from this, so a refresh, a second tab or another device cannot hand
+    # the allowance back — the count is the server's, never the page's.
+    from app.services import media_plays
+    media_used = media_plays.used_by_question(supabase, sitting_id)
     # One reading of the two clocks for this sitting: the instant it ends, which
     # clock decided that, and how long is left as the server sees it. The page
     # renders its countdown from this and the sync API recomputes it from the same
@@ -714,7 +722,7 @@ def take_exam(exam_id):
     # URL at all.
     safe_exam["question_audio"] = exam_media.with_media_urls(
         safe_exam.get("question_audio"), subject=g.user_id, exam_id=exam_id)
-    resp = make_response(render_template("student/take_exam.html", exam=safe_exam, anti_cheat_config=anti_cheat_config, exam_started_at=exam_started_at, recovery_code=recovery_code, question_options=question_options, deadline=clocks["deadline_iso"], deadline_reason=clocks["reason"], seconds_left=clocks["seconds_left"], window_end=clocks["window_end_iso"], away_grace_seconds=AWAY_GRACE_SECONDS, away_grace_chances=AWAY_GRACE_CHANCES, student_name=student_name, student_class_label=student_class_label, student_key=g.user_id))
+    resp = make_response(render_template("student/take_exam.html", exam=safe_exam, anti_cheat_config=anti_cheat_config, exam_started_at=exam_started_at, recovery_code=recovery_code, question_options=question_options, deadline=clocks["deadline_iso"], deadline_reason=clocks["reason"], seconds_left=clocks["seconds_left"], window_end=clocks["window_end_iso"], away_grace_seconds=AWAY_GRACE_SECONDS, away_grace_chances=AWAY_GRACE_CHANCES, student_name=student_name, student_class_label=student_class_label, student_key=g.user_id, media_used=media_used))
     resp.headers["Cache-Control"] = "private, max-age=30, stale-while-revalidate=60"
     return resp
 
@@ -767,6 +775,63 @@ def attempt_heartbeat(exam_id):
             "heartbeat failed for exam %s user %s", exam_id, g.user_id)
         return jsonify({"ok": False, "status": "missing",
                         "message_key": "attempt_missing"})
+
+
+@student_bp.route("/media-play", methods=["POST"])
+@login_required
+@_rate_limit("60 per minute")
+def media_play():
+    """Charge one play of one question's media, on the server, against the sitting.
+
+    The pupil's page draws a player for each question's audio, YouTube embed or
+    uploaded video, and this is the door it calls before each fresh play. Three
+    rules are why it is short:
+
+    * **The pupil is the session's.** The sitting row is read by ``eq("student_id",
+      g.user_id)``, so a crafted body cannot charge a play to somebody else.
+    * **The allowance is the paper's, never the request's.** The limit is read from
+      the question's own media record (`media_plays.limit_for`); nothing here looks at
+      a number off the wire, so a pupil cannot raise their own limit.
+    * **Only an ongoing sitting may play.** A finished, expired or locked paper
+      charges nothing, and answers with the status vocabulary the page already reads.
+    """
+    from app.services import media_plays, attempt_status as status_service
+    supabase = get_supabase()
+    body = request.get_json(silent=True) or {}
+    exam_id = str(body.get("exam_id") or request.form.get("exam_id") or "").strip()
+    try:
+        index = int(body.get("question_index"))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "allowed": False, "reason": "bad_question"}), 400
+    if not exam_id:
+        return jsonify({"ok": False, "allowed": False, "reason": "no_exam"}), 400
+
+    row = status_service.sitting_row(supabase, exam_id, g.user_id)
+    status = status_service.get_attempt_status(supabase, exam_id, g.user_id, row=row)
+    if row is None or status.get("status") not in status_service.ONGOING:
+        return jsonify({"ok": False, "allowed": False, "reason": "not_ongoing",
+                        "status": status.get("status"),
+                        "message_key": status.get("message_key")})
+
+    # The question's own media record decides the allowance. Read here rather than
+    # through the status payload because the status never carries the questions.
+    limit = media_plays.DEFAULT_LIMIT
+    try:
+        exam_row = row_or_none(
+            supabase.table("exams").select("question_audio")
+            .eq("id", exam_id).maybe_single().execute()
+        ) or {}
+        raw = exam_row.get("question_audio")
+        if isinstance(raw, str):
+            raw = json.loads(raw)
+        media = (raw or {}).get(str(index)) or {}
+        limit = media_plays.limit_for(media)
+    except Exception:  # noqa: BLE001 — an unreadable record falls back to the default
+        current_app.logger.warning("could not read media limit for exam %s", exam_id)
+
+    out = media_plays.record_play(supabase, row.get("id"), index, limit)
+    out["ok"] = True
+    return jsonify(out)
 
 
 @student_bp.route("/exams/<exam_id>/resume", methods=["POST"])
