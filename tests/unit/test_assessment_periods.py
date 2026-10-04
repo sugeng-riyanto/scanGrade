@@ -178,6 +178,19 @@ class FakeSupabase:
         return _Query(self, name)
 
 
+def _write_call(store, table, mode):
+    """The one call that wrote `table` in `mode`, wherever it sits in the run.
+
+    A period write now ends by re-deriving every paper's tag
+    (`retag_school_exams`), so the period write is no longer the last call. These
+    assertions are about *what* was written and to whose school, not about it being
+    last, so they find it by shape.
+    """
+    hits = [c for c in store.calls if c[0] == table and c[3] == mode]
+    assert len(hits) == 1, f"expected one {mode} on {table}, saw {len(hits)}"
+    return hits[0]
+
+
 def _period(**over):
     row = {"id": "p1", "school_id": "s1", "kind": "mid_semester",
            "name": "UTS Ganjil", "start_date": "2026-09-01",
@@ -196,8 +209,8 @@ class TestTheServiceScopesEveryWrite:
                              end_date="2026-11-05", is_active=False)
 
         assert out["ok"] is True
-        table, _filters, payload, _mode = sb.calls[-1]
-        assert table == "assessment_periods"
+        table, _filters, payload, mode = _write_call(sb, "assessment_periods", "insert")
+        assert table == "assessment_periods" and mode == "insert"
         assert payload["school_id"] == "s1", (
             "the school must come from the caller's session, never from the form")
         assert payload["kind"] == "tryout"
@@ -282,8 +295,8 @@ class TestTheServiceScopesEveryWrite:
         out = ap.delete_period(sb, "s1", "p1")
 
         assert out["ok"] is True
-        table, filters, _payload, _mode = sb.calls[-1]
-        assert table == "assessment_periods"
+        table, filters, _payload, mode = _write_call(sb, "assessment_periods", "delete")
+        assert table == "assessment_periods" and mode == "delete"
         assert ("id", "p1") in filters and ("school_id", "s1") in filters
 
     def test_the_running_period_is_read_by_school(self):
@@ -450,3 +463,165 @@ def test_the_period_segment_is_named_in_the_trail():
     base = (ROOT / "app" / "templates" / "base.html").read_text(encoding="utf-8-sig")
     assert "assessment-periods" in source or "assessment-periods" in base, (
         "the trail would print this segment title-cased")
+
+
+# ── the school admin can run the calendar without a vice principal ───────────
+#
+# The window the deputy owns is the *school's*, not the deputy's. A small school
+# that never created the role would otherwise have nobody who can name a UTS's
+# dates, so the account that administers the school inherits the same controls —
+# at its own prefix and behind its own guard, not by loosening the deputy's.
+
+ADMIN_ROUTES = ROOT / "app" / "routes" / "admin_sekolah.py"
+ADMIN_PREFIX = "/admin-sekolah/assessment-periods"
+
+
+def _blocks(source: str):
+    """Each `@blueprint.route(…)` and the view beneath it, as one string."""
+    starts = [m.start() for m in re.finditer(r"@\w*bp\.route\(", source)]
+    starts.append(len(source))
+    return [source[a:b] for a, b in zip(starts, starts[1:])]
+
+
+def _admin_period_blocks():
+    """Only the blocks whose *route decorator* is the assessment calendar.
+
+    Keyed on the decorator line, not on the word appearing anywhere: the comment
+    above the block names the URL, so a substring scan would fold it into the
+    route that happens to sit above it.
+    """
+    source = ADMIN_ROUTES.read_text(encoding="utf-8")
+    return [b for b in _blocks(source)
+            if b.lstrip().startswith('@admin_sekolah_bp.route("/assessment-periods')]
+
+
+class TestTheSchoolAdminCanRunTheCalendar:
+    def test_the_admin_prefix_serves_the_calendar(self):
+        source = ADMIN_ROUTES.read_text(encoding="utf-8")
+        assert re.search(r'@admin_sekolah_bp\.route\("/assessment-periods"',
+                         source), (
+            "the school admin has no GET route for the assessment calendar")
+
+    def test_the_admin_calendar_is_registered_in_the_url_map(self, app):
+        rules = {rule.rule: rule for rule in app.url_map.iter_rules()}
+        assert ADMIN_PREFIX in rules, (
+            "the school admin has no door to the assessment calendar")
+        save = ADMIN_PREFIX + "/save"
+        assert save in rules and "POST" in rules[save].methods, save
+
+    def test_every_admin_write_carries_the_admin_guard_on_its_own_prefix(self):
+        writes = 0
+        for block in _admin_period_blocks():
+            if 'methods=["POST"]' not in block:
+                continue
+            writes += 1
+            assert "@admin_sekolah_required" in block, block[:90]
+            assert '@admin_sekolah_bp.route("/assessment-periods' in block, (
+                "an admin calendar write was registered outside the admin's own "
+                "blueprint, so the admin prefix does not describe it: " + block[:90])
+        assert writes >= 2, "expected save and delete writes on the admin's prefix"
+
+    def test_the_admin_page_renders_the_same_template_with_write_on(self):
+        pages = [b for b in _admin_period_blocks() if 'methods=["POST"]' not in b]
+        assert len(pages) == 1, "the admin calendar is one page"
+        for block in pages:
+            assert 'principal/assessment_periods.html' in block, block[:140]
+            assert "can_write=True" in block, block[:140]
+            assert "period_save_url" in block and "period_delete_base" in block, block[:140]
+
+    def test_the_admin_route_takes_the_school_from_the_session(self):
+        blocks = _admin_period_blocks()
+        assert blocks, "no admin assessment-period route was found"
+        for block in blocks:
+            for stolen in ('request.form.get("school_id")',
+                           'request.args.get("school_id")',
+                           'request.values.get("school_id")'):
+                assert stolen not in block, block[:90]
+            assert "_school_id()" in block, block[:90]
+
+
+class TestOneCalendarTwoDoorsTheTemplateTakesItsUrls:
+    """Both writers render one page, so its forms cannot hardcode one door."""
+
+    def test_the_template_does_not_hardcode_the_deputys_prefix(self):
+        page = OFFICIAL_PAGE.read_text(encoding="utf-8")
+        assert "period_save_url" in page and "period_delete_base" in page
+        assert 'action="/vice-principal/assessment-periods/save"' not in page, (
+            "the form action is hardcoded, so the admin page would post to the "
+            "deputy's door")
+
+    def test_both_callers_pass_their_own_write_urls(self):
+        for path, prefix in ((PRINCIPAL_ROUTES, "/vice-principal/assessment-periods"),
+                             (ADMIN_ROUTES, ADMIN_PREFIX)):
+            source = path.read_text(encoding="utf-8")
+            assert "period_save_url" in source, path
+            assert f'"{prefix}/save"' in source or f"'{prefix}/save'" in source, path
+            assert "period_delete_base" in source, path
+
+    def test_the_admin_menu_links_the_calendar(self):
+        base = (ROOT / "app" / "templates" / "base.html").read_text(encoding="utf-8-sig")
+        assert ADMIN_PREFIX in base, (
+            "the admin calendar is reachable only by typing its URL")
+
+
+class TestTheAdminSaveUsesTheSessionSchool:
+    """The form supplies every field *except* whose calendar it is.
+
+    A `school_id` in the body must be inert: the write is the session's school, or
+    an admin could schedule — and delete — inside another school's calendar. The
+    guard's own permit/refuse is asserted structurally above; these drive the view
+    body directly, because a real sign-in would prove the login, not the scope.
+    """
+
+    @staticmethod
+    def _view(view):
+        """The view under its `login_required`/role wrapper, called directly."""
+        return getattr(view, "__wrapped__", view)
+
+    def _fake(self, seen):
+        from types import SimpleNamespace
+        return SimpleNamespace(
+            save_period=lambda sb, school_id, **kw: (
+                seen.update({"school": school_id, "kw": kw}),
+                {"ok": True, "reason": ""})[1],
+            delete_period=lambda sb, school_id, period_id: (
+                seen.update({"delete_school": school_id, "period": period_id}),
+                {"ok": True, "reason": ""})[1],
+            list_periods=lambda *a, **k: [],
+            active_period=lambda *a, **k: None,
+            KINDS=("mid_semester", "final_semester", "tryout", "asesmen"),
+        )
+
+    def test_a_form_school_id_cannot_redirect_the_write(self, app, monkeypatch):
+        from flask import g
+        from app.routes import admin_sekolah as adm
+        seen: dict = {}
+        monkeypatch.setattr(adm, "assessment_periods", self._fake(seen))
+        monkeypatch.setattr(adm, "get_supabase", lambda: object())
+        with app.test_request_context(
+                "/admin-sekolah/assessment-periods/save", method="POST",
+                data={"kind": "mid_semester", "name": "UTS Ganjil",
+                      "start_date": "2026-09-01", "end_date": "2026-09-05",
+                      "school_id": "somebody-elses-school"}):
+            g.user_id = "admin-1"
+            g.user_school_id = "school-9"
+            resp = self._view(adm.assessment_period_save)()
+        assert seen["school"] == "school-9", (
+            "the write took the school from the form instead of the session")
+        assert seen["kw"]["name"] == "UTS Ganjil"
+        assert resp.status_code == 302
+
+    def test_delete_is_scoped_to_the_session_school_too(self, app, monkeypatch):
+        from flask import g
+        from app.routes import admin_sekolah as adm
+        seen: dict = {}
+        monkeypatch.setattr(adm, "assessment_periods", self._fake(seen))
+        monkeypatch.setattr(adm, "get_supabase", lambda: object())
+        with app.test_request_context("/admin-sekolah/assessment-periods/p-1/delete",
+                                      method="POST"):
+            g.user_id = "admin-1"
+            g.user_school_id = "school-9"
+            resp = self._view(adm.assessment_period_delete)("p-1")
+        assert seen["delete_school"] == "school-9"
+        assert seen["period"] == "p-1"
+        assert resp.status_code == 302

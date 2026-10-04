@@ -154,12 +154,22 @@ class Config:
     # a release. `DEPLOY_ALERT_MIN_COMMITS` is the "more than a few commits" line,
     # and the interval is six hours — 12 cheap `git` calls a day on a 1 vCPU box.
     DEPLOY_ALERT_MIN_COMMITS = env_int("DEPLOY_ALERT_MIN_COMMITS", 5)
+    #: The "more than a few" line for account-create retries (a struggling GoTrue),
+    #: on the same channel and for the same reason: it must be arming-able without a
+    #: release, because the box it is about is the one that cannot deploy.
+    DEPLOY_ALERT_MIN_AUTH_RETRIES = env_int("DEPLOY_ALERT_MIN_AUTH_RETRIES", 5)
     DEPLOY_ALERT_INTERVAL_SECONDS = env_int("DEPLOY_ALERT_INTERVAL_SECONDS", 6 * 3600)
 
     #: How often the server closes sittings whose deadline has passed. The exam
     #: page's countdown is a display; this is the enforcement, so it runs whether or
     #: not a browser is still open (app/services/deadline_service.py).
     DEADLINE_SWEEP_INTERVAL_SECONDS = env_int("DEADLINE_SWEEP_INTERVAL_SECONDS", 60)
+    #: How often every exam's assessment-period tag is re-derived from the calendar
+    #: (app/services/period_reconcile_service.py). A day: the write doors already
+    #: keep the tags current for everything the app writes, and this only catches a
+    #: tag written around a door (SQL, a repair script).
+    PERIOD_RECONCILE_INTERVAL_SECONDS = env_int(
+        "PERIOD_RECONCILE_INTERVAL_SECONDS", 86400)
     #: Where the last-alert record is kept. Defaults to Flask's instance folder.
     DEPLOY_ALERT_STATE_DIR = env_str("SCANGRADE_ALERT_STATE_DIR", "") or None
 

@@ -2,13 +2,15 @@
 {% from "shared/_assessment_period_reasons.html" import reason_note %}
 {# Kalender penilaian sekolah: UTS, UAS, Try Out, Asesmen Sekolah.
 
-   Satu halaman, dua pembaca, dan yang membedakan keduanya adalah *kata kerja*:
+   Satu halaman, beberapa pembaca, dan yang membedakan mereka adalah *kata kerja*:
    kepala sekolah membaca kalendernya tanpa satu pun tombol yang menulis, sedangkan
-   wakil kepala sekolah menyusunnya. Formulir di bawah hanya digambar saat
-   `can_write` — tetapi wewenangnya tidak bergantung pada itu: setiap route POST-nya
-   berada di prefiks `/vice-principal/*` di belakang `vice_principal_required`, jadi
-   halaman yang menggambar formulirnya pun tetap ditolak kalau pembacanya kepala
-   sekolah. #}
+   wakil kepala sekolah **dan admin sekolah** menyusunnya. Formulir di bawah hanya
+   digambar saat `can_write` — tetapi wewenangnya tidak bergantung pada itu: setiap
+   route POST-nya berada di prefiks penulisnya (di belakang `vice_principal_required`
+   atau `admin_sekolah_required`), jadi halaman yang menggambar formulirnya pun tetap
+   ditolak kalau pembacanya kepala sekolah. Karena ada dua pintu tulis, tujuan
+   formulirnya datang dari pemanggil (`period_save_url`/`period_delete_base`) — tidak
+   ada satu prefiks yang ditulis mati di sini. #}
 {% block title %}{{ 'Periode Penilaian' if lang == 'id' else 'Assessment Periods' }} - ScanGrade{% endblock %}
 {% block page_title %}{{ 'Periode Penilaian' if lang == 'id' else 'Assessment Periods' }}{% endblock %}
 {% block content %}
@@ -44,7 +46,7 @@
     <div class="card p-5">
         <h2 class="font-extrabold text-surface-800 mb-1" x-text="t('Susun periode','Set a period')"></h2>
         <p class="text-xs text-surface-500 mb-4" x-text="t('Tanggal memakai kalender sekolah. Mengedit periode tidak mengubah tanggal periode lain.','Dates use the school calendar. Editing one period never changes the dates of another.')"></p>
-        <form method="POST" action="/vice-principal/assessment-periods/save" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <form method="POST" action="{{ period_save_url }}" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <label class="text-xs font-bold text-surface-600">
                 <span x-text="t('Jenis','Kind')"></span>
                 <select name="kind" required class="mt-1 w-full px-3 py-2 border border-surface-200 rounded-xl text-sm text-surface-700">
@@ -111,7 +113,7 @@
                         </td>
                         {% if can_write %}
                         <td class="px-4 py-2.5">
-                            <form method="POST" action="/vice-principal/assessment-periods/{{ p.id }}/delete" class="inline"
+                            <form method="POST" action="{{ period_delete_base }}/{{ p.id }}/delete" class="inline"
                                   onsubmit="return confirm('{{ 'Hapus periode ini?' if lang == 'id' else 'Delete this period?' }}')">
                                 <button type="submit" class="text-rose-600 hover:text-rose-700" title="{{ 'Hapus' if lang == 'id' else 'Delete' }}"><i class="fas fa-trash"></i></button>
                             </form>
