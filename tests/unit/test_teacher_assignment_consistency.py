@@ -176,9 +176,14 @@ class TestTheReadersAgree:
             "reader the dashboard uses")
 
     def test_the_students_page_scopes_to_assigned_classes(self):
-        body = TEACHER_PY.split("def students(", 1)[1].split("\n@teacher_bp", 1)[0]
-        assert "assigned_class_ids(" in body, (
-            "/teacher/students must resolve the teacher's assigned classes")
-        assert "students_in_classes(" in body, (
+        # The route delegates to `_grade_table` / `_grade_roster_context` now (the
+        # grade table's shared read), so the scoping lives there, not in the thin
+        # route body: a guru's subjects come from their own pairs, and the pupils
+        # are narrowed to the classes those pairs name.
+        roster = TEACHER_PY.split("def _grade_roster_context(", 1)[1].split("\ndef ", 1)[0]
+        assert "current_pairs(" in roster, (
+            "/teacher/students must resolve the teacher's own assignment pairs")
+        table = TEACHER_PY.split("def _grade_table(", 1)[1].split("\ndef ", 1)[0]
+        assert "students_in_classes(" in table, (
             "/teacher/students lists the whole school because it never narrows "
             "the pupils to the teacher's classes")

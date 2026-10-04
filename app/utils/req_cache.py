@@ -320,6 +320,78 @@ def invalidate_class_subjects(class_id):
     invalidate(class_subjects_key(class_id))
 
 
+def class_teachers_key(class_id):
+    return f"classteachers:{class_id}"
+
+
+def _teacher_map(rows, names, year_name):
+    """``{subject_id: [teacher name, …]}`` from assignment rows and an id→name map.
+
+    Pure, so the two rules that matter can be read and tested without a database:
+    the **active-pair rule** (`teacher_assignments.row_is_active` — `status` and
+    the year) decides which rows name a teacher at all, and a row whose teacher
+    has no resolved name is dropped rather than printing a blank beside the
+    subject. Two teachers on one subject are both named, once each.
+    """
+    from app.services import teacher_assignments as ta
+    out: dict[str, list[str]] = {}
+    for row in rows or []:
+        if not ta.row_is_active(row, year_name):
+            continue
+        subject_id = row.get("subject_id")
+        teacher_id = row.get("teacher_id")
+        if not subject_id or not teacher_id:
+            continue
+        name = names.get(str(teacher_id))
+        if not name:
+            continue
+        bucket = out.setdefault(str(subject_id), [])
+        if name not in bucket:
+            bucket.append(name)
+    for bucket in out.values():
+        bucket.sort()
+    return out
+
+
+def teachers_for_class(school_id, class_id):
+    """The teacher assigned to each subject one class takes, in one cached read.
+
+    The pupil dashboard names the teacher beside each subject, and every pupil in
+    the class needs the same answer — so this is read once per class (like
+    `subjects_for_class`) rather than once per pupil. The pairs are the admin's
+    own `teacher_assignments` rows for this school and class, filtered by the one
+    active-pair rule the rest of the app uses, and the names come from a single
+    `profiles` read. Fails to an empty map, which the card reads as "no teacher
+    named yet" rather than a blank.
+    """
+    if not school_id or not class_id:
+        return {}
+
+    def load():
+        from app.utils.supabase_client import get_supabase
+        from app.services import teacher_assignments as ta
+        try:
+            supabase = get_supabase()
+            rows = (supabase.table("teacher_assignments")
+                    .select("teacher_id, subject_id, status, school_year")
+                    .eq("school_id", school_id).eq("class_id", class_id)
+                    .execute().data) or []
+            year = ta.active_school_year(supabase, school_id)
+            teacher_ids = sorted({str(r["teacher_id"]) for r in rows
+                                  if r.get("teacher_id")})
+            names = {}
+            if teacher_ids:
+                profs = (supabase.table("profiles").select("id, full_name")
+                         .in_("id", teacher_ids).execute().data) or []
+                names = {str(p["id"]): (p.get("full_name") or "") for p in profs}
+            return _teacher_map(rows, names, (year or {}).get("name"))
+        except Exception as e:
+            logger.debug("teachers_for_class(%s) failed: %s", class_id, e)
+            return {}
+
+    return ttl(class_teachers_key(class_id), ASSIGNMENT_TTL, load)
+
+
 def teacher_assignments_key(teacher_id, school_id):
     return f"tassign:{teacher_id}:{school_id}"
 
@@ -356,15 +428,21 @@ def teacher_assignments_for(teacher_id, school_id):
     return ttl(teacher_assignments_key(teacher_id, school_id), ASSIGNMENT_TTL, load)
 
 
-def invalidate_teacher_assignments(teacher_id, school_id):
+def invalidate_teacher_assignments(teacher_id, school_id, class_ids=None):
     """Call from every writer of a teacher_assignments row.
 
-    An added or removed assignment moves two cached things: the teacher's own
-    list, and the school's subject count that every student dashboard reads. A
-    teacher who has just assigned a class must see it immediately, so the write
-    invalidates rather than waiting out the TTL.
+    An added or removed assignment moves three cached things: the teacher's own
+    list, the school's subject count that every student dashboard reads, and the
+    per-class teacher map the pupil's card names subjects from. A teacher who has
+    just been assigned a class must see it immediately, so the write invalidates
+    rather than waiting out the TTL. `class_ids` is optional because some callers
+    (a teacher editing their own list) know only the teacher; those rely on the
+    short TTL, while the admin's matrix editor passes the classes it touched.
     """
     if teacher_id and school_id:
         invalidate(teacher_assignments_key(teacher_id, school_id))
     if school_id:
         invalidate(subject_count_key(school_id))
+    for class_id in (class_ids or []):
+        if class_id:
+            invalidate(class_teachers_key(class_id))

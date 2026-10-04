@@ -2458,7 +2458,8 @@ def teacher_assignments(teacher_id):
 
     # Both caches the door is read through: the teacher's own list and the
     # school's, so the exam builder's dropdown reflects the new matrix at once.
-    invalidate_teacher_assignments(teacher_id, sid)
+    invalidate_teacher_assignments(teacher_id, sid,
+                                   class_ids=[c for c, _s in pairs])
     invalidate_school(sid)
     added = result.get("added_count", 0)
     removed = result.get("removed_count", 0)
@@ -2513,7 +2514,8 @@ def create_teacher():
             if not ok:
                 flash(f"Guru dibuat, tetapi penugasan gagal: {result.get('reason')}",
                       "warning")
-            invalidate_teacher_assignments(uid, sid)
+            invalidate_teacher_assignments(uid, sid,
+                                           class_ids=[c for c, _s in pairs])
             invalidate_school(sid)
         log_activity("create", "teacher", uid, new_data={"full_name": nama, "employee_id": nip}, user_id=g.user_id)
         flash(f"Guru berhasil ditambahkan. Email: {user_email}, Password: {password}", "success")
@@ -2583,7 +2585,8 @@ def edit_teacher(teacher_id):
             if not ok:
                 flash(f"Penugasan tidak tersimpan: {result.get('reason')}", "warning")
             else:
-                invalidate_teacher_assignments(teacher_id, sid)
+                invalidate_teacher_assignments(teacher_id, sid,
+                                               class_ids=[c for c, _s in pairs])
                 invalidate_school(sid)
         log_activity("update", "teacher", teacher_id, new_data={**data, **profile_data}, user_id=g.user_id)
         flash("Guru berhasil diperbarui", "success")
