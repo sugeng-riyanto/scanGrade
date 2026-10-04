@@ -4,6 +4,10 @@
    the duration below then falls back to the app's own default hour rather than
    silently reading a new paper as Unlimited. #}
 {% set builder_defaults = builder_defaults if builder_defaults is defined else {} %}
+{# The subject→classes map the admin's matrix produces. `None` means the reader
+   is not scoped (a school admin), so the page offers every class for every
+   subject; an empty mapping would wrongly hide the whole grid. #}
+{% set cbs = classes_by_subject if classes_by_subject is defined else none %}
 {% block title %}{{ 'Edit' if exam else 'Create' }} Exam - ScanGrade{% endblock %}
 {# `page_title` is defined here and rendered by nothing — base.html has no such
    block — so it stays a single string rather than growing a toggle it can never
@@ -56,6 +60,11 @@
                 // it. (Single quotes, deliberately: this attribute is delimited
                 // by double quotes, and a stray one ends it.)
                 subjectAuto: {{ 'true' if (not exam and builder_defaults.subject_id) else 'false' }},
+                // The subject the Target Classes grid follows. Seeded from the
+                // saved paper (or the server's default) and updated by the radios
+                // below, so a class can be shown for a subject only when the
+                // admin's matrix assigned that pair.
+                subjectSel: '{{ exam.subject_id if exam else (builder_defaults.subject_id or '') }}',
                 classAuto: {{ 'true' if (not exam and builder_defaults.class_ids) else 'false' }},
                 durationAuto: {{ 'true' if not exam else 'false' }},
                 get step1Done() { return this.examTitle.trim().length > 0 && this.hasClasses; },
@@ -641,7 +650,7 @@
                                 {% for s in subjects %}
                                 <label class="flex items-center gap-2 p-2.5 rounded-xl border-2 cursor-pointer transition border-slate-200 bg-white hover:border-slate-300">
                                     <input type="radio" name="subject_id" value="{{ s.id }}" class="w-4 h-4 text-primary-600 border-slate-300 focus:ring-primary-500"
-                                           @change="subjectAuto=false"
+                                           @change="subjectAuto=false; subjectSel='{{ s.id }}'"
                                            {{ 'checked' if (exam and exam.subject_id == s.id) or (not exam and builder_defaults.subject_id == s.id) else '' }}>
                                     <span class="text-sm font-bold text-slate-700">{{ s.name }}</span>
                                     {% if not exam and builder_defaults.subject_id == s.id %}
@@ -686,25 +695,43 @@
                                left unlimited — one conditional render away from saving
                                60 and silently converting the paper. #}
                             {% set dur = duration_facts(exam.duration_minutes) if exam else duration_facts(builder_defaults.get('duration_minutes', 60)) %}
-                            <select name="duration_minutes" @change="durationAuto=false"
-                                    class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-500 font-bold transition">
-                                {% for m in [10,15,20,25,30,40,45,50,60,75,90,100,120,150,180] %}
-                                <option value="{{ m }}" {% if not dur.unlimited and dur.minutes == m %}selected{% endif %} x-text="'{{ m }} ' + t('menit','minutes')">{{ m }} minutes</option>
-                                {% endfor %}
-                                 <option value="0" {% if dur.unlimited %}selected{% endif %} x-text="t('Tak terbatas','Unlimited')">Unlimited</option>
-                            </select>
-                            <p class="text-xs text-slate-400 mt-1" x-text="t('Dihitung dari saat murid mulai menegerjakan, dan boleh melewati Jendela Berakhir di atas.','Counted from the moment the student starts, and it may extend beyond the assignment window end above.')"></p>
+                            {# A number the teacher types, in five-minute steps, opening on the
+                               app's hour. It used to be a fixed <select>, so "any number of
+                               minutes" was impossible. The helper below names the one special
+                               value: 0 is the Unlimited branch `duration_facts` and `deadline()`
+                               already read — writing 60 for a stored zero is the defect that
+                               turned an open-ended paper into an hour. #}
+                            <div x-data="{ minutes: {{ dur.minutes }} }">
+                            <input type="number" name="duration_minutes" min="0" max="600" step="5"
+                                   x-model.number="minutes" @change="durationAuto=false"
+                                   value="{{ dur.minutes }}"
+                                   class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-500 font-bold transition">
+                            <p class="text-xs text-slate-400 mt-1">
+                                <span class="font-bold text-emerald-600" x-show="minutes > 0" x-text="minutes + ' ' + t('menit','minutes')"></span>
+                                <span class="font-bold text-emerald-600" x-show="!minutes" x-text="t('Tak terbatas','Unlimited')"></span>
+                                <span x-text="t(' — dihitung dari saat murid mulai mengerjakan, dan boleh melewati Jendela Berakhir di atas. Isi 0 untuk tanpa batas.',' — counted from the moment the student starts, and it may extend beyond the assignment window end above. Enter 0 for unlimited.')"></span>
+                            </p>
+                            </div>
                         </div>
                     </div>
 
                     <div>
                         <label class="block text-sm font-extrabold text-slate-700 mb-2" x-text="t('Kelas Tujuan','Target Classes')"></label>
                         {% if classes %}
-                        <div class="grid grid-cols-2 gap-1.5 sm:gap-2" x-data='{ selected: {{ ((exam.class_ids if exam else builder_defaults.class_ids) or []) | tojson }} }'>
+                        {# The grid follows the admin's matrix: a class is offered for a
+                           subject only when the admin assigned that pair. `cbs` is the
+                           subject→classes map; `none` marks an unscoped reader (an
+                           admin), who sees every class. A hidden class is disabled too,
+                           so switching subjects cannot submit a pair the write guard
+                           would refuse. #}
+                        <div class="grid grid-cols-2 gap-1.5 sm:gap-2"
+                             x-data='targetClasses({{ cbs | tojson }}, {{ ((exam.class_ids if exam else builder_defaults.class_ids) or []) | tojson }}, {{ 'false' if cbs is none else 'true' }})'>
                             {% for c in classes %}
-                            <label class="flex items-center gap-2 p-2.5 rounded-xl border-2 cursor-pointer transition"
+                            <label x-show="hasClass('{{ c.id }}')" x-cloak
+                                   class="flex items-center gap-2 p-2.5 rounded-xl border-2 cursor-pointer transition"
                                    :class="selected.includes('{{ c.id }}') ? 'border-primary-400 bg-primary-50' : 'border-slate-200 bg-white hover:border-slate-300'">
                                  <input type="checkbox" name="class_ids" value="{{ c.id }}" class="w-4 h-4 text-primary-600 border-slate-300 rounded focus:ring-primary-500"
+                                        :disabled="!hasClass('{{ c.id }}')"
                                         {{ 'checked' if (exam and c.id|string in (exam.class_ids or [])|map('string')|list) or (not exam and c.id in builder_defaults.class_ids) else '' }}
                                         @change="classAuto=false; setTimeout(() => document.querySelectorAll('input[name=class_ids]:checked').length > 0 ? window.dispatchEvent(new CustomEvent('classes-selected')) : '', 50)">
                                 <span class="text-sm font-bold text-slate-700">{{ c.name }}</span>
@@ -1439,8 +1466,11 @@
                     block_right_click: {{ 'true' if (exam.get('block_right_click') if exam else True) else 'false' }},
                     auto_submit_on_max: {{ 'true' if (exam.get('auto_submit_on_max') if exam else True) else 'false' }},
                     allow_calculator: {{ 'true' if (exam.get('allow_calculator') if exam else False) else 'false' }},
-                    block_screenshot: {{ 'true' if (exam.get('block_screenshot') if exam else False) else 'false' }},
-                    lock_pending_resume: {{ 'true' if (exam.get('lock_pending_resume') if exam else False) else 'false' }},
+                    {# Both default *on* for a new paper: they are the safe setting, and
+                       a teacher should not have to know to switch them on. A stored
+                       row still wins — the value the school saved is the value shown. #}
+                    block_screenshot: {{ 'true' if (exam.get('block_screenshot') if exam else True) else 'false' }},
+                    lock_pending_resume: {{ 'true' if (exam.get('lock_pending_resume') if exam else True) else 'false' }},
                     resume_code_limit: {{ exam.get('resume_code_limit', 2) if exam else 2 }},
                 })">
                     <div class="flex items-center justify-between">
@@ -1543,21 +1573,13 @@
                 </div>
 
                 <div class="flex flex-col sm:flex-row justify-end gap-2">
-                    <!-- Saving a published exam keeps it published (see
-                         app/routes/teacher.py `_publication_state`); the tooltip has
-                         to say so, or a teacher believes Save withdraws the paper. -->
-                    <button type="submit" name="action" value="save_active"
-                            class="bg-primary-600 hover:bg-primary-700 text-white px-5 py-3 rounded-xl font-extrabold text-sm transition flex items-center gap-2"
-                            {% if exam and exam.is_published %}
-                            :title="t('Simpan perubahan — ujian tetap terbit untuk siswa','Save changes — the exam stays published for students')"
-                            {% else %}
-                            :title="t('Simpan sebagai draf — siswa belum bisa melihatnya','Save as a draft — students cannot see it yet')"
-                            {% endif %}>
-                        <i class="fas fa-save"></i><span x-text="t('Simpan','Save')"></span>
-                    </button>
+                    <!-- One button, as asked: it saves *and* publishes in a single
+                         step, so there is no way to save and forget to send, or to
+                         send without saving. Saving a published exam keeps it
+                         published (app/routes/teacher.py `_publication_state`). -->
                     <button type="submit" name="action" value="publish"
                             class="bg-gradient-to-r from-emerald-600 to-emerald-500 text-white px-5 py-3 rounded-xl font-extrabold shadow-lg hover:from-emerald-700 hover:to-emerald-600 transition flex items-center gap-2"
-                            :title="t('Publikasikan sekarang — siswa langsung bisa mengerjakannya','Publish now — students can start immediately')">
+                            :title="t('Simpan dan publikasikan — siswa langsung bisa mengerjakannya','Save and publish — students can start immediately')">
                         <i class="fas fa-paper-plane"></i><span x-text="t('Publish &amp; Kirim ke Kelas','Publish &amp; Send to Classes')"></span>
                     </button>
                 </div>
@@ -2486,6 +2508,23 @@ function examRoster(examId) {
 }
 
 function antiCheatSettings(cfg) { return cfg; }
+
+// The Target Classes grid. `map` is the admin's subject→classes matrix; `null`
+// means the reader is not scoped (a school admin), so every class is offered.
+// `subjectSel` is inherited from the enclosing form scope (Alpine merges nested
+// scopes), so the grid re-filters the moment the subject radio changes.
+function targetClasses(map, selected, scoped) {
+    return {
+        map: map,
+        selected: selected,
+        scoped: scoped,
+        hasClass(id) {
+            if (!this.scoped || this.map === null) return true;
+            const ids = this.map[this.subjectSel] || [];
+            return ids.map(String).indexOf(String(id)) !== -1;
+        },
+    };
+}
 
 // The grade-component picker. A component belongs to a subject's weight policy,
 // so the list follows whichever subject radio is checked. The saved value is

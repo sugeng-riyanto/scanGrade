@@ -124,14 +124,17 @@ def _duration_branch(html):
     return found[0]
 
 
-SELECT = re.compile(r"<select name=\"duration_minutes\".*?</select>", re.S)
-OPTION = re.compile(r"<option value=\"(\d+)\"([^>]*)>")
+# The builder's duration is a free number input ("type any number of minutes",
+# step 5) rather than a fixed <select>, so the value it carries is the input's
+# `value` attribute — one number, read the same way whatever the branch.
+DURATION_INPUT = re.compile(r'<input[^>]*name="duration_minutes"[^>]*>', re.S)
 
 
 def _selected_minutes(html):
-    select = SELECT.search(html)
-    assert select, "the builder no longer has a duration select"
-    return [v for v, attrs in OPTION.findall(select.group(0)) if "selected" in attrs]
+    tag = DURATION_INPUT.search(html)
+    assert tag, "the builder no longer has a duration input"
+    found = re.search(r'value="([^"]*)"', tag.group(0))
+    return [found.group(1)] if found else []
 
 
 # ── 1. the rule itself ──────────────────────────────────────────────────────
@@ -213,26 +216,25 @@ class TestTheDashboard:
 # ── 4. the builder's own form ───────────────────────────────────────────────
 
 class TestTheBuilderForm:
-    def test_an_unlimited_paper_selects_unlimited_not_sixty(self, app):
+    def test_an_unlimited_paper_shows_zero_not_sixty(self, app):
         html = _render_form(app, _exam(duration_minutes=0))
         assert _selected_minutes(html) == ["0"], (
-            "the form marks the 60-minute option selected on a paper the teacher "
-            "left unlimited, so the next save silently converts it"
+            "the form shows 60 on a paper the teacher left unlimited, so the next "
+            "save silently converts it"
         )
 
-    def test_a_stored_duration_selects_its_own_option(self, app):
+    def test_a_stored_duration_shows_its_own_number(self, app):
         assert _selected_minutes(_render_form(app, _exam(duration_minutes=45))) == ["45"]
 
-    def test_a_paper_stored_without_a_duration_selects_unlimited(self, app):
+    def test_a_paper_stored_without_a_duration_shows_unlimited(self, app):
         """A NULL column reads as unlimited in the arithmetic (`or 0`), so the form
-        has to agree: a select with nothing chosen falls back to its first option —
-        10 minutes — and the next save writes a duration onto a paper the teacher
-        left open-ended."""
+        has to agree: an input that fell back to a first option would write a
+        duration onto a paper the teacher left open-ended."""
         assert _selected_minutes(_render_form(app, _exam(duration_minutes=None))) == ["0"]
 
     def test_a_new_paper_still_opens_on_the_forms_default_hour(self, app):
         """The fabricated 60 was wrong about a *stored* zero, not about a new paper:
-        a teacher opening the form for a new exam still finds 60 minutes chosen."""
+        a teacher opening the form for a new exam still finds 60 minutes."""
         assert _selected_minutes(_render_form(app, None)) == ["60"]
 
 

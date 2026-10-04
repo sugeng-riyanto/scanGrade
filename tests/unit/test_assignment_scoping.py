@@ -180,15 +180,19 @@ def test_the_rule_reads_the_year_and_status_the_migration_adds():
 
 
 def test_the_dropdown_fallback_is_gated_on_the_admin_role():
-    """`if not subjects:` alone is the bug: it made 'no rows' mean 'the school'."""
+    """A whole-school read is the *admin's* privilege, not a guru's default.
+
+    The fallback lives in `_builder_scope` (both builder doors share it). The
+    gate has to come **before** the school-wide reads: a rewrite that read first
+    and asked later would offer every class and subject to an unassigned teacher.
+    """
     src = _source()
-    call = src.split("def exam_form(")[1].split("\ndef ")[0]
-    assert "if not subjects:" in call, "the subjects fallback disappeared entirely"
-    # The gate is the line (or two) immediately before the fallback. Looking
-    # *before* rather than after is deliberate: the fallback's own body also
-    # mentions `subjects`, so a check that scanned forward would pass on any
-    # rewrite that kept the word.
-    before = call.split("if not subjects:")[0].rstrip().splitlines()[-2:]
-    assert any("is_scoped_role" in line for line in before), (
+    body = src.split("def _builder_scope(")[1].split("\ndef ")[0]
+    assert "is_scoped_role" in body, (
         "the empty-assignment fallback is unconditional — an unassigned teacher "
         "is offered every class and subject in the school")
+    gate = body.index("is_scoped_role")
+    assert body.index('supabase.table("subjects")') > gate, (
+        "the whole-school subject read is not gated on the admin role")
+    assert body.index('supabase.table("classes")') > gate, (
+        "the whole-school class read is not gated on the admin role")
