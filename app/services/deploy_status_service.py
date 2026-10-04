@@ -298,6 +298,10 @@ GATE_KEYS = frozenset({
     #: (`deploy/touch_gate.py`). A control the stylesheet promised would be at
     #: least 44px on a finger measured under it.
     "touch_gate",
+    #: The pupil's exam page laid out on a real headless browser
+    #: (`deploy/exam_render_gate.py`). A blank exam page, or a page error while it
+    #: loaded, that every other gate would pass.
+    "exam_render_gate",
     "schema_gate",
 })
 

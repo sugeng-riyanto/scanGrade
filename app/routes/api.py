@@ -9,7 +9,10 @@ from datetime import datetime, timezone
 from flask import Blueprint, request, jsonify, g, render_template, redirect, send_file, current_app
 from app.utils.auth import login_required, get_supabase
 from app.utils.helpers import row_or_none
-from app.utils.exam_access import exam_sitting_allowed
+from app.utils.exam_access import (
+    exam_sitting_allowed, managed_exam, can_manage_exam,
+    EXAM_OK, EXAM_MISSING, EXAM_UNVERIFIABLE,
+)
 from app.utils import exam_window
 from app.utils import denials
 from app.utils import lock_health
@@ -28,6 +31,68 @@ from app.decorators.year_lock import open_year_required
 #: This module's own logger. `current_app.logger` needs a request, and the lock's
 #: fallback path must be able to say why it fell back from places that have none.
 logger = get_logger("api")
+
+#: How long a running OMR task stays claimable by the caller that started it. A
+#: sheet is read in seconds; an hour is generous headroom for a big ZIP, and the
+#: record is only used to answer "may this caller poll this task?".
+OMR_TASK_TTL_SECONDS = 3600
+
+
+def _guard_managed_exam(exam_id, columns="id,teacher_id,school_id"):
+    """``(exam, None)`` when the caller owns this paper or administers its school.
+
+    The scan routes take an `exam_id` from the request body and had *no* check on
+    it: any teacher could read a sheet into any paper in the database by posting
+    its id. This is the same rule the teacher UI already assumes (see
+    `exam_access.managed_exam`), answered as JSON because these are API routes.
+    """
+    exam, verdict = managed_exam(
+        get_supabase(), exam_id, g.user_id, g.get("user_role"), g.get("user_school_id"), columns
+    )
+    if verdict == EXAM_OK:
+        return exam, None
+    if verdict == EXAM_MISSING:
+        return None, (jsonify({"error": denials.NO_SUCH_EXAM}), 404)
+    if verdict == EXAM_UNVERIFIABLE:
+        return None, (jsonify({"error": denials.CANNOT_VERIFY_EXAM}), 403)
+    return None, (jsonify({"error": denials.NO_EXAM_ACCESS}), 403)
+
+
+def _register_omr_task(task_id, exam_id):
+    """Remember which caller may poll this task, and for which paper.
+
+    A Celery task id is a bearer token: anyone who knows it can read the result,
+    which carries a pupil's scanned answers. The id is only ever handed to the
+    caller that started the task, so the record is what lets the polling route ask
+    "is this yours?" rather than trusting the id alone.
+    """
+    from app.utils.kv_cache import cache_set
+    cache_set(f"omr_task:{task_id}",
+              {"user_id": g.user_id, "exam_id": exam_id or ""},
+              OMR_TASK_TTL_SECONDS)
+
+
+def _omr_task_caller_allowed(record):
+    """May the current caller poll the task this record describes?"""
+    if not record:
+        return False
+    if str(record.get("user_id") or "") == str(g.user_id):
+        return True
+    exam_id = record.get("exam_id")
+    if not exam_id:
+        return False
+    # An administrator who did not start the scan may still watch it, but only of
+    # a paper they administer — the same owner-or-school-admin rule, re-resolved
+    # against the row rather than trusted from the record.
+    try:
+        exam = row_or_none(
+            get_supabase().table("exams").select("id,teacher_id,school_id")
+            .eq("id", exam_id).maybe_single().execute()
+        )
+    except Exception:
+        return False
+    return can_manage_exam(g.user_id, g.get("user_role"), g.get("user_school_id"), exam)
+
 
 def _rate_limit(n):
     return limiter.limit(n) if limiter else (lambda f: f)
@@ -414,6 +479,14 @@ def violation_count():
 def scan_process():
     if g.get("user_role") not in ("guru", "admin_sekolah", "super_admin"):
         return jsonify({"error": "Hanya guru/admin yang boleh scan OMR"}), 403
+    # Bind the scan to a paper this caller may manage — checked before a byte is
+    # written or a task queued. An empty exam_id is `__custom__` mode on the scan
+    # page (OCR of an arbitrary sheet, no paper), which has nothing to bind to.
+    exam_id = request.form.get("exam_id", "")
+    if exam_id:
+        _exam, _err = _guard_managed_exam(exam_id)
+        if _err:
+            return _err
     """Process a scanned bubble sheet image and return detected answers.
 
     Security: validates extension, MIME type, image integrity, strips EXIF.
@@ -482,7 +555,6 @@ def scan_process():
     except Exception as e:
         return jsonify({"error": "Gambar tidak valid atau corrupt", "detail": str(e)[:100]}), 422
 
-    exam_id = request.form.get("exam_id", "")
     total_questions = int(request.form.get("total_questions", 50))
     # Which page of the sheet this photograph is. A 2-page LJK (over 80
     # questions) is scanned one page at a time; without this the reader could
@@ -513,6 +585,9 @@ def scan_process():
             exam_id=exam_id,
             page_index=page_index,
         )
+        # The task id is a bearer token for a pupil's scanned answers: only the
+        # caller that started it may poll it (see `_omr_task_caller_allowed`).
+        _register_omr_task(task.id, exam_id)
         current_app.logger.info("OMR task enqueued: %s", task.id)
         return jsonify({
             "async": True,
@@ -684,6 +759,12 @@ def vision_canvas_ocr():
 @require_role(*STAFF_ROLES)
 def scan_task_status(task_id):
     """Poll Celery task status and get result when done."""
+    from app.utils.kv_cache import cache_get
+    # The id is a bearer token for a pupil's scanned answers. Only the caller that
+    # started the task — or an administrator of the paper it belongs to — may read
+    # its result; an unknown id is refused rather than polled.
+    if not _omr_task_caller_allowed(cache_get(f"omr_task:{task_id}")):
+        return jsonify({"error": "Task tidak ditemukan"}), 404
     from app.celery_app import celery_app
     task = celery_app.AsyncResult(task_id)
     response = {"task_id": task_id, "status": task.state}
@@ -723,6 +804,10 @@ def scan_bulk():
         return jsonify({"error": "Hanya file ZIP yang didukung"}), 400
 
     exam_id = request.form.get("exam_id", "")
+    if exam_id:
+        _exam, _err = _guard_managed_exam(exam_id)
+        if _err:
+            return _err
     total_questions = int(request.form.get("total_questions", 50))
 
     _cleanup_scan_tmp()
@@ -743,6 +828,7 @@ def scan_bulk():
             exam_id=exam_id,
             page_index=max(0, int(request.form.get("page", 0) or 0)),
         )
+        _register_omr_task(task.id, exam_id)
         current_app.logger.info("Bulk OMR task enqueued: %s (%d images)", task.id, 0)
         return jsonify({
             "async": True,
@@ -774,6 +860,11 @@ def scan_bulk_save():
     exam_id = data.get("exam_id")
     if not exam_id:
         return jsonify({"error": "exam_id required"}), 400
+    # Saving a class of sheets writes into submissions of this paper: the writable
+    # door needs the writable rule, not just `open_year_required` above.
+    _exam, _err = _guard_managed_exam(exam_id)
+    if _err:
+        return _err
 
     supabase = get_supabase()
     saved = []

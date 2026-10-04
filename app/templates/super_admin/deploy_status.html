@@ -751,6 +751,7 @@
                                 {% elif q.gate_key == 'claims_gate' %}<span x-text="t('gerbang klaim','the claims gate')"></span>
                                 {% elif q.gate_key == 'perf_gate' %}<span x-text="t('gerbang kinerja','the performance gate')"></span>
                                 {% elif q.gate_key == 'touch_gate' %}<span x-text="t('gerbang sentuh','the touch gate')"></span>
+                                {% elif q.gate_key == 'exam_render_gate' %}<span x-text="t('gerbang render halaman ujian','the exam page render gate')"></span>
                                 {% elif q.gate_key == 'schema_gate' %}<span x-text="t('gerbang skema basis data','the database schema gate')"></span>
                                 {% else %}<span x-text="t('tidak diketahui','unknown')"></span>
                                 {% endif %}
@@ -1256,7 +1257,9 @@
                     {% if A.to %}
                     <span x-text="t('Halaman ini hanya terbaca kalau ada yang membukanya, jadi peringatannya dikirim sendiri: sebuah email begitu runner tertinggal lebih dari','This page only reads when somebody opens it, so the alert is sent for you: one email when the runner falls more than')"></span>
                     <strong>{{ A.min_commits }}</strong>
-                    <span x-text="t('commit dari checkout, atau begitu runner terpasang tidak lagi bisa memeriksa rilis.','commits behind the checkout, or when the installed runner can no longer check a release.')"></span>
+                    <span x-text="t('commit dari checkout, begitu runner terpasang tidak lagi bisa memeriksa rilis, atau begitu pembuatan akun diulang lebih dari','commits behind the checkout, when the installed runner can no longer check a release, or when account creates are retried more than')"></span>
+                    <strong>{{ A.min_retries }}</strong>
+                    <span x-text="t('kali — tanda layanan autentikasi sedang tersendat.','times — the sign of a struggling auth service.')"></span>
                     {% else %}
                     <span x-text="t('Peringatan belum bisa dikirim: tidak ada alamat tujuan yang bisa ditentukan.','Alerts cannot be sent yet: no destination address could be resolved.')"></span>
                     {% if A.source_detail %}<code class="block mt-2 font-mono text-xs break-all">{{ A.source_detail }}</code>{% endif %}
@@ -1301,8 +1304,10 @@
                                 {% elif A.last.kind == 'copy_drifted' %}<span x-text="t('runner terpasang adalah salinan yang menyimpang','the installed runner is a drifted copy')"></span>
                                 {% elif A.last.kind == 'runner_behind' %}<span x-text="t('runner tertinggal dari checkout','the runner is behind the checkout')"></span>
                                 {% elif A.last.kind == 'checkout_behind' %}<span x-text="t('checkout tertinggal dari origin/main','the checkout is behind origin/main')"></span>
+                                {% elif A.last.kind == 'auth_retries' %}<span x-text="t('pembuatan akun diulang-ulang — layanan autentikasi tersendat','account creates are being retried — the auth service is struggling')"></span>
                                 {% else %}<span x-text="t('tidak diketahui','unknown')"></span>{% endif %}
-                                {% if A.last.commits is not none %} — <strong>{{ A.last.commits }}</strong> <span x-text="t('commit','commits')"></span>{% endif %}
+                                {% if A.last.kind == 'auth_retries' and A.last.retries is not none %} — <strong>{{ A.last.retries }}</strong> <span x-text="t('percobaan ulang','retries')"></span>
+                                {% elif A.last.commits is not none %} — <strong>{{ A.last.commits }}</strong> <span x-text="t('commit','commits')"></span>{% endif %}
                             </span>
                             {% else %}
                             <span class="text-xs text-surface-500" x-text="t('belum ada peringatan yang dikirim dari server ini.','nothing has been sent from this server yet.')"></span>
@@ -1711,6 +1716,94 @@
                 </div>
 
                 <p class="text-xs text-surface-500 mt-3 leading-relaxed" x-text="t('Penanda ditulis sekali tiap worker saat store tidak terjangkau, lalu dihapus lagi oleh kunci pertama yang berhasil — jadi satu baris berumur sepuluh menit berarti gangguan yang masih berjalan, bukan riwayat lama. Angka di kartu ini menghitung pengambilan kunci draft saja, sedangkan store yang sama juga membawa pembatasan laju; dan penanda hidup di perangkat ini, jadi worker di host lain tidak terlihat dari sini.','The marker is written once per worker while the store is unreachable and deleted again by the first lock that succeeds — so a line ten minutes old is an outage still running, not ancient history. The counts here cover the draft lock only, while the same store also carries the rate limits; and the marker lives on this appliance, so workers on another host are not visible here.')"></p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── account-create retries: is GoTrue hiccupping? ────────────────── -->
+    {#
+        `create_user_with_retry` repeats GoTrue's transient `Database error creating
+        new user`, and that repetition is invisible to the school: they see success,
+        and a box whose auth server is struggling is only noticed when a school says
+        "it keeps failing". `auth_health` records the retries and this card reads
+        them — per worker, plus the marker every worker leaves so a page landing on
+        any of the three sees the others'. Read freshly, like the lock store: "is
+        auth hiccupping right now" is not a thirty-second-old question.
+    #}
+    {% set AUTHD = {'key': 'clean', 'measured_at': None, 'recorded': False,
+                    'marker': {}, 'worker_retries': None, 'worker_exhausted': None,
+                    'worker_first_at': None, 'worker_last_at': None,
+                    'worker_reason': None, 'worker_cleared': None,
+                    'worker_cleared_at': None, 'state_file': None} %}
+    {% set AR = authretries if authretries is defined and authretries else AUTHD %}
+    {% set ARC = {
+        'clean': {'box': 'bg-emerald-50 border-emerald-200', 'text': 'text-emerald-800', 'icon': 'text-emerald-500'},
+        'recorded': {'box': 'bg-amber-50 border-amber-200', 'text': 'text-amber-800', 'icon': 'text-amber-500'}
+    }.get(AR.key, {'box': 'bg-surface-100 border-surface-200', 'text': 'text-surface-700', 'icon': 'text-surface-400'}) %}
+    {% set AM = AR.marker or {} %}
+    <div class="card p-5 border {{ ARC.box }}">
+        <div class="flex items-start gap-3">
+            <i class="fas fa-user-plus {{ ARC.icon }} mt-0.5"></i>
+            <div class="min-w-0 flex-1">
+                <div class="flex items-center gap-2 flex-wrap">
+                    <h2 class="font-extrabold {{ ARC.text }}" x-text="t('Percobaan Ulang Pembuatan Akun','Account-Create Retries')"></h2>
+                    <span class="text-xs text-surface-500">{{ AR.measured_at }}</span>
+                </div>
+                <p class="text-sm mt-1 leading-relaxed {{ ARC.text }}">
+                    {% if AR.key == 'clean' %}<span x-text="t('Tidak ada percobaan ulang yang tercatat: pembuatan akun mendarat pada percobaan pertama, jadi server akun (GoTrue) tidak sedang tersendat.','Nothing on record: account creates are landing on the first try, so the auth server (GoTrue) is not hiccupping.')"></span>
+                    {% else %}<span x-text="t('Setidaknya satu pembuatan akun memerlukan percobaan ulang karena GoTrue menjawab galat basis data yang bersifat sementara. Sekolah hanya melihat keberhasilannya — kotak ini yang menyimpan buktinya. Bila angka ini terus bertambah, periksa kesehatan GoTrue/Postgres di kotak itu sebelum ada sekolah yang melapor.','At least one account create needed a retry because GoTrue answered a transient database error. The school only saw the success — this box kept the evidence. If this number keeps rising, check GoTrue/Postgres on the box before a school reports it.')"></span>{% endif %}
+                </p>
+
+                <div class="mt-3 space-y-1.5 text-xs">
+                    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                        <span class="text-surface-500" x-text="t('Pembuatan yang butuh percobaan ulang','Creates needing a retry')"></span>
+                        <span class="font-bold {{ 'text-amber-700' if AR.worker_retries else 'text-surface-800' }}">{{ AR.worker_retries if AR.worker_retries is not none else '—' }}</span>
+                    </div>
+                    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                        <span class="text-surface-500" x-text="t('Percobaan ulang yang habis (akun tidak jadi)','Exhausted retries (no account made)')"></span>
+                        <span class="font-bold {{ 'text-rose-700' if AR.worker_exhausted else 'text-surface-800' }}">{{ AR.worker_exhausted if AR.worker_exhausted is not none else '—' }}</span>
+                    </div>
+                    {% if AR.worker_first_at %}
+                    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                        <span class="text-surface-500" x-text="t('Percobaan ulang pertama (worker ini)','First retry (this worker)')"></span>
+                        <code class="font-mono text-surface-700">{{ AR.worker_first_at }}</code>
+                    </div>
+                    {% endif %}
+                    {% if AR.worker_last_at %}
+                    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                        <span class="text-surface-500" x-text="t('Percobaan ulang terakhir (worker ini)','Last retry (this worker)')"></span>
+                        <code class="font-mono text-surface-700">{{ AR.worker_last_at }}</code>
+                    </div>
+                    {% endif %}
+                    {% if AR.worker_reason %}
+                    <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1">
+                        <span class="text-surface-500 shrink-0" x-text="t('Alasan terakhir','Last reason')"></span>
+                        <code class="font-mono text-surface-700 break-all text-right">{{ AR.worker_reason }}</code>
+                    </div>
+                    {% endif %}
+                    <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1">
+                        <span class="text-surface-500 shrink-0" x-text="t('Penanda di perangkat','Marker on the appliance')"></span>
+                        <span class="text-surface-700 text-right">
+                            {% if AM.key == 'ok' %}<span x-text="t('Ada — ditulis','Present, written')"></span> <code class="font-mono">{{ AM.at }}</code>{% if AM.worker %} <span x-text="t('oleh proses','by process')"></span> <code class="font-mono">{{ AM.worker }}</code>{% endif %}{% if AM.age_seconds is not none %} <span class="text-surface-500">({{ AM.age_seconds }} <span x-text="t('detik lalu','seconds ago')"></span>)</span>{% endif %}{% if AM.reason %} <span class="text-surface-500" x-text="t('sebab pertama:','first cause:')"></span> <code class="font-mono">{{ AM.reason }}</code>{% endif %}
+                            {% elif AM.key == 'absent' %}<span x-text="t('Tidak ada','None')"></span>
+                            {% elif AM.key == 'unreadable' %}<span class="text-amber-700" x-text="t('Ada dan tidak bisa dibaca','Present and unreadable')"></span>{% if AM.reason %} <code class="font-mono text-surface-500">{{ AM.reason }}</code>{% endif %}
+                            {% elif AM.key == 'malformed' %}<span class="text-amber-700" x-text="t('Ada dan isinya bukan rekaman','Present and not a record')"></span>{% if AM.reason %} <code class="font-mono text-surface-500">{{ AM.reason }}</code>{% endif %}
+                            {% else %}<span class="text-surface-500" x-text="t('Tidak terbaca','Unreadable')"></span>{% endif %}
+                        </span>
+                    </div>
+                    {% if AR.worker_cleared %}
+                    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                        <span class="text-surface-500" x-text="t('Penanda yang dibersihkan worker ini','Markers this worker cleared')"></span>
+                        <span class="font-bold text-surface-800">{{ AR.worker_cleared }}{% if AR.worker_cleared_at %} <code class="font-mono text-xs text-surface-500">{{ AR.worker_cleared_at }}</code>{% endif %}</span>
+                    </div>
+                    {% endif %}
+                    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                        <span class="text-surface-500" x-text="t('Berkas penanda','Marker file')"></span>
+                        <code class="font-mono text-surface-500 break-all text-right">{{ AR.state_file }}</code>
+                    </div>
+                </div>
+
+                <p class="text-xs text-surface-500 mt-3 leading-relaxed" x-text="t('Angka di kartu ini menghitung worker yang menjawab halaman; penanda ditulis sekali tiap worker saat percobaan ulang pertama dan dihapus lagi oleh pembuatan pertama yang langsung berhasil, jadi satu baris berumur lama berarti auth masih tersendat. Penanda hidup di perangkat ini, jadi worker di host lain tidak terlihat dari sini.','The counts cover the worker that answered this page; the marker is written once per worker on the first retry and deleted again by the first first-try success, so an old line means auth is still struggling. The marker lives on this appliance, so workers on another host are not visible here.')"></p>
             </div>
         </div>
     </div>
