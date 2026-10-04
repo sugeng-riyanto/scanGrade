@@ -333,18 +333,32 @@ class TestOnePointOwnsTheEnd:
     SOURCE = (ROOT / "app" / "services" / "deadline_service.py").read_text(encoding="utf-8")
 
     def test_the_deadline_arithmetic_is_the_modules_own(self):
-        """`exam_window` already answers this; a second answer is a second truth."""
-        assert "exam_window.deadline(" in self.SOURCE, (
-            "the sweep does not ask exam_window when the sitting ends"
+        """`attempt_status` already answers this; a second answer is a second truth.
+
+        The delegation moved one level deeper: the sweep asks `attempt_status`
+        rather than `exam_window` directly, so the sweep and the lock gate share
+        one answer to "when does this sitting end".
+        """
+        assert "attempt_status.deadline_of(" in self.SOURCE, (
+            "the sweep does not ask attempt_status when the sitting ends"
+        )
+        assert "exam_window.deadline(" not in self.SOURCE, (
+            "the sweep reaches past attempt_status for the arithmetic, which is a "
+            "second answer to the same question"
         )
         assert not re.search(r"timedelta\s*\(\s*minutes\s*=", self.SOURCE), (
             "the sweep recomputes the duration arithmetic instead of asking for it"
         )
 
     def test_the_grace_is_the_number_the_submit_route_accepts_within(self):
-        assert "LATE_GRACE_SECONDS" in self.SOURCE, (
+        """One grace, asked of the one place that applies it."""
+        assert "attempt_status.expired(" in self.SOURCE, (
             "the grace is not the one the submit route accepts papers within, so "
             "'accepted' and 'not yet closed' can drift apart"
+        )
+        assert "LATE_GRACE_SECONDS" not in self.SOURCE, (
+            "the sweep reads the grace constant itself instead of asking "
+            "attempt_status whether the sitting is over"
         )
 
     def test_the_row_is_written_by_the_one_writer(self):

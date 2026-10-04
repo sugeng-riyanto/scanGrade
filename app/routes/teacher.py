@@ -14,7 +14,10 @@ from app.utils.helpers import read_with_retry, row_or_none
 from app.decorators.security import require_school_access
 from app.decorators.year_lock import open_year_required
 from app.decorators.subscription import require_subscription
-from app.utils.exam_access import can_manage_exam, exam_class_ids
+from app.utils.exam_access import (
+    can_manage_exam, exam_class_ids,
+    managed_exam, EXAM_OK, EXAM_MISSING, EXAM_UNVERIFIABLE,
+)
 from app.services.export_service import export_to_xlsx, export_to_pdf
 from app.services.answer_sheet_generator import generate_answer_sheet
 from app.services.question_types import (
@@ -28,8 +31,11 @@ from app.services import mark_scheme
 from app.services import assignments as assignments_service
 from app.services import exam_media
 from app.services import exam_targets
+from app.services import assessment_periods
 from app.services import grading_annotations
 from app.services import grading_assist
+from app.services import exam_codes
+from app.services import attempt_timeline
 from app.services import invigilation
 from app.services import session_review
 from app.services import teacher_assignments as ta_service
@@ -37,6 +43,7 @@ from app.services.anti_cheat_service import (
     events_for_exam, events_for_student, leaving_summary,
 )
 from app.services.pdf_service import upload_pdf
+from app.services import pdf_service
 from app.services.audit_service import log_activity
 from app.utils.req_cache import (invalidate_school, invalidate_teacher_assignments,
                                  school_classes, school_subjects, teacher_assignments_for)
@@ -84,6 +91,23 @@ def _wants_json():
 #: reported from.
 NO_EXAM_ACCESS = denials.NO_EXAM_ACCESS
 NO_SUBMISSION_ACCESS = denials.NO_SUBMISSION_ACCESS
+
+
+def _off_calendar_message(period) -> str:
+    """The sentence a teacher reads when their window escapes the running period.
+
+    It names the period and its dates, because "outside the running period" is not
+    actionable without them: the teacher either moves the window or asks the deputy
+    to widen the calendar, and both need to see what the calendar currently says.
+    """
+    period = period or {}
+    name = period.get("name") or ""
+    start = period.get("start_date") or ""
+    end = period.get("end_date") or ""
+    window = f" ({name}: {start}\u2013{end})" if name or start or end else ""
+    return ("Jendela ujian berada di luar periode penilaian yang berjalan"
+            f"{window}. Sesuaikan tanggal ujian, atau minta wakil kepala sekolah "
+            "menyesuaikan kalender penilaian.")
 NO_SUCH_EXAM = denials.NO_SUCH_EXAM
 
 
@@ -104,24 +128,51 @@ def _guard_exam(supabase, exam_id, columns="id,teacher_id,school_id", as_json=Tr
     A failed lookup DENIES. A permission check that raises answers 500, which
     keeps the data safe but hides the cause and looks like a broken feature; the
     failure is logged and the caller is told access could not be confirmed.
+
+    The lookup and the rule are `exam_access.managed_exam` — the *same* function
+    the API guard uses — so a teacher route and a scan route cannot end up asking
+    two slightly different questions about the same paper.
     """
-    try:
-        exam = row_or_none(
-            supabase.table("exams").select(columns).eq("id", exam_id).maybe_single().execute()
-        )
-    except Exception:
-        logger.exception("Access check failed for exam %s", exam_id)
+    exam, verdict = managed_exam(
+        supabase, exam_id, g.user_id, g.get("user_role"), g.get("user_school_id"), columns
+    )
+    if verdict == EXAM_OK:
+        return exam, None
+    if verdict == EXAM_UNVERIFIABLE:
         return None, _deny(denials.CANNOT_VERIFY_EXAM, as_json, redirect_to)
-    if not exam:
+    if verdict == EXAM_MISSING:
         if as_json:
             return None, (jsonify({"error": NO_SUCH_EXAM}), 404)
         flash(NO_SUCH_EXAM, "error")
         return None, redirect(redirect_to)
-    if not can_manage_exam(g.user_id, g.get("user_role"), g.get("user_school_id"), exam):
-        logger.warning("Denied exam access: exam=%s user=%s role=%s",
-                       exam_id, g.user_id, g.get("user_role"))
-        return None, _deny(NO_EXAM_ACCESS, as_json, redirect_to)
-    return exam, None
+    return None, _deny(NO_EXAM_ACCESS, as_json, redirect_to)
+
+
+def _publication_state(existing, action):
+    """``{"status":…, "is_published":…}`` for an edit, given what the row held.
+
+    The edit door used to rebuild these two fields from the *submitted action*:
+    ``"is_published": action == "publish"``. The builder's ordinary Save button
+    posts ``save_active``, so a teacher who reopened a published paper to fix a
+    typo and pressed Save wrote ``is_published = False`` over it — the paper left
+    every pupil's list, and the pupils still sitting it were refused on their next
+    sync, because `exam_sitting_allowed` requires ``is_published``. The control a
+    teacher reaches for most was the one that withdrew the exam.
+
+    The rule every other toggle here follows: **a save preserves the paper's
+    publication; only an explicit publish changes it.** A draft stays a draft (Save
+    must not publish by accident), and ``action == "publish"`` — the button that
+    says "Publish & Send to Classes" — publishes.
+    """
+    if action == "publish":
+        return {"status": "active", "is_published": True}
+    # A save preserves both fields exactly as the row held them: a published paper
+    # stays published and active, a draft stays a draft. Save is the neutral verb;
+    # publishing and the visibility toggle are the two doors that change this.
+    return {
+        "status": (existing or {}).get("status") or "draft",
+        "is_published": bool((existing or {}).get("is_published")),
+    }
 
 
 def _sync_exam_targets(supabase, exam_id, class_ids, form):
@@ -1139,6 +1190,19 @@ def exam_form():
     if _start_dt and _end_dt and _end_dt <= _start_dt:
         flash("Batas akhir ujian harus setelah waktu mulai", "error")
         return redirect(request.referrer or "/teacher/exams")
+    # The calendar: a window outside the running assessment period is a paper filed
+    # against a date the school never opened. The period names itself in the refusal,
+    # and a school with no running period keeps the behaviour it had.
+    _period, _off_calendar = assessment_periods.window_outside_running_period(
+        supabase, g.get("user_school_id"), start_at, end_at, tz_off)
+    if _off_calendar:
+        flash(_off_calendar_message(_period), "error")
+        return redirect(request.referrer or "/teacher/exams")
+    # Tag the paper with the period it belongs to, so results can be grouped and
+    # compared by period across a year. At a write door the running period is the
+    # only one a window may sit in (the check above refuses the rest), and an empty
+    # window has nothing to place, so the running period stands in for it.
+    assessment_period_id = (_period or {}).get("id")
 
     question_types = json.loads(request.form.get("question_types", "{}"))
     answer_key = json.loads(request.form.get("answer_key", "{}"))
@@ -1181,6 +1245,7 @@ def exam_form():
         "class_ids": class_ids,
         "start_at": start_at,
         "end_at": end_at,
+        "assessment_period_id": assessment_period_id,
         "auto_submit_on_window_end": auto_submit_on_window_end,
         "is_template": is_template,
         "source_exam_id": source_exam_id,
@@ -1216,7 +1281,7 @@ def exam_form():
     try:
         res = supabase.table("exams").insert(data).execute()
     except Exception:
-        for key in ["question_weights", "question_texts", "anti_cheat_enabled", "penalty_per_violation", "max_violations", "auto_submit_on_max", "fullscreen_required", "randomize_questions", "randomize_options", "watermark_name", "block_copy_paste", "block_right_click", "block_screenshot", "allow_calculator", "subject_id", "class_ids", "start_at", "end_at", "auto_submit_on_window_end", "is_template", "source_exam_id", "max_attempts", "publish_mode", "question_pages", "question_cognitive"]:
+        for key in ["question_weights", "question_texts", "anti_cheat_enabled", "penalty_per_violation", "max_violations", "auto_submit_on_max", "fullscreen_required", "randomize_questions", "randomize_options", "watermark_name", "block_copy_paste", "block_right_click", "block_screenshot", "allow_calculator", "subject_id", "class_ids", "start_at", "end_at", "assessment_period_id", "auto_submit_on_window_end", "is_template", "source_exam_id", "max_attempts", "publish_mode", "question_pages", "question_cognitive"]:
             data.pop(key, None)
         res = supabase.table("exams").insert(data).execute()
     exam_id = res.data[0]["id"]
@@ -1440,6 +1505,19 @@ def exam_detail(exam_id):
     if _start_dt and _end_dt and _end_dt <= _start_dt:
         flash("Batas akhir ujian harus setelah waktu mulai", "error")
         return redirect(request.referrer or "/teacher/exams")
+    # The calendar: a window outside the running assessment period is a paper filed
+    # against a date the school never opened. The period names itself in the refusal,
+    # and a school with no running period keeps the behaviour it had.
+    _period, _off_calendar = assessment_periods.window_outside_running_period(
+        supabase, g.get("user_school_id"), start_at, end_at, tz_off)
+    if _off_calendar:
+        flash(_off_calendar_message(_period), "error")
+        return redirect(request.referrer or "/teacher/exams")
+    # Tag the paper with the period it belongs to, so results can be grouped and
+    # compared by period across a year. At a write door the running period is the
+    # only one a window may sit in (the check above refuses the rest), and an empty
+    # window has nothing to place, so the running period stands in for it.
+    assessment_period_id = (_period or {}).get("id")
 
     question_types = json.loads(request.form.get("question_types", "{}"))
     answer_key = json.loads(request.form.get("answer_key", "{}"))
@@ -1473,6 +1551,13 @@ def exam_detail(exam_id):
         if media:
             question_audio[str(i)] = media
 
+    # What the paper *is*, not what this save happened to say. The dict below used
+    # to carry `is_published: action == "publish"`, and the builder's ordinary Save
+    # posts `save_active` — so editing a published exam withdrew it from every pupil
+    # still sitting it. A save now preserves the publication the row already had;
+    # only the explicit publish button (or the visibility toggle) changes it. See
+    # `_publication_state`.
+    publication = _publication_state(exam_row, action)
     data = {
         "teacher_id": g.user_id,
         "school_id": g.get("user_school_id"),
@@ -1482,19 +1567,19 @@ def exam_detail(exam_id):
         "class_ids": class_ids,
         "start_at": start_at,
         "end_at": end_at,
+        "assessment_period_id": assessment_period_id,
         "auto_submit_on_window_end": auto_submit_on_window_end,
         "is_template": is_template,
         "source_exam_id": source_exam_id,
         "max_attempts": max_attempts,
-        "publish_mode": publish_mode,
         "question_pages": request.form.get("question_pages", "{}"),
         "question_cognitive": _cognitive_levels(),
         "total_questions": total_questions,
         "duration_minutes": duration_minutes,
         "passing_score": passing_score,
         "description": description,
-        "status": "active" if action in ("save_active", "publish") else "draft",
-        "is_published": action == "publish",
+        "status": publication["status"],
+        "is_published": publication["is_published"],
         "publish_mode": "auto" if action == "publish" else publish_mode,
         "answer_key": answer_key,
         "question_types": question_types,
@@ -1517,7 +1602,7 @@ def exam_detail(exam_id):
     try:
         supabase.table("exams").update(data).eq("id", exam_id).execute()
     except Exception:
-        for key in ["question_weights", "question_texts", "anti_cheat_enabled", "penalty_per_violation", "max_violations", "auto_submit_on_max", "fullscreen_required", "randomize_questions", "randomize_options", "watermark_name", "block_copy_paste", "block_right_click", "block_screenshot", "allow_calculator", "subject_id", "class_ids", "start_at", "end_at", "auto_submit_on_window_end", "is_template", "source_exam_id", "max_attempts", "publish_mode", "question_pages", "question_cognitive"]:
+        for key in ["question_weights", "question_texts", "anti_cheat_enabled", "penalty_per_violation", "max_violations", "auto_submit_on_max", "fullscreen_required", "randomize_questions", "randomize_options", "watermark_name", "block_copy_paste", "block_right_click", "block_screenshot", "allow_calculator", "subject_id", "class_ids", "start_at", "end_at", "assessment_period_id", "auto_submit_on_window_end", "is_template", "source_exam_id", "max_attempts", "publish_mode", "question_pages", "question_cognitive"]:
             data.pop(key, None)
         supabase.table("exams").update(data).eq("id", exam_id).execute()
 
@@ -3578,8 +3663,15 @@ def api_penalty_appeal_handle(submission_id):
 @open_year_required("exam_id")
 def publish_scores(exam_id):
     supabase = get_supabase()
+    # The owner, or the admin of this paper's school — the *same* rule the rest of
+    # the results surface uses. `require_school_access` above only asks "is this row
+    # from your school?", which let a colleague in the same school publish another
+    # teacher's marks. One lookup, reused below so the check costs nothing extra.
+    exam, err = _guard_exam(supabase, exam_id, columns="id,title,passing_score,teacher_id,school_id",
+                            as_json=_wants_json(), redirect_to="/teacher/results?exam_id=" + exam_id)
+    if err:
+        return err
     if request.method == "GET":
-        exam = supabase.table("exams").select("id,title,passing_score").eq("id", exam_id).single().execute().data
         subs = supabase.table("submissions").select("id,student_id,final_score,status,profiles(full_name)").eq("exam_id", exam_id).execute().data or []
         subs.sort(key=lambda s: (s.get("profiles") or {}).get("full_name", ""))
         return render_template("teacher/publish_preview.html", exam=exam, submissions=subs)
@@ -4459,9 +4551,13 @@ def exam_reprocess_pdf(exam_id):
     if not exam:
         return jsonify({"error": "not found"}), 404
 
-    # Strategy 1: local exam.pdf already exists → regenerate from that
-    local_pdf = os.path.join(current_app.root_path, "static", "uploads", "exams", exam_id, "exam.pdf")
-    if os.path.exists(local_pdf):
+    # Strategy 1: the PDF this exam actually stored → regenerate from that.
+    # Resolved from `pdf_url` rather than rebuilt as `<exam_id>/exam.pdf`: a paper
+    # rendered into a generation directory (see pdf_service.generation_dir) lives
+    # one level deeper, and the fixed path reported "No PDF source found" for
+    # every paper whose PDF had been replaced.
+    local_pdf = pdf_service.local_path_for_url(exam.get("pdf_url"))
+    if local_pdf:
         try:
             with open(local_pdf, "rb") as f:
                 raw = f.read()
@@ -4554,7 +4650,13 @@ def exam_sessions_data(exam_id):
         columns="id,teacher_id,school_id,title,class_ids,total_questions")
     if err:
         return err
-    return jsonify(session_review.review_for_exam(supabase, exam))
+    out = session_review.review_for_exam(supabase, exam)
+    # The transitions themselves, so a pupil's "my connection dropped three times" can
+    # be read off the record rather than taken on the strength of the summary count.
+    # Scoped to this one exam, which `_guard_exam` has already proven is the caller's.
+    out["timelines"] = attempt_timeline.for_exam(
+        supabase, exam.get("school_id") or "", exam_ids=[exam_id])
+    return jsonify(out)
 
 
 @teacher_bp.route("/exams/<exam_id>/generate-remedial", methods=["POST"])
@@ -4946,6 +5048,25 @@ def _teacher_school() -> str | None:
     return g.get("user_school_id")
 
 
+def _teacher_code_exam_ids(supabase, school_id: str, teacher_id: str) -> set[str]:
+    """The exams whose pupils' recovery codes this teacher may read.
+
+    Two authorities, unioned because both are the teacher holding the pupil's paper:
+
+    * the exams they **invigilate** — the same set `invigilation.invigilated_exam_ids`
+      already resolves for the retake decision, so the page and the decision cannot
+      disagree about which exams are theirs;
+    * the exams they **own** — the subject teacher who assigned the test.
+
+    A colleague's exam is in neither set, so a teacher who holds this route still
+    cannot read a code for a paper that is not theirs.
+    """
+    owned = {str(r["id"]) for r in (supabase.table("exams").select("id")
+             .eq("school_id", school_id).eq("teacher_id", teacher_id)
+             .execute().data or []) if r.get("id")}
+    return invigilation.invigilated_exam_ids(supabase, school_id, teacher_id) | owned
+
+
 @teacher_bp.route("/invigilation")
 @teacher_required
 def invigilation_duties():
@@ -4953,10 +5074,21 @@ def invigilation_duties():
     school_id = _teacher_school()
     if not school_id:
         return redirect("/auth/login")
-    board = invigilation.teacher_board(get_supabase(), school_id, g.user_id)
+    supabase = get_supabase()
+    board = invigilation.teacher_board(supabase, school_id, g.user_id)
+    # The pupil's recovery code, for the sittings this teacher holds — so an
+    # invigilator asked to let a locked pupil back in has the number to compare
+    # against rather than reading it off the pupil's screen. Read-only.
+    held = _teacher_code_exam_ids(supabase, school_id, g.user_id)
+    codes = exam_codes.codes_for_exams(supabase, school_id, held)
+    # The same held set the codes use — invigilated or owned — so the invigilator who
+    # holds the sitting can read a pupil's transitions, not just their code.
+    timelines = attempt_timeline.for_exam(supabase, school_id, held)
     return render_template("teacher/invigilation.html",
                            tasks=board["tasks"],
-                           requests=board["pending_requests"])
+                           requests=board["pending_requests"],
+                           codes=codes,
+                           timelines=timelines)
 
 
 @teacher_bp.route("/retake-requests/<request_id>/decide", methods=["POST"])

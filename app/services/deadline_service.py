@@ -11,12 +11,14 @@ no longer running.
 
 This module is the one enforcement point, and it holds to four rules:
 
-* **The arithmetic is asked for, never re-derived.** ``exam_window.deadline``
-  already answers "when does this sitting end" from both clocks — the duration
-  counted from the student's own ``started_at``, and the assignment window end
-  when the exam is set to stop there. A sweep that recomputes it is a second
-  answer to the same question, and the two go out of step the first time a teacher
-  edits a window.
+* **The arithmetic is asked for, never re-derived.**
+  ``attempt_status.deadline_of`` already answers "when does this sitting end" from
+  both clocks — the duration counted from the student's own ``started_at``, and the
+  assignment window end when the exam is set to stop there. A sweep that recomputes
+  it is a second answer to the same question, and the two go out of step the first
+  time a teacher edits a window. The same rule holds for "is it over": the grace is
+  ``attempt_status.expired``'s, so the sweep cannot close a paper the one source
+  still calls open.
 
 * **The row is written by the one writer.** ``submission_service.finish_sitting``
   owns the ``submissions`` row — the unique constraint counts *every* status, so
@@ -25,11 +27,11 @@ This module is the one enforcement point, and it holds to four rules:
   paper and a hand-submitted one are written the same way, from the same mark
   scheme and the same penalty ladder.
 
-* **The grace belongs to both halves.** A paper arriving within
-  ``exam_window.LATE_GRACE_SECONDS`` of the deadline is *accepted* — that is what
-  the grace means — so the sweep must not close that sitting yet, or a student
-  whose countdown reaches zero would be racing the box for their own answers.
-  "Accepted" and "not yet closed" read the same constant on purpose.
+* **The grace belongs to both halves.** A paper arriving within the app's one
+  late-grace window is *accepted* — that is what the grace means — so the sweep
+  must not close that sitting yet, or a student whose countdown reaches zero would
+  be racing the box for their own answers. "Accepted" and "not yet closed" read
+  the same rule on purpose, and that rule is ``attempt_status.expired``.
 
 * **A paper the clock closed was not late.** ``submitted_late`` means the answers
   arrived after the deadline. Here they arrived before it and the sitting was
@@ -52,20 +54,20 @@ from app.services.anti_cheat_service import (
     calculate_graduated_penalty, count_penalized_violations,
 )
 from app.services.question_types import default_weights, earned_points, objective_result
-from app.services.submission_service import LOCKED_STATUS, finish_sitting
-from app.utils import exam_window
+from app.services import attempt_status
+from app.services.submission_service import finish_sitting
 from app.utils.logger import get_logger
 
 logger = get_logger("deadline")
 
-#: The statuses that are still a *sitting* — a paper the clock may still close.
-#: A `draft` is the ordinary case. `locked_pending_resume` is still a sitting, not
-#: a result: locking is not a pause, the clock keeps running, so the clock still
-#: ends it. Leaving the locked status out was how a pupil locked a minute before
-#: the end could sit past their own deadline forever. A live row is a result, and
-#: a result is not the sweep's to rewrite.
-DRAFT_STATUS = "draft"
-OPEN_STATUSES = (DRAFT_STATUS, LOCKED_STATUS)
+#: The statuses that are still a *sitting* — a paper the clock may still close. It
+#: is `attempt_status.OPEN_STATUSES`, not a copy: locking is not a pause, the clock
+#: keeps running, so a locked paper is still the clock's to end, and the vocabulary
+#: that says so lives in one place. Leaving the locked status out was how a pupil
+#: locked a minute before the end could sit past their own deadline forever. A live
+#: row is a result, and a result is not the sweep's to rewrite.
+DRAFT_STATUS = attempt_status.DRAFT
+OPEN_STATUSES = attempt_status.OPEN_STATUSES
 
 #: How many drafts one pass looks at. Bounds the read on a busy box; anything
 #: beyond it is picked up by the next tick, and the deadline arithmetic — not this
@@ -73,7 +75,7 @@ OPEN_STATUSES = (DRAFT_STATUS, LOCKED_STATUS)
 SCAN_LIMIT = 500
 
 #: The read filter's only job is to keep the query small. No sitting can be over
-#: sooner than this, and the exact answer still comes from `exam_window.deadline`.
+#: sooner than this, and the exact answer still comes from `attempt_status`.
 MIN_SITTING_SECONDS = 60
 
 #: How often the sweep runs. Short enough that a paper stops being a draft shortly
@@ -98,16 +100,21 @@ def _now(now=None) -> datetime:
 
 
 def sitting_end(exam, started_at):
-    """The instant this sitting ended, or None when nothing enforces an end."""
-    return exam_window.deadline(exam or {}, started_at)
+    """The instant this sitting ended, or None when nothing enforces an end.
+
+    Asked of `attempt_status`, the one place that answers "when does this sitting
+    end" — so the sweep and the lock gate cannot drift apart on the deadline.
+    """
+    return attempt_status.deadline_of(exam or {}, None, started_at=started_at)
 
 
 def has_expired(exam, started_at, now=None) -> bool:
-    """Is the deadline — plus the grace a paper may still arrive within — behind us?"""
-    limit = sitting_end(exam, started_at)
-    if limit is None:
-        return False
-    return _now(now) > limit + timedelta(seconds=exam_window.LATE_GRACE_SECONDS)
+    """Is the deadline — plus the grace a paper may still arrive within — behind us?
+
+    The grace is applied by `attempt_status.expired`, which owns that rule: a paper
+    arriving inside the grace is *accepted*, so this must not read as closed yet.
+    """
+    return attempt_status.expired(exam or {}, {"started_at": started_at}, now=now)
 
 
 def _exam_of(row) -> dict:

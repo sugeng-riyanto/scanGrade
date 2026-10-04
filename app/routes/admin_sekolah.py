@@ -28,6 +28,8 @@ from app.services import school_officials as officials_service
 from app.services.subject_service import (subject_usage, usage_confirmation_needed,
                                           usage_message)
 from app.services import analysis_scope
+from app.services import attempt_timeline
+from app.services import exam_codes
 from app.services import invigilation
 from app.services import login_cards
 from app.services import account_emails
@@ -36,6 +38,7 @@ from app.services import academic_year
 from app.services import identity_names
 from app.services import subject_levels as sl_service
 from app.services import subject_kkm as kkm_service
+from app.services import assessment_periods
 
 def _gen_password(length=12) -> str:
     chars = string.ascii_letters + string.digits + "!@#$%^&*"
@@ -1033,7 +1036,7 @@ def _import_subjects(ws, sid, supabase, results):
                 by_code[s["code"]] = s
     except Exception as e:
         # Non-fatal: without the lookup a re-import inserts instead of updating.
-        results["errors"].append(f"Gagal membaca daftar mapel: {e}")
+        results["errors"].append(f"Gagal membaca daftar mapel: {failure.sentence(e)}")
 
     for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), 2):
         if not row or not row[0]:
@@ -1067,7 +1070,7 @@ def _import_subjects(ws, sid, supabase, results):
             if target:
                 results["subjects_updated"] = results.get("subjects_updated", 0) + 1
         except Exception as e:
-            results["errors"].append(f"Baris {row_idx}: {e}")
+            results["errors"].append(f"Baris {row_idx}: {failure.sentence(e)}")
 
 
 # ─── EXPORT EXCEL ────────────────────────────────────
@@ -1160,6 +1163,78 @@ def school_years():
 
     years = supabase.table("school_years").select("*").eq("school_id", sid).order("name", desc=True).execute().data or []
     return render_template("admin_sekolah/school_years.html", years=years)
+
+
+# ── Periode Penilaian (kalender asesmen sekolah) ─────────────────────────────
+#
+# Kalender yang sama yang disusun wakil kepala sekolah, dibuka juga untuk admin
+# sekolah. Jendela ini milik *sekolah*, bukan milik jabatannya: sekolah yang belum
+# membuat akun wakil kepala tidak boleh kehilangan kemampuan menamai tanggal
+# UTS-nya. Halaman yang sama dirender dengan `can_write=True`, dan tujuan
+# formulirnya adalah prefiks admin sendiri — bukan prefiks wakil kepala — sehingga
+# `principal/assessment_periods.html` tetap satu halaman untuk semua penulis.
+#
+# Wewenangnya tidak bergantung pada template: ketiga route di bawah berada di
+# prefiks `/admin-sekolah/assessment-periods` (blueprint dengan prefix
+# `/admin-sekolah`) di belakang `@admin_sekolah_required`. Sekolahnya selalu dari
+# sesi (`_school_id()`), dan `assessment_periods` mensyaratkan `school_id` itu di
+# setiap baca/tulis — jadi tidak ada sekolah yang bisa dititipkan lewat parameter.
+
+@admin_sekolah_bp.route("/assessment-periods")
+@admin_sekolah_required
+def assessment_periods_page():
+    """Admin sekolah: kalender penilaian sekolahnya, plus wewenang menyusunnya."""
+    sid = _school_id()
+    if not sid:
+        return redirect("/auth/login")
+    supabase = get_supabase()
+    return render_template(
+        "principal/assessment_periods.html",
+        role="admin_sekolah",
+        can_write=True,
+        period_save_url="/admin-sekolah/assessment-periods/save",
+        period_delete_base="/admin-sekolah/assessment-periods",
+        periods=assessment_periods.list_periods(supabase, sid),
+        active=assessment_periods.active_period(supabase, sid),
+        kinds=assessment_periods.KINDS,
+    )
+
+
+
+
+@admin_sekolah_bp.route("/assessment-periods/save", methods=["POST"])
+@admin_sekolah_required
+def assessment_period_save():
+    """Create or edit one period. The school is the session's, never the form's."""
+    sid = _school_id()
+    if not sid:
+        return redirect("/auth/login")
+    out = assessment_periods.save_period(
+        get_supabase(), sid,
+        period_id=request.form.get("period_id") or None,
+        kind=request.form.get("kind", ""),
+        name=request.form.get("name", ""),
+        start_date=request.form.get("start_date", ""),
+        end_date=request.form.get("end_date", ""),
+        is_active=request.form.get("is_active") in ("1", "true", "on"),
+        actor_id=g.get("user_id"),
+    )
+    flash(out["reason"] if not out.get("ok") else "period_saved",
+          "error" if not out.get("ok") else "success")
+    return redirect("/admin-sekolah/assessment-periods")
+
+
+@admin_sekolah_bp.route("/assessment-periods/<period_id>/delete", methods=["POST"])
+@admin_sekolah_required
+def assessment_period_delete(period_id: str):
+    """Remove one period, scoped to this school by the service's own filter."""
+    sid = _school_id()
+    if not sid:
+        return redirect("/auth/login")
+    out = assessment_periods.delete_period(get_supabase(), sid, period_id)
+    flash(out["reason"] if not out.get("ok") else "period_deleted",
+          "error" if not out.get("ok") else "success")
+    return redirect("/admin-sekolah/assessment-periods")
 
 
 @admin_sekolah_bp.route("/school-years/<year_id>/toggle", methods=["POST"])
@@ -1390,7 +1465,7 @@ def create_class():
             return jsonify({"success": True, "id": cid})
         flash("Kelas berhasil ditambahkan", "success")
     except Exception as e:
-        return refuse(f"Gagal: {e}")
+        return refuse(f"Gagal: {failure.sentence(e)}")
     return redirect(back)
 
 
@@ -1452,7 +1527,7 @@ def edit_class(class_id):
         flash("Kelas berhasil diperbarui", "success")
         return redirect(back)
     except Exception as e:
-        return refuse(f"Gagal: {e}")
+        return refuse(f"Gagal: {failure.sentence(e)}")
 
 
 @admin_sekolah_bp.route("/classes/<class_id>/delete", methods=["POST"])
@@ -1514,7 +1589,7 @@ def delete_class(class_id):
         return redirect(back)
     except Exception as e:
         if wants_json:
-            return jsonify({"error": str(e)}), 400
+            return jsonify({"error": failure.sentence(e)}), 400
         flash(f"Gagal: {failure.sentence(e)}", "error")
         return redirect(back)
 
@@ -1686,7 +1761,7 @@ def admin_subject_delete(subject_id):
         return redirect("/admin-sekolah/subjects")
     except Exception as e:
         if wants_json:
-            return jsonify({"error": str(e)}), 400
+            return jsonify({"error": failure.sentence(e)}), 400
         flash(f"Gagal: {failure.sentence(e)}", "error")
         return redirect("/admin-sekolah/subjects")
 
@@ -2382,7 +2457,7 @@ def delete_teacher(teacher_id):
         log_activity("delete", "teacher", teacher_id, user_id=g.user_id)
         return jsonify({"success": True})
     except Exception as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": failure.sentence(e)}), 400
 
 
 @admin_sekolah_bp.route("/teachers/<teacher_id>/reset-password", methods=["POST"])
@@ -2399,7 +2474,7 @@ def reset_teacher_password(teacher_id):
         log_activity("reset_password", "teacher", teacher_id, user_id=g.user_id)
         return jsonify({"success": True, "password": password})
     except Exception as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": failure.sentence(e)}), 400
 
 
 # ─── PEJABAT SEKOLAH (kepala sekolah & wakil kepala sekolah) ──────
@@ -2492,7 +2567,7 @@ def delete_official(official_id):
         log_activity("delete", "official", official_id, user_id=g.user_id)
         return jsonify({"success": True})
     except Exception as e:
-        return jsonify({"error": getattr(e, "user_message", str(e))}), 400
+        return jsonify({"error": failure.sentence(e)}), 400
 
 
 @admin_sekolah_bp.route("/officials/<official_id>/reset-password", methods=["POST"])
@@ -2506,7 +2581,7 @@ def reset_official_password(official_id):
         log_activity("reset_password", "official", official_id, user_id=g.user_id)
         return jsonify({"success": True, "password": password})
     except Exception as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": failure.sentence(e)}), 400
 
 
 # ─── STUDENTS CRUD ───────────────────────────────────
@@ -2921,7 +2996,7 @@ def upload_emails():
     try:
         rows = account_emails.read_rows(file.stream, file.filename)
     except Exception as exc:
-        return back(error=f"Berkas tidak bisa dibaca: {str(exc)[:80]}")
+        return back(error=f"Berkas tidak bisa dibaca: {failure.sentence(exc)}")
     if not rows:
         return back(error="Tidak ada baris yang bisa dibaca di berkas itu.")
 
@@ -2983,7 +3058,7 @@ def admin_reset_user_password(user_id):
         log_activity("reset_password", "user", user_id, user_id=g.user_id)
         return jsonify({"success": True, "password": new_pw})
     except Exception as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": failure.sentence(e)}), 400
 
 
 @admin_sekolah_bp.route("/students/<student_id>/delete", methods=["POST"])
@@ -2999,7 +3074,7 @@ def delete_student(student_id):
         log_activity("delete", "student", student_id, user_id=g.user_id)
         return jsonify({"success": True})
     except Exception as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": failure.sentence(e)}), 400
 
 
 @admin_sekolah_bp.route("/students/<student_id>/reset-password", methods=["POST"])
@@ -3014,7 +3089,7 @@ def reset_student_password(student_id):
         log_activity("reset_password", "student", student_id, user_id=g.user_id)
         return jsonify({"success": True, "password": password})
     except Exception as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": failure.sentence(e)}), 400
 
 
 # ─── Langganan / Subscription ─────────────────────────────────────────
@@ -3462,6 +3537,14 @@ def invigilation_page():
     if not sid:
         return redirect("/auth/login")
     supabase = get_supabase()
+    schedules = invigilation.list_schedules(supabase, sid)
+    # The school's codes, read-only — the admin's authority is the whole school, the
+    # same reach as their retake decision, and a school without a vice principal
+    # must still be able to compare a locked pupil's code.
+    held = {str(s["exam_id"]) for s in schedules if s.get("exam_id")}
+    codes = exam_codes.codes_for_exams(supabase, sid, held)
+    # The same held set, so the admin's reach matches their retake decision.
+    timelines = attempt_timeline.for_exam(supabase, sid, held)
     return render_template(
         "principal/invigilation.html",
         role="admin_sekolah",
@@ -3470,9 +3553,11 @@ def invigilation_page():
         retake_decide_base="/admin-sekolah",
         can_write=True,
         school=None,
-        schedules=invigilation.list_schedules(supabase, sid),
+        schedules=schedules,
         requests=invigilation.retake_requests(supabase, sid),
         options=invigilation.form_options(supabase, sid),
+        codes=codes,
+        timelines=timelines,
     )
 
 
