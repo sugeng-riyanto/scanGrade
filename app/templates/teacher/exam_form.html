@@ -1109,6 +1109,26 @@
                                         <i class="fas" :class="q._showMedia ? 'fa-chevron-up' : 'fa-chevron-down'"></i>
                                     </button>
                                     <div x-show="q._showMedia" class="px-3 pb-3 space-y-2 border-t border-slate-200 pt-2">
+                                        <!-- How many times this question's media may be played.
+                                             One by default — a listening passage is often meant to
+                                             be heard once — and `0` is the Unlimited branch. The
+                                             count is kept by the server per sitting, so a refresh
+                                             cannot hand the allowance back. -->
+                                        <div class="flex items-center gap-2">
+                                            <label class="text-xs font-semibold text-slate-500 flex items-center gap-1 shrink-0">
+                                                <i class="fas fa-rotate-right text-rose-500"></i><span x-text="t('Putar ulang','Play attempts')"></span>
+                                            </label>
+                                            <select :name="'media_plays_' + i" x-model.number="q.plays"
+                                                    class="text-xs font-bold border-2 border-slate-200 rounded-lg px-2 py-1 focus:border-rose-400 transition">
+                                                <option value="1" x-text="t('1 kali','1 time')"></option>
+                                                <option value="2" x-text="t('2 kali','2 times')"></option>
+                                                <option value="3" x-text="t('3 kali','3 times')"></option>
+                                                <option value="5" x-text="t('5 kali','5 times')"></option>
+                                                <option value="10" x-text="t('10 kali','10 times')"></option>
+                                                <option value="0" x-text="t('Tak terbatas','Unlimited')"></option>
+                                            </select>
+                                            <span class="text-[10px] text-slate-400" x-text="t('setelah batas ini tombol putar murid dinonaktifkan','after this limit the play button is disabled')"></span>
+                                        </div>
                                         <div>
                                             <label class="text-xs font-semibold text-slate-500 flex items-center gap-1">
                                                 <i class="fas fa-music text-rose-500"></i>Audio (Google Drive link)
@@ -1831,6 +1851,9 @@ function questionManager() {
                     var q = {_id: 'q' + i, type: t, pages: ppages[i] || '',
                              level: plevel[i] || '',
                              audio: m.audio || '', youtube: m.youtube || '', _showMedia: false,
+                             // The play allowance travels with the question's media; a paper
+                             // built before it existed reads as one play.
+                             plays: (typeof m.plays === 'number' ? m.plays : 1),
                              // An uploaded file: `file` is what the save route stores,
                              // `url` is the app's own preview link minted for this
                              // teacher (a token, so it is good for minutes, not for
@@ -2077,6 +2100,7 @@ function questionManager() {
         _pgkTimers: {},
         blankQuestion(type) {
             const q = {_id: 'n' + (++this._cid), type: type, pages: '', level: '', audio: '', youtube: '', _showMedia: false,
+                       plays: 1,
                        file: '', url: '', name: '', kind: 'audio', fileKind: 'audio',
                        _uploading: false, _uploadError: ''};
             const kind = this.kindOf(q);
@@ -2404,6 +2428,7 @@ function questionManager() {
                 if (q.file) { m.file = q.file; m.kind = q.kind || 'audio'; if (q.name) m.name = q.name; }
                 if (q.audio) m.audio = q.audio;
                 if (q.youtube) m.youtube = q.youtube;
+                if (Object.keys(m).length > 0) m.plays = (typeof q.plays === 'number' ? q.plays : 1);
                 return [i, Object.keys(m).length > 0 ? m : null];
             }).filter(([k,v]) => v !== null)));
         },

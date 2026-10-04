@@ -1328,17 +1328,23 @@ body.sg-exam .sidebar-overlay { display: none !important; }
                          that never reached YouTube. A pasted YouTube link keeps the
                          frame below — nothing that played before stops playing. -->
                     <template x-if="(questions[i]||{}).video">
-                        <div class="mb-3 bg-gradient-to-r from-amber-50 to-orange-50 rounded-xl px-4 py-3 border border-amber-200/50">
+                        <div class="mb-3 bg-gradient-to-r from-amber-50 to-orange-50 rounded-xl px-4 py-3 border border-amber-200/50" x-data="sgMediaPlay(i)">
                             <div class="flex items-center justify-between mb-2">
                                 <div class="flex items-center gap-2">
                                     <i class="fas fa-film text-orange-500"></i>
                                     <span class="text-xs font-semibold text-stone-600" x-text="t('Video soal','Question video')"></span>
                                 </div>
-                                <span class="text-[10px] text-stone-400 bg-white/60 px-2 py-0.5 rounded-full" x-text="t('Putar di sini — tautan tidak bisa dibagikan','Plays here — the link cannot be shared')"></span>
+                                <span class="text-[10px] px-2 py-0.5 rounded-full"
+                                      :class="mediaLocked ? 'bg-rose-100 text-rose-700 font-bold' : 'bg-white/60 text-stone-400'"
+                                      x-text="mediaLeftText()"></span>
                             </div>
                             <video controls class="w-full rounded-lg bg-black/5" preload="none"
+                                   :controls="!mediaLocked"
                                    :src="(questions[i]||{}).video"
+                                   @play="onMediaPlay($event)"
                                    @error="mediaFailed[i] = true"></video>
+                            <p x-show="mediaLocked" x-cloak class="mt-1 text-[11px] font-bold text-rose-700"
+                               x-text="t('Batas putar untuk video ini sudah tercapai — beri tahu pengawas bila perlu diputar lagi.','The play limit for this video has been reached — tell your proctor if it must be played again.')"></p>
                         </div>
                     </template>
                     <template x-if="(questions[i]||{}).video && mediaFailed[i]">
@@ -1348,22 +1354,56 @@ body.sg-exam .sidebar-overlay { display: none !important; }
                         </div>
                     </template>
                     <template x-if="(questions[i]||{}).youtubeEmbed">
-                        <div class="mb-3 bg-gradient-to-r from-red-50 to-rose-50 rounded-xl px-4 py-3 border border-red-200/50">
-                            <div class="flex items-center justify-between mb-2">
+                        <div class="mb-3 bg-gradient-to-r from-red-50 to-rose-50 rounded-xl px-4 py-3 border border-red-200/50"
+                             x-data="sgVideoPlay(i)"
+                             :class="mediaMax ? 'fixed inset-0 z-[9999] bg-black/95 flex flex-col justify-center rounded-none m-0' : ''">
+                            <div class="flex items-center justify-between mb-2" :class="mediaMax ? 'px-4 pt-3' : ''">
                                 <div class="flex items-center gap-2">
                                     <i class="fab fa-youtube text-red-500"></i>
-                                    <span class="text-xs font-semibold text-stone-600" x-text="t('Video soal','Question video')"></span>
+                                    <span class="text-xs font-semibold" :class="mediaMax ? 'text-white' : 'text-stone-600'" x-text="t('Video soal','Question video')"></span>
+                                    <span class="text-[10px] px-2 py-0.5 rounded-full"
+                                          :class="mediaLocked ? 'bg-rose-100 text-rose-700 font-bold' : 'bg-white/70 text-stone-500'"
+                                          x-text="mediaLeftText()"></span>
                                 </div>
-                                <span class="text-[10px] text-stone-400 bg-white/60 px-2 py-0.5 rounded-full" x-text="t('Putar di sini — tidak bisa buka tab baru','Plays here — opening a new tab is not allowed')"></span>
+                                <button type="button" @click="toggleMediaMax()"
+                                        class="tap-44 text-[11px] font-bold px-3 py-1.5 rounded-lg border"
+                                        :class="mediaMax ? 'text-white border-white/40 hover:bg-white/10' : 'text-stone-500 border-stone-300 hover:bg-white'">
+                                    <i class="fas" :class="mediaMax ? 'fa-compress' : 'fa-expand'"></i>
+                                    <span x-text="mediaMax ? t('Kembalikan','Restore') : t('Perbesar','Maximise')"></span>
+                                </button>
                             </div>
-                            <div class="relative w-full rounded-lg overflow-hidden bg-black/5" style="padding-bottom:56.25%">
-                                <iframe class="absolute inset-0 w-full h-full"
-                                    :src="(questions[i]||{}).youtubeEmbed"
-                                    frameborder="0"
-                                    loading="lazy"
-                                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                                    allowfullscreen
-                                    sandbox="allow-scripts allow-same-origin allow-presentation"></iframe>
+                            <div :class="mediaMax ? 'w-full max-w-6xl mx-auto px-4 pb-4' : ''">
+                                <div class="relative w-full rounded-lg overflow-hidden bg-black/80" style="padding-bottom:56.25%">
+                                    <!-- Our own play button, not YouTube's: a charge has to be
+                                         recorded before the frame may autoplay, and once the
+                                         allowance is spent the button is disabled and this
+                                         overlay covers the frame so no native control can
+                                         start it again. -->
+                                    <template x-if="!videoStarted">
+                                        <button type="button" @click="mediaStart()" :disabled="mediaLocked"
+                                                class="absolute inset-0 w-full h-full flex flex-col items-center justify-center gap-2 transition"
+                                                :class="mediaLocked ? 'bg-black/70 cursor-not-allowed' : 'bg-black/50 hover:bg-black/40'">
+                                            <i class="fas" :class="mediaLocked ? 'fa-lock text-stone-400 text-3xl' : 'fa-play-circle text-white text-5xl'"></i>
+                                            <span class="text-sm font-bold" :class="mediaLocked ? 'text-stone-300' : 'text-white'"
+                                                  x-text="mediaLocked ? t('Batas putar tercapai','Play limit reached') : t('Putar video','Play video')"></span>
+                                        </button>
+                                    </template>
+                                    <template x-if="videoStarted">
+                                        <div class="absolute inset-0">
+                                            <iframe x-ref="sgvideo" class="absolute inset-0 w-full h-full"
+                                                :src="(questions[i]||{}).youtubeEmbed + '&enablejsapi=1&autoplay=1&controls=0&fs=0&disablekb=1&playsinline=1'"
+                                                frameborder="0"
+                                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                                                sandbox="allow-scripts allow-same-origin allow-presentation"></iframe>
+                                            <button type="button" @click="mediaPause()" x-show="videoPlaying"
+                                                    class="absolute bottom-2 left-2 tap-44 bg-black/60 text-white rounded-lg px-3 py-1.5 text-xs font-bold hover:bg-black/75">
+                                                <i class="fas fa-pause"></i>
+                                            </button>
+                                        </div>
+                                    </template>
+                                </div>
+                                <p x-show="mediaLocked && videoStarted" x-cloak class="mt-1 text-[11px] font-bold text-rose-700"
+                                   x-text="t('Batas putar untuk video ini sudah tercapai.','The play limit for this video has been reached.')"></p>
                             </div>
                         </div>
                     </template>
@@ -1374,7 +1414,7 @@ body.sg-exam .sidebar-overlay { display: none !important; }
                         </div>
                     </template>
                     <template x-if="(questions[i]||{}).audioSources.length">
-                        <div class="mb-3 bg-gradient-to-r from-amber-50 to-orange-50 rounded-xl px-4 py-3 border border-amber-200/50">
+                        <div class="mb-3 bg-gradient-to-r from-amber-50 to-orange-50 rounded-xl px-4 py-3 border border-amber-200/50" x-data="sgMediaPlay(i)">
                             <div class="flex items-center gap-3">
                                 <div class="w-9 h-9 rounded-lg bg-orange-100 flex items-center justify-center shrink-0">
                                     <i class="fas fa-headphones text-orange-500 text-sm"></i>
@@ -1385,13 +1425,16 @@ body.sg-exam .sidebar-overlay { display: none !important; }
                                      endpoint is refused still hears the question —
                                      which is the whole point of carrying two. -->
                                 <audio controls class="h-9 w-full max-w-md" preload="none"
+                                       :controls="!mediaLocked"
+                                       @play="onMediaPlay($event)"
                                        @error="mediaFailed[i] = true">
                                     <template x-for="src in (questions[i]||{}).audioSources" :key="src">
                                         <source :src="src">
                                     </template>
                                 </audio>
                             </div>
-                            <p class="text-[11px] text-stone-400 mt-1.5 ml-12" x-text="t('Putar audio soal','Play question audio')"></p>
+                            <p class="text-[11px] mt-1.5 ml-12" :class="mediaLocked ? 'text-rose-700 font-bold' : 'text-stone-400'"
+                               x-text="mediaLocked ? t('Batas putar audio ini sudah tercapai.','The play limit for this audio has been reached.') : mediaLeftText() + ' · ' + t('Putar audio soal','Play question audio')"></p>
                         </div>
                     </template>
                     <!-- Two ways a question's audio ends up silent, and the pupil is
@@ -1780,6 +1823,10 @@ body.sg-exam .sidebar-overlay { display: none !important; }
 <script src="/static/js/tools.js"></script>
 <script>
 const QUESTION_AUDIO = {{ (exam.question_audio or {}) | tojson | safe }};
+// How many times each question's media has already been played, as the server
+// counts it (`app/services/media_plays.py`). The page draws its players from this,
+// so a refresh or a second tab cannot hand the allowance back.
+const MEDIA_USED = {{ (media_used or {}) | tojson | safe }};
 const QUESTION_CANVAS = {{ (exam.question_canvas or {}) | tojson | safe }};
 const QUESTION_PAGES = {{ (exam.question_pages or {}) | tojson | safe }};
 // The material for a matching or drag-and-drop question: the two columns, or the
@@ -1817,6 +1864,90 @@ function sgLS(prefix) { return prefix + SG_EXAM + '__' + SG_STUDENT; }
 // `null < timeLeft - 5` true, which could put `null` on screen as `NaN:NaN`.
 // Absent, null, a string, NaN and Infinity are all "no signal" — never zero, which
 // is a real value: the clock has run out.
+// ── the media play allowance ────────────────────────────────────────────────
+// One guard per question's media. The limit and the spent count come from the
+// server; a fresh play is charged at the server before it is allowed, and a
+// charge the server refuses (or that would cross the limit) locks the player.
+// A charge that cannot reach the server fails open locally, the same rule the
+// service follows, so a dropped connection never traps a pupil mid-paper.
+function sgMediaPlay(i) {
+    var raw = (QUESTION_AUDIO && QUESTION_AUDIO[i]) || {};
+    var limit = (raw && typeof raw === 'object' && typeof raw.plays === 'number') ? raw.plays : 1;
+    var used = (MEDIA_USED && typeof MEDIA_USED[i] === 'number') ? MEDIA_USED[i] : 0;
+    return {
+        mediaLimit: limit,
+        mediaUsed: used,
+        mediaMax: false,
+        get mediaUnlimited() { return this.mediaLimit === 0; },
+        get mediaLocked() { return !this.mediaUnlimited && this.mediaUsed >= this.mediaLimit; },
+        get mediaLeft() { return this.mediaUnlimited ? null : Math.max(0, this.mediaLimit - this.mediaUsed); },
+        mediaLeftText() {
+            if (this.mediaUnlimited) return window.sgT('Tak terbatas', 'Unlimited');
+            if (this.mediaLeft === 0) return window.sgT('Batas putar tercapai', 'Play limit reached');
+            return window.sgT('Sisa ', 'Left ') + this.mediaLeft + 'x';
+        },
+        toggleMediaMax() { this.mediaMax = !this.mediaMax; },
+        _mediaToken() {
+            var meta = document.querySelector('meta[name="csrf-token"]');
+            return meta ? meta.getAttribute('content') : '';
+        },
+        async mediaClaim() {
+            if (this.mediaLocked) return false;
+            try {
+                var token = this._mediaToken();
+                var resp = await fetch('/student/media-play', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json', 'Accept': 'application/json',
+                              'X-CSRF-Token': token},
+                    body: JSON.stringify({exam_id: SG_EXAM, question_index: i, _csrf_token: token}),
+                });
+                var data = await resp.json().catch(function () { return {}; });
+                if (data && typeof data.used === 'number') this.mediaUsed = data.used;
+                return !(data && data.allowed === false);
+            } catch (e) {
+                this.mediaUsed += 1;   // fail open: a dropped connection is not a refusal
+                return true;
+            }
+        },
+        // A native <audio>/<video> control: charge a *fresh* start, and let a
+        // pause-and-resume cost nothing (the playhead is past zero).
+        async onMediaPlay(ev) {
+            var el = ev && ev.target;
+            if (this.mediaLocked || (el && el.currentTime > 0)) {
+                if (this.mediaLocked && el && el.pause) el.pause();
+                return;
+            }
+            var ok = await this.mediaClaim();
+            if (!ok && el && el.pause) el.pause();
+        },
+    };
+}
+
+// The YouTube embed, which has native controls of its own — so the play button is
+// *ours*. A fresh play is charged before the frame is allowed to autoplay, and
+// once the allowance is spent the button is disabled and an overlay blocks the
+// frame. Pause/Resume is driven over `postMessage` with `enablejsapi=1`, so no
+// second external script has to load on the exam page.
+function sgVideoPlay(i) {
+    var comp = sgMediaPlay(i);
+    comp.videoStarted = false;
+    comp.videoPlaying = false;
+    comp.mediaStart = async function () {
+        if (this.mediaLocked || this.videoStarted) return;
+        var ok = await this.mediaClaim();
+        if (ok) { this.videoStarted = true; this.videoPlaying = true; }
+    };
+    comp.mediaPause = function () {
+        this.videoPlaying = false;
+        var f = this.$refs && this.$refs.sgvideo;
+        try {
+            if (f && f.contentWindow) f.contentWindow.postMessage(
+                JSON.stringify({event: 'command', func: 'pauseVideo', args: []}), '*');
+        } catch (e) {}
+    };
+    return comp;
+}
+
 function sgCountdown(value) {
     return (typeof value === 'number' && isFinite(value)) ? value : null;
 }

@@ -234,6 +234,14 @@ def _question_media_from_form(i):
         media["audio"] = audio_url
     if youtube_url:
         media["youtube"] = youtube_url
+    # How many times this question's media may be played, total. Stored beside the
+    # media so it cannot drift onto another question. The clamp lives in the
+    # service (`media_plays.limit_for`), so a hand-posted number cannot raise the
+    # allowance above the menu, and an absent field reads as the default of one.
+    if media:
+        from app.services import media_plays
+        media["plays"] = media_plays.limit_for(
+            {"plays": request.form.get(f"media_plays_{i}")})
     return media
 
 
