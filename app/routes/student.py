@@ -26,7 +26,8 @@ from app.services import academic_year
 from app.services import teacher_assignments as ta_service
 from app.utils.rate_limiter import limiter
 from app.utils.req_cache import (active_whiteboards_for, class_row, memo,
-                                 school_features, subjects_for_class)
+                                 school_features, subjects_for_class,
+                                 teachers_for_class)
 from app.decorators.year_lock import open_year_required
 
 student_bp = Blueprint("student", __name__)
@@ -362,6 +363,11 @@ def dashboard():
     offered_names = {str(s.get("name") or "") for s in class_subjects}
     unlisted_averages = {name: avg for name, avg in subject_averages.items()
                          if str(name) not in offered_names}
+    # Who teaches each of those subjects to *this class* — the admin's own
+    # `teacher_assignments` pairs, read once per class (shared by every pupil in
+    # it) and filtered by the one active-pair rule. A subject with no name in the
+    # map reads as "no teacher named yet" rather than a blank.
+    class_teachers = teachers_for_class(student_school_id, student_class_id)
 
     # The mark beside each subject is the school's own policy, computed by the same
     # `grade_weighting.compute` the teacher's table and both exports use — so the
@@ -397,6 +403,7 @@ def dashboard():
         "student_class": student_class,
         "subject_count": subject_count,
         "class_subjects": class_subjects,
+        "class_teachers": class_teachers,
         "active_whiteboards": active_whiteboards,
         "subject_averages": subject_averages,
         "subject_finals": subject_finals,
