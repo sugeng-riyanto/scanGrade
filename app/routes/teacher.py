@@ -1082,8 +1082,10 @@ def _builder_defaults(supabase, teacher_id, subjects, classes) -> dict:
       available. With a choice to make, the field is left empty — a wrong guess is
       worse than an empty field (`unassigned_class_ids` already fails closed for
       the same reason);
-    * the duration is the one this teacher used last, falling back to the app's 60
-      when they have never built a paper.
+    * the duration is the app's own **60 minutes**. It used to be the duration of
+      this teacher's last paper, but the request is explicit that the default is 60
+      and that the field is free to type into — a remembered 90 is a number the
+      teacher did not choose for this paper.
 
     An unscoped caller (admin) usually has many subjects/classes, so they get no
     pre-selection and keep full manual control.
@@ -1093,16 +1095,51 @@ def _builder_defaults(supabase, teacher_id, subjects, classes) -> dict:
         defaults["subject_id"] = subjects[0]["id"]
     if len(classes) == 1 and classes[0].get("id"):
         defaults["class_ids"] = [classes[0]["id"]]
-    try:
-        last = (supabase.table("exams").select("duration_minutes")
-                .eq("teacher_id", teacher_id).order("created_at", desc=True)
-                .limit(1).execute().data or [])
-        if last and last[0].get("duration_minutes") is not None:
-            defaults["duration_minutes"] = last[0]["duration_minutes"]
-    except Exception:
-        # A failed read must not cost the teacher a page; the 60 default stands.
-        logger.warning("duration default lookup failed for %s", teacher_id)
     return defaults
+
+
+def _builder_scope(supabase, sid):
+    """What the exam builder may offer: subjects, classes, and subject→classes.
+
+    One helper for both builder doors (create and edit), because they were scoping
+    Target Classes **differently** — the create page unioned every class the
+    teacher was assigned to *any* subject, and the edit page offered the whole
+    school's classes — and either way a teacher could tick a class the admin had
+    not assigned for that subject, only to be refused on save.
+
+    A scoped role (a guru, a head of school or their deputy) is bounded by their
+    own **active** assignment pairs, read through the one reader the rest of the
+    app uses (`teacher_assignments_for`): a class appears for a subject only when
+    the admin assigned that pair, and a pair the admin removed is not offered
+    back. An admin runs the school and is not scoped at all — every subject and
+    class, with `classes_by_subject` left `None` so the page does not filter.
+    """
+    subjects, classes = [], []
+    classes_by_subject: dict = {}
+    if not sid:
+        return subjects, classes, classes_by_subject
+    if assignments_service.is_scoped_role(g.get("user_role")):
+        try:
+            rows = teacher_assignments_for(g.user_id, sid)
+        except Exception:
+            current_app.logger.warning("Failed to fetch teacher assignments")
+            rows = []
+        for a in rows:
+            subj, cls = a.get("subjects"), a.get("classes")
+            if subj and subj.get("id") and subj not in subjects:
+                subjects.append(subj)
+            if cls and cls.get("id") and cls not in classes:
+                classes.append(cls)
+            if subj and cls and subj.get("id") and cls.get("id"):
+                bucket = classes_by_subject.setdefault(str(subj["id"]), [])
+                if str(cls["id"]) not in bucket:
+                    bucket.append(str(cls["id"]))
+        return subjects, classes, classes_by_subject
+    # Unscoped: an admin reads the whole school. `classes_by_subject = None`
+    # tells the page not to filter the grid.
+    subjects = supabase.table("subjects").select("*").eq("school_id", sid).order("name").execute().data or []
+    classes = supabase.table("classes").select("*").eq("school_id", sid).order("name").execute().data or []
+    return subjects, classes, None
 
 
 @teacher_bp.route("/exams/new", methods=["GET", "POST"])
@@ -1114,35 +1151,11 @@ def exam_form():
     if request.method == "GET":
         supabase = get_supabase()
         sid = g.get("user_school_id")
-        subjects = []
-        classes = []
-        if sid:
-            # Get teacher's assigned subjects and classes
-            try:
-                teacher_assignments = supabase.table("teacher_assignments") \
-                    .select("*, subjects(id, name, code), classes(id, name, grade_level)") \
-                    .eq("teacher_id", g.user_id) \
-                    .execute().data or []
-                for a in teacher_assignments:
-                    if a.get("subjects"):
-                        if a["subjects"] not in subjects:
-                            subjects.append(a["subjects"])
-                    if a.get("classes"):
-                        if a["classes"] not in classes:
-                            classes.append(a["classes"])
-            except Exception:
-                current_app.logger.warning("Failed to fetch teacher assignments, falling back to all")
-            # The fallback is for the roles that are not scoped to a pair: an
-            # admin runs the school, a guru does not. Running it for a guru is
-            # the bug this guard was written for — an empty assignment list made
-            # "no rows" mean "every class and subject in the school", which is a
-            # permission nobody granted.
-            if not assignments_service.is_scoped_role(g.get("user_role")):
-                if not subjects:
-                    subjects = supabase.table("subjects").select("*").eq("school_id", sid).order("name").execute().data or []
-                if not classes:
-                    classes = supabase.table("classes").select("*").eq("school_id", sid).order("name").execute().data or []
+        # The admin's own matrix scopes both lists: a class is offered for a
+        # subject only when the admin assigned that pair (`_builder_scope`).
+        subjects, classes, classes_by_subject = _builder_scope(supabase, sid)
         return render_template("teacher/exam_form.html", exam=None, subjects=subjects, classes=classes,
+                               classes_by_subject=classes_by_subject,
                                grade_components=_grade_components_by_subject(supabase, sid),
                                builder_defaults=_builder_defaults(supabase, g.user_id, subjects, classes))
 
@@ -1179,10 +1192,13 @@ def exam_form():
     # cannot end up on different clocks — the one mistake here that would move a
     # deadline by seven hours without anything looking wrong.
     tz_off = g.get("tz_offset", 7)
-    if action == "publish":
-        start_at = None
-    else:
-        start_at = exam_window.to_utc_iso(request.form.get("start_at", ""), tz_off)
+    # Publishing does **not** clear the schedule. This used to read
+    # `if action == "publish": start_at = None`, so a paper a teacher scheduled for
+    # tomorrow opened the moment it was published, and the "Starts (scheduled)"
+    # field the form offers meant nothing. The window is the assignment: students
+    # reach the paper from `start_at` until `end_at` (the window end), so clearing
+    # the start is exactly what made those two ends unenforceable.
+    start_at = exam_window.to_utc_iso(request.form.get("start_at", ""), tz_off)
     # The assignment window end: the last instant a student may *begin*. The
     # duration is counted from each student's own start and may run past it (the
     # form says so on the field); `auto_submit_on_window_end` is the switch that
@@ -1462,11 +1478,10 @@ def exam_detail(exam_id):
         exam_data = _normalise_exam_json(exam_row)
         exam_data.setdefault("question_weights", {})
         sid = g.get("user_school_id")
-        subjects = []
-        classes = []
-        if sid:
-            subjects = supabase.table("subjects").select("*").eq("school_id", sid).order("name").execute().data or []
-            classes = supabase.table("classes").select("*").eq("school_id", sid).order("name").execute().data or []
+        # Same scoping as the create door — the edit page used to offer the whole
+        # school's classes, which is how a teacher could tick a class the admin
+        # never assigned and be refused on save.
+        subjects, classes, classes_by_subject = _builder_scope(supabase, sid)
         # An uploaded file is previewed from the app, never from Storage, so the
         # builder is handed the same kind of URL a pupil's page gets — minted for
         # *this* teacher, since the preview is theirs. A copy: `with_media_urls`
@@ -1479,6 +1494,7 @@ def exam_detail(exam_id):
         # exclusion the teacher made).
         saved_targets = exam_targets.targets_for_exam(supabase, exam_id)
         return render_template("teacher/exam_form.html", exam=exam_data, subjects=subjects, classes=classes,
+                               classes_by_subject=classes_by_subject,
                                saved_targets=saved_targets,
                                grade_components=_grade_components_by_subject(supabase, sid),
                                builder_defaults=_builder_defaults(supabase, g.user_id, subjects, classes))
@@ -1516,10 +1532,13 @@ def exam_detail(exam_id):
     # cannot end up on different clocks — the one mistake here that would move a
     # deadline by seven hours without anything looking wrong.
     tz_off = g.get("tz_offset", 7)
-    if action == "publish":
-        start_at = None
-    else:
-        start_at = exam_window.to_utc_iso(request.form.get("start_at", ""), tz_off)
+    # Publishing does **not** clear the schedule. This used to read
+    # `if action == "publish": start_at = None`, so a paper a teacher scheduled for
+    # tomorrow opened the moment it was published, and the "Starts (scheduled)"
+    # field the form offers meant nothing. The window is the assignment: students
+    # reach the paper from `start_at` until `end_at` (the window end), so clearing
+    # the start is exactly what made those two ends unenforceable.
+    start_at = exam_window.to_utc_iso(request.form.get("start_at", ""), tz_off)
     # The assignment window end: the last instant a student may *begin*. The
     # duration is counted from each student's own start and may run past it (the
     # form says so on the field); `auto_submit_on_window_end` is the switch that
