@@ -33,12 +33,21 @@ Two ways in:
 import python_requires
 
 import collections
+import os
+import sys
+from pathlib import Path
+
+# The shared git-scrub lives under `tests/`, which is importable as a package from
+# the repository root — put that root on the path before naming it, so importing
+# this file does not depend on how pytest was invoked.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import pytest
 import werkzeug.routing
 from flask import Flask
 
 from app import create_app
+from tests.unit.git_env import GIT_REPO_ENV
 
 #: The config every test app is built with. ``TestingConfig`` keeps the suite
 #: offline and side-effect free; nothing here should construct a real one.
@@ -231,3 +240,24 @@ def _shared_app_hygiene(app_session):
     snapshot = _snapshot(app_session)
     yield
     _restore(app_session, snapshot)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _git_spawns_resolve_their_own_repository():
+    """Run the whole suite with git's repository variables cleared.
+
+    Git hands a hook an absolute ``GIT_DIR``/``GIT_INDEX_FILE``, and every
+    subprocess inherits them — so a test that runs ``git`` against a scratch repo
+    in ``tmp_path`` wrote into the checkout's index, and the tree it had just
+    dirtied failed the gate that ran it (see ``tests/unit/git_env.py``). Clearing
+    them from ``os.environ`` for the session means a spawn that forgets ``env=``
+    still resolves its own ``cwd``. Session-scoped and autouse, so it is in place
+    before any test, and put back afterwards so the run leaves nothing changed.
+    """
+    saved = {name: os.environ[name] for name in GIT_REPO_ENV if name in os.environ}
+    for name in GIT_REPO_ENV:
+        os.environ.pop(name, None)
+    try:
+        yield
+    finally:
+        os.environ.update(saved)

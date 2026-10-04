@@ -44,6 +44,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.unit.git_env import git_env
+
 ROOT = Path(__file__).resolve().parents[2]
 
 #: The byte that strands a box. Passed to `git grep -e` as a literal pattern.
@@ -63,7 +65,8 @@ CRLF_BODY = b"a = 1\r\nb = 2\r\nc = 3\r\n"
 
 def _git(repo: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(["git", "-C", str(repo), *args],
-                          capture_output=True, text=True, check=False)
+                          capture_output=True, text=True, check=False,
+                          env=git_env())
 
 
 def cr_blobs(repo: Path, rev: str | None = None) -> list[str]:

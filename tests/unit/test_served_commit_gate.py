@@ -53,6 +53,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.unit.git_env import git_env
+
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
@@ -201,13 +203,14 @@ def _checkout_with_the_module(tmp_path: Path) -> Path:
     (repo / "app" / "utils").mkdir(parents=True)
     (repo / "app" / "__init__.py").write_text("", encoding="utf-8")
     shutil.copy(BUILD_INFO, repo / "app" / "utils" / "build_info.py")
-    subprocess.run([GIT, "init", "-q", str(repo)], check=True, capture_output=True)
+    subprocess.run([GIT, "init", "-q", str(repo)], check=True, capture_output=True,
+                   env=git_env())
     for key, value in (("user.email", "t@example.com"), ("user.name", "t")):
         subprocess.run([GIT, "-C", str(repo), "config", key, value], check=True,
-                       capture_output=True)
+                       capture_output=True, env=git_env())
     subprocess.run([GIT, "-C", str(repo), "commit", "-q", "--allow-empty",
                     "-m", "the release this process loaded"], check=True,
-                   capture_output=True)
+                   capture_output=True, env=git_env())
     return repo
 
 
@@ -233,8 +236,10 @@ def test_a_checkout_that_moves_after_load_does_not_move_the_reading(tmp_path):
         "                '--allow-empty', '-m', 'the next release'], check=True)\n"
         "now = build_info.read_commit(build_info.CODE_ROOT)['full_commit']\n"
         "print(at_load, now, build_info.snapshot()['full_commit'])\n")
+    # The program spawns `git` itself; hand it a scrubbed environment so that inner
+    # `git commit` cannot resolve this checkout from an inherited GIT_DIR either.
     run = subprocess.run([sys.executable, "-c", program], capture_output=True,
-                         text=True, encoding="utf-8")
+                         text=True, encoding="utf-8", env=git_env())
     assert run.returncode == 0, run.stderr
     at_load, now, served = run.stdout.split()
     assert at_load != now, "the harness failed to move the checkout"

@@ -42,6 +42,7 @@ sys.path.insert(0, str(ROOT))
 
 from app.services import deploy_status_service as status  # noqa: E402
 from app.utils import build_info  # noqa: E402
+from tests.unit.git_env import git_env  # noqa: E402
 
 TEMPLATE = ROOT / "app" / "templates" / "super_admin" / "deploy_status.html"
 ROUTE = ROOT / "app" / "routes" / "super_admin.py"
@@ -55,7 +56,8 @@ def _now() -> _dt.datetime:
 
 
 def _git(*args, cwd):
-    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
+    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True,
+                          env=git_env())
 
 
 def _commit(repo: Path, message: str) -> str:

@@ -41,6 +41,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.unit.git_env import git_env
+
 ROOT = Path(__file__).resolve().parents[2]
 DEPLOY = ROOT / "deploy"
 GATE = DEPLOY / "theme_gate.sh"
@@ -291,7 +293,7 @@ def make_scratch_repo(tmp_path: Path):
 
     def git(*args):
         return subprocess.run(["git", *args], cwd=repo, check=True,
-                              capture_output=True, text=True)
+                              capture_output=True, text=True, env=git_env())
 
     git("init", "-q")
     (repo / "file.txt").write_text("one\n", encoding="utf-8")
@@ -324,7 +326,8 @@ class TestTheShippedRollbackActuallyRollsBack:
                               capture_output=True, text=True, encoding="utf-8",
                               errors="replace")
         head = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=repo,
-                              capture_output=True, text=True).stdout.strip()
+                              capture_output=True, text=True,
+                              env=git_env()).stdout.strip()
         return proc, head, before
 
     @pytest.mark.parametrize("theme_rc", [EXIT_FINDING, EXIT_DISARMED])
