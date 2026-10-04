@@ -7,9 +7,9 @@ two different pages:
   says *when a class sits a paper*, and attaches one or more teachers to that sitting.
   This is what a teacher's *My duty* page reads back.
 * the **matrix** (`/admin-sekolah/invigilation/matrix`) says *who stands in this room,
-  in this slot, on this day*. It is a grid — rows are time slots, columns are rooms,
-  a cell holds one teacher — and it is the page a school uses when a room holds
-  candidates from several classes at once.
+  in this slot, on this day*. It is a grid — rows are teachers, columns are rooms, and
+  a cell is a tick for one teacher in one room — and it is the page a school uses when
+  a room holds candidates from several classes at once.
 
 Both are written by the same people: **`admin_sekolah`** always, and
 **`vice_principal`** on their own prefix. A school that never made a deputy can still
@@ -32,24 +32,32 @@ no SQL are involved.
 
 ### Filling the grid
 
-Pick a date, and the grid shows that day. An empty cell offers a dropdown of **this
-school's teachers who are free in that slot** — a teacher already standing in another
-room is not offered, because the write would refuse them. Choose one and press *Set*.
+Pick a date and a session, and the grid shows that session: rows are this school's
+teachers, columns are its rooms. **Click a cell to put that teacher in that room;
+click it again to take them out.** Every click saves by itself — there is no *Save*
+button and no page reload. A room's header chip shows `taken/2` and a teacher's row
+chip shows the same, so you can see at a glance who is short.
 
-Two rules hold, and both are enforced by the **database**, not just the page:
+Two ceilings hold, and both are enforced by the **database**, not just the page:
 
-* a room holds **one** invigilator per slot per day;
-* a teacher stands in **one** room per slot per day.
+* a room holds **at most two** invigilators per slot per day;
+* a teacher stands in **at most two** rooms per slot per day.
 
-The service checks them first so you read a sentence (*"that room already has an
-invigilator in this period"*, *"that teacher is already on duty in another room this
-period"*) instead of a constraint error, and the unique indexes are what actually hold
-when two people press the button at the same moment. The same teacher may of course
-take a *later* slot — the rules are per slot, not per day.
+And two minimums are shown, not enforced: the summary above the grid counts the rooms
+with **no** invigilator yet and the teachers with **no** room yet, and both are the
+amber chip until they are zero. They are stated rather than refused because a hard
+"you cannot remove the last one" would make moving a teacher between rooms
+impossible — the grid tells you the gap and leaves the judgement to you.
 
-A filled cell shows the teacher's name, an **uploaded** chip if it came from the Excel
-import, and an ✕ to empty it. The load strip under the grid counts each teacher's
-duties for the day, which is how you tell whether the work is spread evenly.
+The service checks the ceilings first so you read a sentence (*"this room already has
+two invigilators in this period"*, *"this teacher already covers two rooms in this
+period"*) instead of a constraint error, and the trigger installed by migration 061 is
+what actually holds when two people click at the same moment. The same teacher may of
+course take a *later* slot — the ceilings are per slot, not per day.
+
+A ticked cell carries a tick and a **uploaded** marker (from the Excel import) is kept
+on the duty row; the load strip under the grid counts each teacher's duties for the
+day, which is how you tell whether the work is spread evenly.
 
 ### Bulk assignment through Excel
 
@@ -76,10 +84,12 @@ abandoned at the first bad line** — fix all of them in one pass:
 * the period name is not one of this school's;
 * the room name is not one of this school's;
 * the teacher's address is not a teacher at this school;
-* the room is already filled that slot, or a **second row in the same file** asks for
-  the same room;
-* the teacher is already on duty that slot, or a **second row in the same file**
-  repeats them.
+* the room already holds its **two** teachers that slot, or the file itself asks for a
+  third;
+* the teacher already stands in **two** rooms that slot, or the file itself asks for a
+  third;
+* a row **repeats** the very same teacher *and* room the file already claimed (that is
+  a duplicate, not a second seat).
 
 Only the rows marked valid are applied, and only after you press the confirm button.
 The rows you confirmed are re-checked through the **same** write the grid uses, so a
@@ -108,6 +118,13 @@ audit line naming who uploaded and how many rows were valid and invalid.
   `invigilation_duty`) enable RLS and each policy compares against the database's own
   roles (`admin_sekolah`, `vice_principal`, `principal`, and a teacher's own rows on
   `invigilation_duty`); none is open to `PUBLIC`.
-* **Schema.** Migration `059_invigilation_matrix.sql` is additive and idempotent, and
-  the two conflict rules are the two `UNIQUE` constraints on `invigilation_duty`
-  (`…_room_slot_key`, `…_teacher_slot_key`).
+* **Schema.** Migration `059_invigilation_matrix.sql` is additive and idempotent and
+  creates the three tables; migration `061_invigilation_seat_caps.sql` relaxes the two
+  single-occupancy constraints to a ceiling of two — it drops `…_room_slot_key` and
+  `…_teacher_slot_key`, keeps a `UNIQUE` on the exact cell
+  (`school_id, exam_date, period_id, room_id, teacher_id`) so the same teacher cannot
+  be written twice into one room, and installs a `BEFORE INSERT OR UPDATE` trigger that
+  refuses a third row for a room or a teacher. A `UNIQUE` index cannot express "at most
+  two"; a trigger can, and it takes a `FOR UPDATE` lock on the session's `exam_period`
+  row so two simultaneous clicks are counted in order rather than against a stale
+  count.

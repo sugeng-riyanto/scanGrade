@@ -3865,29 +3865,53 @@ def _matrix_context(supabase, sid: str, exam_date: str, selected_period: str = "
     """Everything the matrix template draws, from one set of reads.
 
     ``selected_period`` is which session the click grid is showing. ``occupied`` is
-    that session's cells as ``{room_id: teacher_id}``, so the template can mark a
-    cell "mine" without re-deriving the grid; ``available`` is the dropdown each empty
-    period used to offer. Both come from the grid that was just read, rather than one
-    call per cell — a grid of eight slots would otherwise pay eight extra reads.
+    that session's cells as ``{room_id: [teacher_id, ...]}`` — a room holds up to two
+    teachers now — so the template can mark a cell "mine" without re-deriving the
+    grid. ``room_seats`` and ``teacher_seats`` are the same session's counts, and the
+    two ``*_needing_*`` lists name who is short of the school's minimum of one. All
+    come from the grid that was just read, rather than one call per cell — a grid of
+    eight slots would otherwise pay eight extra reads.
     """
     grid = inv_matrix.matrix(supabase, sid, exam_date)
     teachers = inv_matrix.teachers_of(supabase, sid)
     active_periods = grid.get("periods") or []
     if not selected_period or str(selected_period) not in {str(p["id"]) for p in active_periods}:
         selected_period = str(active_periods[0]["id"]) if active_periods else ""
-    occupied = {rid: cell.get("teacher_id")
-                for rid, cell in (grid.get("cells") or {}).get(selected_period, {}).items()}
-    busy = {pid: {c["teacher_id"] for c in rooms.values()}
-            for pid, rooms in (grid.get("cells") or {}).items()}
-    available = {str(p["id"]): [t for t in teachers
-                                if t["id"] not in busy.get(str(p["id"]), set())]
-                 for p in active_periods}
+    period_cells = (grid.get("cells") or {}).get(selected_period, {})
+    occupied = {rid: [c["teacher_id"] for c in cells]
+                for rid, cells in period_cells.items()}
+    room_seats = {rid: len(cells) for rid, cells in period_cells.items()}
+    teacher_seats: dict = {}
+    all_counts: dict = {}
+    for pid, rooms in (grid.get("cells") or {}).items():
+        pid_counts: dict = {}
+        for cells in rooms.values():
+            for cell in cells:
+                tid = cell["teacher_id"]
+                pid_counts[tid] = pid_counts.get(tid, 0) + 1
+        all_counts[pid] = pid_counts
+    for cells in period_cells.values():
+        for cell in cells:
+            tid = cell["teacher_id"]
+            teacher_seats[tid] = teacher_seats.get(tid, 0) + 1
+    available = {
+        str(p["id"]): [t for t in teachers
+                       if all_counts.get(str(p["id"]), {}).get(t["id"], 0)
+                       < inv_matrix.MAX_PER_TEACHER]
+        for p in active_periods}
     return {
         "grid": grid, "exam_date": exam_date, "today": date.today().isoformat(),
         "periods": inv_matrix.list_periods(supabase, sid),
         "rooms": inv_matrix.list_rooms(supabase, sid),
         "teachers": teachers, "available": available,
         "selected_period": selected_period, "occupied": occupied,
+        "room_seats": room_seats, "teacher_seats": teacher_seats,
+        "max_per_room": inv_matrix.MAX_PER_ROOM,
+        "max_per_teacher": inv_matrix.MAX_PER_TEACHER,
+        "rooms_needing_teacher": [r for r in grid.get("rooms") or []
+                                  if room_seats.get(str(r["id"]), 0) == 0],
+        "teachers_without_room": [t for t in teachers
+                                  if teacher_seats.get(t["id"], 0) == 0],
         "class_rooms": inv_matrix.class_rooms(supabase, sid),
     }
 
@@ -4007,11 +4031,17 @@ def invigilation_matrix_seed():
 @admin_sekolah_bp.route("/invigilation/matrix/cell", methods=["POST"])
 @admin_sekolah_required
 def invigilation_matrix_cell():
-    """The click: one teacher into one room of the current session, or back out.
+    """The click: put one teacher into one room of the session, or take them out.
 
     Reads nothing that decides anything from the form except which cell was clicked —
     the school is the session's, and the service re-proves the period, the room and
     the teacher belong to it.
+
+    The cell saves without a reload: the grid's JavaScript posts here with an XHR
+    header and reads the seat counts back from the JSON, so the page can redraw the
+    caps from the server's arithmetic instead of guessing. A browser with no
+    JavaScript posts the same form and gets the redirect, so the grid keeps working
+    either way.
     """
     sid = _matrix_school()
     if not sid:
@@ -4026,6 +4056,20 @@ def invigilation_matrix_cell():
         teacher_id=request.form.get("teacher_id", ""),
         actor_id=g.get("user_id"),
     )
+    wants_json = (request.headers.get("X-Requested-With") == "XMLHttpRequest"
+                  or "application/json" in (request.headers.get("Accept") or ""))
+    if wants_json:
+        return jsonify({
+            "ok": bool(out.get("ok")),
+            "reason": out.get("reason") or "",
+            "action": out.get("action") or "",
+            "room_id": out.get("room_id") or "",
+            "teacher_id": out.get("teacher_id") or "",
+            "room_counts": out.get("room_counts") or {},
+            "teacher_counts": out.get("teacher_counts") or {},
+            "max_per_room": out.get("max_per_room", inv_matrix.MAX_PER_ROOM),
+            "max_per_teacher": out.get("max_per_teacher", inv_matrix.MAX_PER_TEACHER),
+        })
     if not out.get("ok"):
         flash(out.get("reason") or "write_failed", "error")
     return _matrix_redirect(exam_date, period)
@@ -4119,12 +4163,20 @@ def invigilation_matrix_upload():
     rooms = {inv_matrix._norm(r["name"]): r
              for r in inv_matrix.list_rooms(supabase, sid, active_only=True)}
     existing = inv_matrix.duties_for_date(supabase, sid, exam_date)
+    # Seat *counts*, not sets: a room may already hold one of its two teachers and
+    # still accept one more row from the sheet. The file's own rows add to these as
+    # they are read, so the second row that fills a room is seen before the write.
+    room_counts: dict = {}
+    teacher_counts: dict = {}
+    for duty in existing:
+        room_key = (str(duty["exam_date"]), str(duty["period_id"]), str(duty["room_id"]))
+        teacher_key = (str(duty["exam_date"]), str(duty["period_id"]),
+                       str(duty["teacher_id"]))
+        room_counts[room_key] = room_counts.get(room_key, 0) + 1
+        teacher_counts[teacher_key] = teacher_counts.get(teacher_key, 0) + 1
     parsed = inv_matrix.parse_workbook(
         data, periods=periods, rooms=rooms, teachers=_matrix_teacher_map(supabase, sid),
-        taken_rooms={(str(d["exam_date"]), str(d["period_id"]), str(d["room_id"]))
-                     for d in existing},
-        taken_teachers={(str(d["exam_date"]), str(d["period_id"]), str(d["teacher_id"]))
-                        for d in existing},
+        taken_rooms=room_counts, taken_teachers=teacher_counts,
     )
     del data  # the bytes are not wanted past the parse — nothing is written anywhere
 

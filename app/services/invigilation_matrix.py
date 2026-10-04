@@ -52,6 +52,9 @@ REFUSALS = (
     "teacher_not_in_school",
     "room_taken",
     "teacher_busy",
+    "room_full",
+    "teacher_full",
+    "already_assigned",
     "bad_date",
     "not_found",
     "write_failed",
@@ -60,6 +63,13 @@ REFUSALS = (
     "nothing_to_apply",
     "no_classes",
 )
+
+#: How many teachers one room may hold, and how many rooms one teacher may stand
+#: in, within a single session. The school's rule, named once so the click grid, the
+#: dropdown, the importer and the auto-fill all point at the same number — and the
+#: database trigger installed by migration 061 enforces the same two limits.
+MAX_PER_ROOM = 2
+MAX_PER_TEACHER = 2
 
 #: The header a template carries, in the order it is written. The normaliser strips
 #: case, spaces and punctuation, so a school that retypes them still matches.
@@ -286,18 +296,21 @@ def matrix(supabase, school_id: str, exam_date: str) -> dict:
     duties = duties_for_date(supabase, school_id, exam_date)
     teachers = {t["id"]: t["name"] for t in teachers_of(supabase, school_id)}
 
-    cells: dict[str, dict[str, dict]] = {}
+    # A room now holds up to two teachers, so a cell is a *list* of duties rather
+    # than one. The list is the honest shape: the grid draws one tick per teacher
+    # in the column, and the caps are read straight off its length.
+    cells: dict[str, dict[str, list]] = {}
     load: dict[str, int] = {}
     for duty in duties:
         pid, rid = str(duty.get("period_id")), str(duty.get("room_id"))
         tid = str(duty.get("teacher_id"))
-        cells.setdefault(pid, {})[rid] = {
+        cells.setdefault(pid, {}).setdefault(rid, []).append({
             "id": str(duty["id"]),
             "teacher_id": tid,
             "teacher_name": teachers.get(tid, ""),
             "source": duty.get("source") or "manual",
             "notes": duty.get("notes") or "",
-        }
+        })
         load[tid] = load.get(tid, 0) + 1
 
     return {"exam_date": exam_date, "periods": periods, "rooms": rooms,
@@ -310,15 +323,34 @@ def matrix(supabase, school_id: str, exam_date: str) -> dict:
 
 def available_teachers(supabase, school_id: str, exam_date: str,
                        period_id: str) -> list[dict]:
-    """Teachers with nothing in this slot — the dropdown a free cell offers.
+    """Teachers who still have a free seat in this slot — what a cell offers.
 
-    A teacher already standing in another room of this slot is not offered, because
-    the write would refuse them; showing them and then rejecting the choice is the
-    kind of form that teaches an operator to distrust it.
+    A teacher may stand in up to :data:`MAX_PER_TEACHER` rooms of one session, so a
+    teacher with one room is still offered. Only a teacher who has used every seat
+    is hidden, because offering them and then refusing the click is the kind of
+    form that teaches an operator to distrust it.
     """
-    busy = {str(d["teacher_id"]) for d in duties_for_date(supabase, school_id, exam_date)
-            if str(d.get("period_id")) == str(period_id)}
-    return [t for t in teachers_of(supabase, school_id) if t["id"] not in busy]
+    counts: dict[str, int] = {}
+    for duty in duties_for_date(supabase, school_id, exam_date):
+        if str(duty.get("period_id")) != str(period_id):
+            continue
+        tid = str(duty["teacher_id"])
+        counts[tid] = counts.get(tid, 0) + 1
+    return [t for t in teachers_of(supabase, school_id)
+            if counts.get(t["id"], 0) < MAX_PER_TEACHER]
+
+
+def _period_seats(supabase, school_id: str, exam_date: str, period_id: str) -> tuple[dict, dict]:
+    """``(room_counts, teacher_counts)`` for one session — the two caps, counted."""
+    room_counts: dict[str, int] = {}
+    teacher_counts: dict[str, int] = {}
+    for duty in duties_for_date(supabase, school_id, exam_date):
+        if str(duty.get("period_id")) != str(period_id):
+            continue
+        rid, tid = str(duty.get("room_id")), str(duty.get("teacher_id"))
+        room_counts[rid] = room_counts.get(rid, 0) + 1
+        teacher_counts[tid] = teacher_counts.get(tid, 0) + 1
+    return room_counts, teacher_counts
 
 
 # ── filling a cell ──────────────────────────────────────────────────────────
@@ -328,10 +360,12 @@ def assign(supabase, school_id: str, *, exam_date: str, period_id: str, room_id:
            actor_id: str | None = None) -> dict:
     """Put one teacher in one cell, or say which rule refused.
 
-    The checks below are the two unique constraints read out in words, and they are
-    here for the *message*, not for the guarantee: the index is what holds when two
-    writes arrive together. A room already filled is not silently overwritten —
-    the operator is told, and clears the cell first.
+    The checks below are the two caps read out in words, and they are here for the
+    *message*, not for the guarantee: the trigger from migration 061 is what holds
+    when two writes arrive together. A room that already holds
+    :data:`MAX_PER_ROOM` teachers, or a teacher already standing in
+    :data:`MAX_PER_TEACHER` rooms, is refused with a sentence rather than silently
+    dropped.
     """
     if not _row(supabase, "exam_period", school_id, period_id):
         return {"ok": False, "reason": "period_not_in_school"}
@@ -340,14 +374,16 @@ def assign(supabase, school_id: str, *, exam_date: str, period_id: str, room_id:
     if not _row(supabase, "teachers", school_id, teacher_id):
         return {"ok": False, "reason": "teacher_not_in_school"}
 
-    existing = duties_for_date(supabase, school_id, exam_date)
-    for duty in existing:
-        if str(duty.get("period_id")) != str(period_id):
-            continue
-        if str(duty.get("room_id")) == str(room_id):
-            return {"ok": False, "reason": "room_taken"}
-        if str(duty.get("teacher_id")) == str(teacher_id):
-            return {"ok": False, "reason": "teacher_busy"}
+    room_counts, teacher_counts = _period_seats(supabase, school_id, exam_date, period_id)
+    if (str(room_id), str(teacher_id)) in {  # exactly this pair already written
+            (str(d.get("room_id")), str(d.get("teacher_id")))
+            for d in duties_for_date(supabase, school_id, exam_date)
+            if str(d.get("period_id")) == str(period_id)}:
+        return {"ok": False, "reason": "already_assigned"}
+    if room_counts.get(str(room_id), 0) >= MAX_PER_ROOM:
+        return {"ok": False, "reason": "room_full"}
+    if teacher_counts.get(str(teacher_id), 0) >= MAX_PER_TEACHER:
+        return {"ok": False, "reason": "teacher_full"}
 
     payload = {"school_id": school_id, "exam_date": exam_date,
                "period_id": period_id, "room_id": room_id, "teacher_id": teacher_id,
@@ -373,11 +409,15 @@ def set_cell(supabase, school_id: str, *, exam_date: str, period_id: str,
     """The click: put this teacher in this room of this session, or take them out.
 
     Clicking the cell that already holds this teacher empties it. Any other click
-    *sets* it, and to keep the two rules — one teacher per room, one room per teacher
-    in a session — it clears whatever stood in the way first: the room's current
-    occupant and this teacher's duty elsewhere in the same session. The write is the
-    same :func:`assign` the dropdown and the upload use, so a click and a spreadsheet
-    cannot end up with two different sets of rules.
+    *adds* them — a room holds up to :data:`MAX_PER_ROOM` teachers and a teacher
+    stands in up to :data:`MAX_PER_TEACHER` rooms — and a click that would cross
+    either cap is refused with a sentence, not by quietly evicting somebody else.
+    The write is the same :func:`assign` the dropdown and the upload use, so a click
+    and a spreadsheet cannot end up with two different sets of rules.
+
+    The seat counts ride back on the result, so the page that saved without a reload
+    can redraw the room and teacher counters from the server's own arithmetic rather
+    than from a guess the browser made.
     """
     if not _row(supabase, "exam_period", school_id, period_id):
         return {"ok": False, "reason": "period_not_in_school", "action": ""}
@@ -393,50 +433,56 @@ def set_cell(supabase, school_id: str, *, exam_date: str, period_id: str,
         if (str(duty.get("room_id")) == str(room_id)
                 and str(duty.get("teacher_id")) == str(teacher_id)):
             clear_cell(supabase, school_id, duty["id"])
-            return {"ok": True, "reason": "", "action": "cleared"}
-
-    for duty in existing:
-        if str(duty.get("period_id")) != str(period_id):
-            continue
-        if (str(duty.get("room_id")) == str(room_id)
-                or str(duty.get("teacher_id")) == str(teacher_id)):
-            clear_cell(supabase, school_id, duty["id"])
+            return {"ok": True, "reason": "", "action": "cleared",
+                    "room_id": str(room_id), "teacher_id": str(teacher_id),
+                    **_counts_after(supabase, school_id, exam_date, period_id)}
 
     out = assign(supabase, school_id, exam_date=exam_date, period_id=period_id,
                  room_id=room_id, teacher_id=teacher_id, source="manual",
                  actor_id=actor_id)
-    return {"ok": bool(out.get("ok")), "reason": out.get("reason", ""), "action": "set"}
+    result = {"ok": bool(out.get("ok")), "reason": out.get("reason", ""),
+              "action": "set" if out.get("ok") else "",
+              "room_id": str(room_id), "teacher_id": str(teacher_id)}
+    result.update(_counts_after(supabase, school_id, exam_date, period_id))
+    return result
+
+
+def _counts_after(supabase, school_id: str, exam_date: str, period_id: str) -> dict:
+    """The session's seat usage, per room and per teacher, read after the write."""
+    room_counts, teacher_counts = _period_seats(supabase, school_id, exam_date, period_id)
+    return {"room_counts": room_counts, "teacher_counts": teacher_counts,
+            "max_per_room": MAX_PER_ROOM, "max_per_teacher": MAX_PER_TEACHER}
 
 
 def auto_fill(supabase, school_id: str, *, exam_date: str, period_id: str,
               actor_id: str | None = None) -> dict:
-    """Fill every empty room of one session with the next free teacher.
+    """Give every room of one session that has nobody at least one teacher.
 
-    The one-press version of the tedious part. A room already filled keeps its
-    teacher, and a teacher already standing somewhere in this session is never
-    offered again — so the fill can create neither conflict, and it stops when the
-    rooms are full or the free teachers run out, whichever comes first.
+    The one-press version of the tedious part. It fills the *minimum* — a room with
+    no teacher gets one — rather than topping every room up to
+    :data:`MAX_PER_ROOM`, because the caps are a ceiling, not a target. A room that
+    already has somebody keeps them, and a teacher who has used both seats in this
+    session is never picked again, so the fill can create neither conflict and stops
+    when the rooms that need somebody are staffed or the teachers run out.
     """
     if not _row(supabase, "exam_period", school_id, period_id):
         return {"ok": False, "reason": "period_not_in_school", "applied": 0}
     rooms = list_rooms(supabase, school_id, active_only=True)
-    teachers = teachers_of(supabase, school_id)
-    in_slot = [d for d in duties_for_date(supabase, school_id, exam_date)
-               if str(d.get("period_id")) == str(period_id)]
-    taken_rooms = {str(d.get("room_id")) for d in in_slot}
-    busy = {str(d.get("teacher_id")) for d in in_slot}
-    free = [t for t in teachers if t["id"] not in busy]
+    room_counts, teacher_counts = _period_seats(supabase, school_id, exam_date, period_id)
+    teachers = [t for t in teachers_of(supabase, school_id)
+                if teacher_counts.get(t["id"], 0) < MAX_PER_TEACHER]
 
     applied = 0
     for room in rooms:
-        if str(room["id"]) in taken_rooms or not free:
+        if room_counts.get(str(room["id"]), 0) > 0 or not teachers:
             continue
-        teacher = free.pop(0)
+        teacher = teachers.pop(0)
         out = assign(supabase, school_id, exam_date=exam_date, period_id=period_id,
                      room_id=str(room["id"]), teacher_id=teacher["id"],
                      source="manual", actor_id=actor_id)
         if out.get("ok"):
             applied += 1
+            teacher_counts[teacher["id"]] = teacher_counts.get(teacher["id"], 0) + 1
     return {"ok": True, "reason": "", "applied": applied}
 
 
@@ -547,10 +593,13 @@ def parse_workbook(data: bytes, *, periods: dict, rooms: dict, teachers: dict,
     with the same functions :func:`matrix` and :func:`available_teachers` use, so the
     importer and the dropdown can never disagree about who is in this school.
 
-    ``taken_rooms`` and ``taken_teachers`` are ``set``s of ``(date, period_id, room_id)``
-    and ``(date, period_id, teacher_id)`` already filled that day. A row that only
-    **repeats** a cell the file itself already claimed is also an error: two lines
-    asking for the same room are one line plus a mistake.
+    ``taken_rooms`` and ``taken_teachers`` are ``dict``s of seat *counts* already
+    written that day, keyed by ``(date, period_id, room_id)`` and
+    ``(date, period_id, teacher_id)``. The file's own rows increment the same counts
+    as they are read, so a sheet that fills a room to its cap is caught before it
+    reaches the database. A row that repeats a cell the file itself already claimed —
+    the same teacher in the same room — is an error too, because it is one line plus
+    a duplicate.
 
     Never raises on a bad row — the whole file is read and every bad line is
     reported with its number, because stopping at the first error makes an operator
@@ -568,10 +617,9 @@ def parse_workbook(data: bytes, *, periods: dict, rooms: dict, teachers: dict,
 
     rows_out: list[dict] = []
     errors: list[dict] = []
-    seen_rooms: set = set()
-    seen_teachers: set = set()
-    taken_rooms = set(taken_rooms or set())
-    taken_teachers = set(taken_teachers or set())
+    room_counts: dict = dict(taken_rooms or {})
+    teacher_counts: dict = dict(taken_teachers or {})
+    seen_cells: set = set()
     total = 0
 
     for index, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
@@ -605,15 +653,19 @@ def parse_workbook(data: bytes, *, periods: dict, rooms: dict, teachers: dict,
 
         if exam_date and period and room:
             room_key = (exam_date, str(period["id"]), str(room["id"]))
-            if room_key in taken_rooms or room_key in seen_rooms:
-                problems.append(("room_taken", _clean(raw_room)))
+            cell_key = (room_key, str(teacher["id"]) if teacher else "")
+            if teacher and cell_key in seen_cells:
+                problems.append(("already_assigned", _clean(raw_email)))
+            elif room_counts.get(room_key, 0) >= MAX_PER_ROOM:
+                problems.append(("room_full", _clean(raw_room)))
             elif teacher:
                 teacher_key = (exam_date, str(period["id"]), str(teacher["id"]))
-                if teacher_key in taken_teachers or teacher_key in seen_teachers:
-                    problems.append(("teacher_busy", _clean(raw_email)))
+                if teacher_counts.get(teacher_key, 0) >= MAX_PER_TEACHER:
+                    problems.append(("teacher_full", _clean(raw_email)))
                 else:
-                    seen_rooms.add(room_key)
-                    seen_teachers.add(teacher_key)
+                    seen_cells.add(cell_key)
+                    room_counts[room_key] = room_counts.get(room_key, 0) + 1
+                    teacher_counts[teacher_key] = teacher_counts.get(teacher_key, 0) + 1
 
         entry = {
             "row": index,

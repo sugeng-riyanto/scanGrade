@@ -32,6 +32,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 SERVICE = ROOT / "app" / "services" / "invigilation_matrix.py"
 MIGRATION = ROOT / "supabase" / "migrations" / "059_invigilation_matrix.sql"
+CAPS = ROOT / "supabase" / "migrations" / "061_invigilation_seat_caps.sql"
 ADMIN_ROUTES = ROOT / "app" / "routes" / "admin_sekolah.py"
 PAGE = ROOT / "app" / "templates" / "admin_sekolah" / "invigilation_matrix.html"
 REASONS = ROOT / "app" / "templates" / "shared" / "_invigilation_reasons.html"
@@ -116,12 +117,27 @@ class TestTheSchema:
             assert f'DROP POLICY IF EXISTS "{policy}"' in sql, (
                 f"{policy} is created without being dropped first")
 
-    def test_the_two_conflict_rules_are_unique_constraints(self):
+    def test_the_base_migration_pins_one_duty_per_cell(self):
         sql = MIGRATION.read_text(encoding="utf-8")
         assert "invigilation_duty_room_slot_key UNIQUE (school_id, exam_date, period_id, room_id)" in sql, (
             "a room could hold two invigilators in one slot")
         assert "invigilation_duty_teacher_slot_key UNIQUE (school_id, exam_date, period_id, teacher_id)" in sql, (
             "a teacher could stand in two rooms in one slot")
+
+    def test_the_caps_migration_relaxes_those_to_two(self):
+        sql = CAPS.read_text(encoding="utf-8")
+        # The two single-occupancy constraints are gone, a repeat of the very same
+        # cell is still impossible, and the "at most two" limit is a trigger —
+        # UNIQUE cannot express a ceiling of two.
+        assert "DROP CONSTRAINT IF EXISTS invigilation_duty_room_slot_key" in sql
+        assert "DROP CONSTRAINT IF EXISTS invigilation_duty_teacher_slot_key" in sql
+        assert ("invigilation_duty_cell_key" in sql
+                and "UNIQUE (school_id, exam_date, period_id, room_id, teacher_id)" in sql)
+        assert "invigilation_duty_seat_cap" in sql
+        assert "room_count >= 2" in sql and "teacher_count >= 2" in sql
+        assert "BEFORE INSERT OR UPDATE ON public.invigilation_duty" in sql
+        assert not re.search(r"DROP\s+(TABLE|COLUMN)", sql), "the migration drops something"
+        assert not re.search(r"^\s*BEGIN\s*;", sql, re.M), "the runner owns the transaction"
 
     def test_every_table_carries_its_own_school_and_rls(self):
         sql = MIGRATION.read_text(encoding="utf-8")
@@ -193,19 +209,52 @@ class TestFillingACell:
                         room_id="r1", teacher_id="t9")
         assert out["reason"] == "teacher_not_in_school", out
 
-    def test_a_room_already_filled_is_refused_with_a_sentence(self):
+    def test_a_room_takes_a_second_teacher(self):
         db = _DB(_tables())
         db.tables["invigilation_duty"].append(_duty("d1", teacher="t1", room="r1"))
         out = im.assign(db, SCHOOL, exam_date="2026-10-01", period_id="p1",
                         room_id="r1", teacher_id="t2")
-        assert out["reason"] == "room_taken", out
+        assert out["ok"], out
+        assert len(db.tables["invigilation_duty"]) == 2
 
-    def test_a_teacher_already_on_duty_this_slot_is_refused(self):
+    def test_a_room_with_two_teachers_refuses_a_third(self):
+        db = _DB(_tables())
+        db.tables["invigilation_duty"] = [
+            _duty("d1", teacher="t1", room="r1"),
+            _duty("d2", teacher="t2", room="r1"),
+        ]
+        db.tables["teachers"].append({"id": "t3", "school_id": SCHOOL,
+                                      "profiles": {"full_name": "Bu Tiga"}})
+        out = im.assign(db, SCHOOL, exam_date="2026-10-01", period_id="p1",
+                        room_id="r1", teacher_id="t3")
+        assert out["reason"] == "room_full", out
+
+    def test_a_teacher_takes_a_second_room(self):
         db = _DB(_tables())
         db.tables["invigilation_duty"].append(_duty("d1", teacher="t1", room="r1"))
         out = im.assign(db, SCHOOL, exam_date="2026-10-01", period_id="p1",
                         room_id="r2", teacher_id="t1")
-        assert out["reason"] == "teacher_busy", out
+        assert out["ok"], out
+        assert len(db.tables["invigilation_duty"]) == 2
+
+    def test_a_teacher_in_two_rooms_refuses_a_third(self):
+        db = _DB(_tables())
+        db.tables["exam_room"].append({"id": "r3", "school_id": SCHOOL, "name": "Ruang 3",
+                                       "capacity": 20, "is_active": True})
+        db.tables["invigilation_duty"] = [
+            _duty("d1", teacher="t1", room="r1"),
+            _duty("d2", teacher="t1", room="r2"),
+        ]
+        out = im.assign(db, SCHOOL, exam_date="2026-10-01", period_id="p1",
+                        room_id="r3", teacher_id="t1")
+        assert out["reason"] == "teacher_full", out
+
+    def test_the_very_same_cell_twice_is_not_a_second_seat(self):
+        db = _DB(_tables())
+        db.tables["invigilation_duty"].append(_duty("d1", teacher="t1", room="r1"))
+        out = im.assign(db, SCHOOL, exam_date="2026-10-01", period_id="p1",
+                        room_id="r1", teacher_id="t1")
+        assert out["reason"] == "already_assigned", out
 
     def test_the_same_teacher_may_take_a_later_slot(self):
         db = _DB(_tables())
@@ -242,7 +291,17 @@ class TestTheGrid:
         db = _DB(_tables())
         db.tables["invigilation_duty"].append(_duty("d1", teacher="t1"))
         grid = im.matrix(db, SCHOOL, "2026-10-01")
-        assert grid["cells"]["p1"]["r1"]["teacher_name"] == "Bu Sari"
+        assert grid["cells"]["p1"]["r1"][0]["teacher_name"] == "Bu Sari"
+
+    def test_a_room_cell_lists_both_of_its_teachers(self):
+        db = _DB(_tables())
+        db.tables["invigilation_duty"] = [
+            _duty("d1", teacher="t1", room="r1"),
+            _duty("d2", teacher="t2", room="r1"),
+        ]
+        grid = im.matrix(db, SCHOOL, "2026-10-01")
+        names = {c["teacher_name"] for c in grid["cells"]["p1"]["r1"]}
+        assert names == {"Bu Sari", "Pak Budi"}, names
 
     def test_the_load_counts_each_teacher(self):
         db = _DB(_tables())
@@ -254,9 +313,18 @@ class TestTheGrid:
         grid = im.matrix(db, SCHOOL, "2026-10-01")
         assert grid["load"]["t1"] == 2 and grid["load"]["t2"] == 1
 
-    def test_available_teachers_exclude_the_busy_ones(self):
+    def test_available_teachers_include_one_with_a_spare_seat(self):
         db = _DB(_tables())
         db.tables["invigilation_duty"].append(_duty("d1", period="p1", teacher="t1"))
+        free = im.available_teachers(db, SCHOOL, "2026-10-01", "p1")
+        assert [t["id"] for t in free] == ["t1", "t2"], free
+
+    def test_available_teachers_drop_one_who_is_full(self):
+        db = _DB(_tables())
+        db.tables["invigilation_duty"] = [
+            _duty("d1", period="p1", teacher="t1", room="r1"),
+            _duty("d2", period="p1", teacher="t1", room="r2"),
+        ]
         free = im.available_teachers(db, SCHOOL, "2026-10-01", "p1")
         assert [t["id"] for t in free] == ["t2"], free
 
@@ -366,23 +434,31 @@ class TestTheImporter:
         reasons = {p["reason"] for p in out["errors"][0]["problems"]}
         assert {"bad_date", "period_not_in_school"} <= reasons
 
-    def test_a_room_the_table_already_holds_is_reported(self):
+    def test_a_room_already_holding_two_is_reported(self):
         periods, rooms, teachers = _lists()
         data = _workbook([["2026-10-01", "Sesi 1", "Ruang 1", "bu@sekolah.sch.id", ""]])
         out = im.parse_workbook(
             data, periods=periods, rooms=rooms, teachers=teachers,
-            taken_rooms={("2026-10-01", "p1", "r1")})
-        assert out["errors"][0]["problems"][0]["reason"] == "room_taken"
+            taken_rooms={("2026-10-01", "p1", "r1"): 2})
+        assert out["errors"][0]["problems"][0]["reason"] == "room_full"
 
-    def test_a_teacher_already_on_duty_is_reported(self):
+    def test_a_room_holding_one_accepts_a_second_row(self):
+        periods, rooms, teachers = _lists()
+        data = _workbook([["2026-10-01", "Sesi 1", "Ruang 1", "bu@sekolah.sch.id", ""]])
+        out = im.parse_workbook(
+            data, periods=periods, rooms=rooms, teachers=teachers,
+            taken_rooms={("2026-10-01", "p1", "r1"): 1})
+        assert out["valid"] == 1 and out["errors"] == []
+
+    def test_a_teacher_already_in_two_rooms_is_reported(self):
         periods, rooms, teachers = _lists(rooms=("Ruang 1", "Ruang 2"))
         data = _workbook([["2026-10-01", "Sesi 1", "Ruang 2", "bu@sekolah.sch.id", ""]])
         out = im.parse_workbook(
             data, periods=periods, rooms=rooms, teachers=teachers,
-            taken_teachers={("2026-10-01", "p1", "t1")})
-        assert out["errors"][0]["problems"][0]["reason"] == "teacher_busy"
+            taken_teachers={("2026-10-01", "p1", "t1"): 2})
+        assert out["errors"][0]["problems"][0]["reason"] == "teacher_full"
 
-    def test_two_rows_in_one_file_claiming_the_same_room_are_caught(self):
+    def test_two_rows_in_one_file_repeating_a_cell_are_caught(self):
         periods, rooms, teachers = _lists()
         data = _workbook([
             ["2026-10-01", "Sesi 1", "Ruang 1", "bu@sekolah.sch.id", ""],
@@ -390,7 +466,18 @@ class TestTheImporter:
         ])
         out = im.parse_workbook(data, periods=periods, rooms=rooms, teachers=teachers)
         assert out["valid"] == 1 and out["errors"][0]["row"] == 3
-        assert out["errors"][0]["problems"][0]["reason"] == "room_taken"
+        assert out["errors"][0]["problems"][0]["reason"] == "already_assigned"
+
+    def test_a_file_filling_one_room_to_two_is_capped_at_three(self):
+        periods, rooms, teachers = _lists(emails=("a@x.id", "b@x.id", "c@x.id"))
+        data = _workbook([
+            ["2026-10-01", "Sesi 1", "Ruang 1", "a@x.id", ""],
+            ["2026-10-01", "Sesi 1", "Ruang 1", "b@x.id", ""],
+            ["2026-10-01", "Sesi 1", "Ruang 1", "c@x.id", ""],
+        ])
+        out = im.parse_workbook(data, periods=periods, rooms=rooms, teachers=teachers)
+        assert out["valid"] == 2
+        assert out["errors"][0]["problems"][0]["reason"] == "room_full"
 
     def test_a_non_workbook_reports_bad_file(self):
         periods, rooms, teachers = _lists()
@@ -592,21 +679,53 @@ class TestClickingACell:
         assert out["ok"] and out["action"] == "cleared", out
         assert db.tables["invigilation_duty"] == []
 
-    def test_clicking_a_taken_room_moves_its_teacher_out(self):
+    def test_clicking_a_room_adding_a_second_teacher(self):
         db = _DB(_tables())
         db.tables["invigilation_duty"].append(_duty("d1", room="r1", teacher="t1"))
         out = im.set_cell(db, SCHOOL, exam_date="2026-10-01", period_id="p1",
                           room_id="r1", teacher_id="t2")
         assert out["ok"] and out["action"] == "set", out
-        assert [d["teacher_id"] for d in db.tables["invigilation_duty"]] == ["t2"]
+        assert sorted(d["teacher_id"] for d in db.tables["invigilation_duty"]) == ["t1", "t2"]
 
-    def test_clicking_moves_the_teacher_out_of_their_other_room(self):
+    def test_clicking_adds_the_teacher_to_their_second_room(self):
         db = _DB(_tables())
         db.tables["invigilation_duty"].append(_duty("d1", room="r1", teacher="t1"))
         im.set_cell(db, SCHOOL, exam_date="2026-10-01", period_id="p1",
                     room_id="r2", teacher_id="t1")
-        pairs = [(d["room_id"], d["teacher_id"]) for d in db.tables["invigilation_duty"]]
-        assert pairs == [("r2", "t1")], pairs
+        pairs = sorted((d["room_id"], d["teacher_id"]) for d in db.tables["invigilation_duty"])
+        assert pairs == [("r1", "t1"), ("r2", "t1")], pairs
+
+    def test_a_click_that_would_cross_the_room_cap_is_refused(self):
+        db = _DB(_tables())
+        db.tables["invigilation_duty"] = [
+            _duty("d1", room="r1", teacher="t1"),
+            _duty("d2", room="r1", teacher="t2"),
+        ]
+        db.tables["teachers"].append({"id": "t3", "school_id": SCHOOL,
+                                      "profiles": {"full_name": "Bu Tiga"}})
+        out = im.set_cell(db, SCHOOL, exam_date="2026-10-01", period_id="p1",
+                          room_id="r1", teacher_id="t3")
+        assert out["reason"] == "room_full", out
+        assert len(db.tables["invigilation_duty"]) == 2
+
+    def test_a_click_that_would_cross_the_teacher_cap_is_refused(self):
+        db = _DB(_tables())
+        db.tables["exam_room"].append({"id": "r3", "school_id": SCHOOL, "name": "Ruang 3",
+                                       "capacity": 20, "is_active": True})
+        db.tables["invigilation_duty"] = [
+            _duty("d1", room="r1", teacher="t1"),
+            _duty("d2", room="r2", teacher="t1"),
+        ]
+        out = im.set_cell(db, SCHOOL, exam_date="2026-10-01", period_id="p1",
+                          room_id="r3", teacher_id="t1")
+        assert out["reason"] == "teacher_full", out
+
+    def test_a_saved_click_reports_the_seat_counts_back(self):
+        db = _DB(_tables())
+        out = im.set_cell(db, SCHOOL, exam_date="2026-10-01", period_id="p1",
+                          room_id="r1", teacher_id="t1")
+        assert out["room_counts"]["r1"] == 1 and out["teacher_counts"]["t1"] == 1, out
+        assert out["max_per_room"] == 2 and out["max_per_teacher"] == 2
 
     def test_a_click_never_touches_another_period(self):
         db = _DB(_tables())
@@ -674,3 +793,21 @@ class TestTheNewDoors:
         assert "/admin-sekolah/invigilation/matrix/seed" in page, "no 'build from classes' button"
         assert "/admin-sekolah/invigilation/matrix/auto-fill" in page, "no auto-fill button"
         assert "/admin-sekolah/invigilation/matrix/cell" in page, "no click-to-assign cell"
+
+    def test_the_cell_form_saves_without_reloading(self):
+        page = PAGE.read_text(encoding="utf-8")
+        # The form is posted by fetch with the XHR header, the button is repainted
+        # from the JSON, and the seat counters are read back — so no reload.
+        assert "class=\"matrix-cell\"" in page
+        assert "X-Requested-With" in page and "XMLHttpRequest" in page
+        assert "preventDefault()" in page
+        assert "paintSeats" in page
+        assert "data-room-seat" in page and "data-teacher-seat" in page
+        assert "matrix-min-summary" in page and "data-empty-rooms" in page
+
+    def test_the_cell_route_answers_json_for_the_no_reload_path(self):
+        source = ADMIN_ROUTES.read_text(encoding="utf-8")
+        block = next(b for b in _route_blocks(source)
+                     if '@admin_sekolah_bp.route("/invigilation/matrix/cell"' in b)
+        assert "X-Requested-With" in block and "jsonify" in block
+        assert '"room_counts"' in block and '"max_per_room"' in block
