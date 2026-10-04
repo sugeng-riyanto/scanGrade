@@ -56,7 +56,8 @@ REQUIRED_TOTAL = 100
 #: Stated as data so the page can render the same sentence the module enforces.
 MISSING_COMPONENT_POLICY = "zero"
 
-COMPONENT_COLUMNS = "id, school_id, name, sort_order, is_active, created_at, updated_at"
+COMPONENT_COLUMNS = ("id, school_id, name, sort_order, is_active, default_weight, "
+                     "created_at, updated_at")
 CONFIG_COLUMNS = ("id, school_id, subject_id, school_year_id, component_id, "
                   "weight_percent, is_active")
 
@@ -86,6 +87,92 @@ def list_components(supabase, school_id: str, *, active_only: bool = True) -> li
         query = query.eq("is_active", True)
     rows = _rows(query.order("sort_order").order("name"))
     return rows
+
+
+def default_config(supabase, school_id: str) -> dict[str, int]:
+    """The school's **default** distribution, or ``{}``.
+
+    Read from the active components' own `default_weight` (058). It is a real
+    policy only when it adds up to :data:`REQUIRED_TOTAL`; a half-filled default
+    is not a policy and answers ``{}``, so a subject that follows it falls back to
+    the simple mean rather than to a total that never reached 100.
+    """
+    if not school_id:
+        return {}
+    weights = {}
+    for row in list_components(supabase, school_id):
+        value = row.get("default_weight")
+        if value is None:
+            continue
+        try:
+            value = int(value)
+        except (TypeError, ValueError):
+            continue
+        if value > 0:
+            weights[str(row["id"])] = value
+    if not weights or sum(weights.values()) != REQUIRED_TOTAL:
+        return {}
+    return weights
+
+
+def save_defaults(supabase, school_id: str, weights: dict, *,
+                  actor_id=None) -> tuple[bool, dict]:
+    """Set the school's default distribution across its active components.
+
+    ``weights`` is ``{component_id: percent}``. Every id must be an active
+    component this school owns (else 403); a non-empty set must sum to exactly
+    :data:`REQUIRED_TOTAL` (else 400). An empty set clears every default, so a
+    school that removes its default goes back to per-subject configs and the
+    simple mean.
+    """
+    if not school_id:
+        return False, {"error": "Sekolah tidak diketahui", "status": 400}
+    components = list_components(supabase, school_id)
+    owned = {str(c["id"]) for c in components}
+    cleaned: dict[str, int] = {}
+    for cid, raw in (weights or {}).items():
+        if str(cid) not in owned:
+            return False, {"error": "Ada komponen bukan milik sekolah ini", "status": 403}
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            return False, {"error": "Bobot harus berupa angka", "status": 400}
+        if value < 0 or value > 100:
+            return False, {"error": "Bobot harus 0-100", "status": 400}
+        if value:
+            cleaned[str(cid)] = value
+    total = sum(cleaned.values())
+    if cleaned and total != REQUIRED_TOTAL:
+        return False, {"error": f"Total bobot default harus 100% (sekarang {total}%)",
+                       "status": 400, "total": total}
+    try:
+        for comp in components:
+            cid = str(comp["id"])
+            # `updated_by` lives on the weight-config rows, not on this table
+            # (057 gave the component list `created_by` only), so only the value
+            # that actually exists is written here.
+            supabase.table("grade_component_type").update(
+                {"default_weight": cleaned.get(cid, 0)})\
+                .eq("id", comp["id"]).eq("school_id", school_id).execute()
+    except Exception as exc:                                        # noqa: BLE001
+        logger.warning("grade_weighting: save defaults failed: %s", exc)
+        return False, {"error": "Gagal menyimpan bobot default", "status": 400}
+    return True, {"weights": cleaned, "total": total, "cleared": not cleaned}
+
+
+def effective_config(supabase, school_id: str, subject_id: str,
+                     year_id: str | None) -> dict[str, int]:
+    """The weights a subject's mark actually uses.
+
+    A custom distribution for the subject/year wins; otherwise the school's
+    **default** distribution applies; otherwise ``{}`` (the simple mean). This is
+    the one read every surface should use, so a subject the admin never touched
+    still carries the school's declared weights.
+    """
+    custom = config_for(supabase, school_id, subject_id, year_id)
+    if custom:
+        return custom
+    return default_config(supabase, school_id)
 
 
 def component_ids(supabase, school_id: str) -> set[str]:
@@ -363,7 +450,7 @@ def subject_finals(supabase, school_id: str, subject_id: str, year_id: str | Non
         exams = []
     exam_components = {str(e["id"]): e.get("grade_component_type_id")
                        for e in exams if e.get("id")}
-    weights = config_for(supabase, school_id, subject_id, year_id)
+    weights = effective_config(supabase, school_id, subject_id, year_id)
     if not exam_components:
         return {sid: compute([], weights) for sid in students}
     try:

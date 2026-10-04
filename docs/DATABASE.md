@@ -172,8 +172,10 @@ All tables have Row Level Security enabled. See `docs/SECURITY_RLS_MATRIX.md` fo
 
 ## Weighted grade components (migration 057)
 
-- **grade_component_type**: school_id, name, sort_order, is_active, created_by.
-  Unique `(school_id, lower(name))`. The school's own list of grade components
+- **grade_component_type**: school_id, name, sort_order, is_active, created_by,
+  **default_weight** (0-100, migration 058 — the school-wide default this component
+  carries; the default is a policy only when it sums to 100). Unique
+  `(school_id, lower(name))`. The school's own list of grade components
   ("Tugas Kelas", "UTS", …).
 - **grade_weight_config**: school_id, subject_id, school_year_id, component_id,
   weight_percent (0-100), is_active, updated_by. Unique
@@ -184,6 +186,8 @@ All tables have Row Level Security enabled. See `docs/SECURITY_RLS_MATRIX.md` fo
 - **exams.grade_component_type_id** (nullable, `ON DELETE SET NULL`): which
   weighted component a paper is counted under. NULL means uncategorised; the paper
   is excluded from a weighted total and reported as `untagged`.
+- **Effective weights** are `custom subject/year config` → else the school
+  `default_weight` distribution → else the simple mean (`grade_weighting.effective_config`).
 
 ## Migrations
 

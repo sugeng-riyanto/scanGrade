@@ -4,15 +4,20 @@
 {% block page_title %}Nilai Berbobot{% endblock %}
 {% block content %}
 <script>
-// The school's grade policy: its components, and the weight each carries per
-// subject. A save only succeeds when a row reaches 100%, so the total is shown
-// live and the Save button stays disabled until it adds up.
+// The school's grade policy: its components, the default weight each carries, and
+// the per-subject distribution. A subject **follows the default** until the admin
+// saves its own row — so one policy covers the whole school and only the
+// exceptions are typed out. A save only succeeds when a row (or the default)
+// reaches 100%, so every total is shown live and its Save stays disabled until it
+// adds up.
 function gradeWeights() {
     return {
         components: {{ components|tojson }},
         subjects: {{ subjects|tojson }},
         weights: {{ matrix|tojson }},
         totals: {{ totals|tojson }},
+        defaults: {{ defaults|tojson }},
+        customSubjects: {{ custom_subjects|tojson }},
         compNames: {{ comp_names|tojson }},
         required: {{ required_total }},
         closed: {{ 'true' if year_status == 'closed' else 'false' }},
@@ -31,7 +36,35 @@ function gradeWeights() {
             this.totals[subjectId] = Object.values(r).reduce((a, b) => a + b, 0);
         },
         total(subjectId) { return this.totals[subjectId] || 0; },
-        canSave(subjectId) { const r = this.row(subjectId); return Object.keys(r).length === 0 || this.total(subjectId) === this.required; },
+        canSave(subjectId) { return this.total(subjectId) === this.required; },
+
+        isCustom(subjectId) { return this.customSubjects.includes(String(subjectId)); },
+
+        // ── the school default ──────────────────────────────────────────────
+        defaultTotal() { return Object.values(this.defaults).reduce((a, b) => a + Number(b || 0), 0); },
+        defaultCanSave() { const t = this.defaultTotal(); return t === 0 || t === this.required; },
+        setDefault(compId, value) {
+            const n = parseInt(value, 10);
+            if (isNaN(n) || n <= 0) { delete this.defaults[compId]; } else { this.defaults[compId] = n; }
+        },
+        saveDefaults() {
+            this.saving = 'defaults'; this.msg = '';
+            this.post('/admin-sekolah/grade-weights/defaults', { weights: this.defaults })
+                .then(d => {
+                    if (d.ok) {
+                        // Every subject still following the default moves with it,
+                        // so the matrix below never shows a stale policy.
+                        this.subjects.forEach(s => {
+                            if (!this.isCustom(s.id)) {
+                                this.weights[s.id] = Object.assign({}, this.defaults);
+                                this.totals[s.id] = this.defaultTotal();
+                            }
+                        });
+                    }
+                    this.flash(d.ok, d.ok ? this.t('Default tersimpan.','Default saved.') : (d.data.error || this.t('Gagal.','Failed.')));
+                    this.saving = '';
+                });
+        },
 
         addComponent() {
             if (!this.newName.trim()) { return; }
@@ -59,17 +92,31 @@ function gradeWeights() {
         },
         saveRow(subjectId) {
             this.saving = subjectId; this.msg = '';
-            const body = { weights: this.row(subjectId) };
-            this.post('/admin-sekolah/grade-weights/' + subjectId, body)
+            this.post('/admin-sekolah/grade-weights/' + subjectId, { weights: this.row(subjectId) })
                 .then(d => {
-                    this.flash(d.ok, d.ok ? this.t('Bobot tersimpan.','Weights saved.') : (d.data.error || this.t('Gagal.','Failed.')));
+                    if (d.ok && !this.customSubjects.includes(String(subjectId))) {
+                        this.customSubjects.push(String(subjectId));
+                    }
+                    this.flash(d.ok, d.ok ? this.t('Bobot mapel tersimpan.','Subject weights saved.') : (d.data.error || this.t('Gagal.','Failed.')));
                     this.saving = '';
                 });
         },
-        clearRow(subjectId) {
-            if (!confirm(this.t('Kosongkan bobot mapel ini? Nilai Akhir kembali rata-rata sederhana.','Clear this subject\'s weights? The Final Mark returns to a simple mean.'))) { return; }
-            this.weights[subjectId] = {}; this.totals[subjectId] = 0;
-            this.saveRow(subjectId);
+        followDefault(subjectId) {
+            if (!confirm(this.t('Pakai default sekolah untuk mapel ini?','Use the school default for this subject?'))) { return; }
+            this.saving = subjectId;
+            // Clearing the subject's rows is what "follow the default" means on the
+            // server: no custom config, so the school default applies again.
+            this.weights[subjectId] = {};
+            this.post('/admin-sekolah/grade-weights/' + subjectId, { weights: {} })
+                .then(d => {
+                    if (d.ok) {
+                        this.weights[subjectId] = Object.assign({}, this.defaults);
+                        this.totals[subjectId] = this.defaultTotal();
+                        this.customSubjects = this.customSubjects.filter(v => v !== String(subjectId));
+                    }
+                    this.flash(d.ok, d.ok ? this.t('Mapel kembali mengikuti default.','Subject follows the default again.') : (d.data.error || this.t('Gagal.','Failed.')));
+                    this.saving = '';
+                });
         },
         post(url, body) {
             return fetch(url, {
@@ -87,7 +134,7 @@ function gradeWeights() {
     <div class="card p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
         <div>
             <h2 class="text-lg font-extrabold text-slate-800" x-text="t('Komponen & Bobot Nilai','Grade Components & Weights')"></h2>
-            <p class="text-xs text-slate-500 font-medium" x-text="t('Komponen = bagian nilai (Tugas, UTS, UAS). Bobot diatur per mapel per tahun ajaran; totalnya harus 100%.','A component is a share of the mark (Coursework, Mid-term, Final). Weights are per subject per year; the total must reach 100%.')"></p>
+            <p class="text-xs text-slate-500 font-medium" x-text="t('Atur default sekolah sekali, lalu tiap mapel mengikutinya. Default diatur per tahun ajaran; totalnya harus 100%.','Set the school default once; each subject follows it. The default is per subject per year; the total must reach 100%.')"></p>
         </div>
         <span class="text-xs font-bold px-2 py-1 rounded-lg bg-slate-100 text-slate-600" x-show="'{{ year_name }}'">{{ year_name or t('Tanpa tahun aktif','No active year') }}</span>
     </div>
@@ -125,54 +172,93 @@ function gradeWeights() {
         </div>
     </div>
 
-    <div class="card p-5">
-        <h3 class="text-sm font-extrabold text-slate-700 mb-3" x-text="t('Matriks Bobot per Mapel','Weight Matrix per Subject')"></h3>
-        <template x-if="activeComponents().length === 0">
-            <p class="text-sm text-slate-400 italic" x-text="t('Tambahkan minimal satu komponen aktif untuk mengatur bobot.','Add at least one active component to set weights.')"></p>
-        </template>
-        <template x-if="activeComponents().length > 0">
-            <div class="overflow-x-auto">
-                <table class="w-full text-sm min-w-[640px]">
-                    <thead><tr class="text-left text-slate-500 bg-slate-50 border-b border-slate-100">
-                        <th class="px-3 py-2 font-semibold" x-text="t('Mapel','Subject')"></th>
-                        <template x-for="c in activeComponents()" :key="c.id">
-                            <th class="px-2 py-2 font-semibold text-center" x-text="c.name"></th>
-                        </template>
-                        <th class="px-2 py-2 font-semibold text-center" x-text="t('Total','Total')"></th>
-                        <th class="px-3 py-2"></th>
-                    </tr></thead>
-                    <tbody>
-                        <template x-for="s in subjects" :key="s.id">
-                            <tr class="border-b border-slate-50 last:border-0">
-                                <td class="px-3 py-2 font-semibold text-slate-700" x-text="s.name"></td>
-                                <template x-for="c in activeComponents()" :key="c.id">
-                                    <td class="px-1 py-2 text-center">
-                                        <input type="number" min="0" max="100" :disabled="closed"
-                                               :value="cell(s.id, c.id)"
-                                               @change="setCell(s.id, c.id, $event.target.value)"
-                                               class="w-16 text-center border border-slate-200 rounded-lg px-1 py-1 text-sm font-bold disabled:bg-slate-100">
-                                    </td>
-                                </template>
-                                <td class="px-2 py-2 text-center font-extrabold"
-                                    :class="total(s.id) === 0 ? 'text-slate-300' : (total(s.id) === required ? 'text-emerald-600' : 'text-red-500')">
-                                    <span x-text="total(s.id) + '%'"></span>
-                                </td>
-                                <td class="px-3 py-2 text-right whitespace-nowrap" x-show="!closed">
-                                    <button type="button" @click="saveRow(s.id)" :disabled="!canSave(s.id)"
-                                            class="px-3 py-1.5 rounded-lg bg-brand-600 text-white text-xs font-bold hover:bg-brand-700 disabled:opacity-40 disabled:cursor-not-allowed">
-                                        <i class="fas fa-save mr-1"></i><span x-text="t('Simpan','Save')"></span>
-                                    </button>
-                                    <button type="button" @click="clearRow(s.id)" x-show="total(s.id) > 0"
-                                            class="ml-1 px-2 py-1.5 rounded-lg bg-slate-100 text-slate-600 text-xs font-bold hover:bg-slate-200">
-                                        <i class="fas fa-eraser"></i>
-                                    </button>
-                                </td>
-                            </tr>
-                        </template>
-                    </tbody>
-                </table>
+    <template x-if="activeComponents().length > 0">
+        <div>
+            <!-- The default distribution: what every subject follows unless it has
+                 its own row below. Editing it moves every subject still on the
+                 default, so the matrix never shows a policy the school no longer has. -->
+            <div class="card p-5 mb-6 border-2 border-brand-200">
+                <div class="flex items-center justify-between gap-2 mb-3">
+                    <div>
+                        <h3 class="text-sm font-extrabold text-slate-700"><i class="fas fa-star text-brand-500 mr-1"></i><span x-text="t('Bobot Default Sekolah','School Default Weights')"></span></h3>
+                        <p class="text-xs text-slate-500 font-medium" x-text="t('Semua mapel mengikuti ini sampai diubah di bawah.','Every subject follows this until changed below.')"></p>
+                    </div>
+                    <div class="flex items-center gap-2" x-show="!closed">
+                        <span class="text-sm font-extrabold" :class="defaultTotal() === required ? 'text-emerald-600' : 'text-red-500'" x-text="defaultTotal() + '%'"></span>
+                        <button type="button" @click="saveDefaults()" :disabled="!defaultCanSave() || saving==='defaults'"
+                                class="px-3 py-1.5 rounded-lg bg-brand-600 text-white text-xs font-bold hover:bg-brand-700 disabled:opacity-40 disabled:cursor-not-allowed">
+                            <i class="fas fa-save mr-1"></i><span x-text="t('Simpan Default','Save Default')"></span>
+                        </button>
+                    </div>
+                </div>
+                <div class="flex flex-wrap gap-3">
+                    <template x-for="c in activeComponents()" :key="c.id">
+                        <label class="flex items-center gap-2">
+                            <span class="text-xs font-bold text-slate-600" x-text="c.name"></span>
+                            <input type="number" min="0" max="100" :disabled="closed"
+                                   :value="defaults[c.id] === undefined ? '' : defaults[c.id]"
+                                   @change="setDefault(c.id, $event.target.value)"
+                                   class="w-16 text-center border border-slate-200 rounded-lg px-1 py-1 text-sm font-bold disabled:bg-slate-100">
+                        </label>
+                    </template>
+                </div>
             </div>
-        </template>
-    </div>
+
+            <div class="card p-5">
+                <h3 class="text-sm font-extrabold text-slate-700 mb-3" x-text="t('Matriks Bobot per Mapel','Weight Matrix per Subject')"></h3>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm min-w-[640px]">
+                        <thead><tr class="text-left text-slate-500 bg-slate-50 border-b border-slate-100">
+                            <th class="px-3 py-2 font-semibold" x-text="t('Mapel','Subject')"></th>
+                            <template x-for="c in activeComponents()" :key="c.id">
+                                <th class="px-2 py-2 font-semibold text-center" x-text="c.name"></th>
+                            </template>
+                            <th class="px-2 py-2 font-semibold text-center" x-text="t('Total','Total')"></th>
+                            <th class="px-3 py-2"></th>
+                        </tr></thead>
+                        <tbody>
+                            <template x-for="s in subjects" :key="s.id">
+                                <tr class="border-b border-slate-50 last:border-0">
+                                    <td class="px-3 py-2 font-semibold text-slate-700">
+                                        <span x-text="s.name"></span>
+                                        <span x-show="!isCustom(s.id)" class="ml-1 text-[10px] font-bold text-brand-600 bg-brand-50 px-1.5 py-0.5 rounded"
+                                              x-text="t('default','default')"></span>
+                                    </td>
+                                    <template x-for="c in activeComponents()" :key="c.id">
+                                        <td class="px-1 py-2 text-center">
+                                            <input type="number" min="0" max="100" :disabled="closed"
+                                                   :value="cell(s.id, c.id)"
+                                                   @change="setCell(s.id, c.id, $event.target.value)"
+                                                   class="w-16 text-center border border-slate-200 rounded-lg px-1 py-1 text-sm font-bold disabled:bg-slate-100">
+                                        </td>
+                                    </template>
+                                    <td class="px-2 py-2 text-center font-extrabold"
+                                        :class="total(s.id) === 0 ? 'text-slate-300' : (total(s.id) === required ? 'text-emerald-600' : 'text-red-500')">
+                                        <span x-text="total(s.id) + '%'"></span>
+                                    </td>
+                                    <td class="px-3 py-2 text-right whitespace-nowrap" x-show="!closed">
+                                        <button type="button" @click="saveRow(s.id)" :disabled="!canSave(s.id)"
+                                                class="px-3 py-1.5 rounded-lg bg-brand-600 text-white text-xs font-bold hover:bg-brand-700 disabled:opacity-40 disabled:cursor-not-allowed">
+                                            <i class="fas fa-save mr-1"></i><span x-text="t('Simpan','Save')"></span>
+                                        </button>
+                                        <button type="button" @click="followDefault(s.id)" x-show="isCustom(s.id)"
+                                                class="ml-1 px-2 py-1.5 rounded-lg bg-slate-100 text-slate-600 text-xs font-bold hover:bg-slate-200"
+                                                :title="t('Kembali ikuti default','Back to the default')">
+                                            <i class="fas fa-rotate-left"></i>
+                                        </button>
+                                    </td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </template>
+    <template x-if="activeComponents().length === 0">
+        <div class="card p-5">
+            <p class="text-sm text-slate-400 italic" x-text="t('Tambahkan minimal satu komponen aktif untuk mengatur bobot.','Add at least one active component to set weights.')"></p>
+        </div>
+    </template>
 </div>
 {% endblock %}

@@ -21,8 +21,16 @@ school meant.
 | `grade_weight_config` | The **weight** of each component for one subject in one academic year | `admin_sekolah` |
 
 Components are a per-school list; weights are per **subject per year**. A school
-that wants one policy everywhere simply gives the same weights to every subject —
-the broader model is a subset of this one, not a second schema.
+that wants one policy everywhere sets the **default distribution** once (migration
+058, stored as `grade_component_type.default_weight`) and every subject follows it
+until the admin types a custom row for that subject. Precedence, spelled out:
+
+```
+custom subject/year config   →   school default   →   simple mean
+```
+
+A default is a policy only when it sums to 100; a half-filled default is ignored
+and the subject falls back to the simple mean.
 
 **Why per subject per year?** Because a weight is the thing a mark *already
 reported* was decided by. Moving it after the fact would silently change a
@@ -89,14 +97,20 @@ the components the school configured for its subject. The field is **optional**:
 
 1. **Komponen Nilai** — add / rename / (de)activate components. Deactivating, not
    deleting, keeps the marks a component already decided intact.
-2. **Matriks Bobot per Mapel** — one row per subject, one column per active
-   component. The row's total is shown live; **Save stays disabled until the row
-   sums to exactly 100%**. Clearing a row returns the subject to the simple mean.
+2. **Bobot Default Sekolah** — the school-wide distribution, above the matrix. A
+   subject with no custom row follows it, so one policy covers the whole school.
+3. **Matriks Bobot per Mapel** — one row per subject, pre-filled from the default
+   and labelled *default* until it is saved with its own numbers. Each row's total
+   is shown live; **Save stays disabled until the row sums to exactly 100%**. The
+   *back to default* button clears the custom row so the subject follows again.
 
 A closed academic year is read-only.
 
 ## Where the number appears
 
+- **`/teacher/exams/new`** — the **Komponen Nilai** picker offers every active
+  category for the chosen subject (a subject on the school default included), so a
+  paper can be filed under any component — not only the first one.
 - **`/teacher/students`** — the teacher's grade table: **Kelas, Nama, NISN, Nilai
   Akhir**, with a per-component breakdown on the info button, KKM colouring, search
   and sort, and **XLSX/PDF exports** that carry one column per component.
