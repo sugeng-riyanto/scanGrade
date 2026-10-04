@@ -15,6 +15,18 @@
     {% endif %}
     {% endwith %}
 
+    {# The centre/list saves without a reload, so a refusal has nowhere to live on
+       the page — it rides a small toast instead. The sentences are the same ones the
+       server flashes, rendered here once per key and cloned by the grid's script, so
+       the no-reload path and the full-reload path read identically. #}
+    <div id="matrix-toast" role="status" aria-live="polite"
+         class="hidden fixed bottom-5 right-5 z-50 max-w-sm px-4 py-3 rounded-xl bg-red-50 text-red-700 border border-red-200 text-sm font-semibold shadow-lg"></div>
+    <div class="hidden" aria-hidden="true">
+        {% for key in ['room_full','teacher_full','already_assigned','period_not_in_school','room_not_in_school','teacher_not_in_school','write_failed','not_found'] %}
+        <template id="matrix-refusal-{{ key }}">{{ reasons.reason_note(key) }}</template>
+        {% endfor %}
+    </div>
+
     {# The outcome of a bulk apply. It sits outside the preview because a successful
        apply clears the preview, and the operator would otherwise see no trace of what
        they just did. #}
@@ -156,7 +168,7 @@
             <div class="min-w-0">
                 <h3 class="font-bold text-stone-800"><i class="fas fa-table-cells-large text-primary-500 mr-1.5"></i><span x-text="t('Matriks pengawas','Invigilator matrix')"></span></h3>
                 <p class="text-xs text-stone-500 mt-1 max-w-3xl"
-                   x-text="t('Baris = guru, kolom = ruangan (kelas). Klik sel untuk menugaskan guru itu ke ruangan itu pada sesi terpilih, klik lagi untuk mengosongkan. Satu guru hanya boleh berada di satu ruangan per sesi.','Rows are teachers, columns are rooms (classes). Click a cell to put that teacher in that room in the selected session; click again to empty it. A teacher can only stand in one room per session.')"></p>
+                   x-text="t('Baris = guru, kolom = ruangan (kelas). Klik sel untuk menugaskan guru itu ke ruangan itu pada sesi terpilih, klik lagi untuk mengosongkan. Setiap sel tersimpan otomatis tanpa memuat ulang halaman. Satu ruangan dijaga 1-2 guru; satu guru menjaga 1-2 ruangan per sesi.','Rows are teachers, columns are rooms (classes). Click a cell to put that teacher in that room in the selected session; click again to empty it. Every tweak saves by itself, with no page reload. A room holds 1-2 teachers; a teacher covers 1-2 rooms per session.')"></p>
             </div>
             <form method="GET" action="/admin-sekolah/invigilation/matrix" class="flex items-end gap-2 flex-wrap">
                 <label class="block">
@@ -186,6 +198,24 @@
                 <i class="fas fa-wand-magic-sparkles mr-1"></i><span x-text="t('Isi otomatis semua ruangan','Auto-fill every room')"></span>
             </button>
         </form>
+
+        {# The two minimums the school asked for: every room needs at least one
+           invigilator, every teacher at least one room. Shown as counts, not enforced
+           as refusals — a hard "you cannot remove the last one" would make moving a
+           teacher between rooms impossible, so the grid states the gap and leaves the
+           judgement to the operator. #}
+        <div class="mt-3 flex flex-wrap gap-2" id="matrix-min-summary"
+             data-total-rooms="{{ grid.rooms | length }}"
+             data-total-teachers="{{ teachers | length }}">
+            <span class="text-[11px] px-2 py-1 rounded-full {% if rooms_needing_teacher %}bg-amber-100 text-amber-800{% else %}bg-emerald-50 text-emerald-700{% endif %}">
+                <i class="fas fa-door-open mr-1"></i><span data-empty-rooms>{{ rooms_needing_teacher | length }}</span>
+                <span x-text="t('ruangan belum punya pengawas (minimal 1)','rooms with no invigilator (minimum 1)')"></span>
+            </span>
+            <span class="text-[11px] px-2 py-1 rounded-full {% if teachers_without_room %}bg-amber-100 text-amber-800{% else %}bg-emerald-50 text-emerald-700{% endif %}">
+                <i class="fas fa-user-clock mr-1"></i><span data-empty-teachers>{{ teachers_without_room | length }}</span>
+                <span x-text="t('guru belum dapat ruangan (minimal 1)','teachers with no room yet (minimum 1)')"></span>
+            </span>
+        </div>
         <div class="overflow-x-auto mt-3">
             <table class="w-full text-xs min-w-[640px]">
                 <thead>
@@ -194,6 +224,9 @@
                         {% for r in grid.rooms %}
                         <th class="text-left py-2 pr-3 font-bold">
                             {{ r.name }}
+                            {% set seats = room_seats.get(r.id|string, 0) %}
+                            <span data-room-seat="{{ r.id }}"
+                                  class="inline-block text-[10px] font-mono px-1.5 py-0.5 rounded-full ml-1 {% if seats == 0 %}bg-amber-100 text-amber-800{% else %}bg-surface-100 text-surface-700{% endif %}">{{ seats }}/{{ max_per_room }}</span>
                             {% if r.capacity %}<div class="text-[10px] text-stone-400 font-normal">{{ r.capacity }} <span x-text="t('murid','pupils')"></span></div>{% endif %}
                         </th>
                         {% endfor %}
@@ -201,21 +234,27 @@
                 </thead>
                 <tbody>
                     {% for t in teachers %}
+                    {% set tseats = teacher_seats.get(t.id|string, 0) %}
                     <tr class="border-t border-surface-100">
-                        <td class="py-1.5 pr-3 font-semibold text-stone-700 whitespace-nowrap sticky left-0 bg-white">{{ t.name }}</td>
+                        <td class="py-1.5 pr-3 font-semibold text-stone-700 whitespace-nowrap sticky left-0 bg-white">
+                            {{ t.name }}
+                            <span data-teacher-seat="{{ t.id }}"
+                                  class="text-[10px] font-mono px-1.5 py-0.5 rounded-full ml-1 {% if tseats == 0 %}bg-amber-100 text-amber-800{% else %}bg-surface-100 text-surface-700{% endif %}">{{ tseats }}/{{ max_per_teacher }}</span>
+                        </td>
                         {% for r in grid.rooms %}
-                        {% set holder = occupied.get(r.id|string) %}
-                        {% set mine = holder and holder|string == t.id|string %}
+                        {% set mine = t.id|string in occupied.get(r.id|string, []) %}
                         <td class="py-1 pr-2">
-                            <form method="POST" action="/admin-sekolah/invigilation/matrix/cell">
+                            <form method="POST" action="/admin-sekolah/invigilation/matrix/cell"
+                                  class="matrix-cell" data-filled="{{ '1' if mine else '0' }}"
+                                  data-room="{{ r.id }}" data-teacher="{{ t.id }}">
                                 <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                                 <input type="hidden" name="exam_date" value="{{ exam_date }}">
                                 <input type="hidden" name="period_id" value="{{ selected_period }}">
                                 <input type="hidden" name="room_id" value="{{ r.id }}">
                                 <input type="hidden" name="teacher_id" value="{{ t.id }}">
                                 <button type="submit"
-                                        class="w-8 h-8 rounded-lg border transition tap-44
-                                               {% if mine %}bg-primary-600 border-primary-600 text-white{% elif holder %}bg-stone-100 border-stone-200 text-stone-500 hover:border-primary-300{% else %}bg-white border-surface-200 hover:border-primary-400{% endif %}"
+                                        class="matrix-cell-btn w-8 h-8 rounded-lg border transition tap-44
+                                               {% if mine %}is-on bg-primary-600 border-primary-600 text-white{% else %}bg-white border-surface-200 hover:border-primary-400{% endif %}"
                                         title="{% if mine %}{{ t.name }} — {{ r.name }} (klik untuk mengosongkan){% else %}{{ t.name }} → {{ r.name }}{% endif %}">
                                     {% if mine %}<i class="fas fa-check"></i>{% endif %}
                                 </button>
@@ -322,4 +361,98 @@
     </div>
     {% endif %}
 </div>
+
+<script>
+/* The click grid saves itself. A tick posts the same form the no-JS path posts,
+   reads the seat counts back, and repaints the cell and the counters — so the
+   operator sees the change land without the page ever reloading. A refusal is a
+   sentence in a toast, using the very same bilingual text the server flashes. */
+(function () {
+    var grid = document.getElementById('matrix-grid');
+    if (!grid) return;
+    var toast = document.getElementById('matrix-toast');
+
+    function refusalText(reason) {
+        var tpl = document.getElementById('matrix-refusal-' + reason);
+        return tpl ? tpl.innerHTML
+                   : String(reason || 'write_failed').replace(/_/g, ' ');
+    }
+    function showRefusal(reason) {
+        if (!toast) return;
+        toast.innerHTML = refusalText(reason);
+        toast.classList.remove('hidden');
+        if (toast._timer) clearTimeout(toast._timer);
+        toast._timer = setTimeout(function () { toast.classList.add('hidden'); }, 7000);
+    }
+    function repaintChip(el, n, max) {
+        el.textContent = n + '/' + max;
+        el.classList.toggle('bg-amber-100', n === 0);
+        el.classList.toggle('text-amber-800', n === 0);
+        el.classList.toggle('bg-surface-100', n > 0);
+        el.classList.toggle('text-surface-700', n > 0);
+    }
+    function paintSeats(data) {
+        var maxRoom = data.max_per_room || 2;
+        var maxTeacher = data.max_per_teacher || 2;
+        var roomCounts = data.room_counts || {};
+        var teacherCounts = data.teacher_counts || {};
+        document.querySelectorAll('[data-room-seat]').forEach(function (el) {
+            repaintChip(el, roomCounts[el.dataset.roomSeat] || 0, maxRoom);
+        });
+        document.querySelectorAll('[data-teacher-seat]').forEach(function (el) {
+            repaintChip(el, teacherCounts[el.dataset.teacherSeat] || 0, maxTeacher);
+        });
+        var summary = document.getElementById('matrix-min-summary');
+        if (!summary) return;
+        var totalRooms = parseInt(summary.dataset.totalRooms || '0', 10);
+        var totalTeachers = parseInt(summary.dataset.totalTeachers || '0', 10);
+        var filled = function (counts) {
+            return Object.keys(counts).filter(function (k) { return counts[k] > 0; }).length;
+        };
+        var emptyRooms = Math.max(0, totalRooms - filled(roomCounts));
+        var emptyTeachers = Math.max(0, totalTeachers - filled(teacherCounts));
+        var er = summary.querySelector('[data-empty-rooms]');
+        var et = summary.querySelector('[data-empty-teachers]');
+        if (er) er.textContent = emptyRooms;
+        if (et) et.textContent = emptyTeachers;
+        summary.querySelectorAll('span.rounded-full').forEach(function (chip, i) {
+            var empty = i === 0 ? emptyRooms : emptyTeachers;
+            chip.classList.toggle('bg-amber-100', empty > 0);
+            chip.classList.toggle('text-amber-800', empty > 0);
+            chip.classList.toggle('bg-emerald-50', empty === 0);
+            chip.classList.toggle('text-emerald-700', empty === 0);
+        });
+    }
+    grid.querySelectorAll('form.matrix-cell').forEach(function (form) {
+        form.addEventListener('submit', function (ev) {
+            ev.preventDefault();
+            var btn = form.querySelector('.matrix-cell-btn');
+            if (!btn || btn.disabled) return;
+            btn.disabled = true;
+            fetch(form.action, {
+                method: 'POST',
+                body: new FormData(form),
+                headers: {'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json'},
+                credentials: 'same-origin'
+            }).then(function (r) { return r.json(); }).then(function (data) {
+                btn.disabled = false;
+                if (!data.ok) { showRefusal(data.reason || 'write_failed'); return; }
+                var on = data.action === 'set';
+                form.dataset.filled = on ? '1' : '0';
+                btn.classList.toggle('is-on', on);
+                btn.classList.toggle('bg-primary-600', on);
+                btn.classList.toggle('border-primary-600', on);
+                btn.classList.toggle('text-white', on);
+                btn.classList.toggle('bg-white', !on);
+                btn.classList.toggle('border-surface-200', !on);
+                btn.innerHTML = on ? '<i class="fas fa-check"></i>' : '';
+                paintSeats(data);
+            }).catch(function () {
+                btn.disabled = false;
+                showRefusal('write_failed');
+            });
+        });
+    });
+})();
+</script>
 {% endblock %}
