@@ -163,6 +163,8 @@ def dashboard():
         repaired=request.args.get("repaired"),
         repair_skipped=request.args.get("skipped"),
         repair_failed=request.args.get("failed"),
+        quarantined=request.args.get("quarantined"),
+        quarantine_note=request.args.get("quarantine_note"),
     )
 
 
@@ -559,6 +561,43 @@ def integrity_repair():
                  user_id=g.user_id)
     return redirect(f"/super-admin/dashboard?repaired={repaired}"
                     f"&skipped={skipped}&failed={failed}")
+
+
+@super_bp.route("/integrity/quarantine", methods=["POST"])
+@_sa_required
+def integrity_quarantine():
+    """Detach a cross-school row the repair door can never re-point.
+
+    A row whose class and subject belong to different schools (`two_schools`) has no
+    single school to move to, and a row whose pointer cannot be read has none either
+    — so the repair door refuses them and, until now, the operator had to reach for
+    SQL for exactly the rows most likely to be mis-wired. This is their door. It does
+    not guess a school; it removes the link the way the app removes one, and it
+    **requires a reason**, which is stored in the audit record.
+
+    The request names only *which* row; the column and value are the service's per
+    kind, so a forged form cannot write an arbitrary table or column.
+    """
+    from app.services import cross_school_repair as repair
+
+    supabase = get_supabase()
+    outcome = repair.quarantine(supabase, request.form.get("kind", ""),
+                                request.form.get("row_id", ""),
+                                request.form.get("reason", ""), g.user_id)
+    ok = bool(outcome.get("ok"))
+    reason = request.form.get("reason", "")
+    log_activity("update", "school_integrity", "quarantine",
+                 new_data={"ok": ok, "kind": request.form.get("kind") or "",
+                           "row_id": request.form.get("row_id") or "",
+                           "quarantine_reason": reason,
+                           "refused": None if ok else outcome.get("reason")},
+                 user_id=g.user_id)
+    # A success carries its own sentence; a refusal carries the reason's key. Using
+    # `reason_key(OK)` would label a quarantine "ready to repair", which is the
+    # wrong verb for a row nobody can move.
+    note = "repair_quarantined" if ok else repair.reason_key(outcome.get("reason") or "")
+    return redirect(f"/super-admin/dashboard?quarantined={1 if ok else 0}"
+                    f"&quarantine_note={note}")
 
 
 @super_bp.route("/reset-demo-passwords", methods=["POST"])
