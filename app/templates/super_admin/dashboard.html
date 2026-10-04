@@ -82,6 +82,36 @@
         'class_subjects': ['Peta mapel-kelas', 'Subject-class map'],
         'teacher_assignments': ['Penugasan guru', 'Teacher assignment'],
     } %}
+    {# One sentence per repair refusal, keyed by the plan's own `reason_key`. A
+       refusal the operator cannot read is a button that silently does nothing. #}
+    {% set IG_REPAIR = {
+        'repair_ok': ['Siap diperbaiki.', 'Ready to repair.'],
+        'repair_already_consistent': ['Sudah konsisten — tidak ada yang perlu diubah.', 'Already consistent — nothing to change.'],
+        'repair_two_schools': ['Kelas dan mapelnya dari sekolah berbeda, jadi tidak ada satu sekolah tujuan. Perbaiki manual setelah memastikan mana yang benar.', 'Its class and subject belong to different schools, so there is no single target. Fix it by hand once you know which is right.'],
+        'repair_target_unknown': ['Kelas atau mapel yang ditunjuk tidak bisa dibaca, jadi tujuannya tidak bisa dipastikan.', 'The class or subject it points at could not be read, so the target cannot be worked out.'],
+        'repair_row_not_found': ['Barisnya sudah tidak ada.', 'The row is already gone.'],
+        'repair_unknown_kind': ['Jenis temuan ini belum punya pintu perbaikan.', 'This kind of finding has no repair door yet.'],
+        'repair_read_failed': ['Barisnya tidak bisa dibaca.', 'The row could not be read.'],
+        'repair_write_failed': ['Perubahan tidak tersimpan.', 'The change was not saved.'],
+        'repair_row_changed': ['Baris sudah diperbaiki pihak lain lebih dulu — muat ulang.', 'The row was fixed by someone else first — reload.'],
+        'repair_failed': ['Perbaikan tidak bisa dilakukan.', 'The repair could not be done.'],
+    } %}
+    {# What the last repair run did. It sits *outside* the card below on purpose: a
+       successful "repair all" empties the findings, so the card disappears and the
+       operator would be left with no trace of what they just did. #}
+    {% if repaired is not none and repaired != '' %}
+    <div class="card p-4 border border-emerald-200 bg-emerald-50/60" id="repair-outcome">
+        <p class="text-sm font-bold text-emerald-800">
+            <i class="fas fa-screwdriver-wrench mr-1"></i>
+            <span x-text="t('Perbaikan baris lintas sekolah selesai diproses:','Cross-school repairs processed:')"></span>
+            <span class="font-mono">{{ repaired }}</span> <span x-text="t('diperbaiki','repaired')"></span>,
+            <span class="font-mono">{{ repair_skipped }}</span> <span x-text="t('dilewati','skipped')"></span>,
+            <span class="font-mono">{{ repair_failed }}</span> <span x-text="t('gagal','failed')"></span>
+        </p>
+        <p class="text-[11px] text-emerald-700/80 mt-1" x-text="t('Diperbaiki = school_id baris itu dipindahkan ke sekolah pemilik datanya. Dilewati = sudah konsisten atau ambigu (kelas dan mapel dari sekolah berbeda). Gagal = baris berubah lebih dulu atau tulisannya ditolak.','Repaired = that row&rsquo;s school_id was moved to the school that owns the data. Skipped = already consistent, or ambiguous (class and subject from different schools). Failed = the row changed first, or the write was refused.')"></p>
+    </div>
+    {% endif %}
+
     {% if integrity and (integrity.findings or not integrity.ok) %}
     <div class="card p-5 border {% if integrity.findings %}border-amber-200 bg-amber-50/60{% else %}border-red-200 bg-red-50/60{% endif %}"
          id="school-integrity" data-integrity="{% if not integrity.ok %}unchecked{% else %}findings{% endif %}">
@@ -111,6 +141,7 @@
                                 <th class="text-left py-2 pr-3 font-bold" x-text="t('Baris','Row')"></th>
                                 <th class="text-left py-2 pr-3 font-bold" x-text="t('Sekolah baris','Row school')"></th>
                                 <th class="text-left py-2 font-bold" x-text="t('Sekolah yang ditunjuk','Pointed-at school')"></th>
+                                <th class="text-left py-2 font-bold" x-text="t('Perbaikan','Repair')"></th>
                             </tr>
                         </thead>
                         <tbody>
@@ -123,6 +154,32 @@
                                 <td class="py-2 pr-3 font-mono text-[10px] text-amber-700 break-all">{% if f.pair_id or f.assignment_id or f.pupil_id %}{{ f.pair_id or f.assignment_id or f.pupil_id }}{% else %}-{% endif %}{% if f.field %} · {{ f.field }} {{ f.subject_id or f.class_id or '' }}{% endif %}</td>
                                 <td class="py-2 pr-3 font-mono text-[10px] text-amber-700 break-all">{% if f.pair_school_id or f.assignment_school_id or f.class_school_id %}{{ f.pair_school_id or f.assignment_school_id or f.class_school_id }}{% else %}-{% endif %}</td>
                                 <td class="py-2 font-mono text-[10px] text-amber-700 break-all">{% if f.subject_school_id or f.pupil_school_id %}{{ f.subject_school_id or f.pupil_school_id }}{% else %}-{% endif %}</td>
+                                {# The preview: where this row *would* move, and — for a row the
+                                   door will refuse — the sentence saying why, so a refusal
+                                   is on the page rather than a surprise after a click. #}
+                                {% set rid = f.pair_id or f.assignment_id or f.pupil_id %}
+                                {% set plan = repair_plans.get(rid) if repair_plans else none %}
+                                <td class="py-2">
+                                    {% if plan and plan.ok %}
+                                    <form method="POST" action="/integrity/repair" class="flex items-center gap-2">
+                                        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                                        <input type="hidden" name="kind" value="{{ f.kind }}">
+                                        <input type="hidden" name="row_id" value="{{ rid }}">
+                                        <span class="text-[10px] font-bold text-emerald-700">
+                                            <span x-text="t('Pindah ke','Move to')"></span>
+                                            {{ plan.to_school_name or plan.to_school_id }}
+                                        </span>
+                                        <button type="submit"
+                                                class="px-2 py-1 bg-emerald-50 text-emerald-700 rounded-lg font-bold text-[10px] hover:bg-emerald-100 transition"
+                                                x-text="t('Perbaiki','Repair')"></button>
+                                    </form>
+                                    {% elif plan %}
+                                    {% set why = IG_REPAIR.get(plan.reason_key, [plan.reason_key, plan.reason_key]) %}
+                                    <span class="text-[10px] font-bold text-surface-500" x-text="t('{{ why[0] }}','{{ why[1] }}')"></span>
+                                    {% else %}
+                                    <span class="text-amber-700/50">—</span>
+                                    {% endif %}
+                                </td>
                             </tr>
                             {% endfor %}
                         </tbody>
@@ -140,6 +197,16 @@
                     <span class="font-mono">{{ integrity.checked.profiles }}</span>
                     <span x-text="t('akun murid berkelas','pupil accounts with a class')"></span>
                 </p>
+                {# Every actionable row at once. Rows the preview refused are skipped by
+                   the service itself, so this cannot guess where they should go. #}
+                <form method="POST" action="/integrity/repair" class="mt-3 flex items-center gap-3 flex-wrap">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="scope" value="all">
+                    <button type="submit"
+                            class="px-3 py-1.5 bg-emerald-600 text-white rounded-lg font-bold text-xs hover:bg-emerald-700 transition"
+                            x-text="t('Perbaiki semua yang bisa','Repair everything it can')"></button>
+                    <span class="text-[10px] text-amber-700/80" x-text="t('Baris yang ambiguous (kelas dan mapel dari sekolah berbeda) dilewati, bukan ditebak.','Ambiguous rows (class and subject from different schools) are skipped, not guessed.')"></span>
+                </form>
                 {% endif %}
             </div>
         </div>
