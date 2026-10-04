@@ -65,6 +65,87 @@
     </div>
     {% endif %}
 
+    {# Cross-school rows: a `school_id` that disagrees with the school of the pupil or
+       class it points at. That is the shape behind three separate "the number looks
+       mixed with another NPSN" reports, each of which was found by a human reading a
+       page days later. The panel draws only when there is something to say — findings,
+       or a sweep that could not run — because a banner that is always there stops
+       being a signal. The two states carry different sentences on purpose: "clean"
+       and "could not check" are opposite answers and must never look alike. #}
+    {% set IG_KINDS = {
+        'class_pupil_mismatch': ['Murid di kelas sekolah lain', 'Pupil in another school class'],
+        'pair_school_mismatch': ['Peta mapel-kelas lintas sekolah', 'Subject-class map across schools'],
+        'assignment_school_mismatch': ['Penugasan guru lintas sekolah', 'Teacher assignment across schools'],
+    } %}
+    {% set IG_TABLES = {
+        'profiles': ['Akun murid', 'Pupil account'],
+        'class_subjects': ['Peta mapel-kelas', 'Subject-class map'],
+        'teacher_assignments': ['Penugasan guru', 'Teacher assignment'],
+    } %}
+    {% if integrity and (integrity.findings or not integrity.ok) %}
+    <div class="card p-5 border {% if integrity.findings %}border-amber-200 bg-amber-50/60{% else %}border-red-200 bg-red-50/60{% endif %}"
+         id="school-integrity" data-integrity="{% if not integrity.ok %}unchecked{% else %}findings{% endif %}">
+        <div class="flex items-start gap-4">
+            <i class="fas {% if integrity.findings %}fa-triangle-exclamation text-amber-600{% else %}fa-circle-question text-red-600{% endif %} text-2xl mt-0.5"></i>
+            <div class="min-w-0 flex-1">
+                <h3 class="font-extrabold {% if integrity.findings %}text-amber-800{% else %}text-red-700{% endif %}"
+                    x-text="t('Data lintas sekolah','Cross-school rows')"></h3>
+
+                {# A sweep that failed is its own sentence, never silence. #}
+                {% if not integrity.ok %}
+                <p class="text-sm text-red-700 mt-1 leading-relaxed">
+                    <span x-text="t('Pemeriksaan data TIDAK selesai, jadi halaman ini tidak bisa memastikan tidak ada baris campur sekolah. Tabel yang gagal dibaca:','The data check did NOT complete, so this page cannot promise there is no cross-school row. Tables that failed to read:')"></span>
+                    <span class="font-mono text-xs">{% for e in integrity.errors %}{{ e.table }}{% if not loop.last %}, {% endif %}{% endfor %}</span>
+                </p>
+                {% endif %}
+
+                {% if integrity.findings %}
+                <p class="text-sm text-amber-800 mt-1 leading-relaxed"
+                   x-text="t('Baris di bawah menyebut sekolah yang berbeda dari murid atau kelas yang ditunjuknya, sehingga halaman satu sekolah bisa membaca data sekolah lain — persis penyebab laporan &ldquo;mapel campur NPSN lain&rdquo;. Perbaiki dengan menyetel school_id baris itu ke sekolah pemilik datanya, atau hapus barisnya bila salah dibuat.','The rows below name a different school than the pupil or class they point at, so one school&rsquo;s page can read another school&rsquo;s data — exactly what the &ldquo;subjects mixed with another NPSN&rdquo; report was. Fix by setting that row&rsquo;s school_id to the school that owns the data, or deleting the row if it was created by mistake.')"></p>
+                <div class="overflow-x-auto mt-3">
+                    <table class="w-full text-xs min-w-[640px]">
+                        <thead class="text-amber-700">
+                            <tr>
+                                <th class="text-left py-2 pr-3 font-bold" x-text="t('Jenis','Kind')"></th>
+                                <th class="text-left py-2 pr-3 font-bold" x-text="t('Tabel','Table')"></th>
+                                <th class="text-left py-2 pr-3 font-bold" x-text="t('Baris','Row')"></th>
+                                <th class="text-left py-2 pr-3 font-bold" x-text="t('Sekolah baris','Row school')"></th>
+                                <th class="text-left py-2 font-bold" x-text="t('Sekolah yang ditunjuk','Pointed-at school')"></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for f in integrity.findings %}
+                            {% set kind = IG_KINDS.get(f.kind, [f.kind, f.kind]) %}
+                            {% set tbl = IG_TABLES.get(f.table, [f.table, f.table]) %}
+                            <tr class="border-t border-amber-200/60" data-finding="{{ f.kind }}">
+                                <td class="py-2 pr-3 font-bold text-amber-800" x-text="t('{{ kind[0] }}','{{ kind[1] }}')"></td>
+                                <td class="py-2 pr-3 text-amber-700" x-text="t('{{ tbl[0] }}','{{ tbl[1] }}')"></td>
+                                <td class="py-2 pr-3 font-mono text-[10px] text-amber-700 break-all">{% if f.pair_id or f.assignment_id or f.pupil_id %}{{ f.pair_id or f.assignment_id or f.pupil_id }}{% else %}-{% endif %}{% if f.field %} · {{ f.field }} {{ f.subject_id or f.class_id or '' }}{% endif %}</td>
+                                <td class="py-2 pr-3 font-mono text-[10px] text-amber-700 break-all">{% if f.pair_school_id or f.assignment_school_id or f.class_school_id %}{{ f.pair_school_id or f.assignment_school_id or f.class_school_id }}{% else %}-{% endif %}</td>
+                                <td class="py-2 font-mono text-[10px] text-amber-700 break-all">{% if f.subject_school_id or f.pupil_school_id %}{{ f.subject_school_id or f.pupil_school_id }}{% else %}-{% endif %}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% if integrity.truncated %}
+                <p class="text-[11px] font-bold text-amber-700 mt-2" x-text="t('Daftar dipotong — masih ada baris lain di luar yang ditampilkan.','The list is capped — there are more rows than shown.')"></p>
+                {% endif %}
+                <p class="text-[11px] text-amber-700/80 mt-2">
+                    <span x-text="t('Diperiksa','Checked')"></span>:
+                    <span class="font-mono">{{ integrity.checked.classes }}</span>
+                    <span x-text="t('kelas','classes')"></span>,
+                    <span class="font-mono">{{ integrity.checked.subjects }}</span>
+                    <span x-text="t('mapel','subjects')"></span>,
+                    <span class="font-mono">{{ integrity.checked.profiles }}</span>
+                    <span x-text="t('akun murid berkelas','pupil accounts with a class')"></span>
+                </p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
     {# The assessment-period reconcile button. A paper's period tag is derived from
        the calendar, so a tag written by SQL (or by any path that bypassed a door) is
        invisible to both the paper doors and the calendar doors until somebody edits
