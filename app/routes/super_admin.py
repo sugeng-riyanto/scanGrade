@@ -40,7 +40,7 @@ from app.services.school_reset import (
 )
 from app.services import subscription_plans as plan_cfg
 from app.utils.req_cache import invalidate, invalidate_school, ttl
-from app.utils import failure, lock_health
+from app.utils import failure, lock_health, auth_health
 
 super_bp = Blueprint("super_admin", __name__, url_prefix="/super-admin")
 
@@ -121,6 +121,10 @@ def dashboard():
 
     requests = _safe_select(supabase, "school_registration_requests", limit=20)
 
+    # The period-reconcile button lands back here with its outcome in the query
+    # string, so the operator sees the counts they just produced rather than a
+    # bare page. The outcome is a key and two numbers; the sentences are in the
+    # template, where the language toggle can reach them.
     return render_template("super_admin/dashboard.html",
         total_schools=total_schools, total_users=total_users,
         total_teachers=total_teachers, total_students=total_students,
@@ -128,6 +132,9 @@ def dashboard():
         pending_requests=pending_requests,
         schools=schools, recent_logs=recent_logs, requests=requests,
         mail=mail_ledger.snapshot(),
+        reconciled=request.args.get("reconciled"),
+        reconciled_retagged=request.args.get("retagged"),
+        reconciled_schools=request.args.get("schools"),
     )
 
 
@@ -173,7 +180,7 @@ def toggle_school_whiteboard(school_id):
         invalidate_school(school_id)
         return jsonify({"success": True, "enabled": new_val})
     except Exception as e:
-        return jsonify({"error": str(e)[:80]}), 500
+        return jsonify({"error": failure.sentence(e)}), 500
 
 
 @super_bp.route("/api/school/<school_id>/suspend", methods=["POST"])
@@ -327,6 +334,7 @@ def deploy_status():
     alerts = deploy_alert_summary()
     return render_template("super_admin/deploy_status.html", status=status,
                            alerts=alerts, locks=lock_health.state(),
+                           authretries=auth_health.state(),
                            testalert=request.args.get("testalert"),
                            released=request.args.get("released"),
                            rebaselined=request.args.get("rebaselined"))
@@ -450,6 +458,39 @@ def deploy_status_test_alert():
     return redirect(f"/super-admin/deploy-status?testalert={result['outcome']}")
 
 
+@super_bp.route("/reconcile-periods", methods=["POST"])
+@_sa_required
+def reconcile_periods():
+    """Re-derive every exam's assessment-period tag, now rather than on the tick.
+
+    The tag is derived from the paper's window and the school's calendar, and the
+    doors keep it current for everything the app writes. A tag written *around* a
+    door — by SQL, by a repair script — is invisible to both, and this is the way
+    to correct it without waiting for the daily sweep: the operator who has just
+    fixed something by hand wants the correction to be their next click, not their
+    next morning.
+
+    It runs the same per-school rule the calendar doors run (`retag_all_schools`),
+    scoped by each school inside the sweep, so pressing it can never re-home one
+    school's papers as a side effect of another's. The answer is an outcome key
+    plus the counts; the copy lives in the template where the language toggle and
+    the i18n sweep can reach it.
+    """
+    from app.services.assessment_periods import retag_all_schools
+
+    result = retag_all_schools(get_supabase())
+    log_activity("update", "assessment_periods", "reconcile",
+                 new_data={"retagged": result.get("retagged"),
+                           "schools": result.get("schools"),
+                           "failed": len(result.get("failed") or [])},
+                 user_id=g.user_id)
+    state = "ok" if result.get("ok") else "partial"
+    return redirect(
+        f"/super-admin/dashboard?reconciled={state}"
+        f"&retagged={int(result.get('retagged') or 0)}"
+        f"&schools={int(result.get('schools') or 0)}")
+
+
 @super_bp.route("/reset-demo-passwords", methods=["POST"])
 @_sa_required
 def reset_demo_passwords():
@@ -499,7 +540,7 @@ def reset_demo_passwords():
     try:
         by_email = {u.email: u.id for u in list_all_auth_users() if u.email}
     except Exception as e:
-        return jsonify({"error": f"could not list auth users: {str(e)[:80]}",
+        return jsonify({"error": f"could not list auth users: {failure.sentence(e)}",
                         "results": [], "total": 0, "ok": 0}), 502
 
     for user in all_users:
@@ -512,7 +553,7 @@ def reset_demo_passwords():
         try:
             supabase.auth.admin.update_user_by_id(uid, {"password": password})
         except Exception as e:
-            results.append({"email": email, "error": str(e)[:60]})
+            results.append({"email": email, "error": failure.sentence(e)})
             continue
         # A demo account is not a first sign-in. `must_change_password` takes a
         # trainee to a password form instead of the dashboard, and the trainee who
@@ -529,7 +570,7 @@ def reset_demo_passwords():
             results.append({"email": email, "password": password, "success": True})
         except Exception as e:
             results.append({"email": email, "password": password,
-                            "warning": f"password set; flag not cleared: {str(e)[:40]}"})
+                            "warning": f"password set; flag not cleared: {failure.sentence(e)}"})
 
     return jsonify({"results": results, "total": len(results), "ok": sum(1 for r in results if r.get("success"))})
 
@@ -649,7 +690,7 @@ def demo_settings():
                 supabase.table("school_settings").insert({"id": 1, "demo_settings": settings}).execute()
         except Exception as e:
             current_app.logger.error(f"demo_settings save failed: {str(e)[:120]}")
-            return jsonify({"success": False, "error": str(e)[:120]}), 500
+            return jsonify({"success": False, "error": failure.sentence(e)}), 500
 
         log_activity("update", "demo_settings", "1", new_data=settings, user_id=g.user_id)
         return jsonify({"success": True, "settings": settings})
@@ -694,7 +735,7 @@ def midtrans_settings():
             if "relation" in err and "does not exist" in err:
                 flash("Tabel midtrans_settings belum ada. Jalankan SQL migration (supabase/_COMPLETE_SETUP.sql) di Supabase SQL Editor.", "error")
             else:
-                flash(f"Gagal menyimpan: {err[:100]}", "error")
+                flash(f"Gagal menyimpan: {failure.sentence(e)}", "error")
         return redirect("/super-admin/midtrans")
 
     settings = {}

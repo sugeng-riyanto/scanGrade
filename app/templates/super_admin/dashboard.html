@@ -65,6 +65,33 @@
     </div>
     {% endif %}
 
+    {# The assessment-period reconcile button. A paper's period tag is derived from
+       the calendar, so a tag written by SQL (or by any path that bypassed a door) is
+       invisible to both the paper doors and the calendar doors until somebody edits
+       that paper or that calendar again. The daily sweep catches it; this is how an
+       operator who has just fixed something by hand gets the correction now, without
+       a shell. #}
+    <div class="card p-5">
+        <div class="flex items-start justify-between gap-4 flex-wrap">
+            <div class="min-w-0">
+                <h3 class="font-bold text-slate-800" x-text="t('Tag Periode Ujian','Exam Period Tags')"></h3>
+                <p class="text-sm text-slate-500 mt-1" x-text="t('Tag periode dihitung dari kalender sekolah. Tombol ini menghitung ulang tag seluruh sekolah dari kalender terkini — pakai setelah mengubah data langsung lewat SQL.', 'A paper’s period tag is derived from the school calendar. This button re-derives every school’s tags from the calendar as it stands — use it after changing data directly through SQL.')"></p>
+                {% if reconciled %}
+                <p class="text-xs font-bold mt-2 {% if reconciled == 'ok' %}text-emerald-700{% else %}text-amber-700{% endif %}">
+                    {% if reconciled == 'ok' %}
+                    <span x-text="t('Selesai — {{ reconciled_retagged or 0 }} tag diperbaiki dari {{ reconciled_schools or 0 }} sekolah.', 'Done — {{ reconciled_retagged or 0 }} tag(s) corrected across {{ reconciled_schools or 0 }} school(s).')"></span>
+                    {% else %}
+                    <span x-text="t('Selesai sebagian — {{ reconciled_retagged or 0 }} tag diperbaiki, tetapi ada sekolah yang gagal dibaca. Coba lagi nanti.', 'Partly done — {{ reconciled_retagged or 0 }} tag(s) corrected, but some school(s) could not be read. Try again later.')"></span>
+                    {% endif %}
+                </p>
+                {% endif %}
+            </div>
+            <button type="button" onclick="reconcilePeriods()" class="shrink-0 px-4 py-2.5 bg-slate-800 text-white rounded-xl font-bold text-sm hover:bg-slate-900 transition flex items-center gap-2">
+                <i class="fas fa-copy text-xs"></i> <span x-text="t('Sahkan ulang tag periode','Re-derive period tags')"></span>
+            </button>
+        </div>
+    </div>
+
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <!-- Registration Requests -->
         <div class="card">
@@ -178,6 +205,15 @@ function resetDemoPasswords() {
             alert(sgT('password berhasil direset ke default: ', 'passwords reset to default: ') + d.ok + '/' + d.total);
         btn.disabled = false; btn.innerHTML = '<i class="fas fa-key"></i> Reset Password';
     }).catch(() => { alert(sgT('Gagal', 'Failed')); btn.disabled = false; });
+}
+function reconcilePeriods() {
+    if (!confirm(sgT('Hitung ulang tag periode ujian untuk SEMUA sekolah dari kalender terkini?\n\nPakai ini setelah mengubah data langsung lewat SQL; tag yang sudah benar tidak diubah.',
+                       'Re-derive every school’s exam-period tags from the calendar as it stands?\n\nUse this after changing data directly through SQL; a tag that is already correct is left alone.'))) return;
+    const btn = event.target.closest('button');
+    btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> ' + sgT('Menghitung...', 'Reconciling...');
+    fetch('/super-admin/reconcile-periods', {method:'POST', headers:{'X-CSRF-Token':document.querySelector('meta[name=csrf-token]')?.content||''}})
+        .then(() => { window.location.reload(); })
+        .catch(() => { alert(sgT('Gagal', 'Failed')); btn.disabled = false; });
 }
 function resetDemoData() {
     if (!confirm(sgT('⚠️ Reset data SEKOLAH DEMO saja?\n\nSekolah asli TIDAK tersentuh — hanya sekolah demo yang dihapus datanya.\nUjian, pengumpulan, kelas, murid, guru, dan mapel demo akan dihapus; akun login tetap ada, jadi jalankan seed lagi setelah ini.',

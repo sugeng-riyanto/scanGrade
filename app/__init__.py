@@ -665,6 +665,18 @@ def create_app(env=None):
         except Exception as e:
             app.logger.warning("Failed to start deadline sweep: %s", e)
 
+        # Re-derive every exam's assessment-period tag once a day. The doors keep the
+        # tags current for everything the app writes, but a tag written by SQL — or by
+        # any path around a door — is invisible to both, and a report grouped by period
+        # then counts a paper under the wrong period. Same rule as the doors, on a timer.
+        try:
+            from app.services.period_reconcile_service import (
+                start_period_reconcile_scheduler)
+            start_period_reconcile_scheduler(
+                interval=app.config.get("PERIOD_RECONCILE_INTERVAL_SECONDS"), app=app)
+        except Exception as e:
+            app.logger.warning("Failed to start period reconcile sweep: %s", e)
+
         # Start the deploy-staleness alert loop. It mails the super admins when the
         # runner falls behind the checkout, so staleness is noticed the day it
         # happens instead of the day somebody opens the status page. It never
