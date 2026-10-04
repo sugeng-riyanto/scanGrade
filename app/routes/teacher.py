@@ -1252,6 +1252,10 @@ def exam_form():
 
     grade_component_id = _resolve_grade_component(
         supabase, g.get("user_school_id"), request.form.get("grade_component_type_id"))
+    # Date the paper to the running year, so the pupil dashboard can scope scores to
+    # the class a pupil is in this year, and a closed year stays read-only.
+    active_year_id = (ta_service.active_school_year(
+        supabase, g.get("user_school_id")) or {}).get("id")
     data = {
         "teacher_id": g.user_id,
         "school_id": g.get("user_school_id"),
@@ -1296,11 +1300,12 @@ def exam_form():
         "lock_pending_resume": lock_pending_resume,
         "resume_code_limit": resume_code_limit,
         "grade_component_type_id": grade_component_id,
+        "school_year_id": active_year_id,
     }
     try:
         res = supabase.table("exams").insert(data).execute()
     except Exception:
-        for key in ["question_weights", "question_texts", "anti_cheat_enabled", "penalty_per_violation", "max_violations", "auto_submit_on_max", "fullscreen_required", "randomize_questions", "randomize_options", "watermark_name", "block_copy_paste", "block_right_click", "block_screenshot", "allow_calculator", "lock_pending_resume", "resume_code_limit", "grade_component_type_id", "subject_id", "class_ids", "start_at", "end_at", "assessment_period_id", "auto_submit_on_window_end", "is_template", "source_exam_id", "max_attempts", "publish_mode", "question_pages", "question_cognitive"]:
+        for key in ["question_weights", "question_texts", "anti_cheat_enabled", "penalty_per_violation", "max_violations", "auto_submit_on_max", "fullscreen_required", "randomize_questions", "randomize_options", "watermark_name", "block_copy_paste", "block_right_click", "block_screenshot", "allow_calculator", "lock_pending_resume", "resume_code_limit", "grade_component_type_id", "school_year_id", "subject_id", "class_ids", "start_at", "end_at", "assessment_period_id", "auto_submit_on_window_end", "is_template", "source_exam_id", "max_attempts", "publish_mode", "question_pages", "question_cognitive"]:
             data.pop(key, None)
         res = supabase.table("exams").insert(data).execute()
     exam_id = res.data[0]["id"]
@@ -1591,6 +1596,10 @@ def exam_detail(exam_id):
     publication = _publication_state(exam_row, action)
     grade_component_id = _resolve_grade_component(
         supabase, g.get("user_school_id"), request.form.get("grade_component_type_id"))
+    # Date the paper to the running year, so the pupil dashboard can scope scores to
+    # the class a pupil is in this year, and a closed year stays read-only.
+    active_year_id = (ta_service.active_school_year(
+        supabase, g.get("user_school_id")) or {}).get("id")
     data = {
         "teacher_id": g.user_id,
         "school_id": g.get("user_school_id"),
@@ -1634,11 +1643,12 @@ def exam_detail(exam_id):
         "lock_pending_resume": lock_pending_resume,
         "resume_code_limit": resume_code_limit,
         "grade_component_type_id": grade_component_id,
+        "school_year_id": active_year_id,
     }
     try:
         supabase.table("exams").update(data).eq("id", exam_id).execute()
     except Exception:
-        for key in ["question_weights", "question_texts", "anti_cheat_enabled", "penalty_per_violation", "max_violations", "auto_submit_on_max", "fullscreen_required", "randomize_questions", "randomize_options", "watermark_name", "block_copy_paste", "block_right_click", "block_screenshot", "allow_calculator", "lock_pending_resume", "resume_code_limit", "grade_component_type_id", "subject_id", "class_ids", "start_at", "end_at", "assessment_period_id", "auto_submit_on_window_end", "is_template", "source_exam_id", "max_attempts", "publish_mode", "question_pages", "question_cognitive"]:
+        for key in ["question_weights", "question_texts", "anti_cheat_enabled", "penalty_per_violation", "max_violations", "auto_submit_on_max", "fullscreen_required", "randomize_questions", "randomize_options", "watermark_name", "block_copy_paste", "block_right_click", "block_screenshot", "allow_calculator", "lock_pending_resume", "resume_code_limit", "grade_component_type_id", "school_year_id", "subject_id", "class_ids", "start_at", "end_at", "assessment_period_id", "auto_submit_on_window_end", "is_template", "source_exam_id", "max_attempts", "publish_mode", "question_pages", "question_cognitive"]:
             data.pop(key, None)
         supabase.table("exams").update(data).eq("id", exam_id).execute()
 
@@ -1958,6 +1968,9 @@ def duplicate_exam(exam_id):
         new_data["is_published"] = False
         new_data["is_template"] = False
         new_data["source_exam_id"] = exam_id
+        # A copy is this year's paper, not the year it was copied from.
+        new_data["school_year_id"] = (ta_service.active_school_year(
+            supabase, g.get("user_school_id")) or {}).get("id")
         new_exam = supabase.table("exams").insert(new_data).execute()
         new_id = new_exam.data[0]["id"]
         # The copy's uploaded media moves with it, so re-saving the duplicate does

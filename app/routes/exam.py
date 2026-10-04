@@ -68,6 +68,11 @@ def create_exam():
     filtered["teacher_id"] = g.user_id
     filtered["school_id"] = filtered.get("school_id") or g.get("user_school_id")
     supabase = get_supabase()
+    # Date the paper to the running year, so the pupil dashboard can scope scores
+    # to the class a pupil is in this year.
+    from app.services import teacher_assignments as _ta
+    filtered["school_year_id"] = (_ta.active_school_year(
+        supabase, filtered["school_id"]) or {}).get("id")
     res = supabase.table("exams").insert(filtered).execute()
     return jsonify(res.data[0]), 201
 
