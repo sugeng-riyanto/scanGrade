@@ -38,6 +38,7 @@ import time
 from typing import Callable
 
 from app.errors import ScanGradeException
+from app.utils import auth_health
 
 #: How many times a create is attempted in total before the operator is told.
 #: Small on purpose: this is a hiccup, not an outage, and a school admin is
@@ -96,12 +97,23 @@ def create_user_with_retry(attempt: Callable[[], object], *,
     last: BaseException | None = None
     for index in range(attempts):
         try:
-            return attempt()
+            result = attempt()
         except Exception as exc:  # noqa: BLE001 -- re-raised below
             if not is_transient(exc):
                 raise
             last = exc
             if index + 1 < attempts:
+                # Recorded the moment the hiccup is seen, before the retry: a retry
+                # that then succeeds is exactly the signal a status page needs — the
+                # operator sees only the success, and the box stays on record.
+                auth_health.record_retry(str(exc))
                 pause = backoff[index] if index < len(backoff) else backoff[-1]
                 sleep(pause)
+            continue
+        if index == 0:
+            # A create that landed on the first try is the one outcome that heals a
+            # marker another worker left, so a recovered box stops being amber.
+            auth_health.record_clean()
+        return result
+    auth_health.record_exhausted(str(last))
     raise AccountNotCreated(last)

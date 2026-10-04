@@ -7,19 +7,20 @@ tabel `officials` yang hanya berisi `id` dan `school_id` akan menambah satu join
 ke setiap pembacaan peran tanpa menyimpan satu fakta pun — jadi peran cukup hidup
 di `profiles.role`, tempat seluruh aplikasi sudah membacanya.
 
-Urutan penulisannya sama dengan `teacher_import.create_teacher_account`, dan
-alasannya sama: `auth` dulu (karena `profiles.id` mereferensikan `auth.users`),
-lalu profil. Kalau profil gagal, akun auth yang sudah jadi **dihapus** — akun yang
-bisa login tanpa punya peran adalah akun yang tidak bisa ditolong siapa pun:
-pembuatnya melihat error, pemiliknya melihat halaman kosong.
+Pembuatan akunnya tidak lagi ditulis di sini: ia memakai
+`account_creation.create_account`, satu-satunya tempat yang menangani retry,
+rollback, dan aturan password sekali pakai. Urutannya tetap sama — `auth` dulu
+(karena `profiles.id` mereferensikan `auth.users`), lalu profil — dan kalau ada
+yang gagal, akun auth yang sudah jadi **dihapus**, karena akun yang bisa login
+tanpa punya peran adalah akun yang tidak bisa ditolong siapa pun: pembuatnya
+melihat error, pemiliknya melihat halaman kosong.
 """
 from __future__ import annotations
 
 import logging
 
+from app.services import account_creation
 from app.services import identity_names
-from app.services import password_change as _password_change
-from app.utils import auth_retry
 
 logger = logging.getLogger(__name__)
 
@@ -110,42 +111,19 @@ def create_official(supabase, *, school_id: str, role: str, full_name: str,
     if not password:
         raise OfficialError("Password wajib diisi.")
 
-    uid = None
     try:
-        # A head teacher is created by the same retry as everyone else: the generic
-        # database answer is the server hiccupping, and that create rolled back.
-        created = auth_retry.create_user_with_retry(
-            lambda: supabase.auth.admin.create_user({
-                "email": email,
-                "password": password,
-                "user_metadata": {"role": role, "full_name": full_name},
-                # Confirmed on creation, like every other account this app makes: the
-                # address is typed by the school admin, and an unconfirmed account
-                # cannot sign in at all.
-                "email_confirm": True,
-            }))
-        uid = created.user.id
-
-        profile = {
-            "id": uid,
-            "full_name": full_name,
-            "role": role,
-            "status": "active",
-            "school_id": school_id,
-        }
-        if phone:
-            profile["phone"] = phone
-        # Same two fields as a pupil's or a teacher's account, for the same reasons:
-        # `profiles.email` is the mirror migration 040 describes (the page printed
-        # `o.email` before the column existed, so it always showed a dash), and the
-        # generated password is a one-time one that must be replaced on first login.
-        profile.update(_password_change.account_fields(email))
-        supabase.table("profiles").upsert(profile).execute()
+        # The one account creator owns the retry, the rollback and the issued
+        # password rule; an official has no role-specific row, so it supplies
+        # neither a table nor fields. Its whole record is the profile that names
+        # the role.
+        return account_creation.create_account(
+            supabase,
+            school_id=school_id, role=role, full_name=full_name,
+            email=email, password=password, phone=phone,
+        )
     except Exception as exc:                                  # noqa: BLE001
-        _discard(supabase, uid)
         raise OfficialError(
             f"Gagal membuat akun {role}: {str(exc)[:120]}", detail=str(exc)) from exc
-    return uid
 
 
 def update_official(supabase, official_id: str, school_id: str, *,
@@ -207,11 +185,4 @@ def _assert_own(supabase, official_id: str, school_id: str) -> dict:
     return row
 
 
-def _discard(supabase, uid: str | None) -> None:
-    """Undo the auth account a failed create left behind."""
-    if not uid:
-        return
-    try:
-        supabase.auth.admin.delete_user(uid)
-    except Exception as exc:                                  # noqa: BLE001
-        logger.error("could not discard half-made official account %s: %s", uid, exc)
+

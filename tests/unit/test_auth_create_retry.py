@@ -234,14 +234,18 @@ CREATE_SITES = {
     "app/services/school_officials.py",
 }
 
+#: The one module that owns the retry (and the rollback and the password rule).
+ACCOUNT_SERVICE = "app/services/account_creation.py"
 
-def test_every_account_creator_routes_its_create_through_the_retry():
+
+def test_every_account_creator_routes_its_create_through_the_shared_service():
     """A fourth creator copied from these must not skip the retry by accident.
 
-    Read off the tree rather than from a list in this test, so a new
-    ``create_user`` in a service is what makes this fail.
+    The three files no longer create auth users themselves: the retry lives in
+    the one module that also owns the rollback and the issued-password rule.
+    Read off the tree, so a ``create_user`` written back into one of them is what
+    makes this fail.
     """
-    missing = []
     for rel in sorted(CREATE_SITES):
         source = (ROOT / rel).read_text(encoding="utf-8-sig")
         tree = ast.parse(source)
@@ -250,10 +254,16 @@ def test_every_account_creator_routes_its_create_through_the_retry():
             if isinstance(node, ast.Call)
             and getattr(node.func, "attr", "") == "create_user"
         ]
-        assert direct, f"{rel} no longer calls create_user at all"
-        if "create_user_with_retry(" not in source:
-            missing.append(rel)
+        assert not direct, (
+            f"{rel} creates auth users directly again; it must go through "
+            "app.services.account_creation.create_account()")
+        assert "create_account(" in source, (
+            f"{rel} no longer routes its create through the shared account service")
 
-    assert not missing, (
-        "these creators can still answer GoTrue's generic database error as if it "
-        "were a fact about the school's data:\n  " + "\n  ".join(missing))
+
+def test_the_shared_account_service_rides_the_retry():
+    """The one account creator must not answer GoTrue's hiccup as a fact."""
+    source = (ROOT / ACCOUNT_SERVICE).read_text(encoding="utf-8-sig")
+    assert "create_user_with_retry(" in source, (
+        "the shared account creator does not ride the retry, so a transient "
+        "database error is reported as a permanent one again")

@@ -864,3 +864,164 @@ class TestTheScheduler:
         monkeypatch.setattr(alerts, "_stop", _Event())
         alerts._loop(SimpleNamespace(app_context=lambda: _Ctx()), 1234)
         assert waited["timeout"] == 1234
+
+
+# ── 5. a struggling GoTrue, on the same channel ──────────────────────────────
+#
+# `auth_health` already records the transient account-create retries so the status
+# page can show them — but a page needs somebody to open it. The *leading*
+# indicator of a struggling auth server is exactly the thing nobody is watching,
+# so it rides the same alert channel the runner staleness does: same recipients,
+# same claim, same one-mail-per-new-state record.
+
+def auth_reading(*, retries: int = 0, exhausted: int = 0,
+                 first_at: str = "2026-09-21T10:00:00+00:00",
+                 last_at: str | None = None,
+                 reason: str | None = "Database error creating new user",
+                 marker_present: bool = False, worker: str = "4211") -> dict:
+    """Shaped like `auth_health.state()` returns one."""
+    active = bool(retries or exhausted)
+    return {
+        "key": "recorded" if (active or marker_present) else "clean",
+        "measured_at": NOW.isoformat(),
+        "recorded": active or marker_present,
+        "worker": worker,
+        "state_file": "/tmp/scangrade-auth-retries.json",
+        "marker": {"present": marker_present, "key": "ok" if marker_present else "absent",
+                   "at": first_at if marker_present else None, "reason": reason,
+                   "worker": worker, "age_seconds": 60},
+        "worker_retries": retries,
+        "worker_exhausted": exhausted,
+        "worker_first_at": first_at if active else None,
+        "worker_last_at": (last_at or first_at) if active else None,
+        "worker_reason": reason if active else None,
+        "worker_cleared": 0,
+        "worker_cleared_at": None,
+        "worker_started_at": first_at,
+    }
+
+
+class TestTheAuthRetryPolicy:
+    def test_a_clean_auth_reading_is_silence(self):
+        assert alerts.staleness(report_of(), auth=auth_reading(), ) is None
+
+    def test_no_auth_reading_at_all_is_silence(self):
+        assert alerts.staleness(report_of(), auth=None) is None
+
+    def test_retries_exactly_at_the_line_stay_quiet(self):
+        """"More than a few": one transient hiccup is not an incident, and the line
+        has to be above the noise, not on it."""
+        assert alerts.staleness(report_of(),
+                                auth=auth_reading(retries=5)) is None
+        assert alerts.staleness(report_of(), auth=auth_reading(retries=5),
+                                min_retries=5) is None
+        assert alerts.staleness(report_of(), auth=auth_reading(retries=5),
+                                min_retries=4)
+
+    def test_retries_over_the_line_alert(self):
+        found = alerts.staleness(report_of(), auth=auth_reading(retries=6))
+        assert found["kind"] == alerts.KIND_AUTH_RETRIES
+        assert found["retries"] == 6
+
+    def test_a_create_that_exhausted_every_retry_never_stays_quiet(self):
+        """An exhausted create is the *school* seeing a failure, so it outranks the
+        threshold: it must reach an operator even on a first occurrence."""
+        found = alerts.staleness(report_of(), auth=auth_reading(retries=1,
+                                                               exhausted=1))
+        assert found["kind"] == alerts.KIND_AUTH_RETRIES
+        assert found["detail"]["exhausted"] == 1
+
+    def test_the_auth_alert_carries_the_counts_and_the_reason(self):
+        found = alerts.staleness(report_of(), auth=auth_reading(
+            retries=9, exhausted=1, reason="Database error creating new user"))
+        detail = found["detail"]
+        assert detail["retries"] == 9 and detail["exhausted"] == 1
+        assert detail["reason"] == "Database error creating new user"
+        assert detail["first_at"] == "2026-09-21T10:00:00+00:00"
+
+    def test_a_worse_retry_count_is_a_new_event(self):
+        one = alerts.staleness(report_of(), auth=auth_reading(retries=6))
+        worse = alerts.staleness(report_of(), auth=auth_reading(retries=40))
+        assert alerts.alert_key(one) != alerts.alert_key(worse)
+        assert alerts.should_send(worse, {"key": alerts.alert_key(one),
+                                          "sent_at": NOW.isoformat()}, now=NOW)
+
+    def test_the_runner_reading_is_judged_before_the_auth_retries(self):
+        """A broken deploy pipeline matters more, and one mail should carry the
+        louder fact."""
+        found = alerts.staleness(report_of({"origin_behind": 40}),
+                                 auth=auth_reading(retries=40))
+        assert found["kind"] == alerts.KIND_RUNNER_BEHIND
+
+
+class TestTheAuthRetryTick:
+    def test_a_struggling_gotrue_sends_through_the_same_channel(self, tmp_path):
+        sends = []
+        outcome, _ = check(tmp_path, report_of(), sends=sends,
+                           auth=auth_reading(retries=9),
+                           recipients_info={"emails": ["ops@x"], "source": "setting"})
+        assert outcome["outcome"] == alerts.OUTCOME_SENT
+        assert [s[0] for s in sends] == ["ops@x"]
+        record = alerts.read_state(tmp_path / "deploy_alerts.json")
+        assert record["kind"] == alerts.KIND_AUTH_RETRIES
+        assert record["retries"] == 9
+
+    def test_the_same_retry_state_is_not_sent_again(self, tmp_path):
+        sends = []
+        recipients = {"emails": ["ops@x"], "source": "setting"}
+        check(tmp_path, report_of(), sends=sends, auth=auth_reading(retries=9),
+              recipients_info=recipients)
+        outcome, _ = check(tmp_path, report_of(), sends=sends,
+                           auth=auth_reading(retries=9), recipients_info=recipients,
+                           now=NOW + timedelta(hours=6))
+        assert outcome["outcome"] == alerts.OUTCOME_ALREADY_SENT
+        assert len(sends) == 1
+
+    def test_a_clean_auth_reading_does_not_send(self, tmp_path):
+        sends = []
+        outcome, _ = check(tmp_path, report_of(), sends=sends, auth=auth_reading(),
+                           recipients_info={"emails": ["ops@x"], "source": "setting"})
+        assert outcome["outcome"] == alerts.OUTCOME_NOT_STALE
+        assert sends == []
+
+    def test_check_reads_auth_health_when_it_is_not_given_one(self, tmp_path,
+                                                              monkeypatch):
+        """The wiring, not just the policy: an injected reading proves the rule, a
+        default proves the box actually looks."""
+        from app.utils import auth_health
+
+        monkeypatch.setattr(auth_health, "state",
+                            lambda *a, **k: auth_reading(retries=9))
+        sends = []
+        outcome = alerts.check(report=report_of(), now=NOW,
+                               send=lambda a, s, h: sends.append((a, s, h)) or True,
+                               state=tmp_path / "deploy_alerts.json",
+                               recipients_info={"emails": ["ops@x"],
+                                                "source": "setting"})
+        assert outcome["outcome"] == alerts.OUTCOME_SENT
+        assert len(sends) == 1
+
+    def test_the_email_names_the_counts_and_the_reason(self, tmp_path):
+        sends = []
+        check(tmp_path, report_of(), sends=sends, auth=auth_reading(
+                  retries=9, exhausted=1, reason="Database error creating new user"),
+              recipients_info={"emails": ["ops@x"], "source": "setting"})
+        _address, subject, html = sends[0]
+        # The magnitude in the subject is every create that needed a retry — the nine
+        # that landed plus the one that exhausted them.
+        assert "[ScanGrade]" in subject and "10" in subject
+        assert "Database error creating new user" in html
+        assert "exhausted" in html.lower()
+
+    def test_the_auth_threshold_is_configurable_without_a_release(self):
+        text = CONFIG.read_text(encoding="utf-8")
+        assert 'DEPLOY_ALERT_MIN_AUTH_RETRIES = env_int("DEPLOY_ALERT_MIN_AUTH_RETRIES"' in text
+
+    def test_the_summary_reports_the_retry_threshold(self, tmp_path):
+        summary = alerts.summary(state=tmp_path / "deploy_alerts.json",
+                                 recipients_info={"emails": ["ops@x"],
+                                                  "source": "setting"})
+        assert summary["min_retries"] == alerts.DEFAULT_MIN_AUTH_RETRIES
+
+    def test_the_default_retry_threshold_is_a_few_not_a_dozen(self):
+        assert 1 < alerts.DEFAULT_MIN_AUTH_RETRIES <= 10

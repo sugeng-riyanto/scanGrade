@@ -439,14 +439,23 @@ class TestUploadingEmails:
 # ── 6. every creator marks its account, and the page says so ─────────────────
 
 class TestEveryNewAccountSaysThePasswordIsOneTime:
-    def test_the_three_creators_carry_both_fields(self):
-        """Three places create an account with an issued password. Forgetting one fails
-        silently — the account simply never asks — so the rule lives in one function and
-        all three call it."""
+    def test_the_three_creators_delegate_the_rule_to_one_function(self):
+        """Three creators issue a password. Forgetting the rule fails silently — the
+        account simply never asks — so it lives in one function, and all three reach
+        it through the one account creator instead of each calling it themselves."""
+        # `admin.py` is the fourth creator: its two legacy Excel importers create
+        # accounts too, and they reach the rule the same way — by going through the
+        # shared creator instead of repeating its body (see test_legacy_importers).
         for path in ("app/services/student_import.py", "app/services/teacher_import.py",
-                     "app/services/school_officials.py"):
+                     "app/services/school_officials.py",
+                     "app/routes/admin.py"):
             source = (ROOT / path).read_text(encoding="utf-8")
-            assert "account_fields(" in source, f"{path} does not mark its account"
+            assert "create_account(" in source, (
+                f"{path} does not go through the shared account creator")
+
+        service = (ROOT / "app/services/account_creation.py").read_text(encoding="utf-8")
+        assert "account_fields(" in service, (
+            "the shared account creator does not stamp the issued-password fields")
 
     def test_the_fields_are_the_flag_and_the_email_mirror(self):
         assert password_change.account_fields(" A@B.C ") == {

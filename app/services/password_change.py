@@ -69,8 +69,9 @@ KNOWN_DEFAULTS = frozenset({
 def account_fields(email: str) -> dict:
     """The profile fields every account created with an *issued* password carries.
 
-    Written once because three creators need it (student, teacher, official) and
-    forgetting one fails silently: the account simply never asks its owner to
+    Called from one place — `account_creation.create_account`, which every
+    student, teacher and official account is built by — because a creator that
+    forgot it would fail silently: the account simply never asks its owner to
     replace the password, which is indistinguishable from the feature working.
 
     ``profiles.email`` is the mirror described in migration 040 — a derived copy, so

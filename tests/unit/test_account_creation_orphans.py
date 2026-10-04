@@ -5,11 +5,12 @@ profiles -> (students|teachers)`` — and the *last* write is the one the databa
 can reject. So any failure leaves an auth user plus a profile with no role row:
 an account that can sign in and belongs to nothing.
 
-Every path that creates accounts has now been closed, and the load-bearing test
-here is the last one: it walks the source and requires each ``create_user`` call
-to be undone by its own function. A behavioural test only covers the call sites
-that exist today; the walk is what catches the next importer, route, or seed
-helper copied without the rollback.
+Every path that creates accounts has now been closed — the three services, the two
+legacy importers in ``app/routes/admin.py``, the public registration door and the
+seed — and the load-bearing test here is the one that walks the source and requires
+each ``create_user`` call to be undone by its own function. A behavioural test only
+covers the call sites that exist today; the walk is what catches the next importer,
+route, or seed helper copied without the rollback.
 
 `manage.py` gets its own tests because it is the one written like a script rather
 than a service: it prints to the operator and returns ``None`` instead of raising,
@@ -447,7 +448,14 @@ def test_no_create_user_site_can_leave_an_account_behind():
     sites = audit_create_user_sites()
     offenders = [f"{s.location} -- {s.reason}" for s in sites if not s.ok]
 
-    assert len(sites) >= 6, f"expected to find the known call sites, saw {len(sites)}"
+    # The three account creators — and, since the unification reached them, the two
+    # legacy importers in `admin.py` — no longer call `create_user` themselves: they
+    # go through `app/services/account_creation.py`, which is one of these sites.
+    # What is left is the shared creator, the public registration door, and the seed.
+    assert len(sites) >= 3, f"expected to find the known call sites, saw {len(sites)}"
+    assert {s.func for s in sites} >= {"create_account", "register", "_create_user"}, (
+        "the surviving `create_user` sites are not the three this check knows about: "
+        + ", ".join(sorted(s.location for s in sites)))
     assert not offenders, (
         "these can make an auth user and then fail with no undo in the branch that "
         "handles the failure, leaving an account that can sign in and belongs to "
