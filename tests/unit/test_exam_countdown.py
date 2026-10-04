@@ -495,7 +495,10 @@ class TestATimeSignalMustBeANumber:
         true, so the timer would paint red on a paper with no limit."""
         source = PAGE.read_text(encoding="utf-8")
         printed = list(re.finditer(r"formatTime\(timeLeft\)", source))
-        assert len(printed) == 2, "the countdown is printed somewhere new"
+        # Three clocks paint the same value: the header, the lock/away panel, and
+        # the review summary. The count is exact on purpose — a fourth place that
+        # prints the countdown must come here and be guarded too.
+        assert len(printed) == 3, "the countdown is printed somewhere new"
         for value in printed:
             line = source[source.rindex("\n", 0, value.start()):value.end()]
             assert "timeLeft === null" in line, (
