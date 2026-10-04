@@ -1669,11 +1669,20 @@ def admin_subjects():
     # to offer even before a subject is mapped to any class.
     grade_levels = sorted({str(c.get("grade_level")) for c in school_classes
                            if c.get("grade_level") not in (None, "")})
+    # Each card shows its subject's mark and how many classes offer it. Both are
+    # seeded into a map the page keeps, so a save updates the *card* the reader is
+    # looking at instead of waiting for a reload — the modal knows the new value,
+    # and a badge that keeps showing the old number reads as a save that failed.
+    kkm_values = {s["id"]: s["kkm"] for s in data}
+    overrides_by_subject = {s["id"]: s["kkm_overrides"] for s in data}
+    class_counts = {s["id"]: s["class_count"] for s in data}
     return render_template(
         "admin_sekolah/subjects.html", subjects=data, sort=sort, q=q,
         total_classes=total_classes, grade_levels=grade_levels,
         kkm_default=kkm_service.DEFAULT_KKM,
         kkm_range=(kkm_service.MIN_KKM, kkm_service.MAX_KKM),
+        kkm_values=kkm_values, overrides_by_subject=overrides_by_subject,
+        class_counts=class_counts,
         year_name=year.get("name") or "",
         year_status=year_status,
     )

@@ -196,6 +196,72 @@ def test_ticking_one_more_class_writes_only_that_class():
         "the tick rewrote a class that was already on")
 
 
+def _written_rows(db):
+    return [r for op, _t, p in db.log if op in ("upsert", "update", "insert")
+            for r in (p if isinstance(p, list) else [p])]
+
+
+def test_u_ticking_a_class_with_no_row_closes_it():
+    """Absence means offered, so an un-tick MUST write a closed row.
+
+    The modal opens every class ticked (a pair is offered unless a row says
+    otherwise), so the class an admin un-ticks usually has *no row at all*.
+    Leaving it absent left it offered — the un-tick was silently ignored, which
+    is exactly what the page looked like it did.
+    """
+    from app.services import subject_levels as sl
+
+    db = _DB(
+        subjects=[{"id": "s1", "school_id": "sch"}],
+        classes=[{"id": "c1", "school_id": "sch"}, {"id": "c2", "school_id": "sch"}],
+        class_subjects=[{"id": "cs1", "class_id": "c1", "subject_id": "s1",
+                         "school_id": "sch", "is_active": True}],
+    )
+    ok, res = sl.save_mapping(db, "sch", "s1", ["c1"])   # c1 kept, c2 un-ticked
+    assert ok and res["removed"] == 1
+    closed = {str(r["class_id"]) for r in _written_rows(db)
+              if r.get("is_active") is False}
+    assert closed == {"c2"}, (
+        "un-ticking a class that had no row left it offered — the un-tick was lost")
+
+
+def test_u_ticking_leaves_the_kept_classes_alone():
+    """The kept class must not be rewritten just because its neighbour was."""
+    from app.services import subject_levels as sl
+
+    db = _DB(
+        subjects=[{"id": "s1", "school_id": "sch"}],
+        classes=[{"id": "c1", "school_id": "sch"}, {"id": "c2", "school_id": "sch"},
+                 {"id": "c3", "school_id": "sch"}],
+        class_subjects=[],
+    )
+    ok, res = sl.save_mapping(db, "sch", "s1", ["c1", "c2"])   # c3 un-ticked
+    assert ok and res["removed"] == 1
+    opened = {str(r["class_id"]) for r in _written_rows(db)
+              if r.get("is_active") is True}
+    closed = {str(r["class_id"]) for r in _written_rows(db)
+              if r.get("is_active") is False}
+    assert opened == {"c1", "c2"} and closed == {"c3"}, (
+        f"expected c1,c2 opened and c3 closed, got open={opened} closed={closed}")
+
+
+def test_u_ticking_an_already_closed_class_writes_nothing():
+    """Re-saving a selection whose un-ticked class is already closed is a no-op."""
+    from app.services import subject_levels as sl
+
+    db = _DB(
+        subjects=[{"id": "s1", "school_id": "sch"}],
+        classes=[{"id": "c1", "school_id": "sch"}, {"id": "c2", "school_id": "sch"}],
+        class_subjects=[{"id": "cs1", "class_id": "c1", "subject_id": "s1",
+                         "school_id": "sch", "is_active": True},
+                        {"id": "cs2", "class_id": "c2", "subject_id": "s1",
+                         "school_id": "sch", "is_active": False}],
+    )
+    ok, res = sl.save_mapping(db, "sch", "s1", ["c1"])
+    assert ok and res["added"] == 0 and res["removed"] == 0
+    assert not _written_rows(db), "saving an unchanged selection rewrote rows"
+
+
 # ── the pupil control: three groups, one checkbox each ─────────────────────
 
 class TestThePupilsAreGroupedByLevel:
@@ -324,3 +390,51 @@ class TestTheNewCopyIsBilingual:
         markup = _markup()
         assert re.search(r"bawaan|default|Dasar", markup), (
             "the page never says that un-ticking returns a pupil to the default track")
+
+
+# ── a save is visible on the card, not only after a reload ──────────────────
+
+ROUTE = ROOT / "app" / "routes" / "admin_sekolah.py"
+
+
+class TestASaveMovesTheCardTheReaderIsLookingAt:
+    """The backend wrote the mark; the card kept the old number.
+
+    The KKM modal saved correctly and said "Tersimpan", but the badge beside it
+    was server-rendered (`KKM {{ s.kkm }}`) and so kept the pre-save value until a
+    reload — which reads as a save that never happened, and is why the mark looked
+    like it could not be changed at all.
+    """
+
+    def test_the_badge_reads_the_live_mark(self):
+        markup = _markup()
+        assert "kkmValue[" in markup, (
+            "the KKM badge is not driven by the saved mark, so it shows the old "
+            "number after a successful save")
+        assert not re.search(r"KKM\s+\{\{\s*s\.kkm\s*\}\}", markup), (
+            "the badge still prints the server's value straight into the HTML")
+
+    def test_the_class_count_is_live_too(self):
+        markup = _markup()
+        assert "classCount[" in markup, (
+            "the 'offered in X of Y' line is still server-rendered, so a tick or "
+            "un-tick never moves it")
+
+    def test_saving_the_mark_moves_the_map(self):
+        script = _script()
+        body = script.split("saveKkm(", 1)[1].split("clearKkm(", 1)[0]
+        assert "kkmValue[" in body and "this.kkmSubjectId" in body, (
+            "saveKkm does not update the card's mark when the write succeeds")
+
+    def test_saving_the_mapping_moves_the_count(self):
+        script = _script()
+        body = script.split("saveMapping() {", 1)[1].split("\n        },", 1)[0]
+        assert "classCount[" in body and "mapped" in body, (
+            "saveMapping does not update the card's class count")
+
+    def test_the_route_seeds_the_maps_it_renders(self):
+        src = ROUTE.read_text(encoding="utf-8")
+        assert "kkm_values=" in src and "class_counts=" in src, (
+            "the list route renders the badge without the maps the page updates")
+        assert "overrides_by_subject=" in src, (
+            "the openKkm handler is given overrides the page never received")

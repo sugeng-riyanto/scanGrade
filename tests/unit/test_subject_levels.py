@@ -145,10 +145,17 @@ class TestTheClassMapping:
         ok, result = sl.save_mapping(sb, SCHOOL, SUBJECT, {CLASS_B})
         assert ok is True
         # CLASS_A is closed, not deleted: the row survives so a paper or a level
-        # set under it still points somewhere.
-        closed = [u for u in sb.updates if u[0] == "class_subjects"]
+        # set under it still points somewhere. The close is written by the *same*
+        # bulk upsert that opens classes — a class with a row is closed in place
+        # and a class with no row is inserted already closed — so the write must
+        # carry `is_active=False` for the class that was dropped.
+        written = [r for _t, payload, _c in sb.upserts
+                   for r in (payload if isinstance(payload, list) else [payload])]
+        closed = [r for r in written if str(r.get("class_id")) == CLASS_A]
         assert closed, "removing a class must write is_active=False, not delete"
-        assert closed[0][1].get("is_active") is False
+        assert closed[0].get("is_active") is False
+        assert all(r.get("is_active") is not False or str(r.get("class_id")) == CLASS_A
+                   for r in written), "a kept class was written closed"
         assert result["removed"] == 1
 
     def test_the_write_is_one_statement_per_side_not_one_per_class(self):

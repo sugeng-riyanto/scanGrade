@@ -77,12 +77,12 @@
                  subject is offered by every class unless a pair is switched off. -->
             <div class="flex items-center justify-center gap-2 mt-2">
                 <button type="button"
-                        @click='openKkm({{ s.id|tojson }}, {{ s.name|tojson }}, {{ s.kkm }}, {{ s.kkm_overrides|tojson }})'
+                        @click='openKkm({{ s.id|tojson }}, {{ s.name|tojson }}, kkmValue[{{ s.id|tojson }}], kkmOverrides[{{ s.id|tojson }}])'
                         class="text-[10px] font-bold px-2 py-1 rounded-lg border border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 transition">
-                    <i class="fas fa-bullseye mr-1"></i>KKM {{ s.kkm }}
+                    <i class="fas fa-bullseye mr-1"></i><span x-text="'KKM ' + kkmValue[{{ s.id|tojson|forceescape }}]"></span>
                 </button>
                 <span class="text-[10px] font-bold text-slate-400"
-                      x-text="t('Berlaku di','Offered in') + ' ' + {{ s.class_count }} + '/' + {{ total_classes }} + ' ' + t('kelas','classes')"></span>
+                      x-text="t('Berlaku di','Offered in') + ' ' + classCount[{{ s.id|tojson|forceescape }}] + '/' + {{ total_classes }} + ' ' + t('kelas','classes')"></span>
             </div>
             <!-- The mapping editor: which classes teach this subject, and the track
                  each pupil is on in it. `tojson` escapes the id and name so a name
@@ -296,6 +296,12 @@ function subjectLevels() {
         kkmOpen: false,
         kkmSubjectId: '',
         kkmSubjectName: '',
+        // The mark and the class count on each card, seeded from the server and
+        // moved by a save so the badge the reader is looking at follows the write
+        // instead of showing the pre-save number until the page is reloaded.
+        kkmValue: {{ kkm_values|tojson }},
+        kkmOverrides: {{ overrides_by_subject|tojson }},
+        classCount: {{ class_counts|tojson }},
         kkmGeneral: {{ kkm_default }},
         kkmGrade: {},
         gradeLevels: {{ grade_levels|tojson }},
@@ -335,6 +341,20 @@ function subjectLevels() {
                 .then(({ok, d}) => {
                     this.kkmOk = ok && !d.error;
                     this.kkmMsg = this.kkmOk ? this.t('Tersimpan.','Saved.') : this.kkmReason(d);
+                    // Move the card the reader is looking at: the modal knows the
+                    // new mark, and a badge that kept the old one read as a save
+                    // that never happened.
+                    if (this.kkmOk) {
+                        const mark = Number(value);
+                        if (gradeLevel === null) {
+                            this.kkmValue[this.kkmSubjectId] = mark;
+                        } else {
+                            this.kkmOverrides[this.kkmSubjectId] = {
+                                ...(this.kkmOverrides[this.kkmSubjectId] || {})
+                            };
+                            this.kkmOverrides[this.kkmSubjectId][String(gradeLevel)] = mark;
+                        }
+                    }
                 })
                 .catch(() => { this.kkmOk = false; this.kkmMsg = this.t('Gagal menyimpan.','Could not save.'); })
                 .finally(() => { this.kkmSaving = false; });
@@ -348,7 +368,12 @@ function subjectLevels() {
                 .then(r => r.json().then(d => ({ok: r.ok, d})))
                 .then(({ok, d}) => {
                     this.kkmOk = ok && !d.error;
-                    if (this.kkmOk) { this.kkmGrade[String(gradeLevel)] = this.kkmGeneral; }
+                    if (this.kkmOk) {
+                        this.kkmGrade[String(gradeLevel)] = this.kkmGeneral;
+                        const overrides = { ...(this.kkmOverrides[this.kkmSubjectId] || {}) };
+                        delete overrides[String(gradeLevel)];
+                        this.kkmOverrides[this.kkmSubjectId] = overrides;
+                    }
                     this.kkmMsg = this.kkmOk ? this.t('Override dihapus.','Override cleared.') : this.kkmReason(d);
                 })
                 .catch(() => { this.kkmOk = false; this.kkmMsg = this.t('Gagal menyimpan.','Could not save.'); })
@@ -548,6 +573,12 @@ function subjectLevels() {
                     this.mappingMsg = this.mappingOk
                         ? this.t('Tersimpan.','Saved.')
                         : (d.error || this.t('Gagal menyimpan.','Could not save.'));
+                    // "Offered in X of Y classes" on the card follows the tick, so
+                    // the reader watches the count move instead of reloading to see
+                    // whether the un-tick landed.
+                    if (this.mappingOk && Array.isArray(d.mapped)) {
+                        this.classCount[this.subjectId] = d.mapped.length;
+                    }
                 })
                 .catch(() => { this.mappingOk = false; this.mappingMsg = this.t('Gagal menyimpan.', 'Could not save.'); })
                 .finally(() => { this.savingMapping = false; });
