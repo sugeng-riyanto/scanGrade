@@ -504,9 +504,9 @@ class TestTheTemplateOnlyReadsWhatTheScopeSends:
 #: The keys `analysis_scope.report` builds into each row, pinned so the template's
 #: reads can be compared against them.
 EXAM_ROW_KEYS = (
-    "id", "title", "subject", "teacher", "school", "passing", "items", "flagged",
-    "holes", "unkeyed", "alpha", "kr20", "count", "mean", "median", "min", "max",
-    "sd", "pass_pct",
+    "id", "period_id", "title", "subject", "teacher", "school", "passing", "items",
+    "flagged", "holes", "unkeyed", "alpha", "kr20", "count", "mean", "median",
+    "min", "max", "sd", "pass_pct",
 )
 
 

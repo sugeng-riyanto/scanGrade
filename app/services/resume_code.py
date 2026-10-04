@@ -25,12 +25,13 @@ that is over, or one whose allowance is spent.
 
 The clock is never an input here
 --------------------------------
-`app/utils/exam_window.deadline()` is the only arithmetic that answers "when does this
-end" — it reads `started_at` plus the exam's own duration (and the window end, when the
-exam is set to stop there). So this module *never derives a deadline*, and every write
-below deliberately omits `started_at`. The guards in `tests/unit/test_resume_code.py`
-assert the exact payload of each transition, because "the deadline did not move" is
-only believable if the column it is derived from is absent from every write.
+`attempt_status` owns both answers — "when does this end" (`deadline_of`) and "has it
+ended" (`at_or_past_deadline`) — and it reads `started_at` plus the exam's own duration
+(and the window end, when the exam is set to stop there). So this module *never derives
+a deadline*, and every write below deliberately omits `started_at`. The guards in
+`tests/unit/test_resume_code.py` assert the exact payload of each transition, because
+"the deadline did not move" is only believable if the column it is derived from is
+absent from every write.
 
 Locking is not a pause: the clock keeps running while a pupil waits, exactly as it
 would have if they had stared at the wall, so a pupil locked for three minutes loses
@@ -48,7 +49,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from app.utils import exam_window
+from app.services import attempt_status
 from app.utils.logger import get_logger
 
 logger = get_logger("resume_code")
@@ -56,8 +57,11 @@ logger = get_logger("resume_code")
 #: What a sitting may be reopened with when neither the exam nor the row says.
 DEFAULT_LIMIT = 2
 
-DRAFT = "draft"
-LOCKED = "locked_pending_resume"
+#: The two statuses this gate moves between, named from the one definition rather
+#: than spelled here: `attempt_status` owns the vocabulary, and a second literal is
+#: a second answer to "what is this sitting".
+DRAFT = attempt_status.DRAFT
+LOCKED = attempt_status.LOCKED_STATUS
 
 #: What `decide` answers, and what a caller acts on.
 NONE = "none"
@@ -99,16 +103,13 @@ def _write(supabase, row: dict, payload: dict) -> list[dict]:
 def at_or_past_deadline(exam: dict, row: dict, now: datetime | None = None) -> bool:
     """Has this sitting reached its end?
 
-    Asked of `exam_window.deadline` — the one arithmetic — so locking, resuming and
-    the deadline sweep cannot disagree about when the paper is over. No grace is
-    applied: `LATE_GRACE_SECONDS` lets a *submission* arrive 120s late, and a grace
-    on the resume door would let a pupil answer past a deadline the server has
-    already treated as final.
+    Asked of `attempt_status.at_or_past_deadline` — the one place that answers it —
+    so locking, resuming and the deadline sweep cannot disagree about when the paper
+    is over. No grace is applied there either: the grace lets a *submission* arrive
+    late, and a grace on the resume door would let a pupil answer past a deadline the
+    server has already treated as final.
     """
-    limit = exam_window.deadline(exam or {}, (row or {}).get("started_at"))
-    if limit is None:
-        return False                      # nothing enforces an end: open indefinitely
-    return (now or _now()) >= limit
+    return attempt_status.at_or_past_deadline(exam or {}, row or {}, now=now)
 
 
 # ── the threshold, which is the exam's own ──────────────────────────────────

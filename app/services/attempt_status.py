@@ -23,8 +23,10 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from app.utils import exam_window
+from app.utils.helpers import row_or_none
 from app.utils.logger import get_logger
-from app.services.submission_service import LIVE_STATUSES, LOCKED_STATUS
+from app.services.submission_service import LIVE_STATUSES
+from app.services.submission_service import LOCKED_STATUS as _LOCKED_STATUS
 
 logger = get_logger("attempt_status")
 
@@ -39,6 +41,19 @@ MISSING = "missing"
 #: Which statuses are still a *sitting* — the paper a pupil may still be on. The
 #: page, the heartbeat and the sweep all read this one tuple.
 ONGOING = (ACTIVE, LOCKED)
+
+#: The two statuses a *sitting* can hold — the paper a pupil is still on. `DRAFT` is
+#: the ordinary case; `locked_pending_resume` is still a sitting, not a result. The
+#: deadline sweep's candidate set and the lock gate's transitions both read this, so
+#: there is one spelling of "the statuses a sitting can be".
+DRAFT = "draft"
+LOCKED_STATUS = _LOCKED_STATUS
+OPEN_STATUSES = (DRAFT, LOCKED_STATUS)
+
+#: The grace a *submission* may still arrive within. Re-exported so a surface asking
+#: "is this sitting over" reads the one constant rather than importing the arithmetic
+#: module and applying it itself.
+GRACE_SECONDS = exam_window.LATE_GRACE_SECONDS
 
 #: How long a gap between pings reads as "the connection went away" rather than
 #: "the page was between ticks". Three missed pings at the page's 25s cadence.
@@ -85,6 +100,43 @@ def _rows(supabase, exam_id, student_id) -> list[dict]:
     )
 
 
+def deadline_of(exam, row, started_at=None):
+    """When this sitting ends, or ``None`` when nothing enforces an end.
+
+    The one arithmetic, exposed: a caller that needs the instant (to stamp a closed
+    paper with the deadline rather than the moment a sweep noticed) asks here rather
+    than reaching for `exam_window` and holding a second answer.
+    """
+    started = started_at if started_at is not None else (row or {}).get("started_at")
+    return exam_window.deadline(exam or {}, started)
+
+
+def at_or_past_deadline(exam, row, now=None) -> bool:
+    """Has this sitting reached its end — with no grace applied?
+
+    The lock gate's question. The grace lets a *submission* arrive late; a grace on
+    the resume door would let a pupil answer past a deadline the server has already
+    treated as final.
+    """
+    limit = deadline_of(exam, row)
+    if limit is None:
+        return False                      # nothing enforces an end: open indefinitely
+    return _now(now) >= limit
+
+
+def expired(exam, row, now=None) -> bool:
+    """Is the deadline — plus the grace a paper may still arrive within — behind us?
+
+    The sweep's question: a paper arriving inside the grace is *accepted*, so the
+    sitting must not be closed yet or a pupil whose countdown hits zero would be
+    racing the box for their own answers.
+    """
+    limit = deadline_of(exam, row)
+    if limit is None:
+        return False
+    return _now(now) > limit + timedelta(seconds=GRACE_SECONDS)
+
+
 def _status_of(row, exam, now):
     """The one place the four statuses are decided from a row and the clock."""
     state = (row or {}).get("status")
@@ -93,14 +145,13 @@ def _status_of(row, exam, now):
     if state == LOCKED_STATUS:
         # A locked sitting whose clock has run out is *not* still resumable: it is
         # a paper that is over, waiting only to be written closed. Saying "locked"
-        # here would offer a pupil a resume that cannot be granted.
-        limit = exam_window.deadline(exam, (row or {}).get("started_at"))
-        if limit is not None and now >= limit:
+        # here would offer a pupil a resume that cannot be granted — and the lock
+        # gate asks this same function, so the two answers cannot differ.
+        if at_or_past_deadline(exam, row, now):
             return EXPIRED
         return LOCKED
-    if state == "draft":
-        limit = exam_window.deadline(exam, (row or {}).get("started_at"))
-        if limit is not None and now > limit + timedelta(seconds=exam_window.LATE_GRACE_SECONDS):
+    if state == DRAFT:
+        if expired(exam, row, now):
             return EXPIRED
         return ACTIVE
     # retracted (a voided attempt, reopenable) and anything unknown read as
@@ -135,10 +186,11 @@ def get_attempt_status(supabase, exam_id, student_id, *, exam=None, row=None,
 
     if exam is None:
         try:
-            exam = _exam_of_row(
+            exam_row = row_or_none(
                 supabase.table("exams").select(EXAM_COLUMNS)
                 .eq("id", exam_id).maybe_single().execute()
             )
+            exam = _exam_of_row(exam_row)
         except Exception:  # noqa: BLE001 — an unreadable exam is not an attempt
             exam = {}
 
@@ -151,7 +203,8 @@ def get_attempt_status(supabase, exam_id, student_id, *, exam=None, row=None,
 
 
 def _exam_of_row(res) -> dict:
-    data = getattr(res, "data", None) or {}
+    data = res if isinstance(res, (dict, list)) else getattr(res, "data", None)
+    data = data or {}
     if isinstance(data, list):
         data = data[0] if data else {}
     return data if isinstance(data, dict) else {}

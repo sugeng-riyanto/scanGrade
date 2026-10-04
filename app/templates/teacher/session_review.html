@@ -23,7 +23,8 @@
              : id === 'medium' ? 'bg-amber-50 text-amber-700 border-amber-200'
              : 'bg-surface-50 text-surface-500 border-surface-200';
     },
-    factsFor(id) { return (this.data && this.data.facts && this.data.facts[id]) || []; }
+    factsFor(id) { return (this.data && this.data.facts && this.data.facts[id]) || []; },
+    timelineFor(id) { return (this.data && this.data.timelines && this.data.timelines[id]) || []; }
 }" class="max-w-6xl mx-auto" x-init="init()">
 
     <!-- Header -->
@@ -103,8 +104,8 @@
                 </p>
             </div>
 
-            <!-- Observations -->
-            <div class="bg-white rounded-2xl p-5 shadow-sm border border-surface-200">
+            <!-- Observations. `id` because the exam page's pattern door lands here. -->
+            <div id="observations" class="bg-white rounded-2xl p-5 shadow-sm border border-surface-200 scroll-mt-20">
                 <h2 class="font-extrabold text-surface-800 mb-1 flex items-center gap-2">
                     <i class="fas fa-magnifying-glass text-primary-500"></i>Yang terlihat di sesi ini
                 </h2>
@@ -151,8 +152,8 @@
                 </div>
             </div>
 
-            <!-- The room -->
-            <div class="bg-white rounded-2xl p-5 shadow-sm border border-surface-200">
+            <!-- The room. `id` because the exam page's proctoring door lands here. -->
+            <div id="room" class="bg-white rounded-2xl p-5 shadow-sm border border-surface-200 scroll-mt-20">
                 <h2 class="font-extrabold text-surface-800 mb-1 flex items-center gap-2">
                     <i class="fas fa-users text-primary-500"></i>Ruang ujian
                 </h2>
@@ -187,6 +188,24 @@
                                 <div x-show="factsFor(s.id).length === 0"
                                      class="text-[11px] text-surface-400 py-2">
                                     Belum ada ringkasan sesi untuk kertas ini.
+                                </div>
+                                {# The transitions themselves, oldest first: the record a
+                                   pupil's "koneksi saya putus tiga kali" is read from.
+                                   Read-only, and no verdict — a gap is a gap. #}
+                                <div x-show="timelineFor(s.id).length" class="mt-2 mb-1">
+                                    <p class="text-[10px] font-bold text-surface-500 uppercase tracking-wide mb-1">
+                                        Jejak sesi
+                                    </p>
+                                    <ol class="space-y-1">
+                                        <template x-for="(ev, ei) in timelineFor(s.id)" :key="ei">
+                                            <li class="flex items-start gap-2 text-[11px]">
+                                                <span class="font-mono text-surface-400 shrink-0" x-text="ev.at"></span>
+                                                <span class="text-surface-700" x-text="ev.label"></span>
+                                                <span x-show="ev.detail" class="text-surface-400"
+                                                      x-text="'(' + ev.detail + ')'"></span>
+                                            </li>
+                                        </template>
+                                    </ol>
                                 </div>
                                 {# A grid rather than a table on purpose: three columns of
                                    numbers a phone cannot scroll sideways is the right-hand column

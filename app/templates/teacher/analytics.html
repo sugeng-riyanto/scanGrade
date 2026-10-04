@@ -328,6 +328,59 @@
         </div>
         <p class="px-5 py-4 text-xs font-medium text-slate-500 border-t border-slate-100" x-text="t('Lulus % = peserta yang mencapai KKM. Alpha = Cronbach alpha; KR-20 sama nilainya untuk soal benar/salah. Soal bermasalah = daya beda lemah atau negatif, menyimpang dari model, atau dijawab sama oleh semua murid.','Pass % = participants reaching the pass mark. Alpha = Cronbach alpha, the same number as KR-20 for right/wrong questions. Flagged = weak or negative discrimination, a misfit, or a question everybody answered the same way.')"></p>
     </div>
+
+    <!-- Results grouped by assessment period, so a year compares UTS against UAS.
+         After the per-exam table: the detail stays first, and the summary reads as
+         the roll-up of the rows above it. -->
+    {% if report.period_groups %}
+    <div class="card">
+        <div class="px-5 py-4 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2">
+            <h3 class="font-bold text-slate-800" x-text="t('Perbandingan per Periode Penilaian','Comparison by Assessment Period')"></h3>
+            <p class="text-xs font-medium text-slate-500" x-text="t('Hasil dikelompokkan menurut periode tiap ujian, dari yang terbaru.','Results grouped by each paper’s period, newest first.')"></p>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm min-w-[720px]">
+                <thead><tr class="text-left text-slate-500 bg-slate-50 border-b border-slate-100">
+                    <th class="px-5 py-3 font-semibold" x-text="t('Periode','Period')"></th>
+                    <th class="px-4 py-3 font-semibold" x-text="t('Ujian','Exams')"></th>
+                    <th class="px-4 py-3 font-semibold" x-text="t('Pengumpulan','Submissions')"></th>
+                    <th class="px-4 py-3 font-semibold" x-text="t('Rata-rata','Average')"></th>
+                    <th class="px-4 py-3 font-semibold" x-text="t('Lulus %','Pass %')"></th>
+                    <th class="px-4 py-3 font-semibold" x-text="t('Tertinggi','Highest')"></th>
+                    <th class="px-4 py-3 font-semibold" x-text="t('Terendah','Lowest')"></th>
+                </tr></thead>
+                <tbody>
+                    {% for grp in report.period_groups %}
+                    <tr class="border-b border-slate-50 last:border-0 hover:bg-slate-50 transition">
+                        <td class="px-5 py-3">
+                            {% if grp.name %}
+                            <p class="font-semibold text-slate-700">{{ grp.name }}</p>
+                            <p class="text-xs font-medium text-slate-400">{{ grp.start_date }} — {{ grp.end_date }}</p>
+                            {% else %}
+                            <p class="font-semibold text-slate-500" x-text="t('Tanpa periode','No period')"></p>
+                            <p class="text-xs font-medium text-slate-400" x-text="t('Ujian yang belum ditandai periode.','Exams not yet tagged with a period.')"></p>
+                            {% endif %}
+                        </td>
+                        <td class="px-4 py-3 text-slate-600">{{ grp.exams }}</td>
+                        <td class="px-4 py-3 text-slate-600">{{ grp.papers }}</td>
+                        <td class="px-4 py-3 font-bold text-slate-800">{{ grp.mean if grp.mean is not none else '—' }}</td>
+                        <td class="px-4 py-3">
+                            {% if grp.pass_rate is not none %}
+                            <div class="flex items-center gap-2">
+                                <div class="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden min-w-[48px]"><div class="h-full bg-brand-500 rounded-full" style="width:{{ grp.pass_rate }}%"></div></div>
+                                <span class="text-xs font-semibold text-slate-600">{{ grp.pass_rate }}%</span>
+                            </div>
+                            {% else %}<span class="text-slate-400">—</span>{% endif %}
+                        </td>
+                        <td class="px-4 py-3 text-slate-600">{{ grp.best if grp.best is not none else '—' }}</td>
+                        <td class="px-4 py-3 text-slate-600">{{ grp.worst if grp.worst is not none else '—' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
 </div>
 {% endblock %}
 {% block scripts %}

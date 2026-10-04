@@ -146,7 +146,85 @@
         </div>
     </div>
 
+    {# The pupils' recovery codes for this school's sittings. A pupil locked out by the
+       fullscreen/tab-switch threshold reads their code off their own screen and the
+       invigilator or the school office compares it here; before this the only copy
+       was the pupil's own. Read-only — this page never mints or redeems a code. #}
     <div class="card overflow-hidden">
+        <div class="px-5 py-4 border-b border-surface-100">
+            <h2 class="font-extrabold text-surface-800" x-text="t('Kode pemulihan murid','Pupil recovery codes')"></h2>
+            <p class="text-xs text-surface-500 mt-1" x-text="t('Kode enam angka tiap murid untuk pelaksanaan ujian sekolah ini. Murid membacakan kodenya saat terkunci; bandingkan di sini. Kode tidak diubah atau dipakai oleh halaman ini.','The six-digit code each pupil has for this school’s sittings. A locked pupil reads it out; compare it here. This page never changes or redeems a code.')"></p>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm min-w-[560px]">
+                <thead class="bg-surface-50 text-surface-500">
+                    <tr>
+                        <th class="text-left px-4 py-3 font-bold" x-text="t('Murid','Pupil')"></th>
+                        <th class="text-left px-4 py-3 font-bold" x-text="t('Ujian','Exam')"></th>
+                        <th class="text-left px-4 py-3 font-bold" x-text="t('Kode','Code')"></th>
+                        <th class="text-left px-4 py-3 font-bold" x-text="t('Status','Status')"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for c in codes %}
+                    <tr class="border-t border-surface-100" data-code="{{ c.id }}">
+                        <td class="px-4 py-2.5 text-surface-700 font-medium">{{ c.student_name or '—' }}</td>
+                        <td class="px-4 py-2.5 text-surface-600">{{ c.exam_title or '—' }}</td>
+                        <td class="px-4 py-2.5 font-mono tracking-widest font-bold text-surface-800">{{ c.code }}</td>
+                        <td class="px-4 py-2.5">
+                            {% if c.is_used %}<span class="text-xs font-bold text-surface-400" x-text="t('Sudah dipakai','Used')"></span>
+                            {% else %}<span class="text-xs font-bold text-emerald-700" x-text="t('Aktif','Active')"></span>{% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    {% if not codes %}
+                    <tr><td colspan="4" class="px-4 py-8 text-center text-sm text-surface-400" x-text="t('Belum ada kode pemulihan untuk pelaksanaan ujian sekolah ini.','No recovery codes for this school’s sittings yet.')"></td></tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>    </div>
+
+    {# The transitions of the school's sittings, so a pupil's claim about their
+       connection can be read off the record. Read-only, and no verdict. #}
+    <div class="card overflow-hidden">
+        <div class="px-5 py-4 border-b border-surface-100">
+            <h2 class="font-extrabold text-surface-800" x-text="t('Jejak sesi murid','Pupil session timeline')"></h2>
+            <p class="text-xs text-surface-500 mt-1" x-text="t('Urutan kejadian tiap murid untuk pelaksanaan ujian sekolah ini: kapan ujian dimulai, kapan koneksi terputus dan berapa lama, kapan dikunci dan dibuka kembali. Halaman ini hanya membaca.','The order of events for each pupil in this school’s sittings: when the sitting started, when the connection dropped and for how long, when it was locked and resumed. This page only reads.')"></p>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm min-w-[560px]" data-timelines>
+                <thead class="bg-surface-50 text-surface-500">
+                    <tr>
+                        <th class="text-left px-4 py-3 font-bold" x-text="t('Murid','Pupil')"></th>
+                        <th class="text-left px-4 py-3 font-bold" x-text="t('Kejadian','Events')"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for sid, tl in timelines.items() %}
+                    <tr class="border-t border-surface-100" data-timeline="{{ sid }}">
+                        <td class="px-4 py-2.5 text-surface-700 font-medium align-top">{{ tl.name or sid[:8] }}</td>
+                        <td class="px-4 py-2.5">
+                            <ol class="space-y-0.5">
+                                {% for ev in tl.entries %}
+                                <li class="text-xs text-surface-600">
+                                    <span class="font-mono text-surface-400">{{ ev.at }}</span>
+                                    <span class="text-surface-700">{{ ev.label }}</span>
+                                    {% if ev.detail %}<span class="text-surface-400">({{ ev.detail }})</span>{% endif %}
+                                </li>
+                                {% endfor %}
+                            </ol>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    {% if not timelines %}
+                    <tr><td colspan="2" class="px-4 py-8 text-center text-sm text-surface-400" x-text="t('Belum ada jejak sesi untuk pelaksanaan ujian sekolah ini.','No session timelines for this school’s sittings yet.')"></td></tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+
         <div class="px-5 py-4 border-b border-surface-100">
             <h2 class="font-extrabold text-surface-800" x-text="t('Permintaan ujian ulang','Retake requests')"></h2>
             <p class="text-xs text-surface-500 mt-1" x-text="t('Keputusan disetujui berarti kertas murid itu dikembalikan ke daftar ujiannya, sehingga ia bisa mengerjakannya lagi.','Approving returns that paper to the pupil exam list, so the pupil can sit it again.')"></p>

@@ -36,8 +36,8 @@ from flask import (Blueprint, flash, g, redirect, render_template, request,
 from app.utils.auth import (get_supabase, principal_required,
                             school_official_required, vice_principal_required)
 from app.utils.cache import cache_get, cache_set
-from app.services import (analysis_scope, assessment_periods, invigilation,
-                          official_insight)
+from app.services import (analysis_scope, assessment_periods, attempt_timeline,
+                          exam_codes, invigilation, official_insight)
 
 logger = logging.getLogger(__name__)
 
@@ -362,6 +362,14 @@ def _invigilation_page(role: str, *, base: str | None = None,
         return redirect("/auth/login")
     supabase = get_supabase()
     base = base or _base(role)
+    schedules = invigilation.list_schedules(supabase, school_id)
+    # An official's authority is the whole school, so the codes shown are the
+    # school's — the same reach their retake decision already has. Read-only.
+    held = {str(s["exam_id"]) for s in schedules if s.get("exam_id")}
+    codes = exam_codes.codes_for_exams(supabase, school_id, held)
+    # The same set the codes use, so an official reading a pupil's code can also read
+    # what the sitting actually did — the transitions, not only the summary count.
+    timelines = attempt_timeline.for_exam(supabase, school_id, held)
     return render_template(
         "principal/invigilation.html",
         role=role,
@@ -370,9 +378,11 @@ def _invigilation_page(role: str, *, base: str | None = None,
         retake_decide_base=base,
         can_write=can_write if can_write is not None else role == "vice_principal",
         school=_school(supabase, school_id),
-        schedules=invigilation.list_schedules(supabase, school_id),
+        schedules=schedules,
         requests=invigilation.retake_requests(supabase, school_id),
         options=invigilation.form_options(supabase, school_id),
+        codes=codes,
+        timelines=timelines,
     )
 
 
@@ -486,6 +496,10 @@ def _periods_page(role: str):
         role=role,
         base=_base(role),
         can_write=role == "vice_principal",
+        # The one page has two writing doors — the deputy's and the school
+        # admin's — so the form's target comes from the caller, never hardcoded.
+        period_save_url="/vice-principal/assessment-periods/save",
+        period_delete_base="/vice-principal/assessment-periods",
         school=_school(supabase, school_id),
         periods=assessment_periods.list_periods(supabase, school_id),
         active=assessment_periods.active_period(supabase, school_id),
