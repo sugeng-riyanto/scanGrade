@@ -349,6 +349,14 @@ def dashboard():
         # read, so the number and the names can never describe different classes.
         class_subjects = subjects_for_class(student_school_id, student_class_id)
     subject_count = len(class_subjects)
+    # The per-subject averages now live *on* the subject list, so a mark whose
+    # subject is not on that list would otherwise vanish from the page: the admin
+    # can switch a subject off for a class after papers were already sat. They keep
+    # a second, smaller list instead of being drawn twice — the same rule the page
+    # follows everywhere (one fact, one picture).
+    offered_names = {str(s.get("name") or "") for s in class_subjects}
+    unlisted_averages = {name: avg for name, avg in subject_averages.items()
+                         if str(name) not in offered_names}
 
     # Active whiteboards for student's class (only if the school has it enabled).
     # The feature flag rides on the cached school row; the board list is cached
@@ -371,6 +379,7 @@ def dashboard():
         "class_subjects": class_subjects,
         "active_whiteboards": active_whiteboards,
         "subject_averages": subject_averages,
+        "unlisted_averages": unlisted_averages,
         "chart_points": _chart_points(completed_exams),
         "weak_areas": weak_areas,
         "mastery_level": mastery_level,
