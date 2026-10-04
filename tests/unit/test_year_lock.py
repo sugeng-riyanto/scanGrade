@@ -245,6 +245,14 @@ EXEMPT = {
     "super_bp /api/school/<school_id>/suspend": "a school-level suspension",
     "super_bp /api/school/<school_id>/extend-trial": "a school's trial window",
     "super_bp /api/school/<school_id>/reset-admin-pw": "an account's credential",
+    # The school directory: a school row and the account that runs it. Neither is a
+    # year's paper or mark, and neither has a year resource for the decorator to
+    # resolve — a school belongs to no school year.
+    "super_bp /schools/create": "a school and its admin account, not a year's data",
+    "super_bp /schools/<school_id>/edit": "a school's name and NPSN, not a year's data",
+    "super_bp /schools/<school_id>/status": "a school's active flag, not a year's data",
+    "super_bp /schools/<school_id>/admin": "an admin account's address and jabatan",
+    "super_bp /api/user/<user_id>/position": "an account's jabatan label, not a year's marks",
     "super_bp /deploy-status/release": "the runner's own release control",
     "super_bp /deploy-status/rebaseline": "the runner's own perf baseline",
     "super_bp /deploy-status/test-alert": "a test alert",
