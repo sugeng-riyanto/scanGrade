@@ -136,6 +136,16 @@ def test_an_artifact_is_never_a_crumb_whatever_its_name(app):
         assert not breadcrumbs.names_a_place(segment), segment
 
 
+def test_a_download_is_dropped_by_its_extension_not_only_its_word(app):
+    """`/teacher/students/export.xlsx` carries the extension on the word, so the
+    whole-segment list misses it; the shape must be dropped too, or the trail would
+    print `Export.xlsx` — an artifact the docstring already promises to drop."""
+    for segment in ("export.xlsx", "export.pdf", "students.xlsx"):
+        assert not breadcrumbs.names_a_place(segment), segment
+    assert breadcrumbs.names_a_place("grade-weights"), (
+        "a page whose segment merely contains a hyphen is still a place")
+
+
 def test_a_six_digit_run_or_a_uuid_is_an_identifier(app):
     for segment in (EXAM, "123456", "9033553f-e225-41cb-8d55-e950db7d2a33"):
         assert not breadcrumbs.names_a_place(segment), segment
