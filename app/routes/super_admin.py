@@ -39,6 +39,7 @@ from app.services.school_reset import (
     school_ids_for_npsns,
 )
 from app.services import school_integrity
+from app.services import school_admin
 from app.services import subscription_plans as plan_cfg
 from app.utils.req_cache import invalidate, invalidate_school, ttl
 from app.utils import failure, lock_health, auth_health
@@ -171,16 +172,150 @@ def dashboard():
 @super_bp.route("/schools")
 @_sa_required
 def schools():
+    """The school directory: each school beside the admin account that runs it.
+
+    The list is built by `school_admin.list_schools` rather than a bare `schools`
+    select, because the row an operator needs to act on is the *pair* — the school
+    and the address and jabatan of whoever administers it — and the counts are
+    filled here so the query stays one read for the pairs plus three cheap counts.
+    """
     supabase = get_supabase()
     q = request.args.get("q", "")
-    data = _safe_select(supabase, "schools", limit=200)
-    if q:
-        data = [s for s in data if q.lower() in (s.get("name", "") + s.get("npsn", "")).lower()]
+    data = school_admin.list_schools(supabase, q)
     for s in data:
         s["teacher_count"] = _safe_count(supabase, "profiles", role="guru", school_id=s["id"])
         s["student_count"] = _safe_count(supabase, "profiles", role="murid", school_id=s["id"])
         s["exam_count"] = _safe_count(supabase, "exams", school_id=s["id"])
-    return render_template("super_admin/schools.html", schools=data, q=q)
+    return render_template(
+        "super_admin/schools.html", schools=data, q=q,
+        generated_password=request.args.get("generated_password"),
+        school_admin=school_admin,
+    )
+
+
+# ── the directory's write side: a school and its admin as one act ───────────
+#
+# Every route is super-admin only and reads no school id from a form: the school
+# id a write acts on is the one in *its own path*, and the service re-reads the
+# row before touching anything. The account is made by the shared primitive
+# (`app/services/account_creation.py`), so the retry, the rollback and the
+# one-time-password rule are the same ones every other creator obeys.
+
+def _school_flash(out: dict) -> bool:
+    """Flash the refusal if there is one; return whether the write succeeded.
+
+    Mirrors `_invigilation_refused`: the *service* owns the vocabulary, and this is
+    the one place the route turns a key into a message.
+    """
+    if not out.get("ok"):
+        flash(out.get("reason") or "write_failed", "error")
+        return False
+    return True
+
+
+@super_bp.route("/schools/create", methods=["POST"])
+@_sa_required
+def school_create():
+    """Create a school and the admin account that runs it, together.
+
+    The issued password is shown **once**: it is flashed and also carried on the
+    redirect as its own single-use parameter, never logged, never stored.
+    """
+    password = secrets.token_urlsafe(9)
+    out = school_admin.create_school(
+        get_supabase(),
+        name=request.form.get("name", ""),
+        npsn=request.form.get("npsn", ""),
+        admin_name=request.form.get("admin_name", ""),
+        admin_email=request.form.get("admin_email", ""),
+        position=request.form.get("position", ""),
+        password=password,
+        actor_id=g.get("user_id"),
+    )
+    if not _school_flash(out):
+        return redirect("/super-admin/schools")
+    log_activity("create", "school", out["school"]["id"],
+                 new_data={"name": request.form.get("name"),
+                           "npsn": request.form.get("npsn")},
+                 user_id=g.get("user_id"))
+    invalidate_school(out["school"]["id"])
+    flash("created", "success")
+    return redirect(f"/super-admin/schools?generated_password={password}")
+
+
+@super_bp.route("/schools/<school_id>/edit", methods=["POST"])
+@_sa_required
+def school_edit(school_id):
+    """Rename a school and/or change its NPSN. It cannot touch a user here."""
+    out = school_admin.update_school(
+        get_supabase(), school_id,
+        name=request.form.get("name", ""),
+        npsn=request.form.get("npsn", ""),
+    )
+    if not _school_flash(out):
+        return redirect("/super-admin/schools")
+    log_activity("update", "school", school_id,
+                 new_data={"name": request.form.get("name"),
+                           "npsn": request.form.get("npsn")},
+                 user_id=g.get("user_id"))
+    invalidate_school(school_id)
+    flash("updated", "success")
+    return redirect("/super-admin/schools")
+
+
+@super_bp.route("/schools/<school_id>/status", methods=["POST"])
+@_sa_required
+def school_status(school_id):
+    """Deactivate or reactivate a school — never delete one.
+
+    A delete would cascade `classes.school_id` and null `profiles.school_id`, so
+    the school's classes would go and its people would be detached. A status keeps
+    every row and is one press to undo.
+    """
+    active = request.form.get("active", "") in ("1", "true", "on", "yes")
+    out = school_admin.set_active(get_supabase(), school_id, active)
+    if not _school_flash(out):
+        return redirect("/super-admin/schools")
+    log_activity("update", "school", school_id,
+                 new_data={"status": out["status"]}, user_id=g.get("user_id"))
+    invalidate_school(school_id)
+    flash("updated", "success")
+    return redirect("/super-admin/schools")
+
+
+@super_bp.route("/schools/<school_id>/admin", methods=["POST"])
+@_sa_required
+def school_admin_edit(school_id):
+    """Edit the school's admin: its address (Auth first), its name and its jabatan."""
+    out = school_admin.update_admin(
+        get_supabase(), school_id,
+        email=request.form.get("admin_email"),
+        full_name=request.form.get("admin_name"),
+        position=request.form.get("position"),
+    )
+    if not _school_flash(out):
+        return redirect("/super-admin/schools")
+    log_activity("update", "profile", out["admin_id"],
+                 new_data={"school_id": school_id}, user_id=g.get("user_id"))
+    invalidate(out["admin_id"])
+    flash("updated", "success")
+    return redirect("/super-admin/schools")
+
+
+@super_bp.route("/api/user/<user_id>/position", methods=["POST"])
+@_sa_required
+def api_user_position(user_id):
+    """Set one account's jabatan from the user list."""
+    data = request.get_json(silent=True) or {}
+    if "position" not in data:
+        data = {"position": request.form.get("position", "")}
+    out = school_admin.set_position(get_supabase(), user_id, data.get("position", ""))
+    if not out.get("ok"):
+        return jsonify({"error": out.get("reason")}), 400
+    log_activity("update", "profile", user_id,
+                 new_data={"position": out["position"]}, user_id=g.get("user_id"))
+    invalidate(user_id)
+    return jsonify({"success": True, "position": out["position"]})
 
 
 @super_bp.route("/api/school/<school_id>/toggle-whiteboard", methods=["POST"])
@@ -2112,7 +2247,7 @@ def user_management():
         start = 0
         while True:
             chunk = (supabase.table("profiles")
-                     .select("id,full_name,role,phone,status,school_id")
+                     .select("id,full_name,role,phone,status,school_id,position")
                      .range(start, start + 999).execute().data or [])
             profile_rows.extend(chunk)
             if len(chunk) < 1000:
@@ -2143,6 +2278,7 @@ def user_management():
             "role": p.get("role", "-"),
             "phone": p.get("phone", ""),
             "status": p.get("status", "active"),
+            "position": p.get("position", "") or "",
             "school_id": sid or "",
             "school": school_names.get(sid, "-"),
         })
