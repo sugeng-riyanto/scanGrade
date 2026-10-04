@@ -430,6 +430,19 @@ Aturan yang ditegakkan server, bukan UI:
 - baris lama tanpa `school_year` (pra-migrasi 045) dianggap milik tahun aktif, supaya
   menyimpan ulang tidak diam-diam menonaktifkannya.
 
+## Nilai berbobot (migration 057)
+
+- Hanya **admin_sekolah** yang boleh mengelola komponen nilai dan matriks bobot
+  (`/admin-sekolah/grade-weights*`), dan hanya untuk sekolahnya sendiri
+  (`@require_school_access("subjects", "subject_id")` pada simpan bobot). Guru tidak
+  bisa memutuskan apa arti sebuah nilai mapel.
+- Guru hanya melihat tabel nilai (`/teacher/students`) dan ekspornya untuk murid
+  di kelas yang **ia pegang untuk mapel terpilih**; admin sekolah melihat seluruh
+  daftar. Mapel yang diminta tetapi tidak diajar jatuh kembali ke mapel default
+  guru itu, bukan membocorkan daftar mapel lain.
+- `exams.grade_component_type_id` hanya menerima komponen milik sekolah pemanggil;
+  id asing/stale dibuang ke `NULL`, tidak ditulis (`_resolve_grade_component`).
+
 Sumber otorisasi guru tetap `app/services/assignments.py`: guru hanya boleh membuat/mengubah
 ujian untuk pasangan yang benar-benar dipegangnya, dan daftar dropdown yang kosong **menutup**
 (admin sekolah & super admin tidak dibatasi per pasangan).
