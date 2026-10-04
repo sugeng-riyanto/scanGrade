@@ -66,8 +66,30 @@ READ_FAILED = "read_failed"
 WRITE_FAILED = "write_failed"
 ROW_CHANGED = "row_changed"
 
+#: The second door's refusals. `REASON_REQUIRED` is the whole point of it: a link a
+#: human made disappear has to say why, or the audit record is "somebody clicked".
+REASON_REQUIRED = "reason_required"
+NOTHING_TO_QUARANTINE = "nothing_to_quarantine"
+
+#: The shortest reason that is a reason. `x` is a keystroke, not a record.
+MIN_REASON_LENGTH = 4
+
 OK = "ok"
 REPOINTED = "repointed"
+QUARANTINED = "quarantined"
+
+#: How each kind is *detached* when it can never be re-pointed, expressed the way the
+#: app itself removes a link: a subject is taken off a class by closing the offering
+#: (`is_active=false`, migration 049), an assignment is retired by `status='inactive'`
+#: (migration 045), and the pupil is simply taken out of the wrong class (their
+#: `class_id` is nullable by design, migration 002). Nothing here deletes a row, so a
+#: mistaken quarantine is reversible and no paper loses its home. The *kind* picks the
+#: column and value, so a request can never name one.
+QUARANTINE_FOR = {
+    CLASS_PUPIL: ("class_id", None),
+    PAIR: ("is_active", False),
+    ASSIGNMENT: ("status", "inactive"),
+}
 
 #: What the page is told, per reason. A key again, for the same reason the lock
 #: gate's refusals are keys.
@@ -81,6 +103,9 @@ REASON_KEYS = {
     READ_FAILED: "repair_read_failed",
     WRITE_FAILED: "repair_write_failed",
     ROW_CHANGED: "repair_row_changed",
+    REASON_REQUIRED: "repair_reason_required",
+    NOTHING_TO_QUARANTINE: "repair_nothing_to_quarantine",
+    QUARANTINED: "repair_quarantined",
 }
 
 
@@ -347,10 +372,101 @@ def _invalidate(kind: str, row: dict, proposed: dict) -> None:
         logger.warning("cross_school_repair: could not invalidate caches: %s", exc)
 
 
+# ── the second door: quarantine a row that can never be re-pointed ──────────
+
+def quarantine(supabase, kind: str, row_id, reason, actor_id) -> dict:
+    """Detach a cross-school row the re-point door refused — with a mandatory reason.
+
+    `apply` needs a single school "its people belong to". A `two_schools` row has
+    none, and a `target_unknown` row cannot even be read, so both were left to SQL.
+    This is the door for those: it does not guess a school, it removes the link the
+    way the app removes one (`QUARANTINE_FOR`), so the cross-school read stops and
+    nothing is destroyed.
+
+    The rules that make it safe are the repair door's, plus one:
+
+    * **the column and value are the kind's**, never the request's — the form names
+      only *which* row;
+    * **the reason is mandatory** (>= `MIN_REASON_LENGTH` after trimming): the record
+      of why a link disappeared is the only thing that makes this answerable later;
+    * a row that is merely *already consistent* is refused (`nothing_to_quarantine`),
+      so this never becomes a delete button for healthy rows;
+    * the write is guarded on the school the read saw, so a row already fixed by
+      somebody else reports `row_changed` rather than being clobbered.
+    """
+    table = TABLE_FOR.get(kind)
+    base = {"kind": kind, "table": table, "row_id": row_id}
+    if table is None:
+        return {**base, "ok": False, "reason": UNKNOWN_KIND, "action": None}
+
+    text = (reason or "").strip()
+    if len(text) < MIN_REASON_LENGTH:
+        return {**base, "ok": False, "reason": REASON_REQUIRED, "action": None}
+
+    try:
+        rows = (supabase.table(table).select(COLUMNS_FOR[kind])
+                .eq("id", row_id).execute().data) or []
+    except Exception as exc:                              # noqa: BLE001
+        logger.warning("cross_school_repair: could not read %s %s: %s", table, row_id, exc)
+        return {**base, "ok": False, "reason": READ_FAILED, "action": None}
+
+    row = rows[0] if rows else None
+    if not row or not row.get("id"):
+        return {**base, "ok": False, "reason": ROW_NOT_FOUND, "action": None}
+
+    classes, subjects, schools = _maps(supabase, [(kind, row)])
+    proposed = plan(kind, row, classes, subjects, schools)
+    # A healthy row has nothing to detach. Closing it would be data loss dressed up
+    # as a repair, so the door says no rather than turning into a delete button.
+    if proposed.get("reason") == ALREADY_CONSISTENT:
+        return {**proposed, "ok": False, "reason": NOTHING_TO_QUARANTINE, "action": None}
+
+    column, value = QUARANTINE_FOR[kind]
+    try:
+        query = supabase.table(table).update({column: value}).eq("id", row_id)
+        if row.get("school_id") is not None:
+            query = query.eq("school_id", row.get("school_id"))
+        written = query.execute().data or []
+    except Exception as exc:                              # noqa: BLE001
+        logger.warning("cross_school_repair: could not quarantine %s %s: %s",
+                       table, row_id, exc)
+        return {**base, "ok": False, "reason": WRITE_FAILED, "action": None}
+
+    if not written:
+        return {**base, "ok": False, "reason": ROW_CHANGED, "action": None}
+
+    _audit_quarantine(table, row_id, proposed, text, actor_id)
+    _invalidate(kind, row, proposed)
+    return {**proposed, "ok": True, "reason": OK, "action": QUARANTINED,
+            "quarantine_column": column}
+
+
+def _audit_quarantine(table: str, row_id, proposed: dict, reason: str, actor_id) -> None:
+    """One record per quarantine: which row, who, and — the whole point — why.
+
+    The reason is stored verbatim. It is the only thing that tells a later reader
+    whether a link was closed because it was mis-wired or because somebody tidied
+    the wrong table, which is exactly what an audit trail is for.
+    """
+    try:
+        log_activity(
+            "update", table, row_id,
+            old_data={"school_id": proposed.get("from_school_id")},
+            new_data={"quarantine": "cross_school", "kind": proposed.get("kind"),
+                      "reason": reason},
+            user_id=actor_id)
+    except Exception as exc:                              # noqa: BLE001 — the write stands
+        logger.warning("cross_school_repair: quarantine audit failed for %s %s: %s",
+                       table, row_id, exc)
+
+
 __all__ = [
     "ASSIGNMENT", "CLASS_PUPIL", "PAIR", "TABLE_FOR", "COLUMNS_FOR",
+    "QUARANTINE_FOR", "MIN_REASON_LENGTH",
     "ROW_NOT_FOUND", "TARGET_UNKNOWN", "TWO_SCHOOLS", "ALREADY_CONSISTENT",
-    "UNKNOWN_KIND", "READ_FAILED", "WRITE_FAILED", "ROW_CHANGED", "OK", "REPOINTED",
+    "UNKNOWN_KIND", "READ_FAILED", "WRITE_FAILED", "ROW_CHANGED",
+    "REASON_REQUIRED", "NOTHING_TO_QUARANTINE",
+    "OK", "REPOINTED", "QUARANTINED",
     "REASON_KEYS", "reason_key", "finding_row_id", "row_from_finding",
-    "plan", "preview", "apply",
+    "plan", "preview", "apply", "quarantine",
 ]

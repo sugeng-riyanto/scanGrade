@@ -95,7 +95,23 @@
         'repair_write_failed': ['Perubahan tidak tersimpan.', 'The change was not saved.'],
         'repair_row_changed': ['Baris sudah diperbaiki pihak lain lebih dulu — muat ulang.', 'The row was fixed by someone else first — reload.'],
         'repair_failed': ['Perbaikan tidak bisa dilakukan.', 'The repair could not be done.'],
+        'repair_reason_required': ['Alasan wajib diisi (minimal 4 karakter) sebelum baris dikarantina.', 'A reason is required (at least 4 characters) before the row is quarantined.'],
+        'repair_nothing_to_quarantine': ['Baris ini sudah konsisten — tidak ada yang perlu dikarantina.', 'This row is already consistent — nothing to quarantine.'],
+        'repair_quarantined': ['Baris dikarantina: ditautkan keluar dari data aktif, tidak dihapus.', 'The row was quarantined: detached from live data, not deleted.'],
+        'repair_quarantine_failed': ['Karantina tidak bisa dilakukan.', 'The quarantine could not be done.'],
     } %}
+    {# The last quarantine's outcome, beside the repair outcome and for the same reason:
+       a successful quarantine removes the finding, so the card vanishes and the
+       operator would otherwise see no trace of what they just did. #}
+    {% if quarantined is not none and quarantined != '' %}
+    <div class="card p-4 border {% if quarantined == '1' %}border-sky-200 bg-sky-50/60{% else %}border-red-200 bg-red-50/60{% endif %}" id="quarantine-outcome">
+        <p class="text-sm font-bold {% if quarantined == '1' %}text-sky-800{% else %}text-red-700{% endif %}">
+            <i class="fas fa-box-archive mr-1"></i>
+            {% set _qn = IG_REPAIR.get(quarantine_note, ['Karantina tidak bisa dilakukan.', 'The quarantine could not be done.']) %}
+            <span x-text="t('{{ _qn[0] }}','{{ _qn[1] }}')"></span>
+        </p>
+    </div>
+    {% endif %}
     {# What the last repair run did. It sits *outside* the card below on purpose: a
        successful "repair all" empties the findings, so the card disappears and the
        operator would be left with no trace of what they just did. #}
@@ -131,7 +147,7 @@
 
                 {% if integrity.findings %}
                 <p class="text-sm text-amber-800 mt-1 leading-relaxed"
-                   x-text="t('Baris di bawah menyebut sekolah yang berbeda dari murid atau kelas yang ditunjuknya, sehingga halaman satu sekolah bisa membaca data sekolah lain — persis penyebab laporan &ldquo;mapel campur NPSN lain&rdquo;. Perbaiki dengan menyetel school_id baris itu ke sekolah pemilik datanya, atau hapus barisnya bila salah dibuat.','The rows below name a different school than the pupil or class they point at, so one school&rsquo;s page can read another school&rsquo;s data — exactly what the &ldquo;subjects mixed with another NPSN&rdquo; report was. Fix by setting that row&rsquo;s school_id to the school that owns the data, or deleting the row if it was created by mistake.')"></p>
+                   x-text="t('Baris di bawah menyebut sekolah yang berbeda dari murid atau kelas yang ditunjuknya, sehingga halaman satu sekolah bisa membaca data sekolah lain — persis penyebab laporan &ldquo;mapel campur NPSN lain&rdquo;. Perbaiki dengan menyetel school_id baris itu ke sekolah pemilik datanya, atau hapus barisnya bila salah dibuat.','The rows below name a different school than the pupil or class they point at, so one school&rsquo;s page can read another school&rsquo;s data — exactly what the &ldquo;subjects mixed with another NPSN&rdquo; report was. Fix by moving the row to the school that owns the data; a row that can never be moved (its class and subject disagree) can be quarantined instead — detached from live data with a reason recorded, never deleted.')"></p>
                 <div class="overflow-x-auto mt-3">
                     <table class="w-full text-xs min-w-[640px]">
                         <thead class="text-amber-700">
@@ -174,8 +190,25 @@
                                                 x-text="t('Perbaiki','Repair')"></button>
                                     </form>
                                     {% elif plan %}
+                                    {# A row the repair door refuses has no single
+                                       school to move to. That is exactly the
+                                       mis-wired kind, so the second door is offered
+                                       here: detach the link, with a reason that is
+                                       recorded. The column and value are the
+                                       service's, never the form's. #}
                                     {% set why = IG_REPAIR.get(plan.reason_key, [plan.reason_key, plan.reason_key]) %}
-                                    <span class="text-[10px] font-bold text-surface-500" x-text="t('{{ why[0] }}','{{ why[1] }}')"></span>
+                                    <p class="text-[10px] font-bold text-surface-500" x-text="t('{{ why[0] }}','{{ why[1] }}')"></p>
+                                    <form method="POST" action="/integrity/quarantine" class="flex items-center gap-1 mt-1 flex-wrap">
+                                        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                                        <input type="hidden" name="kind" value="{{ f.kind }}">
+                                        <input type="hidden" name="row_id" value="{{ rid }}">
+                                        <input type="text" name="reason" required minlength="4" maxlength="200"
+                                               :placeholder="t('Alasan (wajib)','Reason (required)')"
+                                               class="px-2 py-1 border border-sky-200 rounded-lg text-[10px] w-40 focus:ring-1 focus:ring-sky-400">
+                                        <button type="submit"
+                                                class="px-2 py-1 bg-sky-50 text-sky-700 rounded-lg font-bold text-[10px] hover:bg-sky-100 transition"
+                                                x-text="t('Karantina','Quarantine')"></button>
+                                    </form>
                                     {% else %}
                                     <span class="text-amber-700/50">—</span>
                                     {% endif %}
