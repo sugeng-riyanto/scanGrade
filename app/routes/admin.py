@@ -10,8 +10,7 @@ from app.services.notification_service import notify_approval
 from app.services.audit_service import log_activity, log_create, log_delete, fetch_audit_logs, count_audit_logs, get_activity_summary
 from app.utils.security import sanitize_input
 from app.utils import denials, failure
-from app.services.student_import import discard_partial_account as discard_student
-from app.services.teacher_import import discard_partial_account as discard_teacher
+from app.services import account_creation
 from app.services import trial_settings
 from app.decorators.year_lock import open_year_required
 
@@ -118,7 +117,7 @@ def create_class():
         }).execute()
     except Exception as e:
         if request.is_json:
-            return jsonify({"success": False, "error": str(e)}), 400
+            return jsonify({"success": False, "error": failure.sentence(e)}), 400
         return redirect("/admin-sekolah/classes")
     if request.is_json:
         return jsonify({"success": True})
@@ -258,6 +257,92 @@ def export_teachers():
     return send_file(buf, as_attachment=True, download_name="data_guru.xlsx", mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 
+# ── the legacy Excel importers ──────────────────────────────────────────────
+#
+# Two panels older than `/admin-sekolah/import`, and they create accounts — so they
+# are creators, and they are bound by the same three rules the shared creator owns:
+# ride the retry (GoTrue's `Database error creating new user` is a hiccup that rolled
+# back, so repeating it cannot make a second account), undo a half-made account (the
+# auth user is deleted, which cascades), and stamp the one-time-password fields. They
+# used to spell all three out themselves, or rather: they spelled out the second one
+# and had neither of the others.
+#
+# They also wrote **no role row**. A profile with no `students`/`teachers` row can sign
+# in and appears in no class list — the same half-made account the rollback exists to
+# prevent, reached by *success* instead of failure. The note that used to stand here
+# said closing it "needs a `school_id`, which `/admin` has no source for". It has one:
+# `g.user_school_id` is the server's own reading of the session, and this module
+# already scopes its school reads with it. So the school is the session's, never the
+# sheet's — a workbook cannot name an NPSN, which is what keeps an upload from placing
+# accounts in somebody else's school.
+#
+# What stays here rather than moving into the shared creator: everything sheet-shaped.
+# The column order, the email fallback and the per-row error text are this panel's
+# surface, and the modern importer has its own sheet and its own duplicate pre-checks
+# (NIP, NUPTK, NISN). A shared primitive that took all of it would be a fourth place
+# for the two sheets to drift apart.
+
+#: What a sheet gets when the session has no school of its own (`super_admin` without
+#: one). Writing the rows anyway is how an account ends up scoped to nothing — the
+#: exact shape this panel's role row exists to remove — so nothing is created and the
+#: sentence says which door to come through.
+_NO_SCHOOL = (
+    "Tidak ada sekolah pada sesi ini, jadi tidak ada tempat untuk akunnya. "
+    "Masuk sebagai admin sekolah (bukan super admin tanpa sekolah) lalu ulangi impor."
+)
+
+
+def _session_school_id() -> str | None:
+    """The school these imports write into: the session's, never the workbook's."""
+    sid = g.get("user_school_id")
+    return str(sid) if sid else None
+
+
+def _create_legacy_student(supabase, school_id, *, full_name, nisn, nis, phone,
+                           row_idx):
+    """One pupil from the legacy sheet, through the shared account creator.
+
+    The sheet carries no class, so the role row is written without one: a pupil in
+    the school but in no class list is still discoverable and can be placed later,
+    which is precisely what a missing row was not. The retry, the rollback and the
+    issued-password stamp ride along with `create_account` instead of being repeated.
+    """
+    profile_fields = {}
+    if nisn:
+        profile_fields["nisn"] = nisn
+    if nis:
+        profile_fields["nis"] = nis
+    return account_creation.create_account(
+        supabase,
+        school_id=school_id, role="murid", full_name=full_name,
+        email=f"siswa.{nisn or nis or row_idx}@school.local",
+        password=_gen_password(), phone=phone,
+        profile_fields=profile_fields,
+        role_table="students",
+        role_fields={"nisn": nisn or None, "status": "active"},
+        identifier=nisn or nis or full_name,
+    )
+
+
+def _create_legacy_teacher(supabase, school_id, *, full_name, phone):
+    """One teacher from the legacy sheet — which names them and gives a phone, and
+    nothing else.
+
+    `employee_id` is left empty rather than invented: the sheet carries no NIP, the
+    column is not unique, and a made-up identifier would be a lie in the one place a
+    school looks to match a person to the payroll.
+    """
+    return account_creation.create_account(
+        supabase,
+        school_id=school_id, role="guru", full_name=full_name,
+        email=f"guru.{full_name.lower().replace(' ', '.')}@school.local",
+        password=_gen_password(), phone=phone,
+        role_table="teachers",
+        role_fields={"employee_id": ""},
+        identifier=full_name,
+    )
+
+
 @admin_bp.route("/students/import", methods=["POST"])
 @admin_required
 def import_students():
@@ -269,8 +354,11 @@ def import_students():
         wb = load_workbook(filename=io.BytesIO(file.read()))
         ws = wb.active
     except Exception as e:
-        return jsonify({"success": False, "error": f"Gagal membaca file: {e}"}), 400
+        return jsonify({"success": False, "error": f"Gagal membaca file: {failure.sentence(e)}"}), 400
     supabase = get_supabase()
+    school_id = _session_school_id()
+    if not school_id:
+        return jsonify({"success": True, "created": 0, "errors": [_NO_SCHOOL]})
     created = 0
     errors = []
     for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), 2):
@@ -280,31 +368,14 @@ def import_students():
         nisn = str(row[1] or "").strip() if len(row) > 1 else ""
         nis = str(row[2] or "").strip() if len(row) > 2 else ""
         phone = str(row[3] or "").strip() if len(row) > 3 else ""
-        default_email = f"siswa.{nisn or nis or row_idx}@school.local"
-        default_pw = _gen_password()
-        uid = None
         try:
-            res = supabase.auth.admin.create_user({
-                "email": default_email,
-                "password": default_pw,
-                "user_metadata": {"role": "murid", "full_name": full_name},
-                "email_confirm": True,
-            })
-            uid = res.user.id
-            profile_data = {"id": uid, "full_name": full_name, "role": "murid"}
-            if nisn:
-                profile_data["nisn"] = nisn
-            if nis:
-                profile_data["nis"] = nis
-            if phone:
-                profile_data["phone"] = phone
-            supabase.table("profiles").insert(profile_data).execute()
+            _create_legacy_student(supabase, school_id, full_name=full_name,
+                                   nisn=nisn, nis=nis, phone=phone, row_idx=row_idx)
             created += 1
         except Exception as e:
-            # An auth user created moments ago must not outlive a failed profile
-            # write: it could sign in, and it appears in no class list.
-            discard_student(supabase, uid, nisn or nis or full_name)
-            errors.append(f"Baris {row_idx} ({full_name}): {e}")
+            # The account creator has already undone a half-made one by the time
+            # this runs; all that is left is to say which row it was.
+            errors.append(f"Baris {row_idx} ({full_name}): {failure.sentence(e)}")
     return jsonify({"success": True, "created": created, "errors": errors})
 
 
@@ -318,38 +389,26 @@ def import_teachers():
     try:
         wb = load_workbook(filename=io.BytesIO(file.read()))
         ws = wb.active
-    except Exception as e:
-        return jsonify({"success": False, "error": f"Gagal membaca file: {e}"}), 400
+    except Exception as e:        return jsonify({"success": False, "error": f"Gagal membaca file: {failure.sentence(e)}"}), 400
     supabase = get_supabase()
+    school_id = _session_school_id()
+    if not school_id:
+        return jsonify({"success": True, "created": 0, "errors": [_NO_SCHOOL]})
     created = 0
     errors = []
+
+
     for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), 2):
         if not row or not row[0]:
             continue
         full_name = str(row[0] or "").strip()
         phone = str(row[1] or "").strip() if len(row) > 1 else ""
-        default_email = f"guru.{full_name.lower().replace(' ', '.')}@school.local"
-        default_pw = _gen_password()
-        uid = None
         try:
-            res = supabase.auth.admin.create_user({
-                "email": default_email,
-                "password": default_pw,
-                "user_metadata": {"role": "guru", "full_name": full_name},
-                "email_confirm": True,
-            })
-            uid = res.user.id
-            profile_data = {"id": uid, "full_name": full_name, "role": "guru"}
-            if phone:
-                profile_data["phone"] = phone
-            supabase.table("profiles").insert(profile_data).execute()
+            _create_legacy_teacher(supabase, school_id, full_name=full_name,
+                                   phone=phone)
             created += 1
         except Exception as e:
-            # This sheet carries no NIP, so there is nothing to pre-check -- but a
-            # failed profile write must not leave an account that can sign in and
-            # is not a teacher anywhere.
-            discard_teacher(supabase, uid, full_name)
-            errors.append(f"Baris {row_idx} ({full_name}): {e}")
+            errors.append(f"Baris {row_idx} ({full_name}): {failure.sentence(e)}")
     return jsonify({"success": True, "created": created, "errors": errors})
 
 
@@ -494,7 +553,7 @@ def approve_request(request_id):
     except Exception as e:
         current_app.logger.error(f"Approve error: {e}")
         if request.is_json or request.headers.get("HX-Request"):
-            return jsonify({"error": str(e)}), 400
+            return jsonify({"error": failure.sentence(e)}), 400
         return redirect("/admin/registration-requests")
 
 
@@ -523,7 +582,7 @@ def reject_request(request_id):
     except Exception as e:
         current_app.logger.error(f"Reject error: {e}")
         if request.is_json or request.headers.get("HX-Request"):
-            return jsonify({"error": str(e)}), 400
+            return jsonify({"error": failure.sentence(e)}), 400
         return redirect("/admin/registration-requests")
 
 
@@ -556,7 +615,7 @@ def registration_request_delete(request_id):
     except Exception as e:
         current_app.logger.error(f"Delete registration request error: {e}")
         if request.is_json or request.headers.get("HX-Request"):
-            return jsonify({"error": str(e)}), 400
+            return jsonify({"error": failure.sentence(e)}), 400
         flash(f"Gagal menghapus: {failure.sentence(e)}", "error")
     return redirect("/admin/registration-requests")
 
@@ -573,7 +632,7 @@ def admin_reset_teacher_password(teacher_id):
             return jsonify({"success": True, "password": password})
         return jsonify({"success": True, "password": password})
     except Exception as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": failure.sentence(e)}), 400
 
 
 @admin_bp.route("/students/<student_id>/reset-password", methods=["POST"])
@@ -588,7 +647,7 @@ def admin_reset_student_password(student_id):
             return jsonify({"success": True, "password": password})
         return jsonify({"success": True, "password": password})
     except Exception as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": failure.sentence(e)}), 400
 
 
 # ─── COMPLIANCE & AUDIT ──────────────────────────────

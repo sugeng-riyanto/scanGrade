@@ -106,6 +106,12 @@ logger = logging.getLogger(__name__)
 #: "More than a few commits". See the module docstring for why it is this small.
 DEFAULT_MIN_COMMITS = 5
 
+#: "More than a few" for account-create retries. A single transient hiccup is normal
+#: and must stay quiet; a handful in one process is a GoTrue that is struggling, and
+#: that is the leading indicator worth paging on. Small for the same reason
+#: `DEFAULT_MIN_COMMITS` is: a healthy box barely retries at all.
+DEFAULT_MIN_AUTH_RETRIES = 5
+
 #: How often the box is looked at. Cheap enough to be more frequent than the
 #: reminder, quiet enough not to matter on a 1 vCPU box (the report is a handful of
 #: `git` calls and it is cached for the page).
@@ -124,8 +130,13 @@ KIND_COPY_PREDATES_GATE = "copy_predates_gate"
 KIND_COPY_DRIFTED = "copy_drifted"
 KIND_RUNNER_BEHIND = "runner_behind"
 KIND_CHECKOUT_BEHIND = "checkout_behind"
+#: The auth server is hiccupping on account creates. Not a deploy fact, but the
+#: *leading* indicator of one, and it rides this channel because a page needs
+#: somebody to open it.
+KIND_AUTH_RETRIES = "auth_retries"
 ALERT_KINDS = frozenset({KIND_COPY_PREDATES_GATE, KIND_COPY_DRIFTED,
-                         KIND_RUNNER_BEHIND, KIND_CHECKOUT_BEHIND})
+                         KIND_RUNNER_BEHIND, KIND_CHECKOUT_BEHIND,
+                         KIND_AUTH_RETRIES})
 
 #: Where the recipients come from, as keys the template can say in either language.
 SOURCE_SETTING = "setting"
@@ -166,12 +177,17 @@ def _int_or_none(value) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
-def staleness(report: dict | None, *, min_commits: int = DEFAULT_MIN_COMMITS) -> dict | None:
+def staleness(report: dict | None, *, min_commits: int = DEFAULT_MIN_COMMITS,
+              auth: dict | None = None,
+              min_retries: int = DEFAULT_MIN_AUTH_RETRIES) -> dict | None:
     """The one thing worth saying about this reading, or None.
 
     The order is the order they bite: a runner that cannot check a release, then
-    one that is behind, then a pipeline that has stopped moving. The first match
-    wins, so the email names the loudest fact rather than all of them.
+    one that is behind, then a pipeline that has stopped moving, then a struggling
+    auth server. The first match wins, so the email names the loudest fact rather
+    than all of them. `auth` is the `auth_health.state()` reading: it is weighed
+    *after* the deploy facts on purpose, because a broken pipeline is the bigger
+    problem and both at once should still be one mail.
     """
     if not report:
         return None
@@ -244,7 +260,51 @@ def staleness(report: dict | None, *, min_commits: int = DEFAULT_MIN_COMMITS) ->
                        "held_gate": (report.get("quarantine") or {}).get("gate"),
                        "branch": checkout.get("branch")},
         }
+
+    retrying = auth_staleness(auth, min_retries=min_retries)
+    if retrying is not None:
+        return retrying
     return None
+
+
+def auth_staleness(auth: dict | None, *,
+                   min_retries: int = DEFAULT_MIN_AUTH_RETRIES) -> dict | None:
+    """The account-create retry reading, or None.
+
+    `auth` is `auth_health.state()`: how many creates this worker had to retry, how
+    many exhausted every retry, and the marker another worker may have left. The
+    magnitude is the two counters together — a create that needed retries and still
+    failed is the same class of fact as one that needed retries and then landed.
+
+    Quiet until the count is *over* the line, with one exception: a create that
+    exhausted every retry is the school seeing a failure, so it is never quiet even
+    on the first occurrence. A reading it could not make (`None`) is silence, the
+    same rule the runner readings follow.
+    """
+    if not auth:
+        return None
+    retries = _int_or_none(auth.get("worker_retries")) or 0
+    exhausted = _int_or_none(auth.get("worker_exhausted")) or 0
+    transient = retries + exhausted
+    if transient <= min_retries and not exhausted:
+        return None
+    marker = auth.get("marker") or {}
+    return {
+        "kind": KIND_AUTH_RETRIES, "verdict_key": KIND_AUTH_RETRIES,
+        # `commits` stays None: the magnitude of this alert is a retry count, not a
+        # commit distance, and rendering it as "N commits" would be a lie.
+        "commits": None, "retries": transient, "from_short": None,
+        "anchor": auth.get("worker_first_at") or auth.get("measured_at"),
+        "detail": {
+            "retries": retries, "exhausted": exhausted,
+            "first_at": auth.get("worker_first_at"),
+            "last_at": auth.get("worker_last_at"),
+            "reason": auth.get("worker_reason") or marker.get("reason"),
+            "worker": auth.get("worker"),
+            "state_file": auth.get("state_file"),
+            "marker_key": marker.get("key"),
+        },
+    }
 
 
 def alert_key(descriptor: dict) -> str:
@@ -256,9 +316,15 @@ def alert_key(descriptor: dict) -> str:
     for the sibling reason: a fixed runner that drifts again is a new event, not a
     continuation.
     """
+    # The magnitude is `commits` for the deploy facts and `retries` for the auth
+    # one — either way it is the number that makes one situation different from a
+    # milder one of the same kind, so it belongs in the key.
+    magnitude = descriptor.get("commits")
+    if magnitude is None:
+        magnitude = descriptor.get("retries")
     return ":".join([
         str(descriptor.get("kind") or "?"),
-        str(descriptor.get("commits")) if descriptor.get("commits") is not None else "-",
+        str(magnitude) if magnitude is not None else "-",
         str(descriptor.get("from_short") or descriptor.get("anchor") or "-")[:12],
     ])
 
@@ -412,6 +478,8 @@ _KIND_SUBJECT = {
         "the deploy runner is behind the checkout",
     KIND_CHECKOUT_BEHIND:
         "the checkout is behind origin/main — deploys are not running",
+    KIND_AUTH_RETRIES:
+        "account creates are being retried — the auth service is struggling",
 }
 
 _KIND_ACTION = {
@@ -427,6 +495,10 @@ _KIND_ACTION = {
     KIND_CHECKOUT_BEHIND:
         "Look at the deploy journal (`journalctl -u scangrade-deploy`) for the reason "
         "the checkout stopped moving, then release the held commit or fix the fault.",
+    KIND_AUTH_RETRIES:
+        "Check the Supabase auth service (GoTrue). The creates are failing with a "
+        "transient database error and being retried, so some may eventually reach "
+        "the school as a refusal. The deploy status page shows the same counts.",
 }
 
 
@@ -448,6 +520,13 @@ def render_email(descriptor: dict, report: dict, *, app_url: str | None = None,
     repo = report.get("repo") or "/opt/scangrade"
     if test:
         subject = "[ScanGrade] test alert — deploy-runner notifications work"
+    elif kind == KIND_AUTH_RETRIES:
+        count = descriptor.get("retries")
+        if count is None:
+            count = descriptor.get("commits")
+        subject = (f"[ScanGrade] {count} account-create retries — the auth service is "
+                   f"struggling" if count is not None else
+                   f"[ScanGrade] {_KIND_SUBJECT[KIND_AUTH_RETRIES]}")
     elif kind == KIND_CHECKOUT_BEHIND:
         subject = (f"[ScanGrade] {commits} commit(s) behind origin/main — deploys "
                    f"are not running")
@@ -457,7 +536,23 @@ def render_email(descriptor: dict, report: dict, *, app_url: str | None = None,
         subject = f"[ScanGrade] {_KIND_SUBJECT.get(kind, 'runner behind')} ({commits} commits)"
 
     rows = []
-    if commits is not None and not test:
+    if kind == KIND_AUTH_RETRIES:
+        retries = descriptor.get("retries")
+        if retries is None:
+            retries = commits
+        if retries is not None and not test:
+            rows.append(("Creates that needed a retry", str(retries)))
+        if detail.get("exhausted") and not test:
+            rows.append(("Creates that exhausted every retry", str(detail["exhausted"])))
+        if detail.get("first_at") and not test:
+            rows.append(("First retry at", str(detail["first_at"])))
+        if detail.get("last_at") and not test:
+            rows.append(("Last retry at", str(detail["last_at"])))
+        if detail.get("reason") and not test:
+            rows.append(("Last reason", str(detail["reason"])))
+        if detail.get("worker") and not test:
+            rows.append(("Reporting worker", str(detail["worker"])))
+    elif commits is not None and not test:
         rows.append(("How far behind", f"{commits} commit(s)"))
     if descriptor.get("from_short"):
         rows.append(("Runner was built from", descriptor["from_short"]))
@@ -662,7 +757,8 @@ class _Claim:
 
 def check(*, report: dict | None = None, now: _dt.datetime | None = None,
           send=None, state: pathlib.Path | None = None,
-          min_commits: int | None = None, recipients_info: dict | None = None) -> dict:
+          min_commits: int | None = None, recipients_info: dict | None = None,
+          auth: dict | None = None, min_retries: int | None = None) -> dict:
     """One look at the box: claim the tick, read, decide, maybe send, record.
 
     Returns an outcome key plus what it did, which is what the page and the tests
@@ -683,7 +779,13 @@ def check(*, report: dict | None = None, now: _dt.datetime | None = None,
                     "detail": "another worker holds this tick"}
 
         reading = report if report is not None else deploy_status_service.report()
-        descriptor = staleness(reading, min_commits=min_commits or DEFAULT_MIN_COMMITS)
+        # The auth reading is part of the same tick: it is the leading indicator of
+        # a struggling GoTrue, and it rides this channel rather than a second one.
+        auth_state = auth if auth is not None else _auth_state()
+        descriptor = staleness(reading,
+                               min_commits=min_commits or DEFAULT_MIN_COMMITS,
+                               auth=auth_state,
+                               min_retries=min_retries or DEFAULT_MIN_AUTH_RETRIES)
         if descriptor is None:
             return {"outcome": OUTCOME_NOT_STALE, "sent": False, "descriptor": None}
 
@@ -710,6 +812,7 @@ def check(*, report: dict | None = None, now: _dt.datetime | None = None,
                 "key": alert_key(descriptor),
                 "kind": descriptor["kind"],
                 "commits": descriptor.get("commits"),
+                "retries": descriptor.get("retries"),
                 "sent_at": now.isoformat(),
                 "to": list(who["emails"]),
                 "subject": message["subject"],
@@ -717,6 +820,22 @@ def check(*, report: dict | None = None, now: _dt.datetime | None = None,
         return {"outcome": OUTCOME_SENT if sent else OUTCOME_SEND_FAILED,
                 "sent": bool(sent), "descriptor": descriptor,
                 "recipients": who, "subject": message["subject"]}
+
+
+def _auth_state() -> dict | None:
+    """The account-create retry reading, or `None` when it cannot be taken.
+
+    Fail-open like the module it reads: a box whose auth health cannot be read is
+    not an incident, it is silence — the page still shows the counts, and this must
+    never raise from inside the alert loop.
+    """
+    from app.utils import auth_health
+
+    try:
+        return auth_health.state()
+    except Exception as exc:                          # noqa: BLE001 - never fatal
+        logger.warning("deploy alerts: could not read account-create retries: %s", exc)
+        return None
 
 
 def _default_send(address: str, subject: str, html: str) -> bool:
@@ -786,6 +905,7 @@ def summary(*, state: pathlib.Path | None = None, recipients_info: dict | None =
         "source_detail": who.get("detail"),
         "interval_seconds": interval or _interval_seconds(),
         "min_commits": _min_commits(),
+        "min_retries": _min_auth_retries(),
         "last": record,
         "state_dir": str(directory) if directory else None,
         "state_error": unreadable,
@@ -810,6 +930,16 @@ def _min_commits() -> int:
                    or DEFAULT_MIN_COMMITS)
     except (RuntimeError, TypeError, ValueError):
         return DEFAULT_MIN_COMMITS
+
+
+def _min_auth_retries() -> int:
+    try:
+        from flask import current_app
+
+        return int(current_app.config.get("DEPLOY_ALERT_MIN_AUTH_RETRIES")
+                   or DEFAULT_MIN_AUTH_RETRIES)
+    except (RuntimeError, TypeError, ValueError):
+        return DEFAULT_MIN_AUTH_RETRIES
 
 
 # ── the scheduler ────────────────────────────────────────────────────────────
@@ -861,11 +991,12 @@ def stop_deploy_alert_scheduler() -> None:
 #: The module's public surface, so the page, the scheduler and the tests all name
 #: the same things.
 __all__ = [
-    "DEFAULT_MIN_COMMITS", "DEFAULT_INTERVAL_SECONDS", "RENOTIFY_AFTER_SECONDS",
+    "DEFAULT_MIN_COMMITS", "DEFAULT_MIN_AUTH_RETRIES", "DEFAULT_INTERVAL_SECONDS",
+    "RENOTIFY_AFTER_SECONDS",
     "ALERT_KINDS", "OUTCOME_SENT", "OUTCOME_NOT_STALE", "OUTCOME_ALREADY_SENT",
     "OUTCOME_NO_RECIPIENTS", "OUTCOME_SEND_FAILED", "OUTCOME_CANNOT_READ",
     "TEST_ALERT_OUTCOMES", "RECIPIENT_SOURCES", "RECIPIENTS_KEY",
-    "staleness", "alert_key", "should_send", "split_recipients", "recipients",
-    "render_email", "check", "send_test", "summary", "state_dir",
+    "staleness", "auth_staleness", "alert_key", "should_send", "split_recipients",
+    "recipients", "render_email", "check", "send_test", "summary", "state_dir",
     "start_deploy_alert_scheduler", "stop_deploy_alert_scheduler",
 ]

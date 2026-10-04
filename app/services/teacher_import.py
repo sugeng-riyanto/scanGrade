@@ -31,12 +31,8 @@ Two traps this module exists to close, both measured against the live database:
    That is why the single-teacher form created the account and then failed.
 """
 
-from app.services import password_change as _password_change
-from app.utils import auth_retry
-from app.utils.logger import get_logger
+from app.services import account_creation
 from app.errors import ValidationError
-
-logger = get_logger("teacher_import")
 
 
 def _clean(value):
@@ -79,22 +75,6 @@ def find_teacher_by_nuptk(supabase, nuptk):
     return rows[0] if rows else None
 
 
-def discard_partial_account(supabase, uid, identifier):
-    """Best-effort removal of an account whose creation did not finish.
-
-    Deleting the auth user cascades to ``profiles`` and from there to
-    ``teachers``, so this is the one call that undoes all three writes.
-    """
-    if not uid:
-        return
-    try:
-        supabase.auth.admin.delete_user(uid)
-        logger.warning("Rolled back a half-created teacher account (nip=%s)", identifier)
-    except Exception as e:  # never mask the original failure
-        logger.error("Could not roll back half-created teacher uid=%s nip=%s: %s",
-                     uid, identifier, e)
-
-
 def _reject_if_taken(existing, field, value, school_id):
     if not existing:
         return
@@ -126,39 +106,16 @@ def create_teacher_account(supabase, *, school_id, full_name, email, password,
     _reject_if_taken(
         find_teacher_by_nuptk(supabase, nuptk), "NUPTK", nuptk, school_id)
 
-    uid = None
-    try:
-        # Retried for the reason app/utils/auth_retry.py spells out: this is the
-        # hiccup, not a refusal, and a create that answered this way rolled back.
-        created = auth_retry.create_user_with_retry(
-            lambda: supabase.auth.admin.create_user({
-                "email": email,
-                "password": password,
-                "user_metadata": {"role": "guru", "full_name": full_name},
-                "email_confirm": True,
-            }))
-        uid = created.user.id
+    # No `status` key in the teachers row on purpose: teachers.status does not
+    # exist (see the module docstring), so status goes to `profiles` only.
+    role_fields = {"employee_id": employee_id, "subject_id": subject_id}
+    if nuptk:
+        role_fields["nuptk"] = nuptk
 
-        profile = {
-            "id": uid, "full_name": full_name, "role": "guru",
-            "status": status, "school_id": school_id,
-        }
-        if phone:
-            profile["phone"] = phone
-        # The generated password is a one-time one — see
-        # app/services/password_change.py for the rule the change is held to.
-        profile.update(_password_change.account_fields(email))
-        supabase.table("profiles").upsert(profile).execute()
-
-        # No `status` key here on purpose: teachers.status does not exist.
-        teacher = {
-            "id": uid, "school_id": school_id,
-            "employee_id": employee_id, "subject_id": subject_id,
-        }
-        if nuptk:
-            teacher["nuptk"] = nuptk
-        supabase.table("teachers").upsert(teacher).execute()
-    except Exception:
-        discard_partial_account(supabase, uid, employee_id)
-        raise
-    return uid
+    return account_creation.create_account(
+        supabase,
+        school_id=school_id, role="guru", full_name=full_name,
+        email=email, password=password, status=status, phone=phone,
+        role_table="teachers", role_fields=role_fields,
+        identifier=employee_id,
+    )

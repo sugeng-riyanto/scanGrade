@@ -6,8 +6,7 @@ Usage:
 
 import csv
 import io
-from app.services import password_change as _password_change
-from app.utils import auth_retry
+from app.services import account_creation
 from app.utils.auth import get_supabase
 from app.utils.helpers import row_or_none
 from app.utils.logger import get_logger
@@ -84,26 +83,6 @@ def find_student_by_nisn(supabase, nisn):
     return rows[0] if rows else None
 
 
-def discard_partial_account(supabase, uid, identifier):
-    """Best-effort removal of an account whose creation did not finish.
-
-    Deleting the auth user cascades to ``profiles`` and from there to
-    ``students``, so this is the one call that undoes all three writes.
-
-    Public because the older importer in ``app/routes/admin.py`` writes the same
-    two rows in the same order and needs the same undo.
-    """
-    if not uid:
-        return
-    try:
-        supabase.auth.admin.delete_user(uid)
-        logger.warning("Rolled back a half-created student account (identifier=%s)",
-                       identifier)
-    except Exception as e:  # never mask the original failure
-        logger.error("Could not roll back half-created student uid=%s (%s): %s",
-                     uid, identifier, e)
-
-
 def create_student_account(supabase, *, school_id, nisn, full_name, email,
                            password, class_id=None, phone="", status="active"):
     """Create one student account: auth user -> profiles -> students.
@@ -126,41 +105,19 @@ def create_student_account(supabase, *, school_id, nisn, full_name, email,
             else "sekolah lain"
         raise ValidationError("nisn", f"NISN {nisn} sudah terdaftar di {where}")
 
-    uid = None
-    try:
-        # Same reason as a teacher's account: this answer is a hiccup that rolled
-        # back, so repeating the create cannot make a second pupil.
-        created = auth_retry.create_user_with_retry(
-            lambda: supabase.auth.admin.create_user({
-                "email": email,
-                "password": password,
-                "user_metadata": {"role": "murid", "full_name": full_name},
-                "email_confirm": True,
-            }))
-        uid = created.user.id
+    profile_fields = {"nisn": nisn}
+    if class_id:
+        profile_fields["class_id"] = class_id
 
-        profile = {
-            "id": uid, "full_name": full_name, "role": "murid",
-            "nisn": nisn, "school_id": school_id, "status": status,
-        }
-        if class_id:
-            profile["class_id"] = class_id
-        if phone:
-            profile["phone"] = phone
-        # The generated password is a one-time one: written to the account, printed on
-        # a card the school hands out, and replaced by its owner before any other
-        # page opens. See app/services/password_change.py.
-        profile.update(_password_change.account_fields(email))
-        supabase.table("profiles").upsert(profile).execute()
-
-        supabase.table("students").upsert({
-            "id": uid, "school_id": school_id, "nisn": nisn,
-            "class_id": class_id, "status": status,
-        }).execute()
-    except Exception:
-        discard_partial_account(supabase, uid, nisn)
-        raise
-    return uid
+    return account_creation.create_account(
+        supabase,
+        school_id=school_id, role="murid", full_name=full_name,
+        email=email, password=password, status=status, phone=phone,
+        profile_fields=profile_fields,
+        role_table="students",
+        role_fields={"nisn": nisn, "class_id": class_id, "status": status},
+        identifier=nisn,
+    )
 
 
 def import_students_from_csv(file_stream, school_id, class_id=None, batch_size=50):
