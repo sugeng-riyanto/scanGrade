@@ -179,6 +179,23 @@ EXEMPT = {
     # asks the question itself: subject_kkm.set_kkm / clear_override call
     # _year_is_editable and refuse a closed year with reason `year_closed`
     # before any write.
+    # The invigilator matrix: periods, exam rooms, and one duty per (date, slot,
+    # room). None of it is a year's paper or mark — a duty names a room and a
+    # teacher, not an exam — so there is no year resource for the decorator to
+    # resolve. The rules that do apply are the two conflict constraints, enforced
+    # in the database and checked first by the service.
+    "admin_sekolah_bp /invigilation/matrix/periods":
+        "a time slot the school scheduled, not a year's marks",
+    "admin_sekolah_bp /invigilation/matrix/rooms":
+        "an exam room, not a year's marks",
+    "admin_sekolah_bp /invigilation/matrix/assign":
+        "one invigilator in one room on one day; no exam or mark is touched",
+    "admin_sekolah_bp /invigilation/matrix/clear":
+        "empties one invigilation cell, not a year's marks",
+    "admin_sekolah_bp /invigilation/matrix/upload":
+        "parses a workbook into a preview; writes no row",
+    "admin_sekolah_bp /invigilation/matrix/apply":
+        "commits the confirmed invigilation rows through the same assign; no mark",
     "admin_sekolah_bp /subjects/<subject_id>/kkm":
         "subject_kkm refuses a closed year itself (year_closed), before writing",
     "admin_sekolah_bp /subjects/<subject_id>/kkm/<grade_level>/clear":

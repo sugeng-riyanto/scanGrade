@@ -31,6 +31,7 @@ from app.services import analysis_scope
 from app.services import attempt_timeline
 from app.services import exam_codes
 from app.services import invigilation
+from app.services import invigilation_matrix as inv_matrix
 from app.services import sitting_unlock
 from app.services import login_cards
 from app.services import account_emails
@@ -3821,3 +3822,264 @@ def _invigilation_refused(out: dict) -> bool:
         flash(out["reason"], "error")
         return False
     return True
+
+
+# ── the invigilation MATRIX: slot x room, one teacher per cell ───────────────
+#
+# A second, different question from the schedule above. `invigilation_schedules`
+# answers "when does this class sit this paper"; the matrix answers "who stands in
+# this room during this slot", which a room full of several classes' candidates
+# needs. So it has its own two axes (migration 059) and its own page — but the same
+# authority: `admin_sekolah` manages its own school's grid, and a school without a
+# vice principal is not left unable to staff an exam.
+#
+# Every route reads the school from the session (`_school_id()`), and the service
+# takes it as a required argument, so no school id can ride in on a form field.
+
+def _matrix_school() -> str | None:
+    """The session's school, or None when there is no session to speak of."""
+    return _school_id()
+
+
+def _matrix_back(exam_date: str = ""):
+    """Back to the matrix, keeping the day the operator was looking at."""
+    if exam_date:
+        return redirect(f"/admin-sekolah/invigilation/matrix?date={exam_date}")
+    return redirect("/admin-sekolah/invigilation/matrix")
+
+
+def _matrix_context(supabase, sid: str, exam_date: str) -> dict:
+    """Everything the matrix template draws, from one set of reads.
+
+    ``available`` is the dropdown each empty cell offers: every teacher of this
+    school who is not already standing in another room of that same slot. Built here
+    from the grid that was just read, rather than one ``available_teachers`` call per
+    cell — a grid of eight slots would otherwise pay eight extra reads to draw one
+    table.
+    """
+    grid = inv_matrix.matrix(supabase, sid, exam_date)
+    teachers = inv_matrix.teachers_of(supabase, sid)
+    busy = {pid: {c["teacher_id"] for c in rooms.values()}
+            for pid, rooms in (grid.get("cells") or {}).items()}
+    available = {str(p["id"]): [t for t in teachers
+                                if t["id"] not in busy.get(str(p["id"]), set())]
+                 for p in grid.get("periods") or []}
+    return {
+        "grid": grid, "exam_date": exam_date, "today": date.today().isoformat(),
+        "periods": inv_matrix.list_periods(supabase, sid),
+        "rooms": inv_matrix.list_rooms(supabase, sid),
+        "teachers": teachers, "available": available,
+    }
+
+
+@admin_sekolah_bp.route("/invigilation/matrix")
+@admin_sekolah_required
+def invigilation_matrix_page():
+    """The grid for one day, its two axes, and the bulk-upload door."""
+    sid = _matrix_school()
+    if not sid:
+        return redirect("/auth/login")
+    supabase = get_supabase()
+    exam_date = (request.args.get("date") or date.today().isoformat()).strip()
+    context = _matrix_context(supabase, sid, exam_date)
+    context["applied"] = request.args.get("applied")
+    context["refused"] = request.args.get("refused")
+    return render_template("admin_sekolah/invigilation_matrix.html", **context)
+
+
+@admin_sekolah_bp.route("/invigilation/matrix/periods", methods=["POST"])
+@admin_sekolah_required
+def invigilation_matrix_period():
+    """Add or rename one slot of the day. No developer, no SQL."""
+    sid = _matrix_school()
+    if not sid:
+        return redirect("/auth/login")
+    out = inv_matrix.save_period(
+        get_supabase(), sid,
+        period_id=request.form.get("period_id") or None,
+        name=request.form.get("name", ""),
+        sort_order=request.form.get("sort_order"),
+        starts_at=request.form.get("starts_at", ""),
+        ends_at=request.form.get("ends_at", ""),
+    )
+    _invigilation_refused(out)
+    return _matrix_back(request.form.get("date", ""))
+
+
+@admin_sekolah_bp.route("/invigilation/matrix/rooms", methods=["POST"])
+@admin_sekolah_required
+def invigilation_matrix_room():
+    """Add or rename one exam room, with its capacity."""
+    sid = _matrix_school()
+    if not sid:
+        return redirect("/auth/login")
+    out = inv_matrix.save_room(
+        get_supabase(), sid,
+        room_id=request.form.get("room_id") or None,
+        name=request.form.get("name", ""),
+        capacity=request.form.get("capacity"),
+    )
+    _invigilation_refused(out)
+    return _matrix_back(request.form.get("date", ""))
+
+
+@admin_sekolah_bp.route("/invigilation/matrix/assign", methods=["POST"])
+@admin_sekolah_required
+def invigilation_matrix_assign():
+    """Fill one cell. A conflict is refused with a sentence, not a 500."""
+    sid = _matrix_school()
+    if not sid:
+        return redirect("/auth/login")
+    out = inv_matrix.assign(
+        get_supabase(), sid,
+        exam_date=request.form.get("exam_date", ""),
+        period_id=request.form.get("period_id", ""),
+        room_id=request.form.get("room_id", ""),
+        teacher_id=request.form.get("teacher_id", ""),
+        notes=request.form.get("notes", ""),
+        source="manual",
+        actor_id=g.get("user_id"),
+    )
+    _invigilation_refused(out)
+    return _matrix_back(request.form.get("exam_date", ""))
+
+
+@admin_sekolah_bp.route("/invigilation/matrix/clear", methods=["POST"])
+@admin_sekolah_required
+def invigilation_matrix_clear():
+    """Empty one cell."""
+    sid = _matrix_school()
+    if not sid:
+        return redirect("/auth/login")
+    _invigilation_refused(inv_matrix.clear_cell(
+        get_supabase(), sid, request.form.get("duty_id", "")))
+    return _matrix_back(request.form.get("exam_date", ""))
+
+
+@admin_sekolah_bp.route("/invigilation/matrix/template.xlsx")
+@admin_sekolah_required
+def invigilation_matrix_template():
+    """The blank workbook, with one marked example row and this school's own lists."""
+    sid = _matrix_school()
+    if not sid:
+        return redirect("/auth/login")
+    supabase = get_supabase()
+    data = inv_matrix.build_template(
+        inv_matrix.list_periods(supabase, sid, active_only=True),
+        inv_matrix.list_rooms(supabase, sid, active_only=True),
+    )
+    return send_file(
+        io.BytesIO(data), as_attachment=True, download_name="template_pengawas.xlsx",
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
+def _matrix_teacher_map(supabase, sid: str) -> dict:
+    """``{email.lower(): teacher}`` for this school's teachers.
+
+    The address lives in Auth, not in ``profiles`` (which has no email column), so
+    it comes from the same cached listing the login cards use. A teacher whose
+    address cannot be read simply does not appear — the importer then reports the
+    row as an unknown teacher, which is the honest answer for an address nobody
+    can match.
+    """
+    emails = _get_email_map(supabase)
+    out = {}
+    for teacher in inv_matrix.teachers_of(supabase, sid):
+        address = emails.get(teacher["id"])
+        if address:
+            out[str(address).strip().lower()] = teacher
+    return out
+
+
+@admin_sekolah_bp.route("/invigilation/matrix/upload", methods=["POST"])
+@admin_sekolah_required
+def invigilation_matrix_upload():
+    """Parse an uploaded workbook and preview it. The file is never stored.
+
+    Read into memory, parsed by the service, and dropped when the request ends:
+    no path on disk, no object in Storage. What the operator gets back is the
+    preview — valid rows and per-row errors — and only the confirmed rows are
+    posted onward to :func:`invigilation_matrix_apply`.
+    """
+    sid = _matrix_school()
+    if not sid:
+        return redirect("/auth/login")
+    file = request.files.get("file")
+    if not file:
+        flash("bad_file", "error")
+        return _matrix_back(request.form.get("date", ""))
+
+    data = file.read()
+    if not inv_matrix.is_xlsx(data):
+        # The signature, not the extension: a renamed CSV is not a workbook.
+        flash("bad_file", "error")
+        return _matrix_back(request.form.get("date", ""))
+
+    supabase = get_supabase()
+    exam_date = (request.form.get("date") or date.today().isoformat()).strip()
+    periods = {inv_matrix._norm(p["name"]): p
+               for p in inv_matrix.list_periods(supabase, sid, active_only=True)}
+    rooms = {inv_matrix._norm(r["name"]): r
+             for r in inv_matrix.list_rooms(supabase, sid, active_only=True)}
+    existing = inv_matrix.duties_for_date(supabase, sid, exam_date)
+    parsed = inv_matrix.parse_workbook(
+        data, periods=periods, rooms=rooms, teachers=_matrix_teacher_map(supabase, sid),
+        taken_rooms={(str(d["exam_date"]), str(d["period_id"]), str(d["room_id"]))
+                     for d in existing},
+        taken_teachers={(str(d["exam_date"]), str(d["period_id"]), str(d["teacher_id"]))
+                        for d in existing},
+    )
+    del data  # the bytes are not wanted past the parse — nothing is written anywhere
+
+    if not parsed.get("ok"):
+        flash("bad_file", "error")
+        return _matrix_back(exam_date)
+    if not parsed.get("total"):
+        flash("no_rows", "error")
+        return _matrix_back(exam_date)
+
+    # One audit line for the upload: who, when, how many landed and how many did
+    # not. Deliberately not the file — only the counts survive.
+    log_activity("import", "invigilation_duty", None,
+                 new_data={"valid": parsed["valid"], "errors": len(parsed["errors"]),
+                           "date": exam_date, "source": "excel_upload"},
+                 user_id=g.get("user_id"))
+
+    context = _matrix_context(supabase, sid, exam_date)
+    context["preview"] = parsed
+    context["applied"] = None
+    context["refused"] = None
+    return render_template("admin_sekolah/invigilation_matrix.html", **context)
+
+
+@admin_sekolah_bp.route("/invigilation/matrix/apply", methods=["POST"])
+@admin_sekolah_required
+def invigilation_matrix_apply():
+    """Commit the rows the operator confirmed — and only those.
+
+    The rows arrive as the preview's own JSON. That payload is not trusted for
+    anything that matters: :func:`invigilation_matrix.apply_rows` runs every row
+    through the same :func:`invigilation_matrix.assign` the matrix uses, which
+    re-proves the period, the room and the teacher belong to this school and
+    re-checks both conflicts against the current table. So a hand-crafted payload
+    can ask for anything and still only be given what the grid would allow.
+    """
+    sid = _matrix_school()
+    if not sid:
+        return redirect("/auth/login")
+    try:
+        rows = json.loads(request.form.get("rows") or "[]")
+    except (TypeError, ValueError):
+        rows = []
+    if not isinstance(rows, list) or not rows:
+        flash("nothing_to_apply", "error")
+        return _matrix_back(request.form.get("date", ""))
+
+    out = inv_matrix.apply_rows(get_supabase(), sid, rows, actor_id=g.get("user_id"))
+    exam_date = request.form.get("date", "")
+    applied = int(out.get("applied") or 0)
+    refused = int(out.get("refused") or 0)
+    if exam_date:
+        return redirect(f"/admin-sekolah/invigilation/matrix?date={exam_date}"
+                        f"&applied={applied}&refused={refused}")
+    return redirect(f"/admin-sekolah/invigilation/matrix?applied={applied}&refused={refused}")

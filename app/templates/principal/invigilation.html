@@ -32,6 +32,22 @@
     {% endfor %}{% endif %}
     {% endwith %}
 
+    {# The second question this page's schedule cannot answer: a room full of several
+       classes' candidates needs *someone per room per slot*, which is what the matrix
+       holds. Linked here so the page is one door away rather than a URL an operator
+       has to know — and only for the school admin, whose matrix that route is. #}
+    {% if role == 'admin_sekolah' %}
+    <div class="card p-4 flex items-center justify-between gap-3 flex-wrap">
+        <div class="min-w-0">
+            <h3 class="font-bold text-surface-800" x-text="t('Matriks pengawas (periode x ruangan)','Invigilator matrix (period x room)')"></h3>
+            <p class="text-xs text-surface-500 mt-1" x-text="t('Susun pengawas per ruangan pada tiap slot waktu, dan unggah penugasan massal lewat Excel.','Staff rooms per time slot, and bulk-assign through Excel.')"></p>
+        </div>
+        <a href="/admin-sekolah/invigilation/matrix" class="px-4 py-2.5 bg-sky-600 text-white rounded-xl text-xs font-bold hover:bg-sky-700 transition">
+            <i class="fas fa-table-cells-large mr-1"></i><span x-text="t('Buka matriks','Open matrix')"></span>
+        </a>
+    </div>
+    {% endif %}
+
     {% if can_write %}
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div class="card p-5 lg:col-span-2">
