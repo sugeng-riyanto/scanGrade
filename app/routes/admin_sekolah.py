@@ -4075,6 +4075,53 @@ def invigilation_matrix_cell():
     return _matrix_redirect(exam_date, period)
 
 
+@admin_sekolah_bp.route("/invigilation/matrix/cells", methods=["POST"])
+@admin_sekolah_required
+def invigilation_matrix_cells():
+    """Shift-click: one teacher across a run of rooms, in one request.
+
+    The grid sends the anchor's own intent (``mode`` = ``set`` or ``clear``) and the
+    rooms between the two clicks, so a run costs one round trip instead of one per
+    cell. The rooms arrive as repeated ``room_id`` fields; the school still comes
+    from the session, and the service re-proves every room and the teacher belong to
+    it — a run is convenience, not a way around the caps.
+    """
+    sid = _matrix_school()
+    if not sid:
+        return redirect("/auth/login")
+    exam_date = request.form.get("exam_date", "")
+    period = request.form.get("period_id", "")
+    room_ids = request.form.getlist("room_id")[:60]
+    out = inv_matrix.set_cells(
+        get_supabase(), sid,
+        exam_date=exam_date,
+        period_id=period,
+        teacher_id=request.form.get("teacher_id", ""),
+        room_ids=room_ids,
+        mode=request.form.get("mode", "set"),
+        actor_id=g.get("user_id"),
+    )
+    wants_json = (request.headers.get("X-Requested-With") == "XMLHttpRequest"
+                  or "application/json" in (request.headers.get("Accept") or ""))
+    if wants_json:
+        return jsonify({
+            "ok": bool(out.get("ok")),
+            "reason": out.get("reason") or "",
+            "action": out.get("action") or "",
+            "applied": out.get("applied", 0),
+            "refused": out.get("refused", 0),
+            "results": out.get("results") or [],
+            "teacher_id": request.form.get("teacher_id", ""),
+            "room_counts": out.get("room_counts") or {},
+            "teacher_counts": out.get("teacher_counts") or {},
+            "max_per_room": out.get("max_per_room", inv_matrix.MAX_PER_ROOM),
+            "max_per_teacher": out.get("max_per_teacher", inv_matrix.MAX_PER_TEACHER),
+        })
+    if not out.get("ok"):
+        flash(out.get("reason") or "write_failed", "error")
+    return _matrix_redirect(exam_date, period)
+
+
 @admin_sekolah_bp.route("/invigilation/matrix/auto-fill", methods=["POST"])
 @admin_sekolah_required
 def invigilation_matrix_auto_fill():

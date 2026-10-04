@@ -38,6 +38,15 @@ click it again to take them out.** Every click saves by itself — there is no *
 button and no page reload. A room's header chip shows `taken/2` and a teacher's row
 chip shows the same, so you can see at a glance who is short.
 
+**Filling a whole run at once.** Holding **Shift** and clicking a second cell in the
+same row applies the first click's action — add or clear — to every cell between the
+two, in a single save. The first click is the *anchor*: it decides whether the run
+fills or empties, so the range never invents an operation of its own. The run goes
+through the same service a single click uses, so the ceilings still hold: a run that
+would seat a teacher in a third room lands the rooms it can and names the one it
+refused, and a refused cell is left exactly as it was. Ranges are one row only — a
+teacher across their own run of rooms; there is no cross-teacher drag.
+
 Two ceilings hold, and both are enforced by the **database**, not just the page:
 
 * a room holds **at most two** invigilators per slot per day;

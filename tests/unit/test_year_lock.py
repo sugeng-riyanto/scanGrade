@@ -202,6 +202,8 @@ EXEMPT = {
         "one click of the grid: a teacher into one room; no exam or mark",
     "admin_sekolah_bp /invigilation/matrix/auto-fill":
         "fills the empty rooms of one session through the same assign; no mark",
+    "admin_sekolah_bp /invigilation/matrix/cells":
+        "a shift-click run through the same assign; a room and a teacher, no mark",
     "admin_sekolah_bp /subjects/<subject_id>/kkm":
         "subject_kkm refuses a closed year itself (year_closed), before writing",
     "admin_sekolah_bp /subjects/<subject_id>/kkm/<grade_level>/clear":

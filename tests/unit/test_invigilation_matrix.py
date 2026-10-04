@@ -536,6 +536,7 @@ MATRIX_ROUTES = (
     '"/invigilation/matrix/template.xlsx"',
     '"/invigilation/matrix/upload"',
     '"/invigilation/matrix/apply"',
+    '"/invigilation/matrix/cells"',
 )
 
 
@@ -811,3 +812,129 @@ class TestTheNewDoors:
                      if '@admin_sekolah_bp.route("/invigilation/matrix/cell"' in b)
         assert "X-Requested-With" in block and "jsonify" in block
         assert '"room_counts"' in block and '"max_per_room"' in block
+
+
+# ── 14. the range: one teacher across a run of rooms in one act ─────────────
+
+class TestSetRange:
+    """Shift-click hands the service one intent and a run of rooms.
+
+    The point is fewer round trips for the tedious part — but a range is not a
+    licence to break the two caps, so every room in the run still goes through the
+    very same :func:`assign` a single click uses. What the range may not do is land
+    a third room for a teacher: the run fills what it can and names the room that
+    was refused.
+    """
+
+    def _three_rooms(self):
+        tables = _tables()
+        tables["exam_room"].append({"id": "r3", "school_id": SCHOOL, "name": "Ruang 3",
+                                    "capacity": 20, "is_active": True})
+        return tables
+
+    def test_a_range_sets_the_teacher_into_every_room_of_the_run(self):
+        db = _DB(_tables())
+        out = im.set_cells(db, SCHOOL, exam_date="2026-10-01", period_id="p1",
+                           teacher_id="t1", room_ids=["r1", "r2"], mode="set",
+                           actor_id="a1")
+        assert out["ok"] and out["applied"] == 2 and out["refused"] == 0, out
+        pairs = sorted((d["room_id"], d["teacher_id"])
+                       for d in db.tables["invigilation_duty"])
+        assert pairs == [("r1", "t1"), ("r2", "t1")], pairs
+
+    def test_a_range_clears_the_teacher_from_every_room_of_the_run(self):
+        db = _DB(_tables())
+        db.tables["invigilation_duty"] = [
+            _duty("d1", room="r1", teacher="t1"),
+            _duty("d2", room="r2", teacher="t1"),
+        ]
+        out = im.set_cells(db, SCHOOL, exam_date="2026-10-01", period_id="p1",
+                           teacher_id="t1", room_ids=["r1", "r2"], mode="clear")
+        assert out["ok"] and out["applied"] == 2, out
+        assert db.tables["invigilation_duty"] == []
+
+    def test_a_run_past_the_teacher_cap_lands_what_it_can_and_names_the_refusal(self):
+        db = _DB(self._three_rooms())
+        out = im.set_cells(db, SCHOOL, exam_date="2026-10-01", period_id="p1",
+                           teacher_id="t1", room_ids=["r1", "r2", "r3"], mode="set")
+        assert out["ok"] and out["applied"] == 2 and out["refused"] == 1, out
+        assert out["reason"] == "teacher_full", out
+        rooms = {d["room_id"] for d in db.tables["invigilation_duty"]}
+        assert rooms == {"r1", "r2"}, "the run crossed the cap"
+
+    def test_a_range_set_is_idempotent_where_the_teacher_is_already_seated(self):
+        db = _DB(_tables())
+        db.tables["invigilation_duty"].append(_duty("d1", room="r1", teacher="t1"))
+        out = im.set_cells(db, SCHOOL, exam_date="2026-10-01", period_id="p1",
+                           teacher_id="t1", room_ids=["r1", "r2"], mode="set")
+        assert out["ok"] and out["applied"] == 2, out
+        assert len(db.tables["invigilation_duty"]) == 2, "the run wrote a duplicate cell"
+
+    def test_a_range_refuses_a_foreign_room_without_writing_to_it(self):
+        db = _DB(_tables())
+        out = im.set_cells(db, SCHOOL, exam_date="2026-10-01", period_id="p1",
+                           teacher_id="t1", room_ids=["r1", "r9"], mode="set")
+        assert out["refused"] == 1 and out["reason"] == "room_not_in_school", out
+        assert [d["room_id"] for d in db.tables["invigilation_duty"]] == ["r1"], (
+            "the run wrote into a room that is not this school's")
+
+    def test_a_range_never_touches_another_session(self):
+        db = _DB(_tables())
+        db.tables["invigilation_duty"].append(_duty("d1", period="p2", room="r1", teacher="t1"))
+        im.set_cells(db, SCHOOL, exam_date="2026-10-01", period_id="p1",
+                     teacher_id="t1", room_ids=["r1"], mode="clear")
+        assert [d["period_id"] for d in db.tables["invigilation_duty"]] == ["p2"], (
+            "clearing a range in one session emptied another session")
+
+    def test_a_range_reports_the_seat_counts_back_for_the_repaint(self):
+        db = _DB(_tables())
+        out = im.set_cells(db, SCHOOL, exam_date="2026-10-01", period_id="p1",
+                           teacher_id="t1", room_ids=["r1", "r2"], mode="set")
+        assert out["room_counts"]["r1"] == 1 and out["room_counts"]["r2"] == 1, out
+        assert out["teacher_counts"]["t1"] == 2, out
+        assert out["max_per_room"] == im.MAX_PER_ROOM
+        assert out["max_per_teacher"] == im.MAX_PER_TEACHER
+
+    def test_a_range_refuses_an_unknown_mode(self):
+        db = _DB(_tables())
+        out = im.set_cells(db, SCHOOL, exam_date="2026-10-01", period_id="p1",
+                           teacher_id="t1", room_ids=["r1"], mode="toggle")
+        assert not out["ok"] and db.tables["invigilation_duty"] == []
+
+    def test_a_range_refuses_another_schools_teacher(self):
+        db = _DB(_tables())
+        out = im.set_cells(db, SCHOOL, exam_date="2026-10-01", period_id="p1",
+                           teacher_id="t9", room_ids=["r1"], mode="set")
+        assert out["reason"] == "teacher_not_in_school", out
+        assert db.tables["invigilation_duty"] == []
+
+
+class TestTheRangeDoor:
+    def test_the_batch_route_is_guarded_and_scoped_to_the_session(self):
+        source = ADMIN_ROUTES.read_text(encoding="utf-8")
+        path = '"/invigilation/matrix/cells"'
+        assert path in source, "the range door is missing"
+        block = next(b for b in _route_blocks(source)
+                     if f"@admin_sekolah_bp.route({path}" in b)
+        assert "@admin_sekolah_required" in block, f"{path} is unguarded"
+        assert "_matrix_school()" in block or "_school_id()" in block
+        assert 'form.get("school_id")' not in block
+        assert 'getlist("room_id")' in block, "the door takes one room, not a run"
+
+    def test_the_batch_route_answers_json_for_the_no_reload_path(self):
+        source = ADMIN_ROUTES.read_text(encoding="utf-8")
+        block = next(b for b in _route_blocks(source)
+                     if '@admin_sekolah_bp.route("/invigilation/matrix/cells"' in b)
+        assert "X-Requested-With" in block and "jsonify" in block
+        assert '"results"' in block
+        assert "inv_matrix.set_cells(" in block
+
+    def test_the_page_reaches_the_batch_door_and_teaches_shift_click(self):
+        page = PAGE.read_text(encoding="utf-8")
+        assert "/admin-sekolah/invigilation/matrix/cells" in page, (
+            "the page cannot reach the range door")
+        assert "shiftKey" in page, "no shift-click range selection in the grid's script"
+        assert "paintCell" in page, "the range repaint is not factored out of the single click"
+        # The interaction must be discoverable, not a hidden keystroke.
+        assert re.search(r"shift[^<]{0,80}(klik|click)", page, re.I), (
+            "the page never tells the operator that shift-click fills a run")
