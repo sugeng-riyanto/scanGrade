@@ -38,6 +38,7 @@ from app.services.school_reset import (
     clear_schools,
     school_ids_for_npsns,
 )
+from app.services import school_integrity
 from app.services import subscription_plans as plan_cfg
 from app.utils.req_cache import invalidate, invalidate_school, ttl
 from app.utils import failure, lock_health, auth_health
@@ -121,11 +122,20 @@ def dashboard():
 
     requests = _safe_select(supabase, "school_registration_requests", limit=20)
 
+    # The cross-school sweep, on the page an operator already opens. Three times in
+    # one week a school reported a number that "looked mixed with another NPSN", and
+    # every time it was found by a human reading a page days later — so the check
+    # belongs where the reader already is, exactly as the mail ledger does. Cached,
+    # because it reads five whole tables and the answer changes only when a row does.
+    integrity = ttl("school_integrity:report", 60,
+                    lambda: school_integrity.cross_school_findings(supabase))
+
     # The period-reconcile button lands back here with its outcome in the query
     # string, so the operator sees the counts they just produced rather than a
     # bare page. The outcome is a key and two numbers; the sentences are in the
     # template, where the language toggle can reach them.
     return render_template("super_admin/dashboard.html",
+        integrity=integrity,
         total_schools=total_schools, total_users=total_users,
         total_teachers=total_teachers, total_students=total_students,
         total_exams=total_exams, total_subs=total_subs,
