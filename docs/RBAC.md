@@ -149,15 +149,31 @@ tombol bernama sama di seksi Admin Sekolah.
 | `/principal/progress` — kalender bulan, tren mingguan & bulanan, per guru | ✅ | ❌ | ❌ |
 | `/vice-principal/progress` | ❌ | ✅ | ❌ |
 | `/admin-sekolah/officials` (+ `/create`, `/<id>/edit`, `/<id>/delete`, `/<id>/reset-password`) | ❌ | ❌ | hanya `admin_sekolah` |
+| `/principal/assessment-periods` — kalender penilaian sekolah | ✅ baca | ❌ | ❌ |
+| `/vice-principal/assessment-periods` (+ `/save`, `/<id>/delete`) — kalender, wakil kepala menyusun | ❌ | ✅ | ❌ |
+| `/admin-sekolah/assessment-periods` (+ `/save`, `/<id>/delete`) — **kalender yang sama**, disusun admin sekolah | ❌ | ❌ | hanya `admin_sekolah` |
 | `/principal/invigilation` — matriks pengawas sekolah | ✅ baca | ❌ | ❌ |
 | `/vice-principal/invigilation` (+ `/save`, `/<id>/assign`, `/assignments/<id>/remove`) — matriks pengawas, wakil kepala menyusun | ❌ | ✅ | ❌ |
 | `/admin-sekolah/invigilation` (+ `/save`, `/<id>/assign`, `/assignments/<id>/remove`, `/retake-requests/<id>/decide`) — **matriks yang sama**, disusun admin sekolah | ❌ | ❌ | hanya `admin_sekolah` |
 
 Satu view melayani dua alamat; yang berbeda hanya peran pembacanya, dan judul halaman
-menyebut peran itu. **Tidak ada satu pun route tulis di `/principal/*` dan
-`/vice-principal/*`** — sifat hanya-baca di sini struktural, bukan janji di dokumen.
-(`tests/unit/test_official_insight.py` gagal begitu satu route di blueprint itu
-mendaftarkan metode POST/PUT/PATCH/DELETE.)
+menyebut peran itu. **Tidak ada satu pun route tulis di `/principal/*`** — sifat
+hanya-baca bagi kepala sekolah struktural, bukan janji di dokumen
+(`tests/unit/test_official_insight.py` gagal begitu satu route di prefiks kepala
+sekolah mendaftarkan metode POST/PUT/PATCH/DELETE). Wewenang tulis yang didelegasikan —
+jadwal pengawasan dan kalender penilaian — berada di prefiks `/vice-principal/*`
+masing-masing di belakang `@vice_principal_required`.
+
+**Kalender penilaian punya tiga pintu, dua di antaranya menulis.** Jendela ini milik
+sekolah, bukan milik jabatan wakil kepala: sekolah kecil yang belum membuat akun wakil
+kepala tetap harus bisa menamai tanggal UTS-nya. Karena itu `/admin-sekolah/assessment-periods`
+(+ `/save`, `/<id>/delete`, di belakang `@admin_sekolah_required`) merender template
+yang sama dengan `can_write=True`. Satu halaman untuk dua penulis berarti tujuan
+formulirnya tidak boleh ditulis mati: template menerima `period_save_url` dan
+`period_delete_base` dari pemanggilnya. Sekolahnya selalu dari sesi — `assessment_periods`
+mensyaratkan `school_id` sebagai argumen wajib dan setiap penolakan terjadi sebelum
+menulis, jadi tidak ada `school_id` dari request yang bisa mengalihkan tulis ke
+sekolah lain (`tests/unit/test_assessment_periods.py`).
 
 Dua halaman laporan dibagi dengan guru, **bukan disalin**: `/principal/analytics`
 dan `/vice-principal/analytics` merender `teacher/analytics.html` dengan
