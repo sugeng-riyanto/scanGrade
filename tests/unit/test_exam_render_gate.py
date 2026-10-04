@@ -314,3 +314,16 @@ class TestItPollsForThePageInsteadOfSleepingOnce:
         src = GATE_PATH.read_text(encoding="utf-8")
         assert "RENDER_BUDGET" in src, "the poll has no bound, so a blank page hangs"
         assert "EXIT_FINDING" in src and "problems.append" in src
+
+    def test_the_reading_survives_a_document_that_is_not_built(self):
+        """The poll's first look can land before `document.body` exists.
+
+        Reading `.innerText` off a null body threw `TypeError: Cannot read
+        properties of null`, the gate answered "could not measure" (exit 2), and
+        exit 2 does **not** stop a release — so the gate silently stopped
+        guarding anything. The read must be null-safe.
+        """
+        src = GATE_PATH.read_text(encoding="utf-8")
+        assert "d.body && d.body.innerText" in src, (
+            "the reading dereferences document.body, which is null until the "
+            "parser has built it")

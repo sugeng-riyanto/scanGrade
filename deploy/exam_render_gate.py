@@ -104,7 +104,11 @@ def render_expression() -> str:
         "    answers: d.querySelectorAll('.exam-answers > div').length,"
         "    xcloak: d.querySelectorAll('[x-cloak]').length,"
         "    stageH: stage ? Math.round(stage.getBoundingClientRect().height) : 0,"
-        "    bodyText: (d.body.innerText || '').slice(0, 120),"
+        # `d.body` is null until the parser has built it, and the poll's first look
+        # can land before that. Reading `.innerText` off it threw a TypeError, the
+        # gate answered "could not measure" (exit 2), and exit 2 does not stop a
+        # release — so the read must survive a document that is not built yet.
+        "    bodyText: (d.body && d.body.innerText || '').slice(0, 120),"
         "  };"
         "})()"
     )
@@ -244,7 +248,12 @@ async def _render(base_url, browser, cookies, exam_path):
                     awaitPromise=True,
                 )
                 if out.get("exceptionDetails"):
-                    return None, events, f"the page threw while reading it: {out['exceptionDetails']}"
+                    # A read that fails mid-navigation is not a verdict — keep
+                    # looking, and only give up when the budget is spent.
+                    if time.time() >= deadline:
+                        return None, events, (
+                            f"the page threw while reading it: {out['exceptionDetails']}")
+                    continue
                 value = (out.get("result") or {}).get("value") or {}
                 if int(value.get("qbtns") or 0) >= 1 and int(value.get("answers") or 0) >= 1:
                     break
