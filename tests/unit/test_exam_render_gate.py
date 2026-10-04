@@ -276,3 +276,41 @@ class TestTheInstallerArmsIt:
         assert "no Chrome/Chromium found" in text and "apt-get install -y chromium" in text, (
             "a box with no browser is armed with a script that says nothing about it"
         )
+
+
+# ── it polls for the page, it does not read it once ──────────────────────
+
+
+class TestItPollsForThePageInsteadOfSleepingOnce:
+    """A single fixed sleep read the page once, and under load read it blank.
+
+    On 2026-10-04 the deploy quarantined a release on *"no question controls
+    rendered"* while the very same gate run by hand answered `qbtns: 5,
+    answers: 5`. The read simply happened too early: one sleep, no re-check, and
+    a healthy release was rolled back for it. The gate must keep looking until
+    the questions are in the DOM — or the budget runs out.
+    """
+
+    def test_the_render_waits_for_the_questions(self):
+        src = GATE_PATH.read_text(encoding="utf-8")
+        body = src.split("async def _render(", 1)[1]
+        assert re.search(r"while True:", body), (
+            "the render is not polled, so a fixed sleep is still the only wait — a "
+            "slow render is reported as a blank exam")
+        assert "qbtns" in body and "break" in body, (
+            "the poll never stops on the questions appearing")
+
+    def test_it_does_not_rely_on_a_fixed_settle(self):
+        src = GATE_PATH.read_text(encoding="utf-8")
+        assert "SETTLE_SECONDS" not in src, (
+            "a fixed settle is still the readiness signal")
+
+    def test_a_blank_page_still_exhausts_and_reports(self):
+        """Polling must not become a pass: the finding path is unchanged.
+
+        A real regression renders nothing, so it exhausts the budget and is still
+        exit 1 — the strictness is the same, only the flake is gone.
+        """
+        src = GATE_PATH.read_text(encoding="utf-8")
+        assert "RENDER_BUDGET" in src, "the poll has no bound, so a blank page hangs"
+        assert "EXIT_FINDING" in src and "problems.append" in src

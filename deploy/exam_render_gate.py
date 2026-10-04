@@ -65,7 +65,14 @@ EXIT_FINDING = 1
 EXIT_CANNOT_MEASURE = 2
 
 REQUEST_TIMEOUT = 25
-SETTLE_SECONDS = 6.0
+#: How long the gate waits for the questions to appear, and how often it looks.
+#: It *polls* rather than sleeping a fixed number of seconds: on a 1 vCPU box the
+#: same page that renders in two seconds can take ten while the other gates run,
+#: and a single early read quarantined a healthy release (b9bea75, 2026-10-04). A
+#: genuinely blank page never renders, so it simply exhausts the budget and is
+#: still a finding — the strictness is unchanged, only the flake is gone.
+RENDER_BUDGET = 25.0
+POLL_EVERY = 0.75
 EXAM_LINK_RE = re.compile(r'href="/student/exams/([0-9a-fA-F-]{36})"')
 
 
@@ -223,16 +230,29 @@ async def _render(base_url, browser, cookies, exam_path):
                 mobile=False,
             )
             await c.send("Page.navigate", url=f"{base_url}{exam_path}")
-            await c.pump(SETTLE_SECONDS)
-            out = await c.send(
-                "Runtime.evaluate",
-                expression=render_expression(),
-                returnByValue=True,
-                awaitPromise=True,
-            )
-            if out.get("exceptionDetails"):
-                return None, events, f"the page threw while reading it: {out['exceptionDetails']}"
-            value = (out.get("result") or {}).get("value") or {}
+            # Poll until the questions are actually in the DOM. Reading once after
+            # a fixed sleep was the flake: under load the page was still blank at
+            # the read, and a healthy release was quarantined for it.
+            deadline = time.time() + RENDER_BUDGET
+            value = {}
+            while True:
+                await c.pump(POLL_EVERY)
+                out = await c.send(
+                    "Runtime.evaluate",
+                    expression=render_expression(),
+                    returnByValue=True,
+                    awaitPromise=True,
+                )
+                if out.get("exceptionDetails"):
+                    return None, events, f"the page threw while reading it: {out['exceptionDetails']}"
+                value = (out.get("result") or {}).get("value") or {}
+                if int(value.get("qbtns") or 0) >= 1 and int(value.get("answers") or 0) >= 1:
+                    break
+                if time.time() >= deadline:
+                    # One more short settle so an error thrown late is captured
+                    # before the finding is reported.
+                    await c.pump(POLL_EVERY)
+                    break
         return value, events, None
     finally:
         proc.terminate()
