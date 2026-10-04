@@ -421,7 +421,13 @@ class TestTheSubjectsPageShowsTheMark:
     def test_the_card_opens_the_kkm_panel_with_its_own_mark_and_overrides(self):
         html = self.PAGE.read_text(encoding="utf-8-sig")
         assert "openKkm(" in html
-        assert "s.kkm" in html and "s.kkm_overrides" in html
+        # The card reads its mark and overrides from the maps the route seeds,
+        # so a save moves the badge in place instead of needing a reload. The
+        # intent is unchanged: the panel opens with *this* subject's values.
+        assert "kkmValue[" in html and "kkmOverrides[" in html
+        src = self.ROUTE.read_text(encoding="utf-8-sig")
+        assert "kkm_values=" in src and "overrides_by_subject=" in src, (
+            "the page reads maps the route never renders")
 
     def test_the_page_offers_a_grade_override(self):
         html = self.PAGE.read_text(encoding="utf-8-sig")

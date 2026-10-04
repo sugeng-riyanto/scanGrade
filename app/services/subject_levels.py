@@ -133,24 +133,32 @@ def save_mapping(supabase, school_id, subject_id, class_ids, created_by=None):
     # already on is left alone.
     to_on = [c for c in sorted(wanted)
              if c not in by_class or not by_class[c].get("is_active", True)]
-    off_ids = [r["id"] for class_id, r in by_class.items()
-               if class_id not in wanted and r.get("is_active", True)]
+    # An un-tick has to be *written*, not merely omitted. Absence means offered
+    # (see `mapped_class_ids`), so the class the admin just un-ticked — which in
+    # the usual case has no row at all — would stay offered and the un-tick would
+    # be silently ignored. Every class of the school that is not wanted and is
+    # not already closed is therefore written closed, by upsert so a class with a
+    # row is closed in place and one without a row is inserted closed; the unique
+    # (class_id, subject_id) keeps either from duplicating.
+    to_off = [c for c in sorted(known - wanted)
+              if c not in by_class or by_class[c].get("is_active", True)]
     added = len(to_on)
-    removed = len(off_ids)
+    removed = len(to_off)
 
     try:
-        if to_on:
+        rows = [{"school_id": school_id, "class_id": class_id,
+                 "subject_id": subject_id, "is_active": True,
+                 "created_by": created_by} for class_id in to_on]
+        rows += [{"school_id": school_id, "class_id": class_id,
+                  "subject_id": subject_id, "is_active": False,
+                  "created_by": created_by} for class_id in to_off]
+        if rows:
             # One upsert over the unique (class_id, subject_id): a class that was
-            # closed is reactivated in place, so a row is never duplicated.
+            # closed is reactivated in place and a class just un-ticked is closed
+            # in place, so a row is never duplicated either way.
             (supabase.table("class_subjects")
-             .upsert([{"school_id": school_id, "class_id": class_id,
-                       "subject_id": subject_id, "is_active": True,
-                       "created_by": created_by} for class_id in to_on],
-                     on_conflict="class_id,subject_id")
+             .upsert(rows, on_conflict="class_id,subject_id")
              .execute())
-        if off_ids:
-            (supabase.table("class_subjects")
-             .update({"is_active": False}).in_("id", off_ids).execute())
     except Exception as e:
         logger.warning("could not save subject mapping for %s", subject_id, exc_info=True)
         return False, {"error": str(e), "status": 400}
@@ -159,7 +167,7 @@ def save_mapping(supabase, school_id, subject_id, class_ids, created_by=None):
     # class. Every class this save turned on or off has a stale answer now.
     try:
         from app.utils.req_cache import invalidate_class_subjects
-        for _cid in set(by_class) | set(to_on):
+        for _cid in set(to_on) | set(to_off) | set(by_class):
             invalidate_class_subjects(_cid)
     except Exception:  # noqa: BLE001 — invalidation must never fail the save
         logger.debug("could not invalidate class subjects for %s", subject_id)
