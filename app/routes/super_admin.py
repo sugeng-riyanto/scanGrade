@@ -129,6 +129,20 @@ def dashboard():
     # because it reads five whole tables and the answer changes only when a row does.
     integrity = ttl("school_integrity:report", 60,
                     lambda: school_integrity.cross_school_findings(supabase))
+    # What repairing each finding *would* do, so the card can show where a row moves
+    # before anybody presses anything — and which rows it will refuse, so a refusal is
+    # a sentence on the page rather than a surprise. It reads nothing when there are no
+    # findings, which is the ordinary case, so it is not cached.
+    repair_plans = {}
+    try:
+        from app.services import cross_school_repair
+
+        repair_plans = {p["row_id"]: p
+                        for p in cross_school_repair.preview(
+                            supabase, integrity.get("findings") or [])
+                        if p.get("row_id")}
+    except Exception:
+        repair_plans = {}
 
     # The period-reconcile button lands back here with its outcome in the query
     # string, so the operator sees the counts they just produced rather than a
@@ -142,9 +156,13 @@ def dashboard():
         pending_requests=pending_requests,
         schools=schools, recent_logs=recent_logs, requests=requests,
         mail=mail_ledger.snapshot(),
+        repair_plans=repair_plans,
         reconciled=request.args.get("reconciled"),
         reconciled_retagged=request.args.get("retagged"),
         reconciled_schools=request.args.get("schools"),
+        repaired=request.args.get("repaired"),
+        repair_skipped=request.args.get("skipped"),
+        repair_failed=request.args.get("failed"),
     )
 
 
@@ -499,6 +517,48 @@ def reconcile_periods():
         f"/super-admin/dashboard?reconciled={state}"
         f"&retagged={int(result.get('retagged') or 0)}"
         f"&schools={int(result.get('schools') or 0)}")
+
+
+@super_bp.route("/integrity/repair", methods=["POST"])
+@_sa_required
+def integrity_repair():
+    """Re-point a cross-school row at the school its people belong to.
+
+    The sweep finds these rows and then told the operator to fix them in SQL, from a
+    page that cannot — so the finding was found and left. This is the door: it repairs
+    one row (the form names the kind and the id) or every actionable one
+    (`scope=all`).
+
+    **The school each row moves to is re-derived from the row itself, never from the
+    form** — the request carries only *which* row, so a forged id cannot re-home data
+    into a school of the attacker's choosing. An ambiguous row (a class and a subject
+    from different schools) is refused, not guessed. The counts ride back on the query
+    string; the sentences live in the template where the language toggle reaches them.
+    """
+    from app.services import cross_school_repair as repair
+
+    supabase = get_supabase()
+    if request.form.get("scope") == "all":
+        report = school_integrity.cross_school_findings(supabase)
+        outcomes = [repair.apply(supabase, f.get("kind"), repair.finding_row_id(f),
+                                 g.user_id)
+                    for f in (report.get("findings") or [])]
+    else:
+        outcomes = [repair.apply(supabase, request.form.get("kind", ""),
+                                 request.form.get("row_id", ""), g.user_id)]
+
+    hard = (repair.WRITE_FAILED, repair.READ_FAILED, repair.ROW_CHANGED)
+    repaired = sum(1 for o in outcomes if o.get("ok"))
+    failed = sum(1 for o in outcomes if not o.get("ok") and o.get("reason") in hard)
+    skipped = sum(1 for o in outcomes
+                  if not o.get("ok") and o.get("reason") not in hard)
+    log_activity("update", "school_integrity", "repair",
+                 new_data={"repaired": repaired, "skipped": skipped,
+                           "failed": failed,
+                           "scope": request.form.get("scope") or "one"},
+                 user_id=g.user_id)
+    return redirect(f"/super-admin/dashboard?repaired={repaired}"
+                    f"&skipped={skipped}&failed={failed}")
 
 
 @super_bp.route("/reset-demo-passwords", methods=["POST"])
