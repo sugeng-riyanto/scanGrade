@@ -44,6 +44,21 @@ fi
 # same. Splitting a file across commits is the one case where this can disagree,
 # and it errs toward blocking, never toward letting unreadable text through.
 echo "theme gate: template or stylesheet changes staged — checking readability, class names and the cached stylesheet…"
+
+# Git exports its own repository-selection variables to this hook. Measured: a
+# linked worktree hands the hook an ABSOLUTE `GIT_DIR` and `GIT_INDEX_FILE`
+# (`…/.git/worktrees/<name>/index`), and a plain checkout at least sets
+# `GIT_INDEX_FILE`. Every `git` the gate spawns then inherits them and resolves
+# THAT repository instead of the scratch one in its own working directory — so
+# `test_static_tree`'s `git add` wrote its fixtures into this checkout's index,
+# and the tree it had just dirtied failed the very gate that ran it. Clear them
+# for the gate and everything it spawns; the gate's own `git` calls rediscover
+# this checkout from their cwd, which is the same index.
+#
+# This sits after the `git diff --cached` above on purpose: that line reads the
+# index git handed us, and is the one place the hook's own view must be kept.
+unset GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE GIT_PREFIX GIT_COMMON_DIR
+unset GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
 if ! bash "$REPO/deploy/theme_gate.sh"; then
   echo
   # Not "fix the contrast": the gate refuses more than one thing (an unreadable

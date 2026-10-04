@@ -241,6 +241,22 @@ class TestTheOtherCallersRefuseItToo:
             "checker into a permanently disabled gate")
         assert "--no-verify" in src
 
+    def test_the_hook_clears_gits_repository_variables_before_the_gate(self):
+        """Git hands the hook GIT_DIR/GIT_INDEX_FILE so a spawned `git` finds *its*
+        repository — which is exactly wrong for a check that builds a scratch repo,
+        and made the static-tree guard `git add` into this checkout's index and then
+        fail the gate that had just run it. The hook must clear them first.
+        """
+        src = HOOK.read_text(encoding="utf-8")
+        before_gate = src[:src.index("deploy/theme_gate.sh")]
+        unsets = [ln for ln in before_gate.splitlines() if ln.startswith("unset ")]
+        assert unsets, "the hook never unsets anything before running the gate"
+        cleared = " ".join(unsets)
+        for name in ("GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE", "GIT_COMMON_DIR"):
+            assert name in cleared, (
+                f"the hook does not clear {name} before the gate, so a scratch `git` "
+                "resolves this checkout instead of its own working directory")
+
 
 # ── and the rollback is executed, not just read ──────────────────
 
