@@ -37,7 +37,7 @@ from app.utils.auth import (get_supabase, principal_required,
                             school_official_required, vice_principal_required)
 from app.utils.cache import cache_get, cache_set
 from app.services import (analysis_scope, assessment_periods, attempt_timeline,
-                          exam_codes, invigilation, official_insight)
+                          exam_codes, invigilation, official_insight, sitting_unlock)
 
 logger = logging.getLogger(__name__)
 
@@ -468,6 +468,34 @@ def vice_principal_invigilation_unassign(assignment_id: str):
         return redirect("/auth/login")
     _invigilation_refused(invigilation.remove_assignment(
         get_supabase(), school_id, assignment_id))
+    return redirect("/vice-principal/invigilation")
+
+
+@principal_bp.route("/vice-principal/locked/<exam_id>/<student_id>/unlock",
+                    methods=["POST"])
+@vice_principal_required
+@open_year_required("exam_id")
+def vice_principal_unlock_sitting(exam_id: str, student_id: str):
+    """Let a locked pupil back in as the school's delegated authority.
+
+    The teacher's door is bounded to the exams they hold; a vice principal's
+    authority is the whole school, so there is nothing to narrow here — the same
+    reach their retake decision already has. Everything else is
+    `sitting_unlock.unlock_sitting`: the paper must be this school's and locked, the
+    deadline must not have passed, and nothing moves the clock. A paper whose clock
+    has ended is *finalised* instead of reopened.
+    """
+    school_id = _school_id()
+    if not school_id:
+        return redirect("/auth/login")
+    out = sitting_unlock.unlock_sitting(
+        get_supabase(), school_id, exam_id, student_id, g.get("user_id"))
+    if out.get("action") == "finalize":
+        flash("submission_finalized", "info")
+    elif out.get("ok"):
+        flash("unlock_ok", "success")
+    else:
+        flash(out.get("reason") or "write_failed", "error")
     return redirect("/vice-principal/invigilation")
 
 
