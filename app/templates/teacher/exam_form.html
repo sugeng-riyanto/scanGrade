@@ -1515,9 +1515,16 @@
                 </div>
 
                 <div class="flex flex-col sm:flex-row justify-end gap-2">
+                    <!-- Saving a published exam keeps it published (see
+                         app/routes/teacher.py `_publication_state`); the tooltip has
+                         to say so, or a teacher believes Save withdraws the paper. -->
                     <button type="submit" name="action" value="save_active"
                             class="bg-primary-600 hover:bg-primary-700 text-white px-5 py-3 rounded-xl font-extrabold text-sm transition flex items-center gap-2"
-                            :title="t('Simpan sebagai draf — siswa belum bisa melihatnya','Save as a draft — students cannot see it yet')">
+                            {% if exam and exam.is_published %}
+                            :title="t('Simpan perubahan — ujian tetap terbit untuk siswa','Save changes — the exam stays published for students')"
+                            {% else %}
+                            :title="t('Simpan sebagai draf — siswa belum bisa melihatnya','Save as a draft — students cannot see it yet')"
+                            {% endif %}>
                         <i class="fas fa-save"></i><span x-text="t('Simpan','Save')"></span>
                     </button>
                     <button type="submit" name="action" value="publish"
@@ -1545,6 +1552,17 @@
                     <a href="{{ url_for('teacher.results', exam_id=exam.id) }}"
                        class="block text-sm font-extrabold text-primary-600 hover:bg-primary-50 px-3 py-2 rounded-xl transition">
                         <i class="fas fa-chart-bar mr-1"></i><span x-text="t('Hasil','Results')"></span>
+                    </a>
+                    {# The live room and the pattern view are one page now; these two
+                       doors are its two halves, so a teacher lands on the one they came
+                       for. Both point at the survivor page, whose two anchors are below. #}
+                    <a href="{{ url_for('teacher.exam_sessions', exam_id=exam.id) }}#room"
+                       class="block text-sm font-extrabold text-primary-600 hover:bg-primary-50 px-3 py-2 rounded-xl transition">
+                        <i class="fas fa-tower-broadcast mr-1"></i><span x-text="t('Pengawasan Langsung','Live proctoring')"></span>
+                    </a>
+                    <a href="{{ url_for('teacher.exam_sessions', exam_id=exam.id) }}#observations"
+                       class="block text-sm font-extrabold text-primary-600 hover:bg-primary-50 px-3 py-2 rounded-xl transition">
+                        <i class="fas fa-magnifying-glass-chart mr-1"></i><span x-text="t('Analisis Pola','Pattern analysis')"></span>
                     </a>
                     <a href="{{ url_for('teacher.upload_exam_pdf', exam_id=exam.id) }}"
                        class="block text-sm font-extrabold text-primary-600 hover:bg-primary-50 px-3 py-2 rounded-xl transition">

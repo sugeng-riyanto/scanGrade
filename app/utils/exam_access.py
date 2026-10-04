@@ -85,6 +85,44 @@ def can_manage_exam(user_id, user_role, user_school_id, exam) -> bool:
     return False
 
 
+#: The answers `managed_exam` can give. Named rather than bare strings so a caller
+#: cannot quietly treat one as the other ("could not verify" is not "denied").
+EXAM_OK = "ok"
+EXAM_MISSING = "missing"
+EXAM_DENIED = "denied"
+EXAM_UNVERIFIABLE = "unverifiable"
+
+
+def managed_exam(supabase, exam_id, user_id, user_role, user_school_id,
+                 columns="id,teacher_id,school_id"):
+    """``(exam, EXAM_OK)`` when this caller may act on the exam, else ``(None, why)``.
+
+    The lookup and the decision in one place, so a route cannot check a column the
+    rule never saw — or, the failure this replaces, check nothing at all. `columns`
+    is passed through, so a route fetches what it needs and the guard pays for the
+    lookup rather than a second query.
+
+    A failed lookup is `EXAM_UNVERIFIABLE`, not a pass: a check that fails open is
+    worse than none, because it looks like one. The four answers are distinct so the
+    caller can say which happened instead of collapsing "no such paper" and "not
+    yours" into one refusal.
+    """
+    try:
+        exam = row_or_none(
+            supabase.table("exams").select(columns).eq("id", exam_id).maybe_single().execute()
+        )
+    except Exception:
+        logger.exception("Access check failed for exam %s", exam_id)
+        return None, EXAM_UNVERIFIABLE
+    if not exam:
+        return None, EXAM_MISSING
+    if not can_manage_exam(user_id, user_role, user_school_id, exam):
+        logger.warning("Denied exam access: exam=%s user=%s role=%s",
+                       exam_id, user_id, user_role)
+        return None, EXAM_DENIED
+    return exam, EXAM_OK
+
+
 #: The two school officials, whose *oversight* of the school is read-only. Named
 #: rather than inferred so a fourth role cannot inherit the school's data by being
 #: added to some list elsewhere. They may still own papers they built themselves —

@@ -318,6 +318,10 @@ window.sgSavePrefs = function (patch) {
             <a href="/admin-sekolah/classes" class="nav-item {% if request.path == '/admin-sekolah/classes' %}active{% endif %}"><i class="fas fa-school"></i><span x-text="t('Kelas','Classes')"></span></a>
             <a href="/admin-sekolah/subjects" class="nav-item {% if request.path == '/admin-sekolah/subjects' %}active{% endif %}"><i class="fas fa-book"></i><span x-text="t('Mata Pelajaran','Subjects')"></span></a>
             <a href="/admin-sekolah/promote" class="nav-item {% if request.path == '/admin-sekolah/promote' %}active{% endif %}"><i class="fas fa-arrow-up"></i><span x-text="t('Naik Kelas','Promote Students')"></span></a>
+            {# Kalender penilaian sekolah. Halaman yang sama dengan pejabat, tetapi di
+               pintu admin: sekolah tanpa wakil kepala tetap harus bisa menjadwalkan
+               periodenya. #}
+            <a href="/admin-sekolah/assessment-periods" class="nav-item {% if request.path == '/admin-sekolah/assessment-periods' %}active{% endif %}"><i class="fas fa-calendar-check"></i><span x-text="t('Periode Penilaian','Assessment Periods')"></span></a>
             {# Matriks pengawas ujian, di pintu admin: sekolah tanpa wakil kepala tetap bisa menugaskan pengawas. #}
             <a href="/admin-sekolah/invigilation" class="nav-item {% if request.path == '/admin-sekolah/invigilation' %}active{% endif %}"><i class="fas fa-clipboard-check"></i><span x-text="t('Jadwal Pengawasan','Invigilation')"></span></a>
             <div class="nav-section-title pt-2"><span x-text="t('Pengguna','Users')"></span></div>
@@ -384,6 +388,10 @@ window.sgSavePrefs = function (patch) {
             <a href="/teacher/dashboard" class="nav-item {% if request.path == '/teacher/dashboard' %}active{% endif %}"><i class="fas fa-chart-pie"></i><span x-text="t('Dashboard','Dashboard')"></span></a>
             <a href="/teacher/classes" class="nav-item {% if request.path == '/teacher/classes' %}active{% endif %}"><i class="fas fa-school"></i><span x-text="t('Kelas &amp; Mapel Saya','My Classes &amp; Subjects')"></span></a>
             <a href="/teacher/subjects" class="nav-item {% if request.path == '/teacher/subjects' %}active{% endif %}"><i class="fas fa-book"></i><span x-text="t('Mata Pelajaran','Subjects')"></span></a>
+            {# A teacher's own pupils, and the import page beside it — both pages
+               existed with no link, so the only door was knowing the address. #}
+            <a href="/teacher/students" class="nav-item {% if request.path == '/teacher/students' %}active{% endif %}"><i class="fas fa-user-graduate"></i><span x-text="t('Murid Saya','My Students')"></span></a>
+            <a href="/students/import" class="nav-item {% if request.path == '/students/import' %}active{% endif %}"><i class="fas fa-file-csv"></i><span x-text="t('Impor Murid','Import Students')"></span></a>
             <div class="nav-section-title pt-2"><span x-text="t('Ujian','Exams')"></span></div>
             <a href="/teacher/exams" class="nav-item {% if request.path == '/teacher/exams' %}active{% endif %}"><i class="fas fa-file-alt"></i><span x-text="t('Ujian Saya','My Exams')"></span></a>
             <a href="/teacher/exams/new" class="nav-item {% if request.path == '/teacher/exams/new' %}active{% endif %}"><i class="fas fa-plus-circle"></i><span x-text="t('Buat Ujian','Create Exam')"></span></a>
@@ -392,6 +400,10 @@ window.sgSavePrefs = function (patch) {
             <a href="/teacher/grading" class="nav-item {% if request.path == '/teacher/grading' %}active{% endif %}"><i class="fas fa-pen-alt"></i><span x-text="t('Koreksi Esai','Grade Essays')"></span></a>
             <a href="/teacher/ai-settings" class="nav-item {% if request.path == '/teacher/ai-settings' %}active{% endif %}"><i class="fas fa-robot"></i><span x-text="t('Koreksi AI','AI Grading')"></span></a>
             <a href="/teacher/retractions" class="nav-item {% if request.path == '/teacher/retractions' %}active{% endif %}"><i class="fas fa-undo-alt"></i><span x-text="t('Permintaan Tarik','Retraction Requests')"></span></a>
+            {# The invigilator page had no link — a teacher had to know the URL. The
+               retake decision a pupil is told to expect lives here, so it belongs in
+               the sidebar next to the retraction requests. #}
+            <a href="/teacher/invigilation" class="nav-item {% if request.path == '/teacher/invigilation' %}active{% endif %}"><i class="fas fa-clipboard-check"></i><span x-text="t('Tugas Pengawasan','Invigilation Duties')"></span></a>
             <a href="/teacher/penalty-appeals" class="nav-item {% if request.path == '/teacher/penalty-appeals' %}active{% endif %}"><i class="fas fa-gavel"></i><span x-text="t('Banding Penalti','Penalty Appeals')"></span></a>
             <div class="nav-section-title pt-2"><span x-text="t('Laporan','Reports')"></span></div>
             <a href="/teacher/results" class="nav-item {% if request.path.startswith('/teacher/results') %}active{% endif %}"><i class="fas fa-chart-bar"></i><span x-text="t('Hasil Ujian','Exam Results')"></span></a>

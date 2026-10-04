@@ -27,6 +27,7 @@ from typing import Any, Mapping, Sequence
 
 from app.services import item_analysis
 from app.services import analysis_report as report_style
+from app.services import assessment_periods
 from app.utils.exam_access import can_read_exam
 
 logger = logging.getLogger(__name__)
@@ -49,7 +50,8 @@ CHUNK = 25
 #: reads a column left out of a select as *absent* and never as an error, so a
 #: forgotten column would silently change a statistic instead of failing.
 EXAM_COLUMNS = ("id,title,subject,teacher_id,school_id,created_at,total_questions,"
-                "question_types,question_weights,answer_key,passing_score,status")
+                "question_types,question_weights,answer_key,passing_score,status,"
+                "assessment_period_id")
 SUBMISSION_COLUMNS = "exam_id,answers,teacher_feedback,score,final_score,status"
 
 #: The two rows of the item table that are not "this question is measured": a
@@ -619,6 +621,7 @@ def report(supabase, role: str, user_id: str, school_id: str | None,
 
         rows.append({
             "id": exam["id"],
+            "period_id": exam.get("assessment_period_id"),
             "title": exam.get("title") or "?",
             "subject": exam.get("subject") or "",
             "teacher": teachers.get(str(exam.get("teacher_id")), ""),
@@ -655,6 +658,14 @@ def report(supabase, role: str, user_id: str, school_id: str | None,
         "scope_pair": scope_pair(role),
         "generated": datetime.now(timezone.utc).astimezone(),
         "rows": rows,
+        # Results grouped by the period each paper is tagged with, so the same
+        # report compares UTS against UAS instead of listing papers. Built here so
+        # every renderer of this report (teacher, admin, officials) carries it, and
+        # so the cached payload is the same shape everywhere.
+        "period_groups": assessment_periods.compare_by_period(
+            rows,
+            assessment_periods.periods_by_id(
+                supabase, [row.get("period_id") for row in rows])),
         "totals": totals,
         "bins": _bins(all_marks),
         "bin_labels": list(SCORES),
