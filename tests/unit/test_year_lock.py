@@ -58,6 +58,10 @@ EXEMPT = {
         "changes one mark's note or colour, not the paper's marks",
     "teacher_bp /api/grading-assist/annotations/delete":
         "removes one mark, so a closed year's answers are unchanged by it",
+    "teacher_bp /exams/<exam_id>/locked/<student_id>/unlock":
+        "reopens a locked sitting for a pupil the teacher already holds — the "
+        "human counterpart to the resume code; it changes no mark, is refused at "
+        "or past the deadline, and is written to the activity log",
     "teacher_bp /ai-settings/add-key": "the teacher's own settings",
     "teacher_bp /ai-settings/<key_id>/toggle": "the teacher's own settings",
     "teacher_bp /ai-settings/<key_id>/delete": "the teacher's own settings",
@@ -123,6 +127,11 @@ EXEMPT = {
     "student_bp /api/recover-exam":
         "redeems a recovery code for the reader's own sitting; the sitting's own "
         "writes go through the locked submit/save doors",
+    "student_bp /exams/<exam_id>/resume":
+        "redeems a resume code for the reader's own locked sitting — the pupil "
+        "who already owns it — and writes no mark; the sitting's own submit/save "
+        "doors remain the ones that change answers, and it refuses at or past the "
+        "deadline so a closed year cannot be reopened through it",
     "student_bp /import/csv": "creates roster accounts from a CSV",
     "student_bp /heartbeat/<exam_id>":
         "records one liveness ping on a running sitting's own row; it opens no "
