@@ -58,6 +58,7 @@ REFUSALS = (
     "bad_file",
     "no_rows",
     "nothing_to_apply",
+    "no_classes",
 )
 
 #: The header a template carries, in the order it is written. The normaliser strips
@@ -71,6 +72,11 @@ EXAMPLE_MARKER = "CONTOH"
 
 #: The reference sheet's name, so the template's two tabs are one story.
 REFERENCE_SHEET = "Referensi"
+
+#: The sessions a school gets when rooms are seeded from its classes. Named here,
+#: not built at the call site, so the page, the seeder and the reference sheet all
+#: say the same three words.
+DEFAULT_SESSION_NAMES = ("Sesi 1", "Sesi 2", "Sesi 3")
 
 #: A cell value Excel hands back that is not a date and not a period name.
 _DATE_FORMATS = ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y")
@@ -175,6 +181,78 @@ def save_room(supabase, school_id: str, *, room_id: str | None = None,
         written = _rows(supabase.table("exam_room").insert(payload))
     return {"ok": bool(written), "reason": "" if written else "write_failed",
             "room": written[0] if written else None}
+
+
+# ── seeding the axes from the school's own classes ─────────────────────────
+
+def class_rooms(supabase, school_id: str) -> list[dict]:
+    """This school's classes, each with the number of pupils it holds.
+
+    A class is where the candidates already sit, so it is the honest *default* exam
+    room: the room takes the class's name and its capacity is the roster size —
+    the number the capacity chip is actually for. The count is one read over every
+    class (a ``class_id`` in-filter), not one read per class, so a school with
+    thirty classes still pays a single round-trip.
+    """
+    classes = _rows(supabase.table("classes")
+                    .select("id, name, grade_level")
+                    .eq("school_id", school_id).order("name"))
+    ids = [str(c["id"]) for c in classes]
+    counts: dict[str, int] = {}
+    if ids:
+        pupils = _rows(supabase.table("profiles").select("class_id")
+                       .eq("role", "murid").eq("school_id", school_id)
+                       .in_("class_id", ids))
+        for pupil in pupils:
+            cid = str(pupil.get("class_id"))
+            counts[cid] = counts.get(cid, 0) + 1
+    for c in classes:
+        c["pupil_count"] = counts.get(str(c["id"]), 0)
+    return classes
+
+
+def seed_from_classes(supabase, school_id: str) -> dict:
+    """Create one room per class and the three sessions — only the missing ones.
+
+    Called by a **button**, never by a GET, so merely opening the page writes
+    nothing. Each room keeps its class's name and its capacity is that class's roster
+    size. Anything already present — matched the same case-and-punctuation-blind way
+    the importer matches names — is left alone, so pressing the button twice is not
+    two rooms called "7A".
+    """
+    classes = class_rooms(supabase, school_id)
+    if not classes:
+        return {"ok": False, "reason": "no_classes", "rooms": 0, "periods": 0,
+                "seeded": []}
+
+    existing_rooms = {_norm(r.get("name")) for r in list_rooms(supabase, school_id)}
+    existing_periods = {_norm(p.get("name")) for p in list_periods(supabase, school_id)}
+    seeded: list[dict] = []
+    rooms_made = 0
+    for klass in classes:
+        name = _clean(klass.get("name"))
+        if not name or _norm(name) in existing_rooms:
+            continue
+        out = save_room(supabase, school_id, name=name,
+                        capacity=klass.get("pupil_count"))
+        if out.get("ok"):
+            rooms_made += 1
+            existing_rooms.add(_norm(name))
+            seeded.append({"kind": "room", "name": name,
+                           "capacity": klass.get("pupil_count")})
+
+    periods_made = 0
+    for index, name in enumerate(DEFAULT_SESSION_NAMES, start=1):
+        if _norm(name) in existing_periods:
+            continue
+        out = save_period(supabase, school_id, name=name, sort_order=index)
+        if out.get("ok"):
+            periods_made += 1
+            existing_periods.add(_norm(name))
+            seeded.append({"kind": "period", "name": name})
+
+    return {"ok": True, "reason": "", "rooms": rooms_made,
+            "periods": periods_made, "seeded": seeded}
 
 
 # ── the matrix for one day ──────────────────────────────────────────────────
@@ -288,6 +366,78 @@ def clear_cell(supabase, school_id: str, duty_id: str) -> dict:
     removed = _rows(supabase.table("invigilation_duty").delete()
                     .eq("id", duty_id).eq("school_id", school_id))
     return {"ok": bool(removed), "reason": "" if removed else "not_found"}
+
+
+def set_cell(supabase, school_id: str, *, exam_date: str, period_id: str,
+             room_id: str, teacher_id: str, actor_id: str | None = None) -> dict:
+    """The click: put this teacher in this room of this session, or take them out.
+
+    Clicking the cell that already holds this teacher empties it. Any other click
+    *sets* it, and to keep the two rules — one teacher per room, one room per teacher
+    in a session — it clears whatever stood in the way first: the room's current
+    occupant and this teacher's duty elsewhere in the same session. The write is the
+    same :func:`assign` the dropdown and the upload use, so a click and a spreadsheet
+    cannot end up with two different sets of rules.
+    """
+    if not _row(supabase, "exam_period", school_id, period_id):
+        return {"ok": False, "reason": "period_not_in_school", "action": ""}
+    if not _row(supabase, "exam_room", school_id, room_id):
+        return {"ok": False, "reason": "room_not_in_school", "action": ""}
+    if not _row(supabase, "teachers", school_id, teacher_id):
+        return {"ok": False, "reason": "teacher_not_in_school", "action": ""}
+
+    existing = duties_for_date(supabase, school_id, exam_date)
+    for duty in existing:
+        if str(duty.get("period_id")) != str(period_id):
+            continue
+        if (str(duty.get("room_id")) == str(room_id)
+                and str(duty.get("teacher_id")) == str(teacher_id)):
+            clear_cell(supabase, school_id, duty["id"])
+            return {"ok": True, "reason": "", "action": "cleared"}
+
+    for duty in existing:
+        if str(duty.get("period_id")) != str(period_id):
+            continue
+        if (str(duty.get("room_id")) == str(room_id)
+                or str(duty.get("teacher_id")) == str(teacher_id)):
+            clear_cell(supabase, school_id, duty["id"])
+
+    out = assign(supabase, school_id, exam_date=exam_date, period_id=period_id,
+                 room_id=room_id, teacher_id=teacher_id, source="manual",
+                 actor_id=actor_id)
+    return {"ok": bool(out.get("ok")), "reason": out.get("reason", ""), "action": "set"}
+
+
+def auto_fill(supabase, school_id: str, *, exam_date: str, period_id: str,
+              actor_id: str | None = None) -> dict:
+    """Fill every empty room of one session with the next free teacher.
+
+    The one-press version of the tedious part. A room already filled keeps its
+    teacher, and a teacher already standing somewhere in this session is never
+    offered again — so the fill can create neither conflict, and it stops when the
+    rooms are full or the free teachers run out, whichever comes first.
+    """
+    if not _row(supabase, "exam_period", school_id, period_id):
+        return {"ok": False, "reason": "period_not_in_school", "applied": 0}
+    rooms = list_rooms(supabase, school_id, active_only=True)
+    teachers = teachers_of(supabase, school_id)
+    in_slot = [d for d in duties_for_date(supabase, school_id, exam_date)
+               if str(d.get("period_id")) == str(period_id)]
+    taken_rooms = {str(d.get("room_id")) for d in in_slot}
+    busy = {str(d.get("teacher_id")) for d in in_slot}
+    free = [t for t in teachers if t["id"] not in busy]
+
+    applied = 0
+    for room in rooms:
+        if str(room["id"]) in taken_rooms or not free:
+            continue
+        teacher = free.pop(0)
+        out = assign(supabase, school_id, exam_date=exam_date, period_id=period_id,
+                     room_id=str(room["id"]), teacher_id=teacher["id"],
+                     source="manual", actor_id=actor_id)
+        if out.get("ok"):
+            applied += 1
+    return {"ok": True, "reason": "", "applied": applied}
 
 
 def _row(supabase, table: str, school_id: str, row_id: str) -> dict | None:

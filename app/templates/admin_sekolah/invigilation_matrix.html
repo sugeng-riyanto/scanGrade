@@ -29,6 +29,28 @@
     </div>
     {% endif %}
 
+    {# The outcome of a seed or an auto-fill rides back on the query string, like the
+       upload's applied/refused, so the button that wrote rows leaves a trace. #}
+    {% if seeded_rooms is not none and seeded_rooms != '' %}
+    <div class="card p-4 border border-emerald-200 bg-emerald-50/60">
+        <p class="text-sm font-bold text-emerald-800">
+            <i class="fas fa-door-open mr-1"></i>
+            <span x-text="t('Dibuat dari kelas:','Built from classes:') "></span>
+            <span class="font-mono">{{ seeded_rooms }}</span> <span x-text="t('ruangan','rooms')"></span>,
+            <span class="font-mono">{{ seeded_periods }}</span> <span x-text="t('sesi','sessions')"></span>
+        </p>
+    </div>
+    {% endif %}
+    {% if filled is not none and filled != '' %}
+    <div class="card p-4 border border-emerald-200 bg-emerald-50/60">
+        <p class="text-sm font-bold text-emerald-800">
+            <i class="fas fa-wand-magic-sparkles mr-1"></i>
+            <span x-text="t('Isi otomatis:','Auto-filled:')"></span>
+            <span class="font-mono">{{ filled }}</span> <span x-text="t('ruangan terisi','rooms filled')"></span>
+        </p>
+    </div>
+    {% endif %}
+
     <!-- Header: the day being planned -->
     <div class="card p-5">
         <div class="flex flex-wrap items-start justify-between gap-4">
@@ -107,6 +129,15 @@
                 <li class="text-xs text-stone-400" x-text="t('Belum ada ruangan. Tambahkan minimal satu.','No room yet. Add at least one.')"></li>
                 {% endfor %}
             </ul>
+            <form method="POST" action="/admin-sekolah/invigilation/matrix/seed" class="mt-3">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="date" value="{{ exam_date }}">
+                <button type="submit" class="w-full px-3 py-2 bg-emerald-50 text-emerald-700 rounded-lg text-xs font-bold hover:bg-emerald-100 transition">
+                    <i class="fas fa-door-open mr-1"></i><span x-text="t('Buat dari kelas','Build from classes')"></span>
+                    {% if class_rooms %}<span class="font-normal">({{ class_rooms | length }})</span>{% endif %}
+                </button>
+                <p class="text-[11px] text-stone-400 mt-1" x-text="t('Membuat satu ruangan per kelas (kapasitas = jumlah murid) dan Sesi 1-3. Ruangan dan sesi yang sudah ada tidak diubah.','Creates one room per class (capacity = pupil count) and Sesi 1-3. Existing rooms and sessions are left alone.')"></p>
+            </form>
             <form method="POST" action="/admin-sekolah/invigilation/matrix/rooms" class="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                 <input type="hidden" name="date" value="{{ exam_date }}">
@@ -119,61 +150,76 @@
         </div>
     </div>
 
-    <!-- The grid itself -->
-    <div class="card p-5">
-        <h3 class="font-bold text-stone-800"><i class="fas fa-table-cells-large text-primary-500 mr-1.5"></i><span x-text="t('Matriks','Matrix')"></span></h3>
-        {% if grid.periods and grid.rooms %}
+    <!-- The click grid: teachers down, rooms across, one session at a time -->
+    <div class="card p-5" id="matrix-grid">
+        <div class="flex flex-wrap items-start justify-between gap-3">
+            <div class="min-w-0">
+                <h3 class="font-bold text-stone-800"><i class="fas fa-table-cells-large text-primary-500 mr-1.5"></i><span x-text="t('Matriks pengawas','Invigilator matrix')"></span></h3>
+                <p class="text-xs text-stone-500 mt-1 max-w-3xl"
+                   x-text="t('Baris = guru, kolom = ruangan (kelas). Klik sel untuk menugaskan guru itu ke ruangan itu pada sesi terpilih, klik lagi untuk mengosongkan. Satu guru hanya boleh berada di satu ruangan per sesi.','Rows are teachers, columns are rooms (classes). Click a cell to put that teacher in that room in the selected session; click again to empty it. A teacher can only stand in one room per session.')"></p>
+            </div>
+            <form method="GET" action="/admin-sekolah/invigilation/matrix" class="flex items-end gap-2 flex-wrap">
+                <label class="block">
+                    <span class="text-xs font-bold text-stone-500" x-text="t('Tanggal','Date')"></span>
+                    <input type="date" name="date" value="{{ exam_date }}" max="{{ today }}"
+                           class="mt-1 px-3 py-2 border border-surface-200 rounded-lg text-sm">
+                </label>
+                <label class="block">
+                    <span class="text-xs font-bold text-stone-500" x-text="t('Sesi','Session')"></span>
+                    <select name="period" class="mt-1 px-3 py-2 border border-surface-200 rounded-lg text-sm">
+                        {% for p in grid.periods %}
+                        <option value="{{ p.id }}" {% if selected_period == p.id|string %}selected{% endif %}>{{ p.name }}{% if p.starts_at or p.ends_at %} ({{ (p.starts_at or '')[:5] }}-{{ (p.ends_at or '')[:5] }}){% endif %}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <button type="submit" class="px-3 py-2.5 bg-primary-600 text-white rounded-lg text-xs font-bold hover:bg-primary-700 transition"
+                        x-text="t('Tampilkan','Show')"></button>
+            </form>
+        </div>
+
+        {% if selected_period and grid.rooms and teachers %}
+        <form method="POST" action="/admin-sekolah/invigilation/matrix/auto-fill" class="mt-3">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="date" value="{{ exam_date }}">
+            <input type="hidden" name="period_id" value="{{ selected_period }}">
+            <button type="submit" class="px-3 py-2 bg-emerald-50 text-emerald-700 rounded-lg text-xs font-bold hover:bg-emerald-100 transition">
+                <i class="fas fa-wand-magic-sparkles mr-1"></i><span x-text="t('Isi otomatis semua ruangan','Auto-fill every room')"></span>
+            </button>
+        </form>
         <div class="overflow-x-auto mt-3">
             <table class="w-full text-xs min-w-[640px]">
                 <thead>
                     <tr class="text-stone-500">
-                        <th class="text-left py-2 pr-3 font-bold" x-text="t('Periode','Period')"></th>
+                        <th class="text-left py-2 pr-3 font-bold sticky left-0 bg-white" x-text="t('Guru','Teacher')"></th>
                         {% for r in grid.rooms %}
-                        <th class="text-left py-2 pr-3 font-bold">{{ r.name }}</th>
+                        <th class="text-left py-2 pr-3 font-bold">
+                            {{ r.name }}
+                            {% if r.capacity %}<div class="text-[10px] text-stone-400 font-normal">{{ r.capacity }} <span x-text="t('murid','pupils')"></span></div>{% endif %}
+                        </th>
                         {% endfor %}
                     </tr>
                 </thead>
                 <tbody>
-                    {% for p in grid.periods %}
-                    <tr class="border-t border-surface-100 align-top">
-                        <td class="py-2 pr-3 font-semibold text-stone-700 whitespace-nowrap">
-                            {{ p.name }}
-                            {% if p.starts_at or p.ends_at %}<div class="text-[10px] text-stone-400">{{ (p.starts_at or '')[:5] }}-{{ (p.ends_at or '')[:5] }}</div>{% endif %}
-                        </td>
+                    {% for t in teachers %}
+                    <tr class="border-t border-surface-100">
+                        <td class="py-1.5 pr-3 font-semibold text-stone-700 whitespace-nowrap sticky left-0 bg-white">{{ t.name }}</td>
                         {% for r in grid.rooms %}
-                        {% set cell = (grid.cells.get(p.id|string) or {}).get(r.id|string) %}
-                        <td class="py-2 pr-3" data-cell="{{ p.id }}-{{ r.id }}">
-                            {% if cell %}
-                            <div class="flex items-center gap-2">
-                                <span class="font-semibold text-stone-700">{{ cell.teacher_name }}</span>
-                                {% if cell.source == 'excel_upload' %}
-                                <span class="text-[10px] px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 font-bold" x-text="t('unggahan','uploaded')"></span>
-                                {% endif %}
-                                <form method="POST" action="/admin-sekolah/invigilation/matrix/clear" class="inline">
-                                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-                                    <input type="hidden" name="duty_id" value="{{ cell.id }}">
-                                    <input type="hidden" name="exam_date" value="{{ exam_date }}">
-                                    <button type="submit" class="text-red-400 hover:text-red-600 transition" title="Kosongkan">
-                                        <i class="fas fa-xmark"></i>
-                                    </button>
-                                </form>
-                            </div>
-                            {% else %}
-                            <form method="POST" action="/admin-sekolah/invigilation/matrix/assign" class="flex items-center gap-1">
+                        {% set holder = occupied.get(r.id|string) %}
+                        {% set mine = holder and holder|string == t.id|string %}
+                        <td class="py-1 pr-2">
+                            <form method="POST" action="/admin-sekolah/invigilation/matrix/cell">
                                 <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                                 <input type="hidden" name="exam_date" value="{{ exam_date }}">
-                                <input type="hidden" name="period_id" value="{{ p.id }}">
+                                <input type="hidden" name="period_id" value="{{ selected_period }}">
                                 <input type="hidden" name="room_id" value="{{ r.id }}">
-                                <select name="teacher_id" class="px-2 py-1 border border-surface-200 rounded-lg text-[11px] max-w-[180px]">
-                                    <option value="" x-text="t('— pilih guru —','— pick a teacher —')"></option>
-                                    {% for t in available.get(p.id|string, []) %}
-                                    <option value="{{ t.id }}">{{ t.name }}</option>
-                                    {% endfor %}
-                                </select>
-                                <button type="submit" class="px-2 py-1 bg-primary-50 text-primary-700 rounded-lg font-bold text-[10px] hover:bg-primary-100 transition"
-                                        x-text="t('Isi','Set')"></button>
+                                <input type="hidden" name="teacher_id" value="{{ t.id }}">
+                                <button type="submit"
+                                        class="w-8 h-8 rounded-lg border transition tap-44
+                                               {% if mine %}bg-primary-600 border-primary-600 text-white{% elif holder %}bg-stone-100 border-stone-200 text-stone-500 hover:border-primary-300{% else %}bg-white border-surface-200 hover:border-primary-400{% endif %}"
+                                        title="{% if mine %}{{ t.name }} — {{ r.name }} (klik untuk mengosongkan){% else %}{{ t.name }} → {{ r.name }}{% endif %}">
+                                    {% if mine %}<i class="fas fa-check"></i>{% endif %}
+                                </button>
                             </form>
-                            {% endif %}
                         </td>
                         {% endfor %}
                     </tr>
@@ -182,7 +228,7 @@
             </table>
         </div>
         {% else %}
-        <p class="mt-3 text-sm text-stone-500" x-text="t('Tambahkan minimal satu periode dan satu ruangan di atas untuk mulai menyusun matriks.','Add at least one period and one room above to start building the matrix.')"></p>
+        <p class="mt-3 text-sm text-stone-500" x-text="t('Tambahkan minimal satu periode dan satu ruangan, atau tekan Buat dari kelas, untuk mulai menyusun matriks.','Add at least one period and one room, or press Build from classes, to start building the matrix.')"></p>
         {% endif %}
 
         {% if grid.load_named %}

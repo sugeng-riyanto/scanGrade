@@ -196,6 +196,12 @@ EXEMPT = {
         "parses a workbook into a preview; writes no row",
     "admin_sekolah_bp /invigilation/matrix/apply":
         "commits the confirmed invigilation rows through the same assign; no mark",
+    "admin_sekolah_bp /invigilation/matrix/seed":
+        "builds rooms and sessions from the school's classes; no exam or mark",
+    "admin_sekolah_bp /invigilation/matrix/cell":
+        "one click of the grid: a teacher into one room; no exam or mark",
+    "admin_sekolah_bp /invigilation/matrix/auto-fill":
+        "fills the empty rooms of one session through the same assign; no mark",
     "admin_sekolah_bp /subjects/<subject_id>/kkm":
         "subject_kkm refuses a closed year itself (year_closed), before writing",
     "admin_sekolah_bp /subjects/<subject_id>/kkm/<grade_level>/clear":

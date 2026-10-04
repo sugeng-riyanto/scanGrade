@@ -3848,27 +3848,47 @@ def _matrix_back(exam_date: str = ""):
     return redirect("/admin-sekolah/invigilation/matrix")
 
 
-def _matrix_context(supabase, sid: str, exam_date: str) -> dict:
+def _matrix_redirect(exam_date: str = "", period: str = "", **extra):
+    """Back to the matrix, keeping the day AND the session the operator was on.
+
+    The click grid is one session at a time, so a write that dropped the session
+    would snap the operator back to Sesi 1 after every cell they touched.
+    """
+    parts = [f"date={exam_date}" if exam_date else "",
+             f"period={period}" if period else ""]
+    parts += [f"{key}={value}" for key, value in extra.items() if value not in (None, "")]
+    query = "&".join(p for p in parts if p)
+    return redirect("/admin-sekolah/invigilation/matrix" + (f"?{query}" if query else ""))
+
+
+def _matrix_context(supabase, sid: str, exam_date: str, selected_period: str = "") -> dict:
     """Everything the matrix template draws, from one set of reads.
 
-    ``available`` is the dropdown each empty cell offers: every teacher of this
-    school who is not already standing in another room of that same slot. Built here
-    from the grid that was just read, rather than one ``available_teachers`` call per
-    cell — a grid of eight slots would otherwise pay eight extra reads to draw one
-    table.
+    ``selected_period`` is which session the click grid is showing. ``occupied`` is
+    that session's cells as ``{room_id: teacher_id}``, so the template can mark a
+    cell "mine" without re-deriving the grid; ``available`` is the dropdown each empty
+    period used to offer. Both come from the grid that was just read, rather than one
+    call per cell — a grid of eight slots would otherwise pay eight extra reads.
     """
     grid = inv_matrix.matrix(supabase, sid, exam_date)
     teachers = inv_matrix.teachers_of(supabase, sid)
+    active_periods = grid.get("periods") or []
+    if not selected_period or str(selected_period) not in {str(p["id"]) for p in active_periods}:
+        selected_period = str(active_periods[0]["id"]) if active_periods else ""
+    occupied = {rid: cell.get("teacher_id")
+                for rid, cell in (grid.get("cells") or {}).get(selected_period, {}).items()}
     busy = {pid: {c["teacher_id"] for c in rooms.values()}
             for pid, rooms in (grid.get("cells") or {}).items()}
     available = {str(p["id"]): [t for t in teachers
                                 if t["id"] not in busy.get(str(p["id"]), set())]
-                 for p in grid.get("periods") or []}
+                 for p in active_periods}
     return {
         "grid": grid, "exam_date": exam_date, "today": date.today().isoformat(),
         "periods": inv_matrix.list_periods(supabase, sid),
         "rooms": inv_matrix.list_rooms(supabase, sid),
         "teachers": teachers, "available": available,
+        "selected_period": selected_period, "occupied": occupied,
+        "class_rooms": inv_matrix.class_rooms(supabase, sid),
     }
 
 
@@ -3881,9 +3901,13 @@ def invigilation_matrix_page():
         return redirect("/auth/login")
     supabase = get_supabase()
     exam_date = (request.args.get("date") or date.today().isoformat()).strip()
-    context = _matrix_context(supabase, sid, exam_date)
+    context = _matrix_context(supabase, sid, exam_date,
+                              request.args.get("period") or "")
     context["applied"] = request.args.get("applied")
     context["refused"] = request.args.get("refused")
+    context["seeded_rooms"] = request.args.get("seeded_rooms")
+    context["seeded_periods"] = request.args.get("seeded_periods")
+    context["filled"] = request.args.get("filled")
     return render_template("admin_sekolah/invigilation_matrix.html", **context)
 
 
@@ -3954,6 +3978,79 @@ def invigilation_matrix_clear():
     _invigilation_refused(inv_matrix.clear_cell(
         get_supabase(), sid, request.form.get("duty_id", "")))
     return _matrix_back(request.form.get("exam_date", ""))
+
+
+@admin_sekolah_bp.route("/invigilation/matrix/seed", methods=["POST"])
+@admin_sekolah_required
+def invigilation_matrix_seed():
+    """Build the rooms and sessions from the school's classes — on a button, never a GET.
+
+    A class is where the candidates already sit, so the room it makes keeps the
+    class's name and takes its roster size as the capacity. Only the missing rooms
+    and sessions are written, so pressing it twice is a no-op rather than duplicates.
+    """
+    sid = _matrix_school()
+    if not sid:
+        return redirect("/auth/login")
+    out = inv_matrix.seed_from_classes(get_supabase(), sid)
+    if not out.get("ok"):
+        flash(out.get("reason") or "write_failed", "error")
+        return _matrix_redirect(request.form.get("date", ""))
+    log_activity("create", "exam_room", None,
+                 new_data={"from_classes": True, "rooms": out["rooms"],
+                           "periods": out["periods"]},
+                 user_id=g.get("user_id"))
+    return _matrix_redirect(request.form.get("date", ""),
+                            seeded_rooms=out["rooms"], seeded_periods=out["periods"])
+
+
+@admin_sekolah_bp.route("/invigilation/matrix/cell", methods=["POST"])
+@admin_sekolah_required
+def invigilation_matrix_cell():
+    """The click: one teacher into one room of the current session, or back out.
+
+    Reads nothing that decides anything from the form except which cell was clicked —
+    the school is the session's, and the service re-proves the period, the room and
+    the teacher belong to it.
+    """
+    sid = _matrix_school()
+    if not sid:
+        return redirect("/auth/login")
+    exam_date = request.form.get("exam_date", "")
+    period = request.form.get("period_id", "")
+    out = inv_matrix.set_cell(
+        get_supabase(), sid,
+        exam_date=exam_date,
+        period_id=period,
+        room_id=request.form.get("room_id", ""),
+        teacher_id=request.form.get("teacher_id", ""),
+        actor_id=g.get("user_id"),
+    )
+    if not out.get("ok"):
+        flash(out.get("reason") or "write_failed", "error")
+    return _matrix_redirect(exam_date, period)
+
+
+@admin_sekolah_bp.route("/invigilation/matrix/auto-fill", methods=["POST"])
+@admin_sekolah_required
+def invigilation_matrix_auto_fill():
+    """Fill every empty room of the current session with the next free teacher."""
+    sid = _matrix_school()
+    if not sid:
+        return redirect("/auth/login")
+    exam_date = request.form.get("exam_date", "")
+    period = request.form.get("period_id", "")
+    out = inv_matrix.auto_fill(
+        get_supabase(), sid, exam_date=exam_date, period_id=period,
+        actor_id=g.get("user_id"))
+    if not out.get("ok"):
+        flash(out.get("reason") or "write_failed", "error")
+        return _matrix_redirect(exam_date, period)
+    log_activity("create", "invigilation_duty", None,
+                 new_data={"auto_fill": True, "applied": out["applied"],
+                           "date": exam_date, "period_id": period},
+                 user_id=g.get("user_id"))
+    return _matrix_redirect(exam_date, period, filled=out["applied"])
 
 
 @admin_sekolah_bp.route("/invigilation/matrix/template.xlsx")
