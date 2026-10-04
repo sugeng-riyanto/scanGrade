@@ -48,7 +48,18 @@ EVENT_LABELS = {
     "attempt_locked": {"id": "Ujian dikunci", "en": "Sitting locked"},
     "attempt_resumed": {"id": "Ujian dibuka kembali", "en": "Sitting resumed"},
     "attempt_finalized": {"id": "Ujian difinalkan", "en": "Sitting finalised"},
+    # The media transitions `app/services/media_plays.py` writes. A play and a pause
+    # are observations, and the limit moment is the charge that spent the last
+    # allowance — none of them carries intent, and none is a verdict.
+    "media_play": {"id": "Media diputar", "en": "Media played"},
+    "media_pause": {"id": "Media dijeda", "en": "Media paused"},
+    "media_limit_reached": {"id": "Batas putar tercapai", "en": "Play limit reached"},
 }
+
+#: The kinds whose detail names a question and a play number. Kept beside
+#: `media_plays.KINDS` on purpose: a new media kind without a place in `entry()` fails
+#: `tests/unit/test_media_timeline.py`.
+MEDIA_KINDS = ("media_play", "media_pause", "media_limit_reached")
 
 #: The columns read from the event table. An explicit list, not ``*``, so a later
 #: column cannot arrive at a template by accident.
@@ -97,13 +108,54 @@ def _gap_detail(meta: dict) -> str:
     return f"{seconds} dtk"
 
 
+def _whole(value):
+    """An int or ``None`` — a meta number nobody can read is simply absent."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _media_detail(kind: str, meta: dict, question_index, lang: str = "id") -> str:
+    """Which question, and for a play which play of how many.
+
+    The question number is the whole point for a proctor reading *"the pupil replayed
+    the passage"*: a play with no question is a fact about the paper, not about the
+    moment. A limited question also says how many plays of how many were used, because
+    "play 3 of 3" is the replay; an unlimited one has only the number.
+    """
+    bits = []
+    number = _whole(question_index)
+    if number is not None:
+        bits.append(f"Question {number}" if lang == "en" else f"Soal {number}")
+    if kind == "media_play":
+        played = _whole((meta or {}).get("play"))
+        limit = _whole((meta or {}).get("limit"))
+        if played:
+            if limit:
+                bits.append(f"play {played} of {limit}" if lang == "en"
+                            else f"putaran {played}/{limit}")
+            else:
+                bits.append(f"play {played}" if lang == "en" else f"putaran {played}")
+    elif kind == "media_limit_reached":
+        limit = _whole((meta or {}).get("limit"))
+        if limit:
+            bits.append(f"limit {limit}" if lang == "en" else f"batas {limit} putaran")
+    return " · ".join(bits)
+
+
 def entry(row: dict, lang: str = "id") -> dict:
     """One transition as a reader meets it: what, when, and how long where it matters."""
     kind = str((row or {}).get("kind") or "")
     meta = (row or {}).get("meta") or {}
     if isinstance(meta, str):
         meta = {}
-    detail = _gap_detail(meta) if kind == "connection_gap" else ""
+    if kind == "connection_gap":
+        detail = _gap_detail(meta)
+    elif kind in MEDIA_KINDS:
+        detail = _media_detail(kind, meta, (row or {}).get("question_index"), lang)
+    else:
+        detail = ""
     return {
         "kind": kind,
         "seq": (row or {}).get("seq"),

@@ -111,7 +111,7 @@ GROUPS: dict[str, list[str]] = {
     "app": ["local", "sticky", "header", "over", "drawer", "badge", "dialog",
             "notice"],
     "paper": ["paper", "bar", "qstrip", "float", "rail", "watermark", "scrim",
-              "strip", "modal", "strip-over", "gate"],
+              "strip", "media", "modal", "strip-over", "gate"],
     "canvas": ["canvas-tool", "canvas-grip", "canvas-item", "canvas-item-ctl"],
 }
 

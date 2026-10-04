@@ -14,8 +14,9 @@
    *reads* it — the sit strip takes `--sg-layer-strip`/`--sg-layer-strip-over`,
    the two blockers `--sg-layer-scrim`, the terms agreement `--sg-layer-modal`,
    the submit gate `--sg-layer-gate`, the toast and calculator
-   `--sg-layer-float`, and the canvas tools their own stacking context — so a
-   panel here can never pick a height by eye. */
+   `--sg-layer-float`, the maximised media player `--sg-layer-media`, and the
+   canvas tools their own stacking context — so a panel here can never pick a
+   height by eye. */
 
 /* ── the paper gets the width on a phone ──────────────────────────────────
    The question column is worth its 150px only when it is *beside* the paper.
@@ -1342,6 +1343,7 @@ body.sg-exam .sidebar-overlay { display: none !important; }
                                    :controls="!mediaLocked"
                                    :src="(questions[i]||{}).video"
                                    @play="onMediaPlay($event)"
+                                   @pause="onMediaPause($event)"
                                    @error="mediaFailed[i] = true"></video>
                             <p x-show="mediaLocked" x-cloak class="mt-1 text-[11px] font-bold text-rose-700"
                                x-text="t('Batas putar untuk video ini sudah tercapai — beri tahu pengawas bila perlu diputar lagi.','The play limit for this video has been reached — tell your proctor if it must be played again.')"></p>
@@ -1356,7 +1358,7 @@ body.sg-exam .sidebar-overlay { display: none !important; }
                     <template x-if="(questions[i]||{}).youtubeEmbed">
                         <div class="mb-3 bg-gradient-to-r from-red-50 to-rose-50 rounded-xl px-4 py-3 border border-red-200/50"
                              x-data="sgVideoPlay(i)"
-                             :class="mediaMax ? 'fixed inset-0 z-[9999] bg-black/95 flex flex-col justify-center rounded-none m-0' : ''">
+                             :class="mediaMax ? 'fixed inset-0 sg-layer-media bg-black/95 flex flex-col justify-center rounded-none m-0' : ''">
                             <div class="flex items-center justify-between mb-2" :class="mediaMax ? 'px-4 pt-3' : ''">
                                 <div class="flex items-center gap-2">
                                     <i class="fab fa-youtube text-red-500"></i>
@@ -1427,6 +1429,7 @@ body.sg-exam .sidebar-overlay { display: none !important; }
                                 <audio controls class="h-9 w-full max-w-md" preload="none"
                                        :controls="!mediaLocked"
                                        @play="onMediaPlay($event)"
+                                       @pause="onMediaPause($event)"
                                        @error="mediaFailed[i] = true">
                                     <template x-for="src in (questions[i]||{}).audioSources" :key="src">
                                         <source :src="src">
@@ -1920,6 +1923,26 @@ function sgMediaPlay(i) {
             var ok = await this.mediaClaim();
             if (!ok && el && el.pause) el.pause();
         },
+        // Report a pause into the sitting's timeline. Evidence only — it charges no
+        // play, so fiddling with the player can never spend the allowance. Best-effort:
+        // a failed report is lost evidence, never a blocked pupil.
+        mediaReportPause() {
+            try {
+                var token = this._mediaToken();
+                fetch('/student/media-pause', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json', 'Accept': 'application/json',
+                              'X-CSRF-Token': token},
+                    body: JSON.stringify({exam_id: SG_EXAM, question_index: i, _csrf_token: token}),
+                }).catch(function () {});
+            } catch (e) {}
+        },
+        // A native control fires `pause` even when our own claim logic stops it at the
+        // start, so the report only goes out once the media actually played.
+        onMediaPause(ev) {
+            var el = ev && ev.target;
+            if (el && el.currentTime > 0) this.mediaReportPause();
+        },
     };
 }
 
@@ -1939,6 +1962,7 @@ function sgVideoPlay(i) {
     };
     comp.mediaPause = function () {
         this.videoPlaying = false;
+        this.mediaReportPause();
         var f = this.$refs && this.$refs.sgvideo;
         try {
             if (f && f.contentWindow) f.contentWindow.postMessage(

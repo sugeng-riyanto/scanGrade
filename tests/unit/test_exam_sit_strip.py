@@ -766,6 +766,9 @@ STRIP_COVERING_LAYERS = {
              "terms are read, so only the pinned row is covered",
     "gate": "the submit confirmation: ending the paper is a decision, and the strip "
             "deliberately stops short of it",
+    "media": "the maximised question video: enlarging a passage is a deliberate "
+             "full-screen act the pupil asks for, and it is dismissed by the same "
+             "button, so covering the strip for its duration is the point of it",
 }
 
 

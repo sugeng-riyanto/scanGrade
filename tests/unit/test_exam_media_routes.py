@@ -336,8 +336,11 @@ def test_a_question_may_only_point_at_its_own_papers_prefix(app):
                               "media_kind_0": "video",
                               "media_name_0": "clip.mp3"},
                         {"exam_id": EXAM})
+    # `plays` is the play allowance the media-plays phase added, and a record always
+    # carries it (default 1). This guard is about the path prefix, so it names the
+    # whole record rather than loosening to a subset.
     assert media == {"file": f"{EXAM}/0/clip.mp3", "kind": "video",
-                     "name": "clip.mp3"}
+                     "name": "clip.mp3", "plays": 1}
 
 
 def test_a_paper_that_does_not_exist_yet_cannot_attach_a_file(app):
@@ -349,8 +352,11 @@ def test_a_paper_that_does_not_exist_yet_cannot_attach_a_file(app):
 def test_a_pasted_link_is_still_read_exactly_as_it_was(app):
     drive = "https://drive.google.com/file/d/1AbCdEfGhIjKlMnOpQrSt/view"
     youtube = "https://youtu.be/dQw4w9WgXcQ"
+    # The links themselves are untouched; the record also carries the play allowance
+    # (default 1) the media-plays phase added.
     assert _form_media(app, {"audio_0": drive, "youtube_0": youtube},
-                       {"exam_id": EXAM}) == {"audio": drive, "youtube": youtube}
+                       {"exam_id": EXAM}) == {"audio": drive, "youtube": youtube,
+                                              "plays": 1}
 
 
 def test_duplicating_a_paper_moves_its_uploaded_media_with_it(app):
