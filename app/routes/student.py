@@ -19,6 +19,7 @@ from app.services.question_types import (
 from app.services.submission_service import finish_sitting, open_sitting
 from app.services import exam_media
 from app.services import exam_targets
+from app.services import grade_weighting
 from app.services import invigilation
 from app.services import enrollment
 from app.services import academic_year
@@ -177,7 +178,11 @@ def dashboard():
     # v4: the whole page is now scoped to the running school year — the subject
     # list reads the pupil's class *for that year* and every score is filtered to
     # papers of that year — so an entry from v3 would answer a different question.
-    cache_key = f"dash:v4:{g.user_id}"
+    # v5: each subject's mark is now the *weighted* final the teacher's table
+    # reports (`grade_weighting.compute`), not a plain average. An entry from v4
+    # carries no `subject_finals`, so the new lookup would render every subject's
+    # mark as absent for the whole TTL — the key has to move with the shape.
+    cache_key = f"dash:v5:{g.user_id}"
     cached = cache_get(cache_key)
     if cached:
         return render_template("student/dashboard.html", **cached)
@@ -358,6 +363,21 @@ def dashboard():
     unlisted_averages = {name: avg for name, avg in subject_averages.items()
                          if str(name) not in offered_names}
 
+    # The mark beside each subject is the school's own policy, computed by the same
+    # `grade_weighting.compute` the teacher's table and both exports use — so the
+    # pupil's card and the teacher's report cannot print two different numbers for
+    # one pupil in one subject. The batch read asks the transpose of the teacher's
+    # (one pupil, every subject) and counts released papers only, which is this
+    # page's own rule: a mark is not official to the pupil until it is released.
+    subject_finals = {}
+    if student_school_id and class_subjects:
+        try:
+            subject_finals = grade_weighting.finals_for_student(
+                supabase, student_school_id,
+                [s.get("id") for s in class_subjects], running_year_id, g.user_id)
+        except Exception as e:                                       # noqa: BLE001
+            current_app.logger.error(f"Dashboard weighted finals error: {e}")
+
     # Active whiteboards for student's class (only if the school has it enabled).
     # The feature flag rides on the cached school row; the board list is cached
     # per class for 30 s, so a class of 30 students costs one query.
@@ -379,6 +399,7 @@ def dashboard():
         "class_subjects": class_subjects,
         "active_whiteboards": active_whiteboards,
         "subject_averages": subject_averages,
+        "subject_finals": subject_finals,
         "unlisted_averages": unlisted_averages,
         "chart_points": _chart_points(completed_exams),
         "weak_areas": weak_areas,

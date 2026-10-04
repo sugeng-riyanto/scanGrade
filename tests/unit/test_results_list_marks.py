@@ -228,10 +228,17 @@ class TestTheMasteryLabelFollowsTheReader:
         `chart_points` replacing `score_trend`; v4 is the whole page scoped to the
         running school year, so a v3 entry would answer a different question. This
         guard had gone stale at v3 while the key had moved on — the failure it was
-        written to prevent, one level up — so it now reads the version the route
-        actually uses."""
+        written to prevent, one level up — so it reads the version the route
+        actually uses, and only requires it to be at least v4 (the year-scoped
+        shape): a later shape change (v5 moved the per-subject mark onto the
+        weighted final) is the same class of change and must move the key again,
+        not trip this guard."""
+        import re
         src = (ROOT / "app" / "routes" / "student.py").read_text(encoding="utf-8")
-        assert 'cache_key = f"dash:v4:{g.user_id}"' in src
+        found = re.search(r'cache_key = f"dash:v(\d+):\{g\.user_id\}"', src)
+        assert found, "the dashboard cache key is not versioned any more"
+        assert int(found.group(1)) >= 4, (
+            "the key went backwards, so a v3 entry renders as its first character")
 
 
 class TestNeedsAttentionIsThePapersStandard:

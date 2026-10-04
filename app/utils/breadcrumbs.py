@@ -205,10 +205,20 @@ def _is_identifier(segment: str) -> bool:
     return len(segment) >= 32 or (segment.isdigit() and len(segment) >= 6)
 
 
+#: A *file extension* ends a segment that is an artifact whatever the word
+#: before it. `ARTIFACT` names whole segments (`download`, `export`, …), so it
+#: misses one that carries its own suffix: `/teacher/students/export.xlsx` and
+#: `.../export.pdf` are the files the roster page builds, and the crumb is that
+#: page. Naming the *shape* means the next `.xlsx` download does not need a new
+#: word in the list above.
+ARTIFACT_SUFFIXES = frozenset({"pdf", "csv", "xlsx", "html", "zip"})
+
+
 def _ignored(segment: str) -> bool:
     return (segment in IGNORED
             or segment.startswith("download")
-            or segment.startswith("loaderio-"))
+            or segment.startswith("loaderio-")
+            or segment.rsplit(".", 1)[-1].lower() in ARTIFACT_SUFFIXES)
 
 
 def names_a_page(segments: list[str], index: int) -> bool:

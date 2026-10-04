@@ -101,8 +101,13 @@ class TestTheScoresAreYearScoped:
             "a paper left published from a previous year is still on offer")
 
     def test_the_cache_key_moved_with_the_shape(self):
+        # v4 moved the whole page onto the running school year; v5 moved each
+        # subject's mark onto the weighted final the teacher's table reports. An
+        # entry cached under either older key answers a different question (a v4
+        # entry carries no `subject_finals` at all), so the version keeps step
+        # with the shape of what is cached.
         body = _dashboard_body()
-        assert 'dash:v4:' in body, (
+        assert 'dash:v5:' in body, (
             "an entry cached under the old key answers a different question")
 
 

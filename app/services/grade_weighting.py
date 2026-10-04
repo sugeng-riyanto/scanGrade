@@ -46,6 +46,8 @@ from __future__ import annotations
 
 import logging
 
+from app.utils.exam_access import result_released
+
 logger = logging.getLogger(__name__)
 
 #: The component a school must reach before its weights are used. Mirrored by the
@@ -475,6 +477,101 @@ def subject_finals(supabase, school_id: str, subject_id: str, year_id: str | Non
             score = None
         by_student[sid].append((exam_components.get(str(sub.get("exam_id"))), score))
     return {sid: compute(rows, weights) for sid, rows in by_student.items()}
+
+
+def finals_for_student(supabase, school_id: str, subject_ids, year_id: str | None,
+                       student_id: str, *, released_only: bool = True) -> dict:
+    """One pupil's final mark in each of **several** subjects, in two reads.
+
+    The single-subject read (:func:`subject_finals`) answers the teacher's roster:
+    one subject, every pupil. The pupil's own dashboard asks the transpose — one
+    pupil, every subject — so calling :func:`subject_finals` per subject would cost
+    two reads per subject on a 1-CPU box. This is that transpose, but the
+    arithmetic is the same :func:`compute` and the weights are the same
+    effective-policy read (a subject's own config, else the school default), so the
+    number beside a subject on the pupil's page is the number the teacher's table
+    computes for it.
+
+    Scoping, stated so no caller can widen it: the exams read is bounded by the
+    **school**, the **subject ids asked for** and the year when one is given; the
+    submissions read is bounded by those exam ids **and the one pupil id**. A
+    classmate is never read, and a paper of another subject or another year is
+    never counted. Returns ``{subject_id: compute(...)}``, one entry per requested
+    subject even when the pupil has no rows in it.
+
+    ``released_only`` is the pupil's own rule, not the teacher's: a mark is not
+    official to the pupil until the teacher releases it, so an unreleased paper is
+    left out of the pupil's final. The teacher's roster reads every graded paper —
+    which is why this is a parameter and not a silent difference.
+    """
+    subjects = [str(s) for s in (subject_ids or []) if s]
+    student = str(student_id or "")
+    if not school_id or not subjects or not student:
+        return {}
+
+    # 1. the papers of these subjects, one read
+    try:
+        exams_q = (supabase.table("exams")
+                   .select("id, subject_id, grade_component_type_id")
+                   .eq("school_id", school_id).in_("subject_id", subjects))
+        if year_id:
+            exams_q = exams_q.eq("school_year_id", year_id)
+        exams = exams_q.execute().data or []
+    except Exception as exc:                                        # noqa: BLE001
+        logger.warning("grade_weighting: exam read failed: %s", exc)
+        exams = []
+    exam_subject = {str(e["id"]): str(e.get("subject_id"))
+                    for e in exams if e.get("id")}
+    exam_components = {str(e["id"]): e.get("grade_component_type_id")
+                       for e in exams if e.get("id")}
+
+    # 2. the weights, one read for the whole school plus its default
+    configs = configs_for_school(supabase, school_id, year_id)
+    default = default_config(supabase, school_id)
+
+    def _entry(subj: str, rows: list) -> dict:
+        mark = compute(rows, configs.get(subj) or default)
+        # Under weighting, `compute` answers 0.0 for a subject the pupil has no
+        # scored papers in — the same "missing component is zero" policy the
+        # teacher's table applies, which is right for a roster but would print a
+        # hard `0` on the pupil's own card. `scored` lets the page tell "no mark
+        # yet" from a real zero without re-deriving the policy here.
+        mark["scored"] = sum(1 for _cid, score in rows if score is not None)
+        return mark
+
+    if not exam_subject:
+        return {subj: _entry(subj, []) for subj in subjects}
+
+    # 3. this pupil's rows, one read
+    columns = "exam_id, score, final_score, is_published, status"
+    try:
+        subs = (supabase.table("submissions").select(columns)
+                .in_("exam_id", list(exam_subject))
+                .in_("student_id", [student]).execute().data or [])
+    except Exception as exc:                                        # noqa: BLE001
+        logger.warning("grade_weighting: submission read failed: %s", exc)
+        subs = []
+
+    by_subject: dict[str, list] = {subj: [] for subj in subjects}
+    for sub in subs:
+        if released_only and not result_released(sub):
+            continue
+        subj = exam_subject.get(str(sub.get("exam_id")))
+        if subj not in by_subject:
+            continue
+        raw = sub.get("final_score")
+        if raw is None:
+            raw = sub.get("score")
+        try:
+            score = float(raw) if raw is not None else None
+        except (TypeError, ValueError):
+            score = None
+        by_subject[subj].append((exam_components.get(str(sub.get("exam_id"))), score))
+
+    out: dict[str, dict] = {}
+    for subj in subjects:
+        out[subj] = _entry(subj, by_subject[subj])
+    return out
 
 
 def rows_from_submissions(submissions: list[dict], exam_components: dict) -> list[tuple]:

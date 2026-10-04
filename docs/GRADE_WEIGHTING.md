@@ -40,8 +40,12 @@ uses, migration 051).
 ## How the Final Mark is computed
 
 Implemented once in `app/services/grade_weighting.py` — `compute()` — and read by
-every surface through `subject_finals()`, so the table, the XLSX export and the
-PDF cannot disagree.
+every surface, so the teacher's table, the XLSX export, the PDF **and the pupil's
+own dashboard** cannot disagree. The teacher/exports read it through
+`subject_finals()` (one subject, every pupil); the pupil's page reads it through
+`finals_for_student()` (one pupil, every subject), which is the same arithmetic and
+the same effective-policy read, batched because the page asks the transpose of the
+roster — two reads for ten subjects instead of twenty.
 
 ```
 weights = config_for(school, subject, year)          # {} when none is configured
@@ -64,6 +68,20 @@ that component counts as **0**. The remaining weights are **not** scaled back up
 Renormalising would quietly raise a pupil's mark for work they never did, and hide
 the real gap from the teacher. Zero is the conservative reading; the page tells the
 teacher which component is empty so they can fix the cause instead.
+
+### The pupil sees released papers only
+
+The teacher's roster counts **every graded paper** — grading happens before
+release. The pupil's own dashboard counts **released papers only**, because a mark
+is not official to the pupil until the teacher releases it, which is the rule every
+other number on that page already follows. `finals_for_student(..., released_only=True)`
+is that difference, stated as a parameter so it is never a silent one: once a paper
+is released, the pupil's number and the teacher's number are the same number.
+
+Weighting answers `0.0` for a subject the pupil has no scored paper in. That is
+right for a roster, but a hard `0` on the pupil's card would read as a real mark, so
+the batched read also returns `scored` (the count of scored rows) and the card shows
+"no mark yet" while `scored == 0` — a real zero is still a real zero.
 
 ### Papers with no component are ignored, and reported
 
@@ -114,6 +132,11 @@ A closed academic year is read-only.
 - **`/teacher/students`** — the teacher's grade table: **Kelas, Nama, NISN, Nilai
   Akhir**, with a per-component breakdown on the info button, KKM colouring, search
   and sort, and **XLSX/PDF exports** that carry one column per component.
+- **`/student/dashboard`** — each subject on the "Mata Pelajaran Kelas Anda" card
+  shows the **same weighted Final Mark** the teacher's table reports for it (a
+  "Berbobot"/"Weighted" chip when the school has configured weights, "Rata-rata
+  sederhana"/"Simple mean" when it has not), over the **released** papers of the
+  running year. It follows the page's score switch like every other mark.
 - Scoping: a guru sees only the pupils in the classes they teach **for the selected
   subject** (from their own `teacher_assignments`); the school admin sees the whole
   roster. A requested subject the teacher does not teach falls back to their
