@@ -224,12 +224,14 @@ class TestTheMasteryLabelFollowsTheReader:
 
     def test_the_cached_shape_cannot_come_back_as_its_first_character(self):
         """The context is cached for 30 s, and the key is part of the shape's
-        contract: an unchanged key hands the new template an old string, and `[0]`
-        of a string is its first letter. It is at v3 because `chart_points` replaced
-        `score_trend` — a v2 entry has no points, so the shared card would tell a
-        student with nine released marks that nothing had been released."""
+        contract: an unchanged key hands the new template an old value. v3 was
+        `chart_points` replacing `score_trend`; v4 is the whole page scoped to the
+        running school year, so a v3 entry would answer a different question. This
+        guard had gone stale at v3 while the key had moved on — the failure it was
+        written to prevent, one level up — so it now reads the version the route
+        actually uses."""
         src = (ROOT / "app" / "routes" / "student.py").read_text(encoding="utf-8")
-        assert 'cache_key = f"dash:v3:{g.user_id}"' in src
+        assert 'cache_key = f"dash:v4:{g.user_id}"' in src
 
 
 class TestNeedsAttentionIsThePapersStandard:

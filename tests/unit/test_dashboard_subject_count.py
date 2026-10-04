@@ -174,3 +174,72 @@ class TestTheGuideDocumentsTheRetake:
         # The page must carry at least as many pairs as before this change; the
         # coverage floor in theme_gate is the real guard, this is the cheap one.
         assert html.count("t('") > 100, "the guide lost its bilingual copy"
+
+
+# ── the subject card and its marks read together ────────────────────────────
+
+class TestTheSubjectCardShowsItsMarks:
+    """A list of names with the marks in another card reads as two pictures.
+
+    Requested: give the subject card a per-subject score so the list and the marks
+    are one thing. The marks come from `subject_averages` — already computed from
+    the same released, year-scoped papers — keyed by the subject's *name*, which is
+    what the class list carries, so the card needs no second read.
+    """
+
+    def _loop(self) -> str:
+        html = DASHBOARD.read_text(encoding="utf-8")
+        loop = re.search(
+            r"{%\s*for\s+\w+\s+in\s+class_subjects\s*%}(.*?){%\s*endfor\s*%}",
+            html, re.S)
+        assert loop, "the subject card has no loop over the class's subjects"
+        return loop.group(1)
+
+    def test_each_subject_reads_its_own_average(self):
+        loop = self._loop()
+        assert "subject_averages.get(" in loop, (
+            "the subject card prints no mark beside the subject's name, so the "
+            "list and the marks are still two pictures")
+
+    def test_each_subject_draws_a_bar(self):
+        loop = self._loop()
+        assert "width: " in loop and "%" in loop, (
+            "the subject card has a number but no bar to read it against")
+
+    def test_the_score_and_the_bar_follow_the_switch(self):
+        loop = self._loop()
+        assert 'x-show="showScores"' in loop, (
+            "the subject card prints its marks regardless of the switch, which is "
+            "the exact bug the switch was made to stop")
+
+    def test_a_subject_without_a_mark_says_so_instead_of_reading_zero(self):
+        loop = self._loop()
+        assert re.search(r"t\('(Belum ada nilai|No mark)", loop), (
+            "a subject with no mark would read as an empty or zero score")
+
+    def test_the_card_is_bilingual(self):
+        assert "t('" in self._loop(), (
+            "the enriched subject card carries no i18n helper, so one language only")
+
+
+class TestNoMarkIsLostWhenItsSubjectLeavesTheList:
+    """The per-subject averages used to live in the Mastery card; they live on the
+    subject list now. A mark whose subject the class no longer offers must not
+    vanish — the admin can switch a subject off after papers were sat."""
+
+    def _body(self) -> str:
+        return STUDENT_ROUTES.read_text(encoding="utf-8"
+                                        ).split("def dashboard(")[1].split("\ndef ")[0]
+
+    def test_the_route_keeps_the_marks_the_class_does_not_list(self):
+        body = self._body()
+        assert re.search(r"unlisted_averages\s*=", body), (
+            "the route drops every mark whose subject is not on the class list")
+        assert '"unlisted_averages"' in body, (
+            "the list is computed and then not passed to the template")
+
+    def test_the_mastery_card_prints_only_what_the_subject_card_did_not(self):
+        html = DASHBOARD.read_text(encoding="utf-8")
+        assert "in unlisted_averages.items()" in html, (
+            "the Mastery card still prints every average, so each mark is drawn "
+            "twice — once beside its subject and once without it")

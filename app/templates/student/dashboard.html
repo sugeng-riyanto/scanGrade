@@ -61,15 +61,37 @@
                 </p>
             </div>
         </div>
-        <div class="flex flex-wrap gap-2">
+        {# The mark rides *with* its subject: the list and the marks used to be two
+           cards, so a pupil read the names in one place and the numbers in another
+           and had to match them by hand. The mark is the released, year-scoped
+           average for that subject's papers, from the same `subject_averages` the
+           rest of the page draws, and it follows the same `showScores` switch — a
+           bar that keeps its length has hidden nothing. #}
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
             {% for s in class_subjects %}
-            <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-surface-50 border border-surface-200 text-xs font-bold text-surface-700">
-                {{ s.name }}
-                {% if s.code %}<span class="text-[10px] font-mono text-surface-400">{{ s.code }}</span>{% endif %}
-            </span>
+            {% set avg = subject_averages.get(s.name) %}
+            <div class="rounded-xl bg-surface-50 border border-surface-200 px-3 py-2.5">
+                <div class="flex items-center justify-between gap-2">
+                    <span class="min-w-0 truncate text-xs font-bold text-surface-700">
+                        {{ s.name }}
+                        {% if s.code %}<span class="text-[10px] font-mono text-surface-400">{{ s.code }}</span>{% endif %}
+                    </span>
+                    {% if avg is not none %}
+                    <span x-show="showScores" class="shrink-0 text-xs font-extrabold {% if avg >= 70 %}text-emerald-600{% else %}text-red-500{% endif %}">{{ avg }}</span>
+                    <span x-show="!showScores" class="shrink-0 text-xs font-extrabold text-surface-300">•••</span>
+                    {% else %}
+                    <span class="shrink-0 text-[10px] font-bold text-surface-400" x-text="t('Belum ada nilai','No mark yet')"></span>
+                    {% endif %}
+                </div>
+                {% if avg is not none %}
+                <div class="mt-2 w-full bg-surface-100 rounded-full h-1.5" x-show="showScores">
+                    <div class="h-1.5 rounded-full {% if avg >= 80 %}bg-emerald-500{% elif avg >= 70 %}bg-primary-500{% elif avg >= 60 %}bg-amber-500{% else %}bg-red-500{% endif %}" style="width: {{ [avg, 100] | min }}%"></div>
+                </div>
+                {% endif %}
+            </div>
             {% endfor %}
         </div>
-        <p class="mt-3 text-[10px] text-surface-400 font-semibold" x-text="t('Daftar ini mengikuti mata pelajaran yang diaktifkan sekolah untuk kelas Anda — bukan seluruh daftar sekolah dan bukan mapel kelas lain.','This list follows the subjects your school has enabled for your class — not the whole school list and not another class&rsquo;s subjects.')"></p>
+        <p class="mt-3 text-[10px] text-surface-400 font-semibold" x-text="t('Daftar ini mengikuti mata pelajaran yang diaktifkan sekolah untuk kelas Anda — bukan seluruh daftar sekolah dan bukan mapel kelas lain. Nilai di sebelah tiap mapel adalah rata-rata nilai yang sudah dirilis untuk mapel itu.','This list follows the subjects your school has enabled for your class — not the whole school list and not another class&rsquo;s subjects. The mark beside each subject is the average of the released papers for that subject.')"></p>
     </div>
     {% endif %}
 
@@ -112,14 +134,20 @@
                     <p class="text-lg font-extrabold text-surface-800" x-text="t('{{ mastery_level[0] }}','{{ mastery_level[1] }}')"></p>
                 </div>
             </div>
-            {% if subject_averages %}
+            {% if unlisted_averages %}
             {# Masked with everything else on this page. The overall average in the card
                above was behind the switch while this list printed every subject's
                average *and* drew a bar for it — the number and a picture of the number.
                The bar goes too, because a bar that keeps its length has not hidden
-               anything: it is the same value in a different shape. #}
+               anything: it is the same value in a different shape.
+
+               This list is now only what the subject card above could *not* place: a
+               mark whose subject the class no longer offers (the admin can switch one
+               off after papers were sat). Everything else is drawn beside its own
+               subject, so nothing here is a second copy. #}
+            <p class="text-[10px] font-bold text-surface-400 mb-2" x-text="t('Nilai dari mapel yang tidak lagi ditawarkan ke kelas Anda.','Marks from subjects your class no longer offers.')"></p>
             <div class="space-y-3" x-show="showScores">
-                {% for subject, avg in subject_averages.items() %}
+                {% for subject, avg in unlisted_averages.items() %}
                 <div>
                     <div class="flex justify-between text-xs mb-1">
                         <span class="font-bold text-surface-600">{{ subject }}</span>
@@ -131,6 +159,8 @@
                 </div>
                 {% endfor %}
             </div>
+            {% endif %}
+            {% if subject_averages %}
             <p class="text-sm font-medium text-surface-400" x-show="!showScores"
                x-text="t('Nilai disembunyikan. Tekan ikon mata di kartu rata-rata untuk menampilkannya.','Marks are hidden. Press the eye on the average card to show them.')"></p>
             {% endif %}
