@@ -20,6 +20,9 @@ from app.services.submission_service import finish_sitting, open_sitting
 from app.services import exam_media
 from app.services import exam_targets
 from app.services import invigilation
+from app.services import enrollment
+from app.services import academic_year
+from app.services import teacher_assignments as ta_service
 from app.utils.rate_limiter import limiter
 from app.utils.req_cache import (active_whiteboards_for, class_row, memo,
                                  school_features, subjects_for_class)
@@ -32,7 +35,49 @@ student_bp = Blueprint("student", __name__)
 SUBMISSION_COLUMNS = ("id, exam_id, student_id, score, max_score, violations, penalty, "
                       "final_score, status, is_published, submitted_at, graded_at, "
                       "exams(id, title, subject, passing_score, question_types, "
-                      "total_questions)")
+                      "total_questions, school_year_id)")
+
+
+def _year_scoped(exam_year, running_year_id):
+    """Does a paper count toward the running school year's picture?
+
+    Unknown on either side counts as yes: a school with no active year is not
+    scoped at all, and a paper whose year column is empty (written before 046, or
+    not yet tagged) must not vanish from the pupil's own dashboard. Only a paper
+    *proven* to belong to another year is excluded.
+    """
+    if not running_year_id or not exam_year:
+        return True
+    return str(exam_year) == str(running_year_id)
+
+
+def _class_for_running_year(supabase, profile_class_id, running_year_id):
+    """The class this pupil sits in **for the running year**, or ``None``.
+
+    ``profiles.class_id`` is a single mutable pointer that promotion overwrites,
+    so it can name last year's class. ``student_enrollment`` records the
+    membership per year (046), so it is read first. When there is no row for the
+    running year the profile pointer stands in — unless that class provably
+    belongs to another year, in which case the honest answer is "unknown" rather
+    than a stale class.
+    """
+    if not running_year_id:
+        return profile_class_id
+    try:
+        enrolled = enrollment.current_class_id(supabase, g.user_id, running_year_id)
+    except Exception:
+        enrolled = None
+    if enrolled:
+        return enrolled
+    if not profile_class_id:
+        return None
+    try:
+        class_year = academic_year.year_of_class(supabase, profile_class_id)
+    except Exception:
+        class_year = None
+    if class_year and str(class_year) != str(running_year_id):
+        return None
+    return profile_class_id
 
 
 def _student_submissions(supabase, student_id):
@@ -129,7 +174,10 @@ def dashboard():
     # its first character (`t('S','a')`) for the remainder of its TTL. v3 because
     # `chart_points` replaced `score_trend`: an entry from v2 would reach the shared
     # visual summary with no points and draw the "nothing released yet" sentence.
-    cache_key = f"dash:v3:{g.user_id}"
+    # v4: the whole page is now scoped to the running school year — the subject
+    # list reads the pupil's class *for that year* and every score is filtered to
+    # papers of that year — so an entry from v3 would answer a different question.
+    cache_key = f"dash:v4:{g.user_id}"
     cached = cache_get(cache_key)
     if cached:
         return render_template("student/dashboard.html", **cached)
@@ -137,8 +185,20 @@ def dashboard():
     available_exams = []
     # The session already carries both of these columns, so the page does not ask
     # for the profile again — it used to, three separate times on this page.
-    student_class_id = g.get("user_class_id")
+    profile_class_id = g.get("user_class_id")
     student_school_id = g.get("user_school_id")
+    # The one year this page is about. Everything below — the subject list and
+    # every score — is read against it, so a pupil is never shown last year's
+    # offering or a mark from a paper that belonged to a different year.
+    running_year = (ta_service.active_school_year(supabase, student_school_id)
+                    if student_school_id else None)
+    running_year_id = (running_year or {}).get("id")
+    # The class the pupil is in *for the running year* — the enrollment row for
+    # that year, falling back to the profile pointer when it does not contradict
+    # the year. `profiles.class_id` alone can name last year's class, which is how
+    # a pupil read another year's subjects as their own.
+    student_class_id = _class_for_running_year(
+        supabase, profile_class_id, running_year_id)
 
     # One submissions read for the whole page. This was three — one for the
     # available list, one for retracted, one for the result cards — over the same
@@ -152,7 +212,7 @@ def dashboard():
     draft_ids = {s["exam_id"] for s in subs if s.get("status") == "draft"}
 
     try:
-        query = supabase.table("exams").select("id,title,subject,start_at,end_at,auto_submit_on_window_end,class_ids,target_mode,question_types,total_questions,duration_minutes").eq("is_published", True).eq("status", "active")
+        query = supabase.table("exams").select("id,title,subject,start_at,end_at,auto_submit_on_window_end,class_ids,target_mode,question_types,total_questions,duration_minutes,school_year_id").eq("is_published", True).eq("status", "active")
         if student_school_id:
             query = query.eq("school_id", student_school_id)
         # Same rule as the door the pupil walks through (`exam_sitting_allowed`),
@@ -164,6 +224,10 @@ def dashboard():
         _included = exam_targets.included_exam_ids(supabase, g.user_id, _target_ids) \
             if _target_ids else set()
         for e in all_exams:
+            # Only papers of the running year are on offer: a paper left published
+            # from a previous year is not this year's exam.
+            if not _year_scoped(e.get("school_year_id"), running_year_id):
+                continue
             if _offerable(e, student_class_id, draft_ids, included_exam_ids=_included):
                 # The card says which window state it is in and which clock ends it,
                 # from the same rules the door uses — never from its own reading.
@@ -179,6 +243,9 @@ def dashboard():
         # Only show submitted/graded/published in dashboard (hide drafts, and
         # retracted rows, which now arrive in this same read)
         if s.get("status") in ("draft", "retracted"):
+            continue
+        # A mark from a paper of another year is not part of this year's picture.
+        if not _year_scoped((s.get("exams") or {}).get("school_year_id"), running_year_id):
             continue
         if s.get("exams"):
             s["exam"] = s.pop("exams")
@@ -307,6 +374,7 @@ def dashboard():
         "chart_points": _chart_points(completed_exams),
         "weak_areas": weak_areas,
         "mastery_level": mastery_level,
+        "year_name": (running_year or {}).get("name") or "",
     }
     # Cache for 30 seconds (skip large/non-serializable fields)
     try:

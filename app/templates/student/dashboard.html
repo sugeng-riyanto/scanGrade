@@ -24,6 +24,10 @@
             <div>
                 <p class="text-xs font-bold text-surface-500 uppercase tracking-wider" x-text="t('Kelas','Class')"></p>
                 <p class="font-extrabold text-surface-800 text-xl">{{ student_class.name if student_class else '-' }}</p>
+                {# The page is scoped to the running school year; saying which year the
+                   class and marks belong to stops last year's picture being mistaken
+                   for this year's. #}
+                {% if year_name %}<p class="text-xs font-bold text-surface-400"><span x-text="t('Tahun Ajaran','School Year')"></span> {{ year_name }}</p>{% endif %}
             </div>
         </div>
         <div class="bg-white rounded-2xl p-5 shadow-lg shadow-surface-200/40 border border-surface-100 flex items-center gap-4 hover:shadow-xl hover:-translate-y-0.5 transition-all duration-300">
@@ -53,6 +57,7 @@
                     <span x-text="t('Berlaku untuk','Offered to')"></span>
                     {{ student_class.name if student_class else '-' }}
                     <span class="text-surface-400 font-bold">· {{ class_subjects|length }}</span>
+                    {% if year_name %}<span class="text-surface-400 font-bold">· {{ year_name }}</span>{% endif %}
                 </p>
             </div>
         </div>
