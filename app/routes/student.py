@@ -834,6 +834,39 @@ def media_play():
     return jsonify(out)
 
 
+@student_bp.route("/media-pause", methods=["POST"])
+@login_required
+@_rate_limit("60 per minute")
+def media_pause():
+    """Write one pause of one question's media into the sitting's own timeline.
+
+    The play door charges; this one only *describes*. A pause is a client observation,
+    so it is recorded exactly as reported and never turned into a lock or a verdict —
+    the timeline's rule that a description is not a judgment. It charges nothing, so a
+    pupil cannot spend their own allowance by fiddling with the player, and it names no
+    number off the wire: only the question index and the session's own sitting.
+    """
+    from app.services import media_plays, attempt_status as status_service
+    supabase = get_supabase()
+    body = request.get_json(silent=True) or {}
+    exam_id = str(body.get("exam_id") or request.form.get("exam_id") or "").strip()
+    try:
+        index = int(body.get("question_index"))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "reason": "bad_question"}), 400
+    if not exam_id:
+        return jsonify({"ok": False, "reason": "no_exam"}), 400
+
+    row = status_service.sitting_row(supabase, exam_id, g.user_id)
+    status = status_service.get_attempt_status(supabase, exam_id, g.user_id, row=row)
+    if row is None or status.get("status") not in status_service.ONGOING:
+        return jsonify({"ok": False, "reason": "not_ongoing",
+                        "status": status.get("status")})
+
+    recorded = media_plays.record_pause(supabase, row.get("id"), index)
+    return jsonify({"ok": True, "recorded": bool(recorded)})
+
+
 @student_bp.route("/exams/<exam_id>/resume", methods=["POST"])
 @login_required
 @_rate_limit("20 per minute")

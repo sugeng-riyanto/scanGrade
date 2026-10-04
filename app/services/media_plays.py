@@ -46,6 +46,18 @@ LIMIT_CHOICES = (1, 2, 3, 5, 10, UNLIMITED)
 #: lifecycle kinds so the media count is a query rather than a subtraction.
 EVENT_KIND = "media_play"
 
+#: A pause — evidence for the timeline, never a charge. A pupil who pauses has not
+#: spent a play, so this kind is written beside the count rather than into it.
+PAUSE_KIND = "media_pause"
+
+#: The moment the allowance runs out. Derived on the server from the charge that
+#: spends the last play, so a page cannot invent one and cannot omit one.
+LIMIT_KIND = "media_limit_reached"
+
+#: Every kind this module writes. A reader-facing label exists for each; a new kind
+#: that lands without one fails `tests/unit/test_media_timeline.py`.
+KINDS = (EVENT_KIND, PAUSE_KIND, LIMIT_KIND)
+
 
 def _normalise(value) -> int:
     """A number from the menu, or the default — never a larger allowance.
@@ -143,11 +155,46 @@ def record_play(supabase, attempt_id, question_index, limit) -> dict:
         return {"allowed": True, "used": used + 1, "limit": limit,
                 "remaining": remaining(limit, used + 1)}
 
+    # The charge that spends the last allowance is the moment the player locks, so it
+    # is recorded as its own transition — the one a proctor reads to see the media run
+    # out. Derived here, not reported by the page: a pupil cannot invent the moment,
+    # and it cannot go missing because a page forgot to send it.
+    if limit != UNLIMITED and used + 1 >= limit:
+        attempt_status.record_event(
+            supabase, attempt_id, LIMIT_KIND,
+            question_index=index, meta={"limit": limit},
+        )
+
     return {"allowed": True, "used": used + 1, "limit": limit,
             "remaining": remaining(limit, used + 1)}
 
 
+def record_pause(supabase, attempt_id, question_index) -> bool:
+    """Record one pause of one question's media — evidence, never a charge.
+
+    A pause is a client observation, so it is written exactly as reported and never
+    turned into a lock or a verdict. It charges nothing: a pupil who fiddles with the
+    player must not be able to spend their own allowance by pausing. Best-effort, like
+    every other event — a failed write is a loss of evidence, not a failure of the exam.
+    """
+    if not attempt_id:
+        return False
+    try:
+        index = int(question_index)
+    except (TypeError, ValueError):
+        return False
+
+    # Imported here for the same reason `record_play` does: this module stays
+    # independent of the events table at import time.
+    from app.services import attempt_status
+
+    return bool(attempt_status.record_event(
+        supabase, attempt_id, PAUSE_KIND, question_index=index))
+
+
+
 __all__ = [
-    "DEFAULT_LIMIT", "UNLIMITED", "LIMIT_CHOICES", "EVENT_KIND",
-    "limit_for", "remaining", "used_by_question", "record_play",
+    "DEFAULT_LIMIT", "UNLIMITED", "LIMIT_CHOICES",
+    "EVENT_KIND", "PAUSE_KIND", "LIMIT_KIND", "KINDS",
+    "limit_for", "remaining", "used_by_question", "record_play", "record_pause",
 ]
