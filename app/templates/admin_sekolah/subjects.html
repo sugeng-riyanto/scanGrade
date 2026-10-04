@@ -137,7 +137,7 @@
             <div x-show="error" class="px-5 py-3 text-sm text-red-600" x-text="error"></div>
 
             <div class="overflow-auto px-4 py-3 flex-1" x-show="!loading && !error">
-                <p class="text-xs text-stone-400 mb-2" x-text="t('Centang kelas yang mengampu mapel ini, simpan, lalu atur level tiap murid.','Tick the classes that teach this subject, save, then set the level of every pupil.')"></p>
+                <p class="text-xs text-stone-400 mb-2" x-text="t('Centang kelas yang mengampu mapel ini (centang langsung tersimpan), lalu centang murid pada levelnya.','Tick the classes that teach this subject (a tick saves itself), then tick each pupil on their track.')"></p>
 
                 {# The class picker: only some classes offer a subject, and this is
                    where that is said. A class already mapped is highlighted. #}
@@ -153,18 +153,25 @@
                 </div>
                 <div x-show="!classes.length" class="text-xs text-stone-400" x-text="t('Belum ada kelas di sekolah ini.','This school has no classes yet.')"></div>
 
+                {# No save button: a tick writes itself, like the pupil rows below.
+                   What a tick writes is `class_subjects` — what a class *offers* —
+                   and never `teacher_assignments`, which answers who teaches it.
+                   Two different sentences, and conflating them is the bug this page
+                   keeps closing. #}
                 <div class="flex items-center gap-3 mb-4 flex-wrap">
-                    <button type="button" @click="saveMapping()" :disabled="savingMapping"
-                            class="px-4 py-2 bg-indigo-600 text-white rounded-xl text-xs font-bold hover:bg-indigo-700 transition disabled:opacity-50">
-                        <span x-show="!savingMapping" x-text="t('Simpan Kelas','Save Classes')"></span>
-                        <span x-show="savingMapping" x-text="t('Menyimpan…','Saving…')"></span>
-                    </button>
                     <span class="text-xs font-bold" :class="mappingOk ? 'text-emerald-600' : 'text-red-600'"
                           x-show="mappingMsg" x-text="mappingMsg"></span>
+                    <span x-show="savingMapping" class="text-xs font-bold text-stone-400" x-text="t('Menyimpan kelas…','Saving classes…')"></span>
                 </div>
 
-                {# The per-pupil level, one accordion per mapped class so a class of
-                   40 does not push the page into a wall of selects. #}
+                {# The pupils, one accordion per mapped class and one level group inside
+                   it. A track used to be one dropdown per pupil, so picking the three
+                   advanced pupils of a class of 40 meant reading 40 names and opening
+                   a dropdown for each. Three tick-lists are the shape the work
+                   actually has: open *Lanjutan* and tick three. A pupil is on exactly
+                   one track, so a tick moves them there and un-ticking the group they
+                   are on returns them to the default track (the server's
+                   `default_level`) rather than to a blank. #}
                 <div x-show="mappedSorted().length">
                     <p class="text-xs font-bold text-stone-500 mb-2" x-text="t('Level murid per kelas','Pupil level per class')"></p>
                     <template x-for="cid in mappedSorted()" :key="cid">
@@ -179,28 +186,39 @@
                             </button>
                             <div x-show="rosterOpen[cid]" class="p-3 border-t border-stone-100">
                                 <div x-show="rosterLoading[cid]" class="text-xs text-stone-400" x-text="t('Memuat murid…','Loading pupils…')"></div>
-                                <template x-for="st in (rosters[cid] || [])" :key="st.student_id">
-                                    <div class="flex items-center justify-between gap-3 py-1.5 border-b border-stone-100 last:border-0">
-                                        <span class="text-sm text-stone-700 truncate" x-text="st.full_name"></span>
-                                        <select class="text-xs border border-stone-200 rounded-lg px-2 py-1 font-bold text-stone-600 shrink-0"
-                                                :value="st.level" @change="setLevel(cid, st.student_id, $event.target.value)">
-                                            <option value="basic" x-text="t('Dasar','Basic') + ' (basic)'"></option>
-                                            <option value="intermediate" x-text="t('Menengah','Intermediate') + ' (intermediate)'"></option>
-                                            <option value="advanced" x-text="t('Lanjutan','Advanced') + ' (advanced)'"></option>
-                                        </select>
+                                <p class="text-[11px] text-stone-400 mb-2" x-text="t('Centang murid pada levelnya, satu level per murid. Melepas centang mengembalikan murid ke level bawaan.','Tick each pupil on their track, one track per pupil. Unticking returns a pupil to the default track.')"></p>
+                                <template x-for="g in levelGroups(cid)" :key="g.level">
+                                    <div class="border border-stone-200 rounded-xl mb-2 overflow-hidden">
+                                        <button type="button" @click="toggleGroup(cid, g.level)"
+                                                class="w-full flex items-center justify-between gap-2 px-3 py-2 bg-white hover:bg-stone-50 transition">
+                                            <span class="text-xs font-bold text-stone-700 flex items-center gap-2">
+                                                <i class="fas" :class="groupOpen(cid, g.level) ? 'fa-chevron-up' : 'fa-chevron-down'"></i>
+                                                <span x-text="levelLabel(g.level)"></span>
+                                                <span x-show="g.level === defaultTrack()" class="text-[10px] font-bold text-stone-400" x-text="t('bawaan','default')"></span>
+                                            </span>
+                                            <span class="text-[11px] font-bold text-stone-400" x-text="g.count + ' ' + t('murid','pupils')"></span>
+                                        </button>
+                                        <div x-show="groupOpen(cid, g.level)" class="border-t border-stone-100">
+                                            <template x-for="st in g.students" :key="st.student_id">
+                                                <label class="flex items-center gap-2 px-3 py-1.5 border-b border-stone-100 last:border-0 cursor-pointer hover:bg-stone-50">
+                                                    <input type="checkbox" class="w-4 h-4"
+                                                           :checked="isOnLevel(cid, st.student_id, g.level)"
+                                                           @change="toggleLevel(cid, st.student_id, g.level, $event.target.checked)">
+                                                    <span class="text-sm text-stone-700 truncate" x-text="st.full_name"></span>
+                                                    <span x-show="st.nis" class="text-[10px] font-mono text-stone-400" x-text="st.nis"></span>
+                                                </label>
+                                            </template>
+                                            <div x-show="!g.students.length" class="px-3 py-2 text-xs text-stone-400" x-text="t('Belum ada murid di level ini.','No pupil on this track yet.')"></div>
+                                        </div>
                                     </div>
                                 </template>
                                 <div x-show="!(rosters[cid] || []).length && !rosterLoading[cid]"
                                      class="text-xs text-stone-400" x-text="t('Belum ada murid di kelas ini.','No pupils in this class yet.')"></div>
                                 <div class="flex items-center gap-3 mt-3 flex-wrap">
-                                    <button type="button" @click="saveLevels(cid)" :disabled="savingLevels[cid]"
-                                            class="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-bold hover:bg-indigo-700 transition disabled:opacity-50">
-                                        <span x-show="!savingLevels[cid]" x-text="t('Simpan Level','Save Levels')"></span>
-                                        <span x-show="savingLevels[cid]" x-text="t('Menyimpan…','Saving…')"></span>
-                                    </button>
                                     <span class="text-xs font-bold" x-show="levelMsg[cid]"
                                           :class="levelOk[cid] ? 'text-emerald-600' : 'text-red-600'"
                                           x-text="levelMsg[cid]"></span>
+                                    <span x-show="pendingLevels[cid]" class="text-xs font-bold text-stone-400" x-text="t('Menyimpan level…','Saving the track…')"></span>
                                 </div>
                             </div>
                         </div>
@@ -362,17 +380,29 @@ function subjectLevels() {
         rosterLoading: {},
         levelMsg: {},
         levelOk: {},
-        savingLevels: {},
+        pendingLevels: {},
+        // The tracks, and which one is the default, both read from the server on
+        // open (`subject_levels.LEVELS` / `DEFAULT_LEVEL`). The page keeps the list
+        // it was given rather than a second copy of the vocabulary: a second copy
+        // is how this page and migration 049's CHECK would drift apart.
+        levels: [],
+        defaultLevel: '',
+        openGroups: {},
         savingMapping: false,
         mappingMsg: '',
         mappingOk: false,
 
         isMapped(id) { return this.mappedIds.indexOf(String(id)) !== -1; },
+        // A tick saves itself — the same immediacy every other control on this page
+        // has, and the reason there is no save button to forget. What it writes is
+        // `class_subjects` (what a class *offers*); it never writes
+        // `teacher_assignments`, which answers who teaches it.
         toggleClass(id) {
             const key = String(id);
             const at = this.mappedIds.indexOf(key);
             if (at === -1) { this.mappedIds.push(key); } else { this.mappedIds.splice(at, 1); }
             this.mappingMsg = '';
+            this.saveMapping();
         },
         open(subjectId, subjectName) {
             this.isOpen = true;
@@ -381,7 +411,8 @@ function subjectLevels() {
             this.subjectId = String(subjectId);
             this.subjectName = subjectName || '';
             this.mappingMsg = ''; this.levelMsg = {}; this.levelOk = {};
-            this.rosters = {}; this.rosterOpen = {}; this.savingLevels = {};
+            this.rosters = {}; this.rosterOpen = {}; this.pendingLevels = {};
+            this.openGroups = {};
             fetch('/admin-sekolah/subjects/' + this.subjectId + '/mapping', {headers: {'Accept': 'application/json'}})
                 .then(r => r.json())
                 .then(d => {
@@ -390,6 +421,9 @@ function subjectLevels() {
                     this.mappedIds = (d.mapped || []).map(String);
                     this.pupilCounts = d.pupil_counts || {};
                     this.yearName = (d.year && d.year.name) || '';
+                    // The vocabulary, from the server that owns it.
+                    this.levels = d.levels || [];
+                    this.defaultLevel = d.default_level || '';
                 })
                 .catch(() => { this.error = this.t('Gagal memuat data.', 'Could not load the data.'); })
                 .finally(() => { this.loading = false; });
@@ -423,11 +457,83 @@ function subjectLevels() {
                 .catch(() => { this.rosters[cid] = []; })
                 .finally(() => { this.rosterLoading[cid] = false; });
         },
-        setLevel(cid, studentId, level) {
+        // ── the tracks, as tick-lists ────────────────────────────────────────
+        // A pupil is on exactly one track. The groups list every pupil of the class
+        // in every track so a move is one tick, and `levelOf` names the track a
+        // pupil is on — the stored one, the server's default when there is none, and
+        // a stored value this release does not know also reads as the default rather
+        // than as "in no group at all".
+        defaultTrack() { return this.defaultLevel || (this.levels || [])[0] || ''; },
+        levelOf(row) {
+            const stored = row && row.level;
+            return (this.levels || []).indexOf(stored) === -1 ? this.defaultTrack() : stored;
+        },
+        levelGroups(cid) {
+            const rows = this.rosters[cid] || [];
+            return (this.levels || []).map(level => {
+                const of = rows.filter(r => this.levelOf(r) === level);
+                return { level: level, students: of, count: of.length };
+            });
+        },
+        levelLabel(level) {
+            const names = {
+                basic: this.t('Dasar', 'Basic'),
+                intermediate: this.t('Menengah', 'Intermediate'),
+                advanced: this.t('Lanjutan', 'Advanced'),
+            };
+            return (names[level] || level) + ' (' + level + ')';
+        },
+        groupKey(cid, level) { return String(cid) + ':' + String(level); },
+        groupOpen(cid, level) { return !!this.openGroups[this.groupKey(cid, level)]; },
+        toggleGroup(cid, level) {
+            const key = this.groupKey(cid, level);
+            this.openGroups[key] = !this.openGroups[key];
+        },
+        isOnLevel(cid, studentId, level) {
             const rows = this.rosters[cid] || [];
             const row = rows.find(r => String(r.student_id) === String(studentId));
-            if (row) { row.level = level; }
+            return this.levelOf(row) === level;
+        },
+        // One tick, one pupil. `save_levels` accepts a partial map, so a class of 40
+        // is not rewritten every time a box changes. Un-ticking the track a pupil is
+        // on means "no explicit track", which is the server's default — never a
+        // blank, and never a level spelled out here.
+        toggleLevel(cid, studentId, level, checked) {
+            const rows = this.rosters[cid] || [];
+            const row = rows.find(r => String(r.student_id) === String(studentId));
+            const before = row ? row.level : null;
+            const want = checked ? level : this.defaultTrack();
+            if (row) { row.level = want; }
             this.levelMsg[cid] = '';
+            this.pendingLevels[cid] = (this.pendingLevels[cid] || 0) + 1;
+            const body = {class_id: cid, levels: {}};
+            body.levels[String(studentId)] = want;
+            fetch('/admin-sekolah/subjects/' + this.subjectId + '/levels', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
+                body: JSON.stringify(body),
+            })
+                .then(r => r.json().then(d => ({ok: r.ok, d})))
+                .then(({ok, d}) => {
+                    const good = ok && !d.error;
+                    this.levelOk[cid] = good;
+                    if (good) {
+                        this.levelMsg[cid] = this.t('Tersimpan.', 'Saved.');
+                    } else {
+                        // Put the row back: a refused write changed nothing, and a
+                        // checkbox that stayed moved would be a lie.
+                        if (row) { row.level = before; }
+                        this.levelMsg[cid] = d.error || this.t('Gagal menyimpan.', 'Could not save.');
+                    }
+                })
+                .catch(() => {
+                    if (row) { row.level = before; }
+                    this.levelOk[cid] = false;
+                    this.levelMsg[cid] = this.t('Gagal menyimpan.', 'Could not save.');
+                })
+                .finally(() => {
+                    this.pendingLevels[cid] = Math.max(0, (this.pendingLevels[cid] || 1) - 1);
+                });
         },
         saveMapping() {
             this.savingMapping = true; this.mappingMsg = '';
@@ -445,26 +551,6 @@ function subjectLevels() {
                 })
                 .catch(() => { this.mappingOk = false; this.mappingMsg = this.t('Gagal menyimpan.', 'Could not save.'); })
                 .finally(() => { this.savingMapping = false; });
-        },
-        saveLevels(cid) {
-            const rows = this.rosters[cid] || [];
-            const levels = {};
-            rows.forEach(r => { levels[r.student_id] = r.level; });
-            this.savingLevels[cid] = true; this.levelMsg[cid] = '';
-            fetch('/admin-sekolah/subjects/' + this.subjectId + '/levels', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
-                body: JSON.stringify({class_id: cid, levels}),
-            })
-                .then(r => r.json().then(d => ({ok: r.ok, d})))
-                .then(({ok, d}) => {
-                    this.levelOk[cid] = ok && !d.error;
-                    this.levelMsg[cid] = this.levelOk
-                        ? this.t('Tersimpan.','Saved.')
-                        : (d.error || this.t('Gagal menyimpan.','Could not save.'));
-                })
-                .catch(() => { this.levelOk[cid] = false; this.levelMsg[cid] = this.t('Gagal menyimpan.', 'Could not save.'); })
-                .finally(() => { this.savingLevels[cid] = false; });
         },
     };
 }

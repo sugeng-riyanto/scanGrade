@@ -126,17 +126,22 @@ def save_mapping(supabase, school_id, subject_id, class_ids, created_by=None):
     # save failed — a half-applied mapping the admin had no way to see. Bulk
     # writes make that window as small as it can be, and the operation is
     # idempotent, so re-saving after a network error simply finishes the job.
-    to_on = sorted(wanted)
+    # Only what changed is written. The page posts its *whole* selection on every
+    # tick (that is what keeps two open tabs from disagreeing), so writing all of
+    # it back would mean a tick on a school with 22 classes rewrites 22 rows — and
+    # with the tick saving itself, that happens on every single tick. A class
+    # already on is left alone.
+    to_on = [c for c in sorted(wanted)
+             if c not in by_class or not by_class[c].get("is_active", True)]
     off_ids = [r["id"] for class_id, r in by_class.items()
                if class_id not in wanted and r.get("is_active", True)]
-    added = sum(1 for c in to_on
-                if c not in by_class or not by_class[c].get("is_active", True))
+    added = len(to_on)
     removed = len(off_ids)
 
     try:
         if to_on:
-            # One upsert over the unique (class_id, subject_id): a class already
-            # on is reactivated in place, so a row is never duplicated.
+            # One upsert over the unique (class_id, subject_id): a class that was
+            # closed is reactivated in place, so a row is never duplicated.
             (supabase.table("class_subjects")
              .upsert([{"school_id": school_id, "class_id": class_id,
                        "subject_id": subject_id, "is_active": True,
