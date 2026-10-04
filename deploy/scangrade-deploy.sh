@@ -758,6 +758,114 @@ lock_heal() {
 }
 # lock-heal-logic:end
 
+# ── A file in `.git` the owner cannot write is healed before the fetch ───────
+# perms-heal-logic:start
+# Every write the release makes goes through `git` *as the checkout's owner*
+# (`as_owner`): the fetch writes refs and `FETCH_HEAD`, the merge writes the index.
+# A file in `.git` that root owns — left by a `git` a human ran as root, by a
+# provider console, or by an older runner — cannot be written by that owner, so the
+# fetch dies with `insufficient permission for adding an object` or `Unable to
+# create .../.git/index.lock`. The runner then prints git's own words under *"git
+# fetch failed (network or credentials)"*, and there the box sits: every tick, the
+# same sentence naming the network for a file that is only mis-owned. That is the
+# stall `lock-heal-logic` closes for a lock, in a different costume, so it is closed
+# the same way — before the fetch, by the run that is already root.
+#
+# The sweep is deliberately narrow, and each choice is why:
+#
+#   * **`.git` only.** The fetch writes nothing else, and a file *outside* the git
+#     directory that the release also wires is the box-local-edit heal's business,
+#     not this one's — sweeping the whole checkout would fight the hand edit that
+#     heal exists to preserve.
+#   * **"not owned by the owner", not "owned by root"** — a file owned by any other
+#     account fails the same write for the same reason, and the test is one `uid`
+#     comparison either way. Root is the name the journal prints because it is the
+#     one that arrives.
+#   * **`-uid`, never `-user`** — the sweep must not depend on a passwd lookup, which
+#     is exactly the sort of thing missing on the minimal box this runs on.
+#   * **`chown -R` the whole directory, not the offending paths one by one.** Owner,
+#     group and mode are one decision about a tree git rewrites constantly, and a
+#     partial sweep leaves a directory that can be written but not traversed.
+#
+# It **fails open**, which is not the same as swallowing the failure: a heal that
+# cannot repair logs what it found and returns, the fetch runs, and if it still fails
+# git's own error now sits beneath a journal line naming the ownership that could not
+# be fixed, rather than alone and unexplained. It takes no exit code and writes no
+# record, on purpose — a box refusing a release over a file a later tick could have
+# healed is the deadlock this whole branch of work exists to remove.
+#
+# One global for the resolved directory, cached like `$INDEX_LOCK`: the read runs
+# `git`, and the sweep and the repair must agree about the tree they act on.
+GIT_DIR_PATH=""
+
+#: The git directory, asked of git so a linked worktree (where `.git` is a *file*) is
+#: handled too, and falling back to `$REPO/.git` when git cannot describe it — the
+#: ordinary checkout, which is the one this box is.
+git_dir_path() {
+  if [ -z "$GIT_DIR_PATH" ]; then
+    local dir
+    dir=$(as_owner git -C "$REPO" rev-parse --absolute-git-dir 2>/dev/null)
+    [ -n "$dir" ] || dir="$REPO/.git"
+    GIT_DIR_PATH="$dir"
+  fi
+  printf '%s\n' "$GIT_DIR_PATH"
+}
+
+#: The owner's numeric uid. `id` is coreutils; a name it cannot resolve falls back to
+#: zero rather than failing, because the sweep only needs *a* number and root's is the
+#: one every other account differs from.
+owner_uid() {
+  id -u "$OWNER" 2>/dev/null || printf '0\n'
+}
+
+#: Set by `git_ownership_heal` before it sweeps, and read by `git_dir_foreign`.
+#: Globals because no helper in this script takes a positional parameter: reading one
+#: is a way to steer the one command root runs unattended, which `test_auto_deploy`
+#: refuses at any level.
+OWNERSHIP_DIR=""
+OWNERSHIP_UID=""
+
+#: What disagrees with the owner under `$OWNERSHIP_DIR`, one path per line. A function
+#: so the repair can be exercised where a test cannot make a root-owned file — the same
+#: reason `lock-heal`'s process table is a variable rather than a literal.
+git_dir_foreign() {
+  find "$OWNERSHIP_DIR" ! -uid "$OWNERSHIP_UID" -print 2>/dev/null || true
+}
+
+git_ownership_heal() {
+  # No owner to repair *to* is not a drift to repair: `OWNER` is read off the checkout
+  # itself, and a checkout that is not there is not this step's to judge.
+  [ -n "${OWNER:-}" ] || return 0
+  local foreign count
+  OWNERSHIP_DIR=$(git_dir_path)
+  [ -d "$OWNERSHIP_DIR" ] || return 0
+  OWNERSHIP_UID=$(owner_uid)
+  foreign=$(git_dir_foreign)
+  [ -n "$foreign" ] || return 0
+
+  count=$(printf '%s\n' "$foreign" | sed '/^$/d' | wc -l | tr -d ' ')
+  log "$OWNERSHIP_DIR holds $count path(s) not owned by $OWNER — repairing before the fetch:"
+  printf '%s\n' "$foreign" | sed '/^$/d' | head -n 8 | sed 's/^/    /'
+
+  if ! chown -R "$OWNER" "$OWNERSHIP_DIR" 2>/dev/null; then
+    log "could not repair ownership under $OWNERSHIP_DIR — the fetch runs anyway and will"
+    log "    name its own error; a later tick, or a run as root, can still heal it"
+    return 0
+  fi
+
+  foreign=$(git_dir_foreign)
+  if [ -n "$foreign" ]; then
+    log "ownership under $OWNERSHIP_DIR still disagrees with $OWNER after chown — leaving"
+    log "    the fetch to report it rather than guessing at the rest:"
+    printf '%s\n' "$foreign" | sed '/^$/d' | head -n 8 | sed 's/^/    /'
+    return 0
+  fi
+
+  log "repaired $count path(s) under $OWNERSHIP_DIR — git can write it as $OWNER again"
+  return 0
+}
+# perms-heal-logic:end
+
 # ── A refusal the runner has already made is not made again ─────────────────
 # refusal-streak-logic:start
 # The box this was being fixed for had been refused for a day: `M
@@ -1723,6 +1831,10 @@ branch_refs_read() {
   REFS_FETCH_OUT=""
   [ -d "$REPO/.git" ] || return 1
   [ "${REFS_FETCHED:-0}" = "1" ] && return 0
+  # A file in `.git` the owner cannot write fails this fetch and is then read as a
+  # network fault; heal it first (perms-heal-logic). It judges nothing and records
+  # nothing, so it cannot change what the fetch below reports.
+  git_ownership_heal
   if ! REFS_FETCH_OUT=$(as_owner git -C "$REPO" fetch --quiet origin "$BRANCH" 2>&1); then
     return 1
   fi

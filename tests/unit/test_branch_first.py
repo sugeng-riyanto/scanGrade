@@ -41,8 +41,10 @@ RUNNER = ROOT / "deploy" / "scangrade-deploy.sh"
 BASH = shutil.which("bash")
 
 #: The blocks the harness composes, exactly as the runner composes them: the two that
-#: define what the read installs, then the read itself.
-BLOCKS = ("refresh-launcher-logic", "fetch-lever-logic", "branch-first-logic")
+#: define what the read installs, the perms heal the read now calls before it fetches,
+#: then the read itself.
+BLOCKS = ("perms-heal-logic", "refresh-launcher-logic", "fetch-lever-logic",
+          "branch-first-logic")
 
 #: Each arrangement refusal, as (the line that names it, the exit it takes). The call
 #: has to sit between the two.
@@ -159,6 +161,9 @@ def _harness(repo: Path, lever_dir: Path) -> str:
         'INSTALLED_RECOVER="$INSTALLED_BIN_DIR/sgfix"',
         'log() { echo "$*"; }',
         'as_owner() { "$@"; }',
+        # The heal reads the checkout's owner off `$OWNER`; set it so a healthy
+        # checkout takes the no-op path rather than the missing-owner guard.
+        'OWNER=$(id -un)',
         *[_block(name) for name in BLOCKS],
         "branch_read_refs",
         "echo DONE",

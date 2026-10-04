@@ -1437,6 +1437,40 @@ A **manual** rollback does not write a quarantine — `git reset --hard` by hand
 leaves no record — so after one, the next tick will indeed try the same release
 again. That is the paragraph at the end of this document.
 
+### A root-owned file in `.git` is healed before the fetch, not blamed on GitHub
+
+The lock heal answers a *lock*; this answers the other file in `.git` that stops a
+release without saying so: one **root owns** and the checkout's owner cannot write.
+It arrives the same ways a root-run `git` arrives — a human at a provider console, an
+older runner, a command typed as root — and it fails the same way the lock does, at
+the *fetch*: git answers `insufficient permission for adding an object` or `Unable to
+create .../.git/index.lock`, the runner prints git's own words under **"git fetch
+failed (network or credentials)"**, and the box sits there, every two minutes, with
+the journal naming a network for a file that is only mis-owned.
+
+`perms-heal-logic` runs inside `branch_refs_read`, ahead of the one fetch in the
+script — the plan reader, the adoption and the release all share it, so every fetch
+path is covered by one call:
+
+* **`.git` only.** That is all the fetch writes. A file outside it that the release
+  also wires is the box-local-edit heal's business, and sweeping the whole checkout
+  here would fight the hand edit that heal exists to preserve.
+* **"not owned by the owner", not "owned by root".** Any other account fails the same
+  write for the same reason, and the test is one uid comparison either way. Root is
+  the name the journal prints because it is the one that arrives.
+* **`find ... ! -uid`, never `-user`.** The sweep must not depend on a passwd lookup,
+  which is exactly what is missing on a minimal box.
+* **`chown -R` the whole git directory.** Owner, group and mode are one decision about
+  a tree git rewrites constantly; a partial sweep leaves a directory that can be
+  written but not traversed.
+
+It **fails open**, and that is not the same as swallowing the failure: a repair that
+cannot be made is logged with the paths it found, the fetch runs, and git's own error
+then sits beneath a line naming the ownership that could not be fixed. It takes no exit
+code and writes no preflight record — a box refusing a release over a file a later tick
+could have healed is the deadlock all of this exists to remove. `tests/unit/
+test_perms_heal.py` holds the block, the call site and the behaviour.
+
 ### The dot at the start of ` M`: a CR in the blob, which no checkout can clear
 
 The dirty guard reports the checkout's own words, so a box can look like it is
