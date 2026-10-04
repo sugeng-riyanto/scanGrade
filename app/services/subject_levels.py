@@ -150,6 +150,15 @@ def save_mapping(supabase, school_id, subject_id, class_ids, created_by=None):
         logger.warning("could not save subject mapping for %s", subject_id, exc_info=True)
         return False, {"error": str(e), "status": 400}
 
+    # The pupil dashboard counts the subjects a class offers, which is cached per
+    # class. Every class this save turned on or off has a stale answer now.
+    try:
+        from app.utils.req_cache import invalidate_class_subjects
+        for _cid in set(by_class) | set(to_on):
+            invalidate_class_subjects(_cid)
+    except Exception:  # noqa: BLE001 — invalidation must never fail the save
+        logger.debug("could not invalidate class subjects for %s", subject_id)
+
     return True, {"added": added, "removed": removed,
                   "mapped": sorted(wanted)}
 
