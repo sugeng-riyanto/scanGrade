@@ -1260,6 +1260,7 @@
                     <span x-text="t('commit dari checkout, begitu runner terpasang tidak lagi bisa memeriksa rilis, atau begitu pembuatan akun diulang lebih dari','commits behind the checkout, when the installed runner can no longer check a release, or when account creates are retried more than')"></span>
                     <strong>{{ A.min_retries }}</strong>
                     <span x-text="t('kali — tanda layanan autentikasi sedang tersendat.','times — the sign of a struggling auth service.')"></span>
+                    <span x-text="t('Sapuan lintas sekolah juga berjalan pada tick yang sama: begitu ada baris yang menyebut dua sekolah, atau begitu sapuannya tidak bisa membaca, satu email dikirim — supaya pencampuran sekolah tidak menunggu ada yang membuka dasbor.','The cross-school sweep runs on the same tick too: as soon as a row names two schools, or the sweep cannot read, one email is sent — so mixed-school data does not wait for somebody to open the dashboard.')"></span>
                     {% else %}
                     <span x-text="t('Peringatan belum bisa dikirim: tidak ada alamat tujuan yang bisa ditentukan.','Alerts cannot be sent yet: no destination address could be resolved.')"></span>
                     {% if A.source_detail %}<code class="block mt-2 font-mono text-xs break-all">{{ A.source_detail }}</code>{% endif %}
@@ -1305,8 +1306,11 @@
                                 {% elif A.last.kind == 'runner_behind' %}<span x-text="t('runner tertinggal dari checkout','the runner is behind the checkout')"></span>
                                 {% elif A.last.kind == 'checkout_behind' %}<span x-text="t('checkout tertinggal dari origin/main','the checkout is behind origin/main')"></span>
                                 {% elif A.last.kind == 'auth_retries' %}<span x-text="t('pembuatan akun diulang-ulang — layanan autentikasi tersendat','account creates are being retried — the auth service is struggling')"></span>
+                                {% elif A.last.kind == 'cross_school_rows' %}<span x-text="t('baris mencampur dua sekolah — satu sekolah membaca data sekolah lain','rows mix two schools — one school is reading another school’s data')"></span>
+                                {% elif A.last.kind == 'cross_school_unchecked' %}<span x-text="t('sapuan lintas sekolah tidak bisa dijalankan — pencampuran mungkin tidak terperiksa','the cross-school sweep could not run — mixing may be going unchecked')"></span>
                                 {% else %}<span x-text="t('tidak diketahui','unknown')"></span>{% endif %}
                                 {% if A.last.kind == 'auth_retries' and A.last.retries is not none %} — <strong>{{ A.last.retries }}</strong> <span x-text="t('percobaan ulang','retries')"></span>
+                                {% elif A.last.kind == 'cross_school_rows' and A.last.findings is not none %} — <strong>{{ A.last.findings }}</strong> <span x-text="t('baris','rows')"></span>
                                 {% elif A.last.commits is not none %} — <strong>{{ A.last.commits }}</strong> <span x-text="t('commit','commits')"></span>{% endif %}
                             </span>
                             {% else %}

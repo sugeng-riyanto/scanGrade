@@ -37,6 +37,16 @@ releases are *not* being checked at all:
 * **the checkout is N commits behind `origin/main`** — the deploy is not running:
   a failed fetch, a quarantine nobody released, or the pause file.
 
+It also carries one fault that is not a deploy fact, because it fails the same way
+next to it. `app/services/school_integrity.py` sweeps the install for rows whose
+`school_id` disagrees with the school of the people they point at — the fault behind
+a week of "the number looks wrong" reports, found by a human reading a page days
+later. That check ran only when somebody opened the super-admin dashboard, so the
+`check()` tick runs it too: a row that names two schools, or a sweep that could not
+read, is emailed through this same channel and recorded by this same
+one-mail-per-new-state rule. The magnitude of that alert is a *row count*, not a
+commit distance.
+
 `DEFAULT_MIN_COMMITS` is the "more than a few" line. It is deliberately small (5):
 the timer runs every two minutes, so a healthy box is never more than a commit or
 two behind for more than a moment, and a threshold high enough to be quiet is a
@@ -134,9 +144,21 @@ KIND_CHECKOUT_BEHIND = "checkout_behind"
 #: *leading* indicator of one, and it rides this channel because a page needs
 #: somebody to open it.
 KIND_AUTH_RETRIES = "auth_retries"
+#: Rows whose `school_id` disagrees with the school of the people they point at.
+#: Not a deploy fact either, but the same failure shape the whole service exists
+#: for: the check ran only when somebody opened the dashboard, so a school could be
+#: reading another school's subjects for days without a trace. The scheduled sweep
+#: below is what makes it reach a person who never opens the page.
+KIND_CROSS_SCHOOL = "cross_school_rows"
+#: The sweep could not finish (a read failed) and found nothing in what it did
+#: read. A separate kind because "checked and clean" and "could not check" are
+#: opposite answers, and a guard that is permanently blind must not be silent —
+#: which is the one thing the sweep's own design went out of its way to prevent.
+KIND_CROSS_SCHOOL_UNCHECKED = "cross_school_unchecked"
 ALERT_KINDS = frozenset({KIND_COPY_PREDATES_GATE, KIND_COPY_DRIFTED,
                          KIND_RUNNER_BEHIND, KIND_CHECKOUT_BEHIND,
-                         KIND_AUTH_RETRIES})
+                         KIND_AUTH_RETRIES, KIND_CROSS_SCHOOL,
+                         KIND_CROSS_SCHOOL_UNCHECKED})
 
 #: Where the recipients come from, as keys the template can say in either language.
 SOURCE_SETTING = "setting"
@@ -179,15 +201,17 @@ def _int_or_none(value) -> int | None:
 
 def staleness(report: dict | None, *, min_commits: int = DEFAULT_MIN_COMMITS,
               auth: dict | None = None,
-              min_retries: int = DEFAULT_MIN_AUTH_RETRIES) -> dict | None:
+              min_retries: int = DEFAULT_MIN_AUTH_RETRIES,
+              integrity: dict | None = None) -> dict | None:
     """The one thing worth saying about this reading, or None.
 
     The order is the order they bite: a runner that cannot check a release, then
-    one that is behind, then a pipeline that has stopped moving, then a struggling
-    auth server. The first match wins, so the email names the loudest fact rather
-    than all of them. `auth` is the `auth_health.state()` reading: it is weighed
-    *after* the deploy facts on purpose, because a broken pipeline is the bigger
-    problem and both at once should still be one mail.
+    one that is behind, then a pipeline that has stopped moving, then a proven
+    data fault, then a struggling auth server. The first match wins, so the email
+    names the loudest fact rather than all of them. `auth` and `integrity` are the
+    `auth_health.state()` and `school_integrity.cross_school_findings()` readings:
+    both are weighed *after* the deploy facts on purpose, because a broken pipeline
+    is the bigger problem, and all of them at once should still be one mail.
     """
     if not report:
         return None
@@ -261,9 +285,70 @@ def staleness(report: dict | None, *, min_commits: int = DEFAULT_MIN_COMMITS,
                        "branch": checkout.get("branch")},
         }
 
+    # A mixture is a proven fact about the data, which outranks a retry count that
+    # is only a leading indicator of a struggling service.
+    mixture = integrity_staleness(integrity)
+    if mixture is not None:
+        return mixture
+
     retrying = auth_staleness(auth, min_retries=min_retries)
     if retrying is not None:
         return retrying
+    return None
+
+
+def integrity_staleness(integrity: dict | None) -> dict | None:
+    """The cross-school reading, or None.
+
+    `integrity` is `school_integrity.cross_school_findings()` — the whole install,
+    never one school, because the row this is looking for is the one that names a
+    *different* school, and a per-school sweep would discard exactly it.
+
+    Two findings are worth a mail, and they are deliberately different keys:
+
+    * **any row** that names two schools — a proven fault, never quiet;
+    * **a sweep that could not finish** and found nothing in what it did read — the
+      opposite of "clean", and the one case the sweep's own design says must never
+      be reported as an empty result.
+
+    A *completed* sweep with no rows, and a reading it could not take at all, are
+    both silence — the same rule every other reading in this module follows.
+    """
+    if not integrity:
+        return None
+    findings = integrity.get("findings") or []
+    errors = integrity.get("errors") or []
+
+    by_kind: dict[str, int] = {}
+    for row in findings:
+        key = row.get("kind") or "unknown"
+        by_kind[key] = by_kind.get(key, 0) + 1
+
+    common = {
+        "verdict_key": None,
+        # The magnitude of this alert is a row count, not a commit distance, so
+        # `commits` stays None and the mail never renders it as "N commits".
+        "commits": None, "retries": None,
+        "from_short": None, "anchor": None,
+        "detail": {
+            "count": len(findings),
+            "by_kind": by_kind,
+            "truncated": bool(integrity.get("truncated")),
+            "checked": integrity.get("checked") or {},
+            "errors": errors,
+            # The first few rows by name, so the mail says what it saw rather than
+            # only how many — a reader who has to open a page to learn the shape of
+            # the fault is back to the problem this channel removes.
+            "examples": findings[:3],
+        },
+    }
+
+    if findings:
+        return {"kind": KIND_CROSS_SCHOOL, "findings": len(findings),
+                "errors": len(errors), **common}
+    if errors:
+        return {"kind": KIND_CROSS_SCHOOL_UNCHECKED, "findings": 0,
+                "errors": len(errors), **common}
     return None
 
 
@@ -316,12 +401,17 @@ def alert_key(descriptor: dict) -> str:
     for the sibling reason: a fixed runner that drifts again is a new event, not a
     continuation.
     """
-    # The magnitude is `commits` for the deploy facts and `retries` for the auth
-    # one — either way it is the number that makes one situation different from a
-    # milder one of the same kind, so it belongs in the key.
+    # The magnitude is `commits` for the deploy facts, `retries` for the auth one
+    # and `findings` (or `errors`) for the cross-school one — either way it is the
+    # number that makes one situation different from a milder one of the same kind,
+    # so it belongs in the key.
     magnitude = descriptor.get("commits")
     if magnitude is None:
         magnitude = descriptor.get("retries")
+    if magnitude is None:
+        magnitude = descriptor.get("findings")
+    if magnitude is None:
+        magnitude = descriptor.get("errors")
     return ":".join([
         str(descriptor.get("kind") or "?"),
         str(magnitude) if magnitude is not None else "-",
@@ -480,6 +570,10 @@ _KIND_SUBJECT = {
         "the checkout is behind origin/main — deploys are not running",
     KIND_AUTH_RETRIES:
         "account creates are being retried — the auth service is struggling",
+    KIND_CROSS_SCHOOL:
+        "rows name two schools — one school is reading another school's data",
+    KIND_CROSS_SCHOOL_UNCHECKED:
+        "the cross-school sweep could not run — mixing may be going unchecked",
 }
 
 _KIND_ACTION = {
@@ -499,7 +593,40 @@ _KIND_ACTION = {
         "Check the Supabase auth service (GoTrue). The creates are failing with a "
         "transient database error and being retried, so some may eventually reach "
         "the school as a refusal. The deploy status page shows the same counts.",
+    KIND_CROSS_SCHOOL:
+        "Correct the `school_id` on the rows named below (or remove them), so a "
+        "school stops reading another school's people. The super-admin dashboard "
+        "shows the same findings, live.",
+    KIND_CROSS_SCHOOL_UNCHECKED:
+        "The sweep could not read one or more tables, so a clean result cannot be "
+        "claimed. Read the database errors below and check connectivity before "
+        "assuming the install is clean.",
 }
+
+
+#: How each kind of cross-school row reads in one line. Data, so a new finding kind
+#: the sweep grows renders as its own name rather than disappearing from the mail.
+_EXAMPLE_NAMES = {
+    "class_pupil_mismatch": "a class holding a pupil of another school",
+    "pair_school_mismatch": "a subject offered to another school's class",
+    "assignment_school_mismatch": "a teacher assigned across schools",
+}
+
+
+def _example_sentence(row: dict) -> str:
+    """One cross-school row, in a sentence — so the mail says *what* it saw."""
+    kind = row.get("kind")
+    if kind == "class_pupil_mismatch":
+        return (f"class {row.get('class_name') or row.get('class_id')} "
+                f"({row.get('class_school_id')}) holds a pupil of "
+                f"{row.get('pupil_school_id')}")
+    name = _EXAMPLE_NAMES.get(kind)
+    if name:
+        field = row.get("field") or "row"
+        other = row.get(f"{field}_school_id")
+        own = row.get("pair_school_id") or row.get("assignment_school_id")
+        return f"{name}: {field} is {other} but the row says {own}"
+    return str(row)
 
 
 def render_email(descriptor: dict, report: dict, *, app_url: str | None = None,
@@ -527,6 +654,16 @@ def render_email(descriptor: dict, report: dict, *, app_url: str | None = None,
         subject = (f"[ScanGrade] {count} account-create retries — the auth service is "
                    f"struggling" if count is not None else
                    f"[ScanGrade] {_KIND_SUBJECT[KIND_AUTH_RETRIES]}")
+    elif kind == KIND_CROSS_SCHOOL:
+        count = descriptor.get("findings")
+        detail_count = (descriptor.get("detail") or {}).get("count")
+        if count is None:
+            count = detail_count
+        subject = (f"[ScanGrade] {count} cross-school row(s) found — mixed-school data"
+                   if count is not None else
+                   f"[ScanGrade] {_KIND_SUBJECT[KIND_CROSS_SCHOOL]}")
+    elif kind == KIND_CROSS_SCHOOL_UNCHECKED:
+        subject = f"[ScanGrade] {_KIND_SUBJECT[KIND_CROSS_SCHOOL_UNCHECKED]}"
     elif kind == KIND_CHECKOUT_BEHIND:
         subject = (f"[ScanGrade] {commits} commit(s) behind origin/main — deploys "
                    f"are not running")
@@ -554,6 +691,21 @@ def render_email(descriptor: dict, report: dict, *, app_url: str | None = None,
             rows.append(("Reporting worker", str(detail["worker"])))
     elif commits is not None and not test:
         rows.append(("How far behind", f"{commits} commit(s)"))
+    if kind in (KIND_CROSS_SCHOOL, KIND_CROSS_SCHOOL_UNCHECKED) and not test:
+        if detail.get("count"):
+            rows.append(("Rows that name two schools", str(detail["count"])))
+        for name, number in sorted((detail.get("by_kind") or {}).items()):
+            rows.append((f"  {name}", str(number)))
+        for example in (detail.get("examples") or [])[:3]:
+            rows.append(("Example", _example_sentence(example)))
+        if detail.get("truncated"):
+            rows.append(("More rows than listed", "yes"))
+        if detail.get("errors"):
+            rows.append(("Tables the sweep could not read", str(len(detail["errors"]))))
+        if detail.get("checked"):
+            rows.append(("Rows checked",
+                         ", ".join(f"{table}: {number}" for table, number
+                                   in sorted(detail["checked"].items()))))
     if descriptor.get("from_short"):
         rows.append(("Runner was built from", descriptor["from_short"]))
     if detail.get("origin_subject") and not test:
@@ -758,7 +910,8 @@ class _Claim:
 def check(*, report: dict | None = None, now: _dt.datetime | None = None,
           send=None, state: pathlib.Path | None = None,
           min_commits: int | None = None, recipients_info: dict | None = None,
-          auth: dict | None = None, min_retries: int | None = None) -> dict:
+          auth: dict | None = None, min_retries: int | None = None,
+          integrity: dict | None = None) -> dict:
     """One look at the box: claim the tick, read, decide, maybe send, record.
 
     Returns an outcome key plus what it did, which is what the page and the tests
@@ -779,13 +932,17 @@ def check(*, report: dict | None = None, now: _dt.datetime | None = None,
                     "detail": "another worker holds this tick"}
 
         reading = report if report is not None else deploy_status_service.report()
-        # The auth reading is part of the same tick: it is the leading indicator of
-        # a struggling GoTrue, and it rides this channel rather than a second one.
+        # The auth and cross-school readings are part of the same tick: one is the
+        # leading indicator of a struggling GoTrue, the other the fault behind a
+        # week of "the number looks wrong" reports, and both ride this channel
+        # rather than a second one — the schedule *is* the point.
         auth_state = auth if auth is not None else _auth_state()
+        integrity_state = integrity if integrity is not None else _integrity_state()
         descriptor = staleness(reading,
                                min_commits=min_commits or DEFAULT_MIN_COMMITS,
                                auth=auth_state,
-                               min_retries=min_retries or DEFAULT_MIN_AUTH_RETRIES)
+                               min_retries=min_retries or DEFAULT_MIN_AUTH_RETRIES,
+                               integrity=integrity_state)
         if descriptor is None:
             return {"outcome": OUTCOME_NOT_STALE, "sent": False, "descriptor": None}
 
@@ -813,6 +970,7 @@ def check(*, report: dict | None = None, now: _dt.datetime | None = None,
                 "kind": descriptor["kind"],
                 "commits": descriptor.get("commits"),
                 "retries": descriptor.get("retries"),
+                "findings": descriptor.get("findings"),
                 "sent_at": now.isoformat(),
                 "to": list(who["emails"]),
                 "subject": message["subject"],
@@ -835,6 +993,31 @@ def _auth_state() -> dict | None:
         return auth_health.state()
     except Exception as exc:                          # noqa: BLE001 - never fatal
         logger.warning("deploy alerts: could not read account-create retries: %s", exc)
+        return None
+
+
+def _integrity_state() -> dict | None:
+    """Run the cross-school sweep for this tick, or `None` when it cannot be run.
+
+    Fail-open like the module it reads: a sweep that cannot be run is silence, not
+    an incident, and this must never raise from inside the alert loop. The sweep
+    itself records a failed *read* rather than raising (that is its design), so the
+    only way to get `None` here is no database client at all — a box with bigger
+    problems than a missing mail.
+    """
+    from app.services import school_integrity
+
+    try:
+        from app.utils.supabase_client import get_supabase
+
+        client = get_supabase()
+    except Exception as exc:                          # noqa: BLE001 - never fatal
+        logger.warning("deploy alerts: no client for the cross-school sweep: %s", exc)
+        return None
+    try:
+        return school_integrity.cross_school_findings(client)
+    except Exception as exc:                          # noqa: BLE001 - never fatal
+        logger.warning("deploy alerts: the cross-school sweep failed: %s", exc)
         return None
 
 
@@ -996,7 +1179,8 @@ __all__ = [
     "ALERT_KINDS", "OUTCOME_SENT", "OUTCOME_NOT_STALE", "OUTCOME_ALREADY_SENT",
     "OUTCOME_NO_RECIPIENTS", "OUTCOME_SEND_FAILED", "OUTCOME_CANNOT_READ",
     "TEST_ALERT_OUTCOMES", "RECIPIENT_SOURCES", "RECIPIENTS_KEY",
-    "staleness", "auth_staleness", "alert_key", "should_send", "split_recipients",
+    "staleness", "auth_staleness", "integrity_staleness", "alert_key", "should_send",
+    "split_recipients",
     "recipients", "render_email", "check", "send_test", "summary", "state_dir",
     "start_deploy_alert_scheduler", "stop_deploy_alert_scheduler",
 ]
