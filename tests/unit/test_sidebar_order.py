@@ -32,10 +32,12 @@ BASE = (ROOT / "app" / "templates" / "base.html").read_text(encoding="utf-8")
 #: the result — the order the work actually happens.
 EXPECTED: dict[str, list[tuple[str, list[str]]]] = {
     "guru": [
-        ("Utama", ["/teacher/dashboard", "/teacher/classes", "/teacher/subjects"]),
+        ("Utama", ["/teacher/dashboard", "/teacher/classes", "/teacher/subjects",
+                   "/teacher/students", "/students/import"]),
         ("Ujian", ["/teacher/exams", "/teacher/exams/new"]),
         ("Koreksi", ["/teacher/scan", "/teacher/grading", "/teacher/ai-settings",
-                     "/teacher/retractions", "/teacher/penalty-appeals"]),
+                     "/teacher/retractions", "/teacher/invigilation",
+                     "/teacher/penalty-appeals"]),
         ("Laporan", ["/teacher/results", "/teacher/analytics", "/teacher/reports"]),
         ("Komunikasi", ["/teacher/comms"]),
         ("Alat", ["/tools/generate-answer-sheet", "/tools/device-preview"]),
@@ -46,6 +48,7 @@ EXPECTED: dict[str, list[tuple[str, list[str]]]] = {
         ("Utama", ["/admin-sekolah/dashboard", "/admin-sekolah/profile"]),
         ("Akademik", ["/admin-sekolah/school-years", "/admin-sekolah/classes",
                       "/admin-sekolah/subjects", "/admin-sekolah/promote",
+                      "/admin-sekolah/assessment-periods",
                       "/admin-sekolah/invigilation"]),
         ("Pengguna", ["/admin-sekolah/teachers", "/admin-sekolah/students",
                       "/admin-sekolah/officials"]),

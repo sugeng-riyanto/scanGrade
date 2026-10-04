@@ -96,6 +96,10 @@ MACHINE = frozenset({
     # offered to, and `.../classes/<id>/roster` hands back that class's pupils and
     # their levels — both JSON for the Subjects modal, which is where the crumb is.
     "mapping", "roster",
+    # `/student/attempt-status/<exam_id>` answers one sitting's state (status,
+    # deadline, remaining seconds) as JSON for the exam page's own timer and
+    # lock screen — a readback, never a page of its own.
+    "attempt-status",
     "members", "slides", "snapshots", "ops", "can-annotate", "sessions-data",
     "wizard-status", "check-pdf", "contacts", "task",
     "violation", "status", "transaction", "evidence", "data", "school",

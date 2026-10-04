@@ -124,6 +124,9 @@ EXEMPT = {
         "redeems a recovery code for the reader's own sitting; the sitting's own "
         "writes go through the locked submit/save doors",
     "student_bp /import/csv": "creates roster accounts from a CSV",
+    "student_bp /heartbeat/<exam_id>":
+        "records one liveness ping on a running sitting's own row; it opens no "
+        "paper and changes no mark, and a closed year's attempts are finalised",
 
     # ── admin.py: the legacy admin panel ──
     "admin_bp /teachers/<teacher_id>/delete": "an account and its roster row",
@@ -157,6 +160,11 @@ EXEMPT = {
         "which classes a subject is offered to; a mapping, not a year's marks",
     "admin_sekolah_bp /subjects/<subject_id>/levels":
         "a pupil's basic/intermediate/advanced track; a label, not a year's marks",
+    "admin_sekolah_bp /assessment-periods/save":
+        "the school's assessment calendar; a period is the subject, not the marks "
+        "inside a year",
+    "admin_sekolah_bp /assessment-periods/<period_id>/delete":
+        "removes a period the school admin created, not the marks inside a year",
     # KKM is year-scoped by *argument* (the running school year), not by a
     # resource id, so there is no id for the decorator to resolve. The service
     # asks the question itself: subject_kkm.set_kkm / clear_override call
@@ -214,6 +222,9 @@ EXEMPT = {
     "super_bp /deploy-status/release": "the runner's own release control",
     "super_bp /deploy-status/rebaseline": "the runner's own perf baseline",
     "super_bp /deploy-status/test-alert": "a test alert",
+    "super_bp /reconcile-periods":
+        "re-derives each exam's assessment-period tag against the running "
+        "calendar; it writes no mark and touches no paper's scores",
     "super_bp /reset-demo-passwords": "the demo accounts' credentials",
     "super_bp /reset-demo-data": "the demo data",
     "super_bp /demo-settings": "the demo page's switches",

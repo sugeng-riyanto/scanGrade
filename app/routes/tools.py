@@ -30,7 +30,7 @@ def staff_required(f):
 
 
 @tools_bp.route("/generate-answer-sheet", methods=["GET", "POST"])
-@login_required
+@staff_required
 def generate_answer_sheet_route():
     if request.method == "POST":
         data = request.get_json() if request.is_json else request.form.to_dict()
