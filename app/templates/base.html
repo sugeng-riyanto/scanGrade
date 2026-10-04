@@ -388,10 +388,11 @@ window.sgSavePrefs = function (patch) {
             <a href="/teacher/dashboard" class="nav-item {% if request.path == '/teacher/dashboard' %}active{% endif %}"><i class="fas fa-chart-pie"></i><span x-text="t('Dashboard','Dashboard')"></span></a>
             <a href="/teacher/classes" class="nav-item {% if request.path == '/teacher/classes' %}active{% endif %}"><i class="fas fa-school"></i><span x-text="t('Kelas &amp; Mapel Saya','My Classes &amp; Subjects')"></span></a>
             <a href="/teacher/subjects" class="nav-item {% if request.path == '/teacher/subjects' %}active{% endif %}"><i class="fas fa-book"></i><span x-text="t('Mata Pelajaran','Subjects')"></span></a>
-            {# A teacher's own pupils, and the import page beside it — both pages
-               existed with no link, so the only door was knowing the address. #}
+            {# A teacher's own pupils. The bulk import that used to sit beside it is
+               the school admin's job (`/admin-sekolah/import`) — a teacher who
+               imports a roster is editing a register they do not own, so the door
+               is not here. #}
             <a href="/teacher/students" class="nav-item {% if request.path == '/teacher/students' %}active{% endif %}"><i class="fas fa-user-graduate"></i><span x-text="t('Murid Saya','My Students')"></span></a>
-            <a href="/students/import" class="nav-item {% if request.path == '/students/import' %}active{% endif %}"><i class="fas fa-file-csv"></i><span x-text="t('Impor Murid','Import Students')"></span></a>
             <div class="nav-section-title pt-2"><span x-text="t('Ujian','Exams')"></span></div>
             <a href="/teacher/exams" class="nav-item {% if request.path == '/teacher/exams' %}active{% endif %}"><i class="fas fa-file-alt"></i><span x-text="t('Ujian Saya','My Exams')"></span></a>
             <a href="/teacher/exams/new" class="nav-item {% if request.path == '/teacher/exams/new' %}active{% endif %}"><i class="fas fa-plus-circle"></i><span x-text="t('Buat Ujian','Create Exam')"></span></a>
