@@ -150,7 +150,7 @@ def class_row(class_id, columns="name, grade_level"):
 
 
 def invalidate_class(class_id):
-    invalidate(class_key(class_id))
+    invalidate(class_key(class_id), class_subjects_key(class_id))
 
 
 def subject_count_key(school_id):
@@ -266,6 +266,58 @@ def school_subjects(school_id):
             return []
 
     return ttl(school_subjects_key(school_id), CLASS_TTL, load)
+
+
+def class_subjects_key(class_id):
+    return f"classsubjects:{class_id}"
+
+
+def closed_subjects_for_class(school_id, class_id):
+    """The subject ids this class has switched **off**.
+
+    A subject is offered by every class unless a `class_subjects` row says it is
+    not (see `subject_levels.mapped_class_ids`); this reads only the closed rows
+    for one class, so the answer is the short list of exceptions rather than a
+    count of rows.
+    """
+    if not school_id or not class_id:
+        return set()
+
+    def load():
+        from app.utils.supabase_client import get_supabase
+        try:
+            rows = (get_supabase().table("class_subjects")
+                    .select("subject_id, is_active")
+                    .eq("school_id", school_id).eq("class_id", class_id)
+                    .execute().data) or []
+            return [str(r["subject_id"]) for r in rows
+                    if r.get("subject_id") and not r.get("is_active", True)]
+        except Exception as e:
+            logger.debug("closed_subjects_for_class(%s) failed: %s", class_id, e)
+            return []
+
+    return set(ttl(class_subjects_key(class_id), CLASS_TTL, load))
+
+
+def subjects_for_class(school_id, class_id):
+    """The school's active subjects that one class actually offers.
+
+    This is the question the pupil dashboard's "Mapel" card asks: scoped to the
+    pupil's own school (NPSN) and to the class the school admin put them in. The
+    class a `class_subjects` row names already carries the school year
+    (`classes.school_year_id`, migration 046), so the pair is year-scoped by the
+    class it belongs to and needs no year of its own — which is why a pupil in a
+    past year's class is counted against that class's offering, not this year's.
+    """
+    subjects = school_subjects(school_id)
+    closed = closed_subjects_for_class(school_id, class_id)
+    if not closed:
+        return subjects
+    return [s for s in subjects if str(s.get("id")) not in closed]
+
+
+def invalidate_class_subjects(class_id):
+    invalidate(class_subjects_key(class_id))
 
 
 def teacher_assignments_key(teacher_id, school_id):

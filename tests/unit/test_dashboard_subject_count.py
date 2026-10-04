@@ -38,10 +38,34 @@ class TestTheSubjectCount:
     def test_the_dashboard_counts_subjects_not_assignment_rows(self):
         src = STUDENT_ROUTES.read_text(encoding="utf-8")
         body = src.split("def dashboard(")[1].split("\ndef ")[0]
-        assert "school_subjects(" in body, (
-            "the dashboard still counts teacher_assignments rows as if they were subjects")
+        assert "subjects_for_class(" in body, (
+            "the dashboard must count the subjects the pupil's own class offers")
         assert "school_subject_count(" not in body, (
             "the Mapel card must not use the assignment-row count")
+
+    def test_the_count_is_scoped_to_the_pupil_s_school_and_class(self):
+        """The card is the pupil's own offering: NPSN and the class the admin
+        assigned, never the school's whole list nor another NPSN's subjects."""
+        src = STUDENT_ROUTES.read_text(encoding="utf-8")
+        body = src.split("def dashboard(")[1].split("\ndef ")[0]
+        found = re.search(r"subjects_for_class\(([^)]*)\)", body)
+        assert found, "the dashboard no longer calls subjects_for_class"
+        args = found.group(1)
+        assert "student_school_id" in args and "student_class_id" in args, (
+            "the count must pass the pupil's school and class, not one of them")
+
+    def test_a_class_offering_is_the_school_s_subjects_minus_the_closed_pairs(self):
+        """A subject is offered unless a `class_subjects` row says it is not, so
+        the class list is the school's active subjects minus the closed ones."""
+        src = REQ_CACHE.read_text(encoding="utf-8")
+        body = src.split("def subjects_for_class(")[1].split("\ndef ")[0]
+        assert "school_subjects(" in body and "closed_subjects_for_class(" in body, (
+            "subjects_for_class must subtract the closed pairs from the school list")
+
+    def test_saving_the_mapping_invalidates_the_per_class_cache(self):
+        src = (ROOT / "app" / "services" / "subject_levels.py").read_text(encoding="utf-8")
+        assert "invalidate_class_subjects(" in src, (
+            "a mapping save leaves each class's cached offering stale")
 
     def test_the_assignment_count_helper_says_it_counts_assignments(self):
         """Its name says what it counts; the dashboard was the only caller that

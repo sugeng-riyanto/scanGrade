@@ -22,7 +22,7 @@ from app.services import exam_targets
 from app.services import invigilation
 from app.utils.rate_limiter import limiter
 from app.utils.req_cache import (active_whiteboards_for, class_row, memo,
-                                 school_features, school_subjects)
+                                 school_features, subjects_for_class)
 from app.decorators.year_lock import open_year_required
 
 student_bp = Blueprint("student", __name__)
@@ -268,11 +268,14 @@ def dashboard():
     if student_class_id:
         student_class = class_row(student_class_id) or None
     if student_school_id:
-        # The number of *subjects* the school offers, not the number of
-        # teacher × class × subject assignment rows: the card is labelled "Mapel",
-        # and a school with 23 subjects was being told it had 306 because the
-        # assignment table was being counted instead.
-        subject_count = len(school_subjects(student_school_id))
+        # The subjects the pupil's *own class* offers, not the school's whole
+        # list and not the teacher × class × subject assignment rows: the card is
+        # labelled "Mapel", and it is scoped to the pupil's school (NPSN) and the
+        # class the admin put them in — which already carries the school year, so
+        # a pupil in a past year's class reads against that class's offering. A
+        # school with 23 subjects and 306 assignment rows was being told it had
+        # 306; a class that offers 10 of them should read 10.
+        subject_count = len(subjects_for_class(student_school_id, student_class_id))
 
     # Active whiteboards for student's class (only if the school has it enabled).
     # The feature flag rides on the cached school row; the board list is cached
