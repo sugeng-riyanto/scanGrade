@@ -135,6 +135,10 @@ def dashboard():
     # a sentence on the page rather than a surprise. It reads nothing when there are no
     # findings, which is the ordinary case, so it is not cached.
     repair_plans = {}
+    # The quarantined rows, read back from the audit trail. The findings list cannot
+    # show them — a quarantined row is detached, so it drops out of the sweep — and the
+    # reason the operator typed lives only here, so this is also what lets them undo it.
+    quarantines = []
     try:
         from app.services import cross_school_repair
 
@@ -142,8 +146,10 @@ def dashboard():
                         for p in cross_school_repair.preview(
                             supabase, integrity.get("findings") or [])
                         if p.get("row_id")}
+        quarantines = cross_school_repair.recent_quarantines(supabase)
     except Exception:
         repair_plans = {}
+        quarantines = []
 
     # The period-reconcile button lands back here with its outcome in the query
     # string, so the operator sees the counts they just produced rather than a
@@ -166,6 +172,9 @@ def dashboard():
         repair_failed=request.args.get("failed"),
         quarantined=request.args.get("quarantined"),
         quarantine_note=request.args.get("quarantine_note"),
+        quarantines=quarantines,
+        restored=request.args.get("restored"),
+        restore_note=request.args.get("restore_note"),
     )
 
 
@@ -733,6 +742,37 @@ def integrity_quarantine():
     note = "repair_quarantined" if ok else repair.reason_key(outcome.get("reason") or "")
     return redirect(f"/super-admin/dashboard?quarantined={1 if ok else 0}"
                     f"&quarantine_note={note}")
+
+
+@super_bp.route("/integrity/restore", methods=["POST"])
+@_sa_required
+def integrity_restore():
+    """Turn a quarantined cross-school row back on — the inverse of the second door.
+
+    Quarantine detached the rows the repair door could never re-point and recorded why.
+    Until now there was no way back: turning a link on again meant SQL, and the reason
+    the operator typed was written down and never read again. This is that way back.
+
+    **The request names only *which* row.** The column and the value come from the
+    quarantine record in the audit trail, so a forged form cannot turn on a link, a
+    class, or a column of its choosing — the door only replays a detach that really
+    happened, and refuses a row with no such record. A row already back on is reported
+    as `already_restored`, never clobbered.
+    """
+    from app.services import cross_school_repair as repair
+
+    supabase = get_supabase()
+    outcome = repair.restore(supabase, request.form.get("kind", ""),
+                             request.form.get("row_id", ""), g.user_id)
+    ok = bool(outcome.get("ok"))
+    log_activity("update", "school_integrity", "restore",
+                 new_data={"ok": ok, "kind": request.form.get("kind") or "",
+                           "row_id": request.form.get("row_id") or "",
+                           "refused": None if ok else outcome.get("reason")},
+                 user_id=g.user_id)
+    note = "repair_restored" if ok else repair.reason_key(outcome.get("reason") or "")
+    return redirect(f"/super-admin/dashboard?restored={1 if ok else 0}"
+                    f"&restore_note={note}")
 
 
 @super_bp.route("/reset-demo-passwords", methods=["POST"])
