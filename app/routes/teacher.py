@@ -5402,10 +5402,11 @@ def unlock_locked_sitting(exam_id: str, student_id: str):
     **The authority is the exam set, not the role.** `_teacher_code_exam_ids` is the
     invigilated-or-owned set the recovery codes and the timeline already use, so a
     teacher who holds this route still cannot reopen a colleague's paper — the same
-    rule the retake decision follows. Three further checks are the service's, not
-    this route's: the paper must be locked, the deadline must not have passed, and
-    nothing may move the clock. A paper whose clock has ended is *finalised* instead,
-    because unlocking one would only hold the pupil out of an exam that is over.
+    rule the retake decision follows. Everything after that check is
+    `sitting_unlock.unlock_sitting`, the one implementation the officials' doors
+    share: the paper must be locked, the deadline must not have passed, and nothing
+    may move the clock. A paper whose clock has ended is *finalised* instead, because
+    unlocking one would only hold the pupil out of an exam that is over.
 
     Recorded in the activity log with the actor's id, because a manual reopen is a
     human decision about a mark and has to be answerable later.
@@ -5419,44 +5420,15 @@ def unlock_locked_sitting(exam_id: str, student_id: str):
         flash("exam_not_yours", "error")
         return redirect("/teacher/invigilation")
 
-    from app.services import attempt_status as status_service
-    from app.services import resume_code as rc
-    exam = status_service.exam_row(supabase, exam_id)
-    # The exam has to be this school's: holding a route is not authority over
-    # another school's paper, and the held set is already school-scoped but this
-    # names the reason rather than trusting the set's construction.
-    if not exam or str(exam.get("school_id") or "") != str(school_id):
-        flash("exam_not_yours", "error")
-        return redirect("/teacher/invigilation")
-
-    row = status_service.sitting_row(supabase, exam_id, student_id)
-    if row is None:
-        flash(rc.NOT_LOCKED, "error")
-        return redirect("/teacher/invigilation")
-
-    out = rc.manual_unlock(supabase, row, exam)
-    if out.get("action") == rc.FINALIZE:
-        try:
-            from app.services import deadline_service
-            deadline_service.finalize_expired(supabase, row, exam)
-        except Exception:  # noqa: BLE001 — the refusal stands even if closing fails
-            current_app.logger.exception(
-                "Could not finalise the locked sitting %s for exam %s",
-                student_id, exam_id)
-        log_activity("finalize", "submission", row.get("id"),
-                     new_data={"exam_id": exam_id, "manual": True},
-                     user_id=g.user_id)
+    from app.services import sitting_unlock
+    out = sitting_unlock.unlock_sitting(
+        supabase, school_id, exam_id, student_id, g.user_id)
+    if out.get("action") == "finalize":
         flash("submission_finalized", "info")
-        return redirect("/teacher/invigilation")
-
-    if not out.get("ok"):
+    elif out.get("ok"):
+        flash("unlock_ok", "success")
+    else:
         flash(out.get("reason") or "write_failed", "error")
-        return redirect("/teacher/invigilation")
-
-    log_activity("unlock", "submission", row.get("id"),
-                 new_data={"exam_id": exam_id, "manual": True},
-                 user_id=g.user_id)
-    flash("unlock_ok", "success")
     return redirect("/teacher/invigilation")
 
 

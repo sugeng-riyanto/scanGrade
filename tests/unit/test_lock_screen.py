@@ -34,7 +34,10 @@ from app.services import resume_code as rc
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 STUDENT = ROOT / "app" / "routes" / "student.py"
 TEACHER = ROOT / "app" / "routes" / "teacher.py"
+PRINCIPAL = ROOT / "app" / "routes" / "principal.py"
+ADMIN = ROOT / "app" / "routes" / "admin_sekolah.py"
 TEMPLATE = ROOT / "app" / "templates" / "student" / "take_exam.html"
+OFFICIAL_PAGE = ROOT / "app" / "templates" / "principal" / "invigilation.html"
 SERVICE = ROOT / "app" / "services" / "resume_code.py"
 
 
@@ -357,8 +360,11 @@ class TestTheStaffUnlockRoute:
             "the manual unlock is not gated on the invigilated-or-owned exam set, so "
             "any teacher could reopen any paper in the school")
 
-    def test_it_calls_the_manual_gate(self):
-        assert "manual_unlock(" in self._route()
+    def test_it_calls_the_shared_gate(self):
+        """`manual_unlock` still owns the rule; the route reaches it through the one
+        service every door shares, so the officials' doors cannot drift from this
+        one."""
+        assert "unlock_sitting(" in self._route()
 
 
 # ── the lock screen, driven by the server's own key ─────────────────────────
@@ -473,3 +479,144 @@ class TestTheStaffPageKnowsWhichPapersAreLocked:
             assert f"'{key}'" in notes, (
                 f"`{key}` is flashed but the page has no sentence for it, so the "
                 f"invigilator reads a raw identifier")
+
+
+# ── the officials' door: the same unlock, when no teacher is on duty ────────
+
+def _handler(source: str, route_decorator: str) -> str:
+    """A whole handler from its route decorator through the next one.
+
+    ``_route_block`` walks back only to the nearest ``@`` before the ``def``, which
+    for a route with a second decorator (`@open_year_required`) stops *after* the
+    role guard these guards are about. This starts at the route line instead, so
+    every decorator on the handler is inside the slice.
+    """
+    at = source.index(route_decorator)
+    nxt = source.find("bp.route(", at + len(route_decorator))
+    end = source.rfind("\n@", at, nxt) if nxt != -1 else len(source)
+    return source[at:end if end != -1 else len(source)]
+
+
+class TestTheOfficialUnlockDoor:
+    """A locked pupil's way back cannot depend on which official is on duty.
+
+    The teacher's door is bounded to the exams they hold. A vice principal and the
+    school admin answer for the whole school, so a school with nobody invigilating
+    that paper still needs the same door — and it has to be the *same* door
+    underneath, or one would finalise a paper past its deadline while the other
+    quietly reopened it.
+    """
+
+    def test_the_vice_principal_door_exists(self):
+        src = PRINCIPAL.read_text(encoding="utf-8")
+        assert re.search(
+            r'@principal_bp\.route\(\s*"/vice-principal/locked/'
+            r'<exam_id>/<student_id>/unlock",\s*methods=\["POST"\]\)', src), (
+            "a vice principal cannot reopen a locked sitting")
+
+    def test_it_requires_the_vice_principal_role(self):
+        block = _handler(PRINCIPAL.read_text(encoding="utf-8"),
+                         '@principal_bp.route("/vice-principal/locked/')
+        assert "@vice_principal_required" in block, (
+            "the officials' unlock is guarded by the wrong role")
+
+    def test_the_admin_door_exists(self):
+        src = ADMIN.read_text(encoding="utf-8")
+        assert re.search(
+            r'@admin_sekolah_bp\.route\(\s*"/locked/<exam_id>/<student_id>/unlock",'
+            r'\s*methods=\["POST"\]\)', src), (
+            "a school admin cannot reopen a locked sitting")
+
+    def test_the_admin_door_requires_the_admin_role(self):
+        block = _handler(ADMIN.read_text(encoding="utf-8"),
+                         '@admin_sekolah_bp.route("/locked/<exam_id>/<student_id>/unlock"')
+        assert "@admin_sekolah_required" in block
+
+    def test_both_officials_call_the_same_service(self):
+        for path, marker in (
+                (PRINCIPAL, '@principal_bp.route("/vice-principal/locked/'),
+                (ADMIN, '@admin_sekolah_bp.route("/locked/<exam_id>/<student_id>/unlock"')):
+            block = _handler(path.read_text(encoding="utf-8"), marker)
+            assert "unlock_sitting(" in block, (
+                f"{path.name}: the officials' unlock does not call the shared "
+                f"service, so its rules can drift from the teacher's")
+
+    def test_the_school_is_the_sessions_never_the_requests(self):
+        block = _handler(ADMIN.read_text(encoding="utf-8"),
+                         '@admin_sekolah_bp.route("/locked/<exam_id>/<student_id>/unlock"')
+        assert "_school_id()" in block, (
+            "the admin unlock does not take the school from the session")
+
+    def test_the_official_page_draws_the_unlock_button(self):
+        src = OFFICIAL_PAGE.read_text(encoding="utf-8")
+        assert "{{ invigilation_base }}/locked/" in src and "unlock" in src, (
+            "the officials' codes table has no way to act on a locked sitting")
+        assert "c.is_locked" in src, (
+            "the officials' unlock button is not gated on the sitting being locked")
+        assert "can_write" in src, (
+            "the read-only head-of-school page would draw a button it cannot post")
+
+
+class TestTheSharedManualUnlock:
+    """One implementation behind every door — proven against the fake PostgREST.
+
+    What these pin is the part that must not differ between callers: the school
+    check, the "not locked is not a recovery" rule, the clock that never moves, and
+    a paper whose clock ended being finalised rather than reopened.
+    """
+
+    def _db(self, *, exam_school="sch-1", status="locked_pending_resume",
+            started_at=None):
+        started = started_at or _now()
+        return _DB(
+            exams=[_exam(id="exam-1", school_id=exam_school, duration_minutes=60)],
+            submissions=[_row(started, id="sub-1", status=status)],
+        )
+
+    def _quiet(self, monkeypatch):
+        """Silence the audit trail: it needs an app context the fake db has not."""
+        from app.services import sitting_unlock
+        monkeypatch.setattr(sitting_unlock, "log_activity",
+                            lambda *a, **k: None, raising=False)
+
+    def test_it_reopens_a_locked_sitting(self, monkeypatch):
+        self._quiet(monkeypatch)
+        from app.services import sitting_unlock
+        db = self._db()
+        out = sitting_unlock.unlock_sitting(db, "sch-1", "exam-1", "stu-1", "staff-1")
+        assert out["ok"] and out["action"] == "unlocked"
+        assert db.tables["submissions"][0]["status"] == "draft"
+
+    def test_it_moves_no_clock_column(self, monkeypatch):
+        self._quiet(monkeypatch)
+        from app.services import sitting_unlock
+        db = self._db()
+        sitting_unlock.unlock_sitting(db, "sch-1", "exam-1", "stu-1", "staff-1")
+        for column in ("started_at", "end_at", "submitted_at"):
+            assert all(column not in payload for payload in _written(db)), (
+                f"the officials' unlock wrote `{column}`; reopening is never a way "
+                f"to buy time")
+
+    def test_it_refuses_another_schools_exam(self, monkeypatch):
+        self._quiet(monkeypatch)
+        from app.services import sitting_unlock
+        db = self._db(exam_school="sch-2")
+        out = sitting_unlock.unlock_sitting(db, "sch-1", "exam-1", "stu-1", "staff-1")
+        assert out["ok"] is False and out["reason"] == "exam_not_in_school"
+        assert _written(db) == [], "a foreign exam was reopened anyway"
+
+    def test_a_sitting_that_is_not_locked_is_not_a_recovery(self, monkeypatch):
+        self._quiet(monkeypatch)
+        from app.services import sitting_unlock
+        db = self._db(status="draft")
+        out = sitting_unlock.unlock_sitting(db, "sch-1", "exam-1", "stu-1", "staff-1")
+        assert out["ok"] is False and out["reason"] == rc.NOT_LOCKED
+
+    def test_past_the_deadline_it_finalises_not_reopens(self, monkeypatch):
+        self._quiet(monkeypatch)
+        from app.services import sitting_unlock
+        db = self._db(started_at=_now() - timedelta(minutes=90))
+        out = sitting_unlock.unlock_sitting(db, "sch-1", "exam-1", "stu-1", "staff-1")
+        assert out["action"] == "finalize" and out["reason"] == "submission_finalized"
+        assert db.tables["submissions"][0]["status"] != "draft", (
+            "a paper whose clock ended was reopened instead of finalised")

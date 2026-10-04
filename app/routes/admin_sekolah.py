@@ -31,6 +31,7 @@ from app.services import analysis_scope
 from app.services import attempt_timeline
 from app.services import exam_codes
 from app.services import invigilation
+from app.services import sitting_unlock
 from app.services import login_cards
 from app.services import account_emails
 from app.services import enrollment
@@ -3760,6 +3761,33 @@ def invigilation_unassign(assignment_id: str):
         return redirect("/auth/login")
     _invigilation_refused(invigilation.remove_assignment(
         get_supabase(), sid, assignment_id))
+    return redirect("/admin-sekolah/invigilation")
+
+
+@admin_sekolah_bp.route("/locked/<exam_id>/<student_id>/unlock", methods=["POST"])
+@admin_sekolah_required
+@open_year_required("exam_id")
+def unlock_locked_sitting(exam_id: str, student_id: str):
+    """Let a locked pupil back in as the school's own authority.
+
+    A school without a vice principal must still be able to reopen a sitting — the
+    same reason the admin gained the invigilation matrix. The school comes from the
+    session (`_school_id()`), never the form, and everything after that is
+    `sitting_unlock.unlock_sitting`, the one implementation every door shares: the
+    paper must be this school's and locked, the deadline must not have passed, and
+    nothing moves the clock. A paper whose clock has ended is finalised instead.
+    """
+    sid = _school_id()
+    if not sid:
+        return redirect("/auth/login")
+    out = sitting_unlock.unlock_sitting(
+        get_supabase(), sid, exam_id, student_id, g.get("user_id"))
+    if out.get("action") == "finalize":
+        flash("submission_finalized", "info")
+    elif out.get("ok"):
+        flash("unlock_ok", "success")
+    else:
+        flash(out.get("reason") or "write_failed", "error")
     return redirect("/admin-sekolah/invigilation")
 
 
