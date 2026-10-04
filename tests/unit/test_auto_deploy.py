@@ -25,6 +25,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.unit.git_env import git_env
+
 ROOT = Path(__file__).resolve().parents[2]
 DEPLOY = ROOT / "deploy"
 
@@ -648,11 +650,12 @@ def test_smoke_config_is_not_in_the_repo():
     """It holds passwords; it must stay out of git forever."""
     tracked = subprocess.run(
         ["git", "ls-files", "--error-unmatch", "scangrade-smoke.conf"],
-        cwd=ROOT, capture_output=True, text=True,
+        cwd=ROOT, capture_output=True, text=True, env=git_env(),
     )
     assert tracked.returncode != 0
     for line in subprocess.run(["git", "ls-files"], cwd=ROOT,
-                               capture_output=True, text=True).stdout.splitlines():
+                               capture_output=True, text=True,
+                               env=git_env()).stdout.splitlines():
         # The two files that legitimately carry the word in their names: the gate's
         # own script, and the suite that reads these paths.
         if line.endswith("smoke_test.py") or line.endswith("test_auto_deploy.py"):

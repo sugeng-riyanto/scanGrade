@@ -59,6 +59,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.unit.git_env import git_env
+
 ROOT = Path(__file__).resolve().parents[2]
 DEPLOY_SH = ROOT / "deploy" / "scangrade-deploy.sh"
 BASH = shutil.which("bash")
@@ -93,7 +95,7 @@ def _git(repo: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["git", "-C", str(repo), "-c", "user.email=t@example.com",
          "-c", "user.name=t", *args],
-        capture_output=True, text=True, check=False)
+        capture_output=True, text=True, check=False, env=git_env())
 
 
 def _repo(tmp_path: Path) -> Path:
@@ -103,7 +105,8 @@ def _repo(tmp_path: Path) -> Path:
     (repo / "app" / "routes" / "admin_sekolah.py").write_text("the release's line\n",
                                                               encoding="utf-8")
     (repo / "README.md").write_text("readme\n", encoding="utf-8")
-    subprocess.run(["git", "init", "-q", str(repo)], capture_output=True, text=True)
+    subprocess.run(["git", "init", "-q", str(repo)], capture_output=True, text=True,
+                   env=git_env())
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "-m", "init")
     return repo
@@ -573,7 +576,7 @@ def _plant_blob(repo: Path, raw: bytes, rel: str = TARGET) -> bytes:
         "git update-index refused the planted blob"
     assert _git(repo, "commit", "-q", "-m", "the blob a box is stuck on").returncode == 0
     return subprocess.run(["git", "-C", str(repo), "cat-file", "blob", f"HEAD:{rel}"],
-                          capture_output=True).stdout
+                          capture_output=True, env=git_env()).stdout
 
 
 def _new_record(state: Path, before: set[Path]) -> Path:

@@ -34,7 +34,6 @@ checker that cannot see must never be the reason a release is refused.
 """
 from __future__ import annotations
 
-import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -56,25 +55,11 @@ SOURCE_SUFFIXES = {".py", ".html", ".css", ".js", ".json", ".svg"}
 EXTRA_SOURCES = ("tailwind.config.js", "package.json")
 
 
-#: The variables git exports to a hook so that a `git` a hook spawns resolves the
-#: repository the hook is for. A subprocess that inherits them ignores its own
-#: ``cwd``: measured, a linked worktree hands the pre-commit hook an ABSOLUTE
-#: ``GIT_DIR`` and ``GIT_INDEX_FILE`` (``…/.git/worktrees/<name>/index``), so a
-#: scratch ``git add`` in a ``tmp_path`` repo wrote its fixtures into THIS checkout's
-#: index — which then failed the very gate that had just run this file. Cleared for
-#: every ``git`` spawned here so each resolves a repository from ``cwd``, the only
-#: thing the caller meant.
-_GIT_REPO_ENV = ("GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE", "GIT_PREFIX",
-                 "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY",
-                 "GIT_ALTERNATE_OBJECT_DIRECTORIES")
-
-
-def _git_env() -> dict:
-    """The environment for a spawned `git`, minus any inherited repo selection."""
-    env = dict(os.environ)
-    for name in _GIT_REPO_ENV:
-        env.pop(name, None)
-    return env
+#: The scrub lives in one place now — `tests/unit/git_env.py` — because every test
+#: that spawns `git` needs it and a second copy is how one of them would stop
+#: covering a variable Git adds. Re-exported under the names this file already
+#: used so its call sites did not have to move.
+from tests.unit.git_env import GIT_REPO_ENV as _GIT_REPO_ENV, git_env as _git_env  # noqa: E402
 
 
 def _git(*args: str, cwd: Path) -> subprocess.CompletedProcess:

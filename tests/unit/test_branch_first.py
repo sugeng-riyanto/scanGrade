@@ -35,6 +35,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.unit.git_env import git_env
+
 ROOT = Path(__file__).resolve().parents[2]
 RUNNER = ROOT / "deploy" / "scangrade-deploy.sh"
 
@@ -73,7 +75,7 @@ def _block(name: str) -> str:
 
 def _git(cwd: Path, *args: str) -> None:
     subprocess.run(["git", "-C", str(cwd), *args], check=True,
-                   capture_output=True, text=True)
+                   capture_output=True, text=True, env=git_env())
 
 
 # ── where the read sits, and what it may not do ──────────────────────────────
@@ -174,7 +176,8 @@ def _sandbox(tmp_path: Path, *, lever_body: str):
     """A bare origin and a clone of it, with the lever on the branch."""
     origin = tmp_path / "origin.git"
     subprocess.run(["git", "-c", "init.defaultBranch=main", "init", "-q", "--bare",
-                    str(origin)], check=True, capture_output=True, text=True)
+                    str(origin)], check=True, capture_output=True, text=True,
+                   env=git_env())
     seed = tmp_path / "seed"
     (seed / "deploy").mkdir(parents=True)
     (seed / "deploy" / "scangrade-recover.sh").write_text("#!/usr/bin/env bash\n# old\n",
@@ -182,7 +185,7 @@ def _sandbox(tmp_path: Path, *, lever_body: str):
     (seed / "deploy" / "entrypoint.sh").write_text("#!/bin/sh\nREPO=\"@REPO@\"\n",
                                                    encoding="utf-8")
     subprocess.run(["git", "-c", "init.defaultBranch=main", "init", "-q", str(seed)],
-                   check=True, capture_output=True, text=True)
+                   check=True, capture_output=True, text=True, env=git_env())
     _git(seed, "add", "-A")
     _git(seed, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "old")
     _git(seed, "remote", "add", "origin", str(origin))
@@ -190,7 +193,7 @@ def _sandbox(tmp_path: Path, *, lever_body: str):
 
     checkout = tmp_path / "checkout"
     subprocess.run(["git", "clone", "-q", str(origin), str(checkout)],
-                   check=True, capture_output=True, text=True)
+                   check=True, capture_output=True, text=True, env=git_env())
     return origin, seed, checkout
 
 
@@ -200,7 +203,7 @@ def test_it_fetches_and_installs_the_lever_from_a_dirty_checkout(tmp_path):
     _origin, seed, checkout = _sandbox(tmp_path, lever_body="")
     (checkout / "somebody-was-editing.txt").write_text("hand edit\n", encoding="utf-8")
     assert subprocess.run(["git", "-C", str(checkout), "status", "--porcelain"],
-                          capture_output=True, text=True).stdout.strip(), \
+                          capture_output=True, text=True, env=git_env()).stdout.strip(), \
         "the harness is not in the dirty state the test is about"
 
     # The lever changes on the branch *after* this box last fetched.
@@ -216,9 +219,9 @@ def test_it_fetches_and_installs_the_lever_from_a_dirty_checkout(tmp_path):
     assert done.returncode == 0, done.stderr
     assert "DONE" in done.stdout, done.stdout
     fetched = subprocess.run(["git", "-C", str(checkout), "rev-parse", "origin/main"],
-                             capture_output=True, text=True).stdout.strip()
+                             capture_output=True, text=True, env=git_env()).stdout.strip()
     branch = subprocess.run(["git", "-C", str(seed), "rev-parse", "main"],
-                            capture_output=True, text=True).stdout.strip()
+                            capture_output=True, text=True, env=git_env()).stdout.strip()
     assert fetched == branch, "the branch was not read — origin/main did not move"
     installed = lever_dir / "deploy" / "scangrade-recover.sh"
     assert installed.is_file(), (

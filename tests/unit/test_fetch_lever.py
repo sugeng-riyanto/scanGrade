@@ -42,6 +42,8 @@ import subprocess
 
 import pytest
 
+from tests.unit.git_env import git_env
+
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 RUNNER = ROOT / "deploy" / "scangrade-deploy.sh"
 ENTRYPOINT = ROOT / "deploy" / "entrypoint.sh"
@@ -97,14 +99,14 @@ def _git(repo: pathlib.Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["git", "-C", str(repo), "-c", "user.email=t@example.com",
          "-c", "user.name=t", *args],
-        capture_output=True, text=True, check=False)
+        capture_output=True, text=True, check=False, env=git_env())
 
 
 def _bare_git(cwd: pathlib.Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["git", "-C", str(cwd), "-c", "user.email=t@example.com",
          "-c", "user.name=t", *args],
-        capture_output=True, text=True, check=False)
+        capture_output=True, text=True, check=False, env=git_env())
 
 
 class Box:
@@ -124,11 +126,11 @@ class Box:
         (self.repo / "app" / "routes" / "admin_sekolah.py").write_text(
             "the release's line\n", encoding="utf-8")
         subprocess.run(["git", "init", "-q", "-b", "main", str(self.repo)],
-                       capture_output=True, text=True)
+                       capture_output=True, text=True, env=git_env())
         _git(self.repo, "add", "-A")
         _git(self.repo, "commit", "-q", "-m", "init")
         subprocess.run(["git", "init", "-q", "--bare", str(self.origin)],
-                       capture_output=True, text=True)
+                       capture_output=True, text=True, env=git_env())
         _git(self.repo, "remote", "add", "origin", str(self.origin))
         _git(self.repo, "push", "-q", "-u", "origin", "main")
 
@@ -137,7 +139,7 @@ class Box:
         """A commit on origin carrying the lever the checkout cannot have."""
         if not self.stage.exists():
             subprocess.run(["git", "clone", "-q", str(self.origin), str(self.stage)],
-                           capture_output=True, text=True)
+                           capture_output=True, text=True, env=git_env())
         (self.stage / "deploy").mkdir(parents=True, exist_ok=True)
         (self.stage / "deploy" / "scangrade-recover.sh").write_text(
             lever, encoding="utf-8", newline="\n")

@@ -46,6 +46,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.unit.git_env import git_env
+
 ROOT = Path(__file__).resolve().parents[2]
 RUNNER = ROOT / "deploy" / "scangrade-deploy.sh"
 PLAN = ROOT / "deploy" / "control" / "plan"
@@ -193,26 +195,28 @@ def _sandbox(tmp_path: Path, plan: str, *, runner: str = "#!/usr/bin/env bash\n#
     """A bare origin and a clone, with `plan` (and optionally a runner) on the branch."""
     origin = tmp_path / "origin.git"
     subprocess.run(["git", *_NO_CRLF, "-c", "init.defaultBranch=main", "init", "-q",
-                    "--bare", str(origin)], check=True, capture_output=True, text=True)
+                    "--bare", str(origin)], check=True, capture_output=True, text=True,
+                   env=git_env())
     seed = tmp_path / "seed"
     (seed / "deploy" / "control").mkdir(parents=True)
     (seed / "deploy" / "scangrade-deploy.sh").write_text(runner, encoding="utf-8",
                                                           newline="")
     (seed / "deploy" / "control" / "plan").write_text(plan, encoding="utf-8", newline="")
     subprocess.run(["git", *_NO_CRLF, "-c", "init.defaultBranch=main", "init", "-q",
-                    str(seed)], check=True, capture_output=True, text=True)
+                    str(seed)], check=True, capture_output=True, text=True,
+                   env=git_env())
     subprocess.run(["git", "-C", str(seed), *_NO_CRLF, "add", "-A"], check=True,
-                   capture_output=True, text=True)
+                   capture_output=True, text=True, env=git_env())
     subprocess.run(["git", "-C", str(seed), *_NO_CRLF, "-c", "user.email=t@t",
                     "-c", "user.name=t", "commit", "-q", "-m", "seed"], check=True,
-                   capture_output=True, text=True)
+                   capture_output=True, text=True, env=git_env())
     subprocess.run(["git", "-C", str(seed), "remote", "add", "origin", str(origin)],
-                   check=True, capture_output=True, text=True)
+                   check=True, capture_output=True, text=True, env=git_env())
     subprocess.run(["git", "-C", str(seed), "push", "-q", "-u", "origin", "main"],
-                   check=True, capture_output=True, text=True)
+                   check=True, capture_output=True, text=True, env=git_env())
     checkout = tmp_path / "checkout"
     subprocess.run(["git", *_NO_CRLF, "clone", "-q", str(origin), str(checkout)],
-                   check=True, capture_output=True, text=True)
+                   check=True, capture_output=True, text=True, env=git_env())
     return seed, checkout
 
 
@@ -332,7 +336,7 @@ class TestTheCommands:
                       "-m", "reissue"),
                      ("push", "-q", "origin", "main")):
             subprocess.run(["git", "-C", str(seed), *args], check=True,
-                           capture_output=True, text=True)
+                           capture_output=True, text=True, env=git_env())
 
         second = _run(_harness(checkout, state), tmp_path)
         assert (state / "requests" / "release").exists(), (
@@ -461,7 +465,8 @@ class TestAdoptingTheBranchesRunner:
         adopted.write_text("#!/usr/bin/env bash\n# origin/main's runner\n",
                            encoding="utf-8", newline="")
         blob = subprocess.run(["git", "hash-object", "--no-filters", str(adopted)],
-                              capture_output=True, text=True, check=True).stdout.strip()
+                              capture_output=True, text=True, check=True,
+                              env=git_env()).stdout.strip()
 
         # `RUNNER_SELF` is the adopted copy, because that is what the running
         # process *is* after the handover: `exec bash $target` makes it `$0`.

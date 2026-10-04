@@ -33,6 +33,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from app.services import deploy_status_service as status  # noqa: E402
+from tests.unit.git_env import git_env  # noqa: E402
 
 RUNNER = ROOT / "deploy" / "scangrade-deploy.sh"
 ENTRYPOINT = ROOT / "deploy" / "entrypoint.sh"
@@ -54,7 +55,8 @@ def _render(text: str, repo: Path) -> str:
 
 
 def _git(*args, cwd):
-    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
+    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True,
+                          env=git_env())
 
 
 def checkout(tmp_path: Path, *, commit: bool = True) -> Path:
@@ -264,7 +266,7 @@ class TestWhatIsInstalled:
         # the bytes, so the fixture has to hand the reader the same ones.
         blob = subprocess.run(
             ["git", "cat-file", "blob", "HEAD~1:deploy/scangrade-deploy.sh"],
-            cwd=repo, capture_output=True).stdout
+            cwd=repo, capture_output=True, env=git_env()).stdout
         assert blob
         source = tmp_path / "installed-snapshot"
         source.write_bytes(blob)
@@ -559,7 +561,7 @@ class TestWhatItAddsUpTo:
         source = tmp_path / "installed-snapshot"
         source.write_bytes(subprocess.run(
             ["git", "cat-file", "blob", "HEAD~1:deploy/scangrade-deploy.sh"],
-            cwd=repo, capture_output=True).stdout)
+            cwd=repo, capture_output=True, env=git_env()).stdout)
         report = status.report(
             repo=repo, runner=install_from(tmp_path, "scangrade-deploy", source),
             snapshot_runner=install(tmp_path, "snap", launcher_for(repo)),
@@ -845,7 +847,7 @@ class TestThePage:
         source = tmp_path / "installed-snapshot"
         source.write_bytes(subprocess.run(
             ["git", "cat-file", "blob", "HEAD~1:deploy/scangrade-deploy.sh"],
-            cwd=repo, capture_output=True).stdout)
+            cwd=repo, capture_output=True, env=git_env()).stdout)
         report = status.report(
             repo=repo, runner=install_from(tmp_path, "scangrade-deploy", source),
             snapshot_runner=install(tmp_path, "snap", launcher_for(repo)),

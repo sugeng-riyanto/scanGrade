@@ -29,6 +29,8 @@ import sys
 
 import pytest
 
+from tests.unit.git_env import git_env
+
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 TOOL = ROOT / "deploy" / "stage_feature.py"
 GIT = shutil.which("git")
@@ -60,13 +62,14 @@ def _git(repo: pathlib.Path, *args: str):
     return subprocess.run(
         ["git", "-C", str(repo), "-c", "user.email=t@example.com",
          "-c", "user.name=t", *args],
-        capture_output=True, check=False)
+        capture_output=True, check=False, env=git_env())
 
 
 def _repo(tmp_path: pathlib.Path, shared: str) -> pathlib.Path:
     repo = tmp_path / "repo"
     repo.mkdir()
-    subprocess.run(["git", "init", "-q", str(repo)], capture_output=True, check=False)
+    subprocess.run(["git", "init", "-q", str(repo)], capture_output=True, check=False,
+                   env=git_env())
     _git(repo, "config", "core.autocrlf", "false")
     (repo / "NOTES.md").write_text(shared, encoding="utf-8", newline="\n")
     _git(repo, "add", "-A")

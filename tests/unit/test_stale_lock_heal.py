@@ -37,6 +37,7 @@ from pathlib import Path
 import pytest
 
 from app.services import deploy_status_service as status
+from tests.unit.git_env import git_env
 
 ROOT = Path(__file__).resolve().parents[2]
 RUNNER = ROOT / "deploy" / "scangrade-deploy.sh"
@@ -68,7 +69,8 @@ def _block() -> str:
 
 
 def _git(*args: str, cwd: Path) -> subprocess.CompletedProcess:
-    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
+    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True,
+                          env=git_env())
 
 
 # ── the block on its own ─────────────────────────────────────────────────────

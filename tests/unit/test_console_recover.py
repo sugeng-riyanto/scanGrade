@@ -29,6 +29,8 @@ import subprocess
 
 import pytest
 
+from tests.unit.git_env import git_env
+
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 DOC = ROOT / "docs" / "AUTO_DEPLOY.md"
 RECOVER = ROOT / "deploy" / "scangrade-recover.sh"
@@ -62,7 +64,7 @@ def _git(repo: pathlib.Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["git", "-C", str(repo), "-c", "user.email=t@example.com",
          "-c", "user.name=t", *args],
-        capture_output=True, text=True, check=False)
+        capture_output=True, text=True, check=False, env=git_env())
 
 
 def _repo(tmp_path: pathlib.Path) -> pathlib.Path:
@@ -71,7 +73,8 @@ def _repo(tmp_path: pathlib.Path) -> pathlib.Path:
     (repo / "app" / "routes").mkdir(parents=True)
     (repo / "app" / "routes" / "admin_sekolah.py").write_text(
         "the release's line\n", encoding="utf-8")
-    subprocess.run(["git", "init", "-q", str(repo)], capture_output=True, text=True)
+    subprocess.run(["git", "init", "-q", str(repo)], capture_output=True, text=True,
+                   env=git_env())
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "-m", "init")
     return repo
@@ -246,12 +249,13 @@ def _plant_blob(repo: pathlib.Path, raw: bytes, rel: str = TARGET) -> bytes:
     path = repo / rel
     path.write_bytes(raw)
     blob = subprocess.run(["git", "-C", str(repo), "hash-object", "-w", "--no-filters",
-                           str(path)], capture_output=True, text=True).stdout.strip()
+                           str(path)], capture_output=True, text=True,
+                          env=git_env()).stdout.strip()
     assert blob, "git hash-object produced no blob"
     assert _git(repo, "update-index", "--cacheinfo", f"100644,{blob},{rel}").returncode == 0
     assert _git(repo, "commit", "-q", "-m", "the blob a box is stuck on").returncode == 0
     return subprocess.run(["git", "-C", str(repo), "cat-file", "blob", f"HEAD:{rel}"],
-                          capture_output=True).stdout
+                          capture_output=True, env=git_env()).stdout
 
 
 def test_a_blob_a_checkout_cannot_reproduce_is_restored_from_head(tmp_path):
@@ -788,19 +792,20 @@ def _seed_origin(tmp_path: pathlib.Path):
     """
     origin = tmp_path / "origin.git"
     subprocess.run(["git", "-c", "init.defaultBranch=main", "init", "-q", "--bare",
-                    str(origin)], capture_output=True, text=True, check=True)
+                    str(origin)], capture_output=True, text=True, check=True,
+                   env=git_env())
     seed = tmp_path / "seed"
     seed.mkdir()
     (seed / "README").write_text("the release's line\n", encoding="utf-8")
     subprocess.run(["git", "-c", "init.defaultBranch=main", "init", "-q", str(seed)],
-                   capture_output=True, text=True, check=True)
+                   capture_output=True, text=True, check=True, env=git_env())
     _git(seed, "add", "-A")
     _git(seed, "commit", "-q", "-m", "before the lever")
     _git(seed, "remote", "add", "origin", str(origin))
     _git(seed, "push", "-q", "-u", "origin", "main")
     checkout = tmp_path / "checkout"
     subprocess.run(["git", "clone", "-q", str(origin), str(checkout)],
-                   capture_output=True, text=True, check=True)
+                   capture_output=True, text=True, check=True, env=git_env())
     return origin, seed, checkout
 
 
@@ -1006,7 +1011,8 @@ class TestTheLeverCanBeReadOutOfTheFetchedCommit:
         line = _line_as_this_box_would_run_it(checkout, out)
         stale = subprocess.run(["git", "-C", str(checkout), "show",
                                 "origin/main:deploy/scangrade-recover.sh"],
-                               capture_output=True, text=True, check=False)
+                               capture_output=True, text=True, check=False,
+                               env=git_env())
         assert stale.returncode != 0, (
             "the harness is not in the pre-lever state the test is about")
         # The lever appears on the origin *after* this box last fetched — which is

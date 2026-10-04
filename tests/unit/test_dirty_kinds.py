@@ -48,6 +48,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from app.services import deploy_status_service as status  # noqa: E402
+from tests.unit.git_env import git_env  # noqa: E402
 
 TEMPLATE = ROOT / "app" / "templates" / "super_admin" / "deploy_status.html"
 GIT = shutil.which("git")
@@ -59,7 +60,7 @@ def _git(repo: Path, *args: str, data: bytes | None = None) -> subprocess.Comple
     return subprocess.run(
         ["git", "-C", str(repo), "-c", "user.email=t@example.com",
          "-c", "user.name=t", *args],
-        input=data, capture_output=True, check=False)
+        input=data, capture_output=True, check=False, env=git_env())
 
 
 def _repo(tmp_path: Path) -> Path:
@@ -69,7 +70,8 @@ def _repo(tmp_path: Path) -> Path:
     (repo / ".gitattributes").write_text("*.py text eol=lf\n", encoding="utf-8")
     (repo / "app" / "clean.py").write_text("x = 1\n", encoding="utf-8")
     (repo / "app" / "added.py").write_text("new = True\n", encoding="utf-8")
-    subprocess.run(["git", "init", "-q", str(repo)], capture_output=True, check=False)
+    subprocess.run(["git", "init", "-q", str(repo)], capture_output=True, check=False,
+                   env=git_env())
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "-m", "init")
     return repo
