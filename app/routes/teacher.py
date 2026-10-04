@@ -1224,6 +1224,17 @@ def exam_form():
     block_right_click = request.form.get("block_right_click") == "true"
     block_screenshot = request.form.get("block_screenshot", "false") == "true"
     allow_calculator = request.form.get("allow_calculator", "false") == "true"
+    # The lock-on-violation settings the builder now exposes. `lock_pending_resume`
+    # is the opt-in `resume_code.decide` reads; `resume_code_limit` is copied onto
+    # the sitting when it opens. 0 means "never unlock automatically — send the
+    # pupil to their teacher", and the cap keeps a fat-fingered number out of the
+    # column.
+    lock_pending_resume = request.form.get("lock_pending_resume") == "true"
+    try:
+        resume_code_limit = int(request.form.get("resume_code_limit", 2))
+    except (TypeError, ValueError):
+        resume_code_limit = 2
+    resume_code_limit = max(0, min(10, resume_code_limit))
     for i in range(total_questions):
         qtype = question_types.get(str(i))
         # A canvas overlay is for a question the student answers by writing on the
@@ -1277,11 +1288,13 @@ def exam_form():
         "block_right_click": block_right_click,
         "block_screenshot": block_screenshot,
         "allow_calculator": allow_calculator,
+        "lock_pending_resume": lock_pending_resume,
+        "resume_code_limit": resume_code_limit,
     }
     try:
         res = supabase.table("exams").insert(data).execute()
     except Exception:
-        for key in ["question_weights", "question_texts", "anti_cheat_enabled", "penalty_per_violation", "max_violations", "auto_submit_on_max", "fullscreen_required", "randomize_questions", "randomize_options", "watermark_name", "block_copy_paste", "block_right_click", "block_screenshot", "allow_calculator", "subject_id", "class_ids", "start_at", "end_at", "assessment_period_id", "auto_submit_on_window_end", "is_template", "source_exam_id", "max_attempts", "publish_mode", "question_pages", "question_cognitive"]:
+        for key in ["question_weights", "question_texts", "anti_cheat_enabled", "penalty_per_violation", "max_violations", "auto_submit_on_max", "fullscreen_required", "randomize_questions", "randomize_options", "watermark_name", "block_copy_paste", "block_right_click", "block_screenshot", "allow_calculator", "lock_pending_resume", "resume_code_limit", "subject_id", "class_ids", "start_at", "end_at", "assessment_period_id", "auto_submit_on_window_end", "is_template", "source_exam_id", "max_attempts", "publish_mode", "question_pages", "question_cognitive"]:
             data.pop(key, None)
         res = supabase.table("exams").insert(data).execute()
     exam_id = res.data[0]["id"]
@@ -1539,6 +1552,17 @@ def exam_detail(exam_id):
     block_right_click = request.form.get("block_right_click") == "true"
     block_screenshot = request.form.get("block_screenshot", "false") == "true"
     allow_calculator = request.form.get("allow_calculator", "false") == "true"
+    # The lock-on-violation settings the builder now exposes. `lock_pending_resume`
+    # is the opt-in `resume_code.decide` reads; `resume_code_limit` is copied onto
+    # the sitting when it opens. 0 means "never unlock automatically — send the
+    # pupil to their teacher", and the cap keeps a fat-fingered number out of the
+    # column.
+    lock_pending_resume = request.form.get("lock_pending_resume") == "true"
+    try:
+        resume_code_limit = int(request.form.get("resume_code_limit", 2))
+    except (TypeError, ValueError):
+        resume_code_limit = 2
+    resume_code_limit = max(0, min(10, resume_code_limit))
     for i in range(total_questions):
         qtype = question_types.get(str(i))
         # A canvas overlay is for a question the student answers by writing on the
@@ -1598,11 +1622,13 @@ def exam_detail(exam_id):
         "block_right_click": block_right_click,
         "block_screenshot": block_screenshot,
         "allow_calculator": allow_calculator,
+        "lock_pending_resume": lock_pending_resume,
+        "resume_code_limit": resume_code_limit,
     }
     try:
         supabase.table("exams").update(data).eq("id", exam_id).execute()
     except Exception:
-        for key in ["question_weights", "question_texts", "anti_cheat_enabled", "penalty_per_violation", "max_violations", "auto_submit_on_max", "fullscreen_required", "randomize_questions", "randomize_options", "watermark_name", "block_copy_paste", "block_right_click", "block_screenshot", "allow_calculator", "subject_id", "class_ids", "start_at", "end_at", "assessment_period_id", "auto_submit_on_window_end", "is_template", "source_exam_id", "max_attempts", "publish_mode", "question_pages", "question_cognitive"]:
+        for key in ["question_weights", "question_texts", "anti_cheat_enabled", "penalty_per_violation", "max_violations", "auto_submit_on_max", "fullscreen_required", "randomize_questions", "randomize_options", "watermark_name", "block_copy_paste", "block_right_click", "block_screenshot", "allow_calculator", "lock_pending_resume", "resume_code_limit", "subject_id", "class_ids", "start_at", "end_at", "assessment_period_id", "auto_submit_on_window_end", "is_template", "source_exam_id", "max_attempts", "publish_mode", "question_pages", "question_cognitive"]:
             data.pop(key, None)
         supabase.table("exams").update(data).eq("id", exam_id).execute()
 
@@ -5089,6 +5115,78 @@ def invigilation_duties():
                            requests=board["pending_requests"],
                            codes=codes,
                            timelines=timelines)
+
+
+@teacher_bp.route("/exams/<exam_id>/locked/<student_id>/unlock", methods=["POST"])
+@teacher_required
+def unlock_locked_sitting(exam_id: str, student_id: str):
+    """Let a locked pupil back into a paper this teacher holds — with no code asked.
+
+    The pupil-side door is `/student/exams/<id>/resume`, and it is the one a pupil
+    uses while the code still has allowance. This is the other half of the same
+    policy, for the two cases the code cannot cover: a school that set the
+    allowance to 0 (the exam form documents that as "hand the pupil to the teacher"),
+    and a pupil whose allowance is spent or whose device is dead.
+
+    **The authority is the exam set, not the role.** `_teacher_code_exam_ids` is the
+    invigilated-or-owned set the recovery codes and the timeline already use, so a
+    teacher who holds this route still cannot reopen a colleague's paper — the same
+    rule the retake decision follows. Three further checks are the service's, not
+    this route's: the paper must be locked, the deadline must not have passed, and
+    nothing may move the clock. A paper whose clock has ended is *finalised* instead,
+    because unlocking one would only hold the pupil out of an exam that is over.
+
+    Recorded in the activity log with the actor's id, because a manual reopen is a
+    human decision about a mark and has to be answerable later.
+    """
+    school_id = _teacher_school()
+    if not school_id:
+        return redirect("/auth/login")
+    supabase = get_supabase()
+    held = _teacher_code_exam_ids(supabase, school_id, g.user_id)
+    if str(exam_id) not in held:
+        flash("exam_not_yours", "error")
+        return redirect("/teacher/invigilation")
+
+    from app.services import attempt_status as status_service
+    from app.services import resume_code as rc
+    exam = status_service.exam_row(supabase, exam_id)
+    # The exam has to be this school's: holding a route is not authority over
+    # another school's paper, and the held set is already school-scoped but this
+    # names the reason rather than trusting the set's construction.
+    if not exam or str(exam.get("school_id") or "") != str(school_id):
+        flash("exam_not_yours", "error")
+        return redirect("/teacher/invigilation")
+
+    row = status_service.sitting_row(supabase, exam_id, student_id)
+    if row is None:
+        flash(rc.NOT_LOCKED, "error")
+        return redirect("/teacher/invigilation")
+
+    out = rc.manual_unlock(supabase, row, exam)
+    if out.get("action") == rc.FINALIZE:
+        try:
+            from app.services import deadline_service
+            deadline_service.finalize_expired(supabase, row, exam)
+        except Exception:  # noqa: BLE001 — the refusal stands even if closing fails
+            current_app.logger.exception(
+                "Could not finalise the locked sitting %s for exam %s",
+                student_id, exam_id)
+        log_activity("finalize", "submission", row.get("id"),
+                     new_data={"exam_id": exam_id, "manual": True},
+                     user_id=g.user_id)
+        flash("submission_finalized", "info")
+        return redirect("/teacher/invigilation")
+
+    if not out.get("ok"):
+        flash(out.get("reason") or "write_failed", "error")
+        return redirect("/teacher/invigilation")
+
+    log_activity("unlock", "submission", row.get("id"),
+                 new_data={"exam_id": exam_id, "manual": True},
+                 user_id=g.user_id)
+    flash("unlock_ok", "success")
+    return redirect("/teacher/invigilation")
 
 
 @teacher_bp.route("/retake-requests/<request_id>/decide", methods=["POST"])

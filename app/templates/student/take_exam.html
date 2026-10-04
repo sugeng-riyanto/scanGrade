@@ -627,6 +627,47 @@ body.sg-exam .sidebar-overlay { display: none !important; }
         </div>
     </div>
 
+    <!-- A sitting the server locked, and the pupil's own way back in. The lock is
+         written server-side the instant the violation ladder is crossed (see
+         app/services/resume_code.py), so this panel is not a screen the page chose:
+         it is the page showing a state the server already holds. It says three
+         things and refuses one: how to get back, that the clock is still running,
+         and — explicitly — that the code does NOT add time. `lockMessage` comes
+         from the server's own `message_key`, translated here, so the browser never
+         re-derives the vocabulary the server computed. -->
+    <div x-show="locked && !submitted" x-cloak id="sg-lock-screen"
+         class="fixed inset-0 sg-layer-scrim bg-surface-900/60 backdrop-blur-xl flex items-center justify-center p-6 overflow-y-auto">
+        <div class="relative max-w-md w-full bg-white rounded-2xl p-6 text-center shadow-2xl border border-surface-200 my-6">
+            <div class="w-14 h-14 mx-auto rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center text-2xl">
+                <i class="fas fa-lock"></i>
+            </div>
+            <h2 class="mt-4 text-lg font-extrabold text-surface-800" x-text="t('Ujian Dikunci','Exam Locked')"></h2>
+            <p class="mt-1 text-sm text-surface-500 font-medium" x-text="lockMessage"></p>
+            <div class="mt-4">
+                <div class="flex items-baseline justify-center gap-1.5">
+                    <span class="text-4xl font-extrabold text-rose-600 font-mono tabular-nums"
+                          x-text="timeLeft === null ? t('Tak terbatas','Unlimited') : formatTime(timeLeft)"></span>
+                </div>
+                <p class="mt-2 text-[11px] font-bold text-surface-600"
+                   x-text="t('Waktu ujian tetap berjalan dan TIDAK ditambah oleh kode ini.','The exam clock keeps running and is NOT extended by this code.')"></p>
+            </div>
+            <form @submit.prevent="submitResumeCode()" class="mt-4 text-left">
+                <label class="text-xs font-bold text-surface-600" for="sg-resume-code"
+                       x-text="t('Kode lanjutkan Anda','Your resume code')"></label>
+                <input id="sg-resume-code" name="code" inputmode="numeric" autocomplete="off"
+                       maxlength="6" x-model="resumeCodeInput"
+                       class="mt-1 w-full text-center font-mono tracking-[0.4em] text-lg px-3 py-3 rounded-xl border border-surface-300 focus:border-primary-500 focus:ring-2 focus:ring-primary-500/30">
+                <p x-show="resumeError" class="mt-2 text-xs font-bold text-rose-600" x-text="resumeError"></p>
+                <button type="submit" :disabled="resuming || !resumeCodeInput"
+                        class="mt-3 w-full bg-gradient-to-r from-primary-500 to-primary-600 text-white py-3 rounded-xl font-extrabold text-sm transition disabled:opacity-50 disabled:cursor-not-allowed">
+                    <i class="fas fa-key mr-1.5"></i><span x-text="resuming ? t('Memeriksa…','Checking…') : t('Buka Kunci','Unlock')"></span>
+                </button>
+            </form>
+            <p class="mt-3 text-[11px] text-surface-400 font-semibold"
+               x-text="t('Kode ada di atas layar ujian sejak menit pertama. Kalau sudah habis, hubungi pengawas untuk membuka kunci manual.','The code has been on your exam screen since the first minute. If it is spent, ask your proctor to unlock it manually.')"></p>
+        </div>
+    </div>
+
     <!-- Penalty indicator in topbar -->
     <template x-if="totalPenalty > 0 && !submitted">
         <div class="bg-red-50 border border-red-200 rounded-xl px-3 py-1 text-xs font-extrabold text-red-600 flex items-center gap-1">
@@ -1803,6 +1844,30 @@ const SG_AWAY_STAMP_MS = 15000;
 // the 1-vCPU box. The server treats a gap larger than its own threshold as a
 // transition event, never as a lock.
 const SG_HEARTBEAT_MS = 25000;
+// What a server status turns into on screen. The keys are `attempt_status`'s
+// `message_key` values (`app/services/attempt_status.py`), and the sentences live
+// here because the language is the browser's, which the server never sees. A key
+// this release does not know is still translated — falling back to "nothing to
+// say" would leave a genuinely new state silent.
+const MESSAGE_TEXT = {
+    attempt_active: {id: 'Ujian Anda berjalan normal.', en: 'Your exam is running normally.'},
+    attempt_locked: {id: 'Ujian ini dikunci setelah pelanggaran berulang. Masukkan kode lanjutkan Anda untuk meneruskan — jam ujian tetap berjalan dan tidak ditambah.', en: 'This exam is locked after repeated violations. Enter your resume code to carry on — the clock keeps running and is not extended.'},
+    attempt_finished: {id: 'Ujian ini sudah dikumpulkan.', en: 'This exam has already been submitted.'},
+    attempt_expired: {id: 'Waktu ujian sudah berakhir.', en: 'The exam time is over.'},
+    attempt_missing: {id: 'Sesi ujian tidak ditemukan. Hubungi guru Anda.', en: 'No exam session was found. Contact your teacher.'},
+};
+// What the resume door answers, by the key the server sent. Kept apart from
+// MESSAGE_TEXT because a *refusal* is a thing the pupil did, and the status is a
+// thing the server decided — one is a hint beside the field, the other is the panel.
+const RESUME_TEXT = {
+    resume_ok: {id: 'Kunci terbuka. Lanjutkan mengerjakan.', en: 'Unlocked. Carry on with your paper.'},
+    resume_wrong_code: {id: 'Kode tidak cocok. Periksa lagi angka di layar ujian Anda.', en: 'That code does not match. Check the number on your exam screen.'},
+    resume_not_locked: {id: 'Ujian ini tidak dalam keadaan terkunci.', en: 'This exam is not locked.'},
+    resume_expired: {id: 'Waktu ujian sudah berakhir, jadi kunci tidak bisa dibuka. Jawaban Anda sampai titik terakhir sudah tersimpan.', en: 'The exam time is over, so the lock cannot be reopened. Your answers up to the last moment are saved.'},
+    resume_limit_reached: {id: 'Jatah kode sudah habis. Minta pengawas membuka kuncinya.', en: 'Your code allowance is spent. Ask your proctor to unlock it.'},
+    resume_write_failed: {id: 'Gagal menyimpan. Coba lagi sebentar.', en: 'Could not save. Try again in a moment.'},
+    resume_failed: {id: 'Tidak bisa membuka kunci. Hubungi pengawas.', en: 'Could not unlock. Contact your proctor.'},
+};
 
 function examApp(duration, totalQ) {
     // The countdown is the server's own number, or there is no countdown at all.
@@ -1825,6 +1890,16 @@ function examApp(duration, totalQ) {
     }
     return {
         timeLeft: sgCountdown(EXAM_SECONDS_LEFT),
+        // ── The lock screen's own state ───────────────────────────────────────
+        // `locked` is only ever set from a server status — never inferred from a
+        // failed save, never set by the page — because a paper the server did not
+        // lock must not be covered. `lockMessage` is the server's `message_key`
+        // translated; the words are not re-derived here.
+        locked: false,
+        lockMessage: '',
+        resumeCodeInput: '',
+        resuming: false,
+        resumeError: '',
         // The teacher's own figure, with 0/— its "Tak terbatas": what the terms
         // screen states about how long this paper may run.
         durationMinutes: {{ exam.duration_minutes if exam.duration_minutes else 0 }},
@@ -2314,11 +2389,64 @@ function examApp(duration, totalQ) {
         // end or lock a sitting, and a missed ping is not a violation.
         _applyServerClock(data) {
             if (!data) return;
+            this._applyServerStatus(data);
             var left = sgCountdown(data.seconds_left);
             if (left === null) return;
             // Adopt a materially different number only, so a ping landing a second
             // after the tick does not make the visible count jump backwards.
             if (this.timeLeft === null || Math.abs(left - this.timeLeft) > 5) this.timeLeft = left;
+        },
+        // The status half of the same payload. This page never decides that a
+        // sitting is locked; it only shows what the server already holds — which is
+        // why the lock can arrive on an ordinary heartbeat and not only when a save
+        // is refused. Lifting it is the server's too: a successful resume rewrites
+        // the status, and the next read brings it back as active.
+        _applyServerStatus(data) {
+            if (!data || typeof data.status !== 'string') return;
+            var text = MESSAGE_TEXT[data.message_key];
+            if (text) this.lockMessage = t(text.id, text.en);
+            this.locked = (data.status === 'locked_pending_resume');
+        },
+        // The pupil's own door back into a locked paper, using the code their exam
+        // screen has shown since the first minute. The pupil id is never sent: the
+        // server reads it from the session, so there is nothing here a classmate
+        // could swap for a different paper's.
+        submitResumeCode() {
+            if (this.resuming) return;
+            var code = (this.resumeCodeInput || '').trim();
+            if (!code) return;
+            this.resuming = true;
+            this.resumeError = '';
+            fetch('/student/exams/{{ exam.id }}/resume', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json', 'Accept': 'application/json',
+                          'X-CSRF-Token': this._csrfToken()},
+                body: JSON.stringify({code: code, _csrf_token: this._csrfToken()}),
+            }).then(r => r.ok ? r.json() : null)
+              .then(d => {
+                  this.resuming = false;
+                  if (!d) {
+                      this.resumeError = t('Gagal menghubungi server. Coba lagi.', 'Could not reach the server. Try again.');
+                      return;
+                  }
+                  // The server's status is the truth either way: a successful resume
+                  // lifts the lock, and a refusal whose paper the clock ended turns
+                  // this panel into the honest "exam is over" state.
+                  this._applyServerStatus(d);
+                  this._applyServerClock(d);
+                  if (d.ok) {
+                      this.resumeCodeInput = '';
+                      this.beep(2, 660);
+                      this.syncToServer();
+                      return;
+                  }
+                  var text = RESUME_TEXT[d.message_key] || RESUME_TEXT.resume_failed;
+                  this.resumeError = t(text.id, text.en);
+              })
+              .catch(() => {
+                  this.resuming = false;
+                  this.resumeError = t('Gagal menghubungi server. Coba lagi.', 'Could not reach the server. Try again.');
+              });
         },
         _heartbeat() {
             if (this.submitted) return;

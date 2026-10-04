@@ -100,6 +100,31 @@ def _rows(supabase, exam_id, student_id) -> list[dict]:
     )
 
 
+def exam_row(supabase, exam_id) -> dict:
+    """The exam columns the status needs, read once. A failed read is no exam.
+
+    Public because two doors outside this module — the pupil's resume route and the
+    staff manual unlock — have to hand `resume_code` an exam and a sitting row, and
+    the columns those need are the ones selected here. Re-reading them with a second
+    column list is how the lock gate would start disagreeing about `duration_minutes`.
+    """
+    try:
+        return _exam_of_row(
+            row_or_none(
+                supabase.table("exams").select(EXAM_COLUMNS)
+                .eq("id", exam_id).maybe_single().execute()
+            )
+        )
+    except Exception:  # noqa: BLE001 — an unreadable exam is not an attempt
+        return {}
+
+
+def sitting_row(supabase, exam_id, student_id) -> dict | None:
+    """This pupil's own row for this exam, or ``None`` — the one read, exposed."""
+    rows = _rows(supabase, exam_id, student_id)
+    return rows[0] if rows else None
+
+
 def deadline_of(exam, row, started_at=None):
     """When this sitting ends, or ``None`` when nothing enforces an end.
 

@@ -103,6 +103,7 @@
                         <th class="text-left px-4 py-3 font-bold" x-text="t('Ujian','Exam')"></th>
                         <th class="text-left px-4 py-3 font-bold" x-text="t('Kode','Code')"></th>
                         <th class="text-left px-4 py-3 font-bold" x-text="t('Status','Status')"></th>
+                        <th class="text-left px-4 py-3 font-bold" x-text="t('Kunci','Lock')"></th>
                     </tr>
                 </thead>
                 <tbody>
@@ -118,10 +119,30 @@
                             <span class="text-xs font-bold text-emerald-700" x-text="t('Aktif','Active')"></span>
                             {% endif %}
                         </td>
+                        <td class="px-4 py-2.5">
+                            {# The manual reopen, offered only where it can mean something:
+                               the sitting is locked *now*. A teacher is the way back when
+                               the pupil's code allowance is spent or their device is dead
+                               (see app/services/resume_code.manual_unlock). The clock is
+                               not moved — a paper the clock already ended is finalised
+                               instead, and the flash says so. #}
+                            {% if c.is_locked %}
+                            <form method="POST" action="/teacher/exams/{{ c.exam_id }}/locked/{{ c.student_id }}/unlock" class="flex items-center gap-2">
+                                <span class="inline-flex items-center gap-1 text-xs font-bold text-rose-600">
+                                    <i class="fas fa-lock"></i><span x-text="t('Terkunci','Locked')"></span>
+                                </span>
+                                <button type="submit"
+                                        class="px-2.5 py-1.5 bg-amber-50 text-amber-700 rounded-lg font-bold text-xs hover:bg-amber-100 transition"
+                                        x-text="t('Buka kunci','Unlock')"></button>
+                            </form>
+                            {% else %}
+                            <span class="text-surface-300">—</span>
+                            {% endif %}
+                        </td>
                     </tr>
                     {% endfor %}
                     {% if not codes %}
-                    <tr><td colspan="4" class="px-4 py-8 text-center text-sm text-surface-400" x-text="t('Belum ada kode pemulihan untuk ujian Anda.','No recovery codes for your exams yet.')"></td></tr>
+                    <tr><td colspan="5" class="px-4 py-8 text-center text-sm text-surface-400" x-text="t('Belum ada kode pemulihan untuk ujian Anda.','No recovery codes for your exams yet.')"></td></tr>
                     {% endif %}
                 </tbody>
             </table>

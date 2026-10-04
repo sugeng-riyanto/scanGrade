@@ -76,6 +76,28 @@ NOT_LOCKED = "not_locked"
 DEADLINE_PASSED = "deadline_passed"
 LIMIT_REACHED = "limit_reached"
 
+#: What the page is told, per reason. A *key* again, because the pupil's language
+#: is the browser's, and a server sentence here would be an Indonesian string shown
+#: to an English-speaking pupil (or the reverse). The page owns the words; this owns
+#: the vocabulary.
+REASON_KEYS = {
+    "": "resume_ok",
+    WRONG_CODE: "resume_wrong_code",
+    NOT_LOCKED: "resume_not_locked",
+    DEADLINE_PASSED: "resume_expired",
+    LIMIT_REACHED: "resume_limit_reached",
+    "write_failed": "resume_write_failed",
+}
+
+#: The answer for a reason this release does not know. A newer release may refuse
+#: for something else; the page still has a sentence for it rather than nothing.
+UNKNOWN_REASON_KEY = "resume_failed"
+
+
+def reason_key(reason: str) -> str:
+    """The page's key for a refusal reason, never the reason itself."""
+    return REASON_KEYS.get(reason or "", UNKNOWN_REASON_KEY)
+
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
@@ -254,6 +276,46 @@ def unlock(supabase, row: dict, exam: dict, *, student_id: str, code: str,
                                  (row or {}).get("exam_id"), code):
         return {"ok": False, "action": NONE, "reason": WRONG_CODE}
 
+    return _reopen(supabase, row, now)
+
+
+def manual_unlock(supabase, row: dict, exam: dict, *, now: datetime | None = None) -> dict:
+    """Reopen a locked sitting on a staff member's authority — no code asked.
+
+    This is the documented second half of the policy, not a back door. A school
+    that sets `resume_code_limit` to 0 hands every locked pupil to a teacher on
+    purpose (the exam form says so), and an allowance that is merely spent is the
+    same case: the pupil has no code left, and the alternative is a paper they can
+    never finish. The authority is the **caller's**, checked at the route; this
+    function only owns the two rules that are the clock's, and they are identical
+    to the code path's:
+
+    * a paper that is not locked is not a recovery;
+    * at or past the deadline the honest offer is *finalise*, not unlock, and
+      nothing is written.
+
+    It moves no clock column, exactly as `unlock` does — the counter and the stamp
+    are the only fields written, so a manual reopen cannot buy a pupil a second of
+    extra time. The caller records *who* did it; the event written here is the same
+    `attempt_resumed` the code path writes, so the timeline reads one transition.
+    """
+    if (row or {}).get("status") != LOCKED:
+        return {"ok": False, "action": NONE, "reason": NOT_LOCKED}
+    if at_or_past_deadline(exam, row, now):
+        return {"ok": False, "action": FINALIZE, "reason": DEADLINE_PASSED}
+    return _reopen(supabase, row, now)
+
+
+def _reopen(supabase, row: dict, now: datetime | None) -> dict:
+    """The one write that puts a locked sitting back to draft — shared by both doors.
+
+    One function so the code path and the manual path cannot diverge on *which*
+    columns move. Neither deadline nor lock stamp appears here.
+    """
+    try:
+        used = max(0, int((row or {}).get("resume_count_used") or 0))
+    except (TypeError, ValueError):
+        used = 0
     payload = {
         "status": DRAFT,
         "resume_count_used": used + 1,
