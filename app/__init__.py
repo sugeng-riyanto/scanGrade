@@ -936,8 +936,12 @@ def _register_request_logging(app):
         return response
 
     @app.route("/metrics")
-    @login_required
+    @super_admin_required
     def metrics():
+        # The box's own CPU, memory and disk. A process inventory (`/metrics/processes`)
+        # already answers only to a super admin; this reads the same kind of thing and
+        # a signed-in pupil has no reason to hold either. `/health` stays open on
+        # purpose — the deploy runner curls it with no session.
         import psutil
         _metrics["active_users"] = len(_metrics.get("response_times", [])) or 0
         rt = _metrics["response_times"]
