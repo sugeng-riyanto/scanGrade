@@ -1999,6 +1999,10 @@ const SG_AWAY_STAMP_MS = 15000;
 // the 1-vCPU box. The server treats a gap larger than its own threshold as a
 // transition event, never as a lock.
 const SG_HEARTBEAT_MS = 25000;
+// How often the page's own observations are flushed. Two minutes, plus a random
+// delay so a whole class does not post in the same second — `attempt_session_events`
+// is not on the critical path, so this is deliberately slower than the heartbeat.
+const SG_EVENT_FLUSH_MS = 120000;
 // What a server status turns into on screen. The keys are `attempt_status`'s
 // `message_key` values (`app/services/attempt_status.py`), and the sentences live
 // here because the language is the browser's, which the server never sees. A key
@@ -2260,6 +2264,8 @@ function examApp(duration, totalQ) {
         // One flag per warning, so each mark is announced once even though the
         // clock ticks a thousand times through it.
         _alerted: { five: false, one: false },
+        _evBuffer: [],
+        evTimer: null,
         syncStatus: navigator.onLine ? 'synced' : 'offline',
         // Every label below goes through window.sgT() rather than t(): these are
         // assembled inside component methods, where `this` is the component and the
@@ -2620,6 +2626,7 @@ function examApp(duration, totalQ) {
               .catch(() => {});
         },
         onGoOnline() {
+            this._ev('came_online');
             this.isOnline = true;
             this.syncStatus = 'saving';
             this.setSyncLabel('syncing');
@@ -2631,6 +2638,7 @@ function examApp(duration, totalQ) {
             if (Object.keys(this.canvasDirty).length > 0) this.syncCanvasToServer();
         },
         onGoOffline() {
+            this._ev('went_offline');
             this.isOnline = false;
             this.syncStatus = 'offline';
             this.setSyncLabel('offline');
@@ -2969,6 +2977,59 @@ function examApp(duration, totalQ) {
             this._seenAt = Date.now();
             if (Date.now() - this._stampedAt >= SG_AWAY_STAMP_MS) this._persistSeen();
         },
+        // ── What the page saw, numbered in the page's own band ─────────────
+        //
+        // `attempt_session_events` used to be written by the server's transitions
+        // alone, so the metrics that need the pupil's own view — offline time,
+        // answer changes, per-question dwell — had no source at all and read as
+        // `NULL` on every dashboard. This buffer is that source. It decides
+        // nothing: the server records, locking stays fullscreen/tab-switch, and the
+        // penalties stay with the ladder that already owns them.
+        //
+        // Two rules keep it honest. The numbers start at 1,000,000 so they cannot
+        // collide with a transition's own numbering — a database uniqueness
+        // (`UNIQUE (attempt_id, seq)`), not a convention — and they are carried
+        // across a reload in the device, so a refreshed page continues its stream
+        // instead of re-writing numbers it already used. A flush that arrives twice
+        // is dropped by that same uniqueness, and a flush that is lost stays a
+        // visible gap rather than a silent rewrite.
+        _evSeqKey() { return 'sg.evseq.' + '{{ exam.id }}'; },
+        _nextSeq() {
+            var n = 0;
+            try { n = parseInt(localStorage.getItem(this._evSeqKey())) || 0; } catch (e) {}
+            if (!(n >= 1000000)) n = 1000000;
+            n += 1;
+            try { localStorage.setItem(this._evSeqKey(), String(n)); } catch (e) {}
+            return n;
+        },
+        _evDevice() { return window.innerWidth <= 768 ? 'phone' : 'laptop'; },
+        _evAwayMs() {
+            var began = this._awayBeganAt || 0;
+            return began ? Math.max(0, Date.now() - began) : null;
+        },
+        _ev(kind, extra) {
+            if (this.submitted) return;
+            var ev = {seq: this._nextSeq(), kind: kind, device_class: this._evDevice()};
+            if (this.currentQ !== undefined && this.currentQ !== null) ev.question_index = this.currentQ;
+            if (extra) { for (var k in extra) { if (extra[k] !== undefined) ev[k] = extra[k]; } }
+            this._evBuffer.push(ev);
+            if (this._evBuffer.length >= 40) this.flushEvents();
+        },
+        flushEvents() {
+            var batch = this._evBuffer;
+            if (!batch.length) return;
+            this._evBuffer = [];
+            var token = this._csrfToken();
+            fetch('/api/student/exams/{{ exam.id }}/events', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json', 'X-CSRF-Token': token},
+                keepalive: true,
+                body: JSON.stringify({_csrf_token: token, events: batch}),
+            }).catch(function () {
+                // The school's link, not the pupil's problem: a dropped flush must
+                // never disturb the paper.
+            });
+        },
         // The student has gone: a hidden tab, a window that is no longer the one
         // in front, or a reload. The instant is the event, so it is exact — and it
         // goes to the device at once, because the reload that follows may be a
@@ -3124,15 +3185,22 @@ function examApp(duration, totalQ) {
             this._persistSeen();
             this._noteAwayGap(gap);
             document.addEventListener('visibilitychange', () => {
-                if (document.hidden) this._markAway();
-                else this._noteReturn();
+                if (document.hidden) { this._ev('tab_hidden'); this._markAway(); }
+                else { this._ev('tab_visible', {duration_ms: this._evAwayMs()}); this._noteReturn(); }
             });
-            window.addEventListener('blur', () => { this._markAway(); });
-            window.addEventListener('focus', () => { this._noteReturn(); });
+            window.addEventListener('blur', () => { this._ev('window_blur'); this._markAway(); });
+            window.addEventListener('focus', () => { this._ev('window_focus', {duration_ms: this._evAwayMs()}); this._noteReturn(); });
             // A reload leaves through the door, not through a blur: `pagehide` is
             // the last chance to write down the instant being left behind.
             window.addEventListener('pagehide', () => { this._markAway(); });
             this.stampTimer = setInterval(() => { if (!document.hidden) this._markSeen(); }, SG_AWAY_STAMP_MS);
+            // The flush is on a lagging cadence with a random offset, so a class of
+            // pupils does not post in the same second; a full buffer also flushes on
+            // its own, so this is the ceiling on how long one event waits.
+            this.evTimer = setInterval(() => {
+                setTimeout(() => { if (!document.hidden) this.flushEvents(); },
+                           Math.floor(Math.random() * 20000));
+            }, SG_EVENT_FLUSH_MS);
         },
         // `vtype` is the kind the server records and charges; `trigger` is what
         // the page actually saw (`visibilitychange`, `window_blur`);
@@ -3574,6 +3642,7 @@ function examApp(duration, totalQ) {
                 this._saveCurrentPage();
                 this.page = p;
                 this.currentQ = owner;
+                this._ev('question_changed', {question_index: owner});
                 this.closeAllTools();
                 this.$nextTick(() => this._restorePage(owner, p - 1));
                 this.updateScrollState();
@@ -3582,6 +3651,7 @@ function examApp(duration, totalQ) {
             if (p === this.page) return;
             this._saveCurrentPage();
             this.page = p;
+            this._ev('question_changed');
             this.closeAllTools();
             this.$nextTick(() => this._restorePage());
         },
@@ -4113,6 +4183,7 @@ function examApp(duration, totalQ) {
             const oi = this.questions[i].origIdx !== undefined ? this.questions[i].origIdx : i;
             this._answerTimestamps[oi] = Date.now();
             this.markDirty();
+            this._ev('answer_changed', {question_index: i});
         },
         selectedAnswer(i) { return this.questions[i]?.answer; },
         get answeredCount() { return Object.keys(this.answered).length; },
@@ -4132,6 +4203,7 @@ function examApp(duration, totalQ) {
             const oi = this.questions[i].origIdx !== undefined ? this.questions[i].origIdx : i;
             this._answerTimestamps[oi] = Date.now();
             this.markDirty();
+            this._ev('answer_changed', {question_index: i});
         },
         setBoolAnswer(i, word) {
             // Tapping the same answer again is how a student clears it: a true/false

@@ -91,7 +91,10 @@ def _code(source: str, name: str) -> str:
 
 def _constants(html: str) -> list[str]:
     out = []
-    for name in ("SG_AWAY_NOTICE_SECONDS", "SG_AWAY_STAMP_MS"):
+    # `_startAwayWatch` starts the away-stamp timer *and* the client-event flush,
+    # so the sandbox needs both cadences: the flush's constant is evaluated when
+    # `setInterval` is called, even though the stubbed timer never fires it.
+    for name in ("SG_AWAY_NOTICE_SECONDS", "SG_AWAY_STAMP_MS", "SG_EVENT_FLUSH_MS"):
         match = re.search(r"const " + name + r" = ([0-9]+);", html)
         assert match, f"the page no longer declares {name}"
         out.append(f"const {name} = {match.group(1)};")

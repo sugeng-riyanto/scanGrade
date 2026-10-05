@@ -380,6 +380,46 @@ def log_violation():
     return jsonify({"violations": results})
 
 
+@api_bp.route("/student/exams/<exam_id>/events", methods=["POST"])
+@login_required
+@open_year_required("exam_id")
+def student_attempt_events(exam_id):
+    """Store a flush of numbered client events for the caller's own sitting.
+
+    The exam id is in the *path* so `open_year_required` can resolve it: read from
+    the JSON body it would find no id, pass the guard through, and leave a closed
+    year writable through this door.
+
+    Recording is not judging. This endpoint writes what the page observed and
+    decides nothing — no lock, no penalty, no submission. Locking stays
+    fullscreen/tab-switch (`attempt_status`), and the penalties stay with the
+    ladder that already owns them.
+    """
+    from app.services import attempt_events
+
+    data = request.get_json(silent=True)
+    payload = data if isinstance(data, dict) else {}
+    events = payload.get("events")
+    if not isinstance(events, list) or not events:
+        return jsonify({"ok": False, "reason": "no_events"}), 400
+
+    supabase = get_supabase()
+    row = attempt_events.open_attempt(supabase, exam_id, g.user_id)
+    if row is None:
+        # Specific, not generic: the page shows a sentence per condition rather than
+        # a raw error. An attempt that does not exist is not a 500.
+        return jsonify({"ok": False, "reason": "no_attempt"}), 404
+
+    status = attempt_events.sitting_status(supabase, exam_id, g.user_id, row)
+    from app.services import attempt_status as status_service
+    if status.get("status") not in status_service.ONGOING:
+        return jsonify({"ok": False, "reason": status.get("status"),
+                        "message_key": status.get("message_key")}), 409
+
+    out = attempt_events.record_batch(supabase, row["id"], events)
+    return jsonify({"ok": True, "attempt_id": row["id"], **out})
+
+
 @api_bp.route("/student/force-submit", methods=["POST"])
 @login_required
 @open_year_required("exam_id")
