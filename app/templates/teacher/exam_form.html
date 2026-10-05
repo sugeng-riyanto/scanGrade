@@ -1597,7 +1597,15 @@
                          step, so there is no way to save and forget to send, or to
                          send without saving. Saving a published exam keeps it
                          published (app/routes/teacher.py `_publication_state`). -->
-                    <button type="submit" name="action" value="publish"
+                    {# `data-sg-busy` opts this control into the shared feedback in
+                       app/static/js/sg-ux.js: it becomes a spinner and stops
+                       accepting clicks while the save-and-publish round trip is
+                       open. Saving a paper with a PDF and a class list is the
+                       slowest write in the app, and until this attribute existed
+                       the only sign it was running was the browser tab spinner —
+                       so a teacher whose connection took a moment clicked again
+                       and submitted the paper twice. #}
+                    <button type="submit" name="action" value="publish" data-sg-busy
                             class="bg-gradient-to-r from-emerald-600 to-emerald-500 text-white px-5 py-3 rounded-xl font-extrabold shadow-lg hover:from-emerald-700 hover:to-emerald-600 transition flex items-center gap-2"
                             :title="t('Simpan dan publikasikan — siswa langsung bisa mengerjakannya','Save and publish — students can start immediately')">
                         <i class="fas fa-paper-plane"></i><span x-text="t('Publish &amp; Kirim ke Kelas','Publish &amp; Send to Classes')"></span>

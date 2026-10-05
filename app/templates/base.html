@@ -54,8 +54,30 @@ window.sgSavePrefs = function (patch) {
     <script>if(!crypto.randomUUID)crypto.randomUUID=function(){return'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,function(c){var r=Math.random()*16|0,v=c=='x'?r:r&3|8;return v.toString(16)})};</script>
     <script src="/static/vendor/htmx.min.js"></script>
     <script src="/static/vendor/alpine.min.js" defer></script>
-    <script src="/static/vendor/chart.umd.min.js"></script>
+    {# Chart.js (205 KB raw / 69 KB gzipped) and the app's own loading feedback
+       (app/static/js/sg-ux.js) are loaded **at the end of the body**, as classic
+       scripts — see the bottom of this file.
+
+       Not `defer` here, though that is the usual answer: this app loads Alpine
+       with `defer`, and a deferred script runs *after* Alpine starts, because
+       Alpine begins in the next microtask once the document stops loading. A
+       helper deferred behind it is a helper that does not exist yet — that is
+       the blank white exam `tests/unit/test_exam_script_order.py` was written
+       from. A classic script at the end of the body runs during parsing, so it
+       is defined *before* Alpine initialises every component.
+
+       Not in the head either: a classic script there blocks the parser, and
+       nothing paints until 205 KB of charting library has downloaded and been
+       parsed — on every page, whether or not that page draws a chart. #}
     <link rel="icon" type="image/svg+xml" href="{{ school_favicon(g.get('school_info', {})) }}">
+    {# The regular weight, preloaded. It is the one face every page paints with,
+       and a font is only discovered once the stylesheet that names it has been
+       parsed and matched — so the browser could not start fetching it until
+       after the CSS arrived, one full round-trip of invisible-to-text time on a
+       slow link. `crossorigin` is required even same-origin: a font request is
+       always made in CORS mode, and a preload without it is fetched twice. #}
+    <link rel="preload" href="/static/vendor/inter/inter-latin-400-normal.woff2"
+          as="font" type="font/woff2" crossorigin>
     <link rel="stylesheet" href="/static/vendor/inter/inter.css">
     <link rel="stylesheet" href="/static/vendor/font-awesome/all.min.css">
     <link rel="manifest" href="/static/manifest.json">
@@ -103,7 +125,17 @@ window.sgSavePrefs = function (patch) {
             });
         };
 
-        window.sgApplyChartTheme();
+        // Chart.js is deferred (see the head), so it does not exist yet while
+        // this inline script runs. Deferred scripts execute *before*
+        // DOMContentLoaded, so waiting for that event is what guarantees the
+        // defaults are set before anything draws. Registered (not called) when
+        // the document is still parsing, so this stays correct if the tag above
+        // ever moves.
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', window.sgApplyChartTheme);
+        } else {
+            window.sgApplyChartTheme();
+        }
 
         // Watching the class, rather than hooking the toggle button, re-themes the
         // charts however dark mode changed — and keeps this the only place that
@@ -888,6 +920,15 @@ function linkify(text) {
         </div>
     </div>
 </footer>
+{# Loaded here, and classic, for the two reasons in the head's note: a classic
+   script executes during parsing — so `window.Chart` and the fetch/`XMLHttpRequest`
+   instrumentation in sg-ux.js exist before Alpine starts (Alpine is `defer`red,
+   and a deferred script cannot be relied on to have run first) — while sitting at
+   the end of the body keeps both out of the parser's critical path.
+
+   Placed before the footer's own `fetch` so that request is tracked too. #}
+<script src="/static/vendor/chart.umd.min.js"></script>
+<script src="/static/js/sg-ux.js"></script>
 <script>
 fetch('/api/public/privacy-info').then(r=>r.json()).then(d=>{
     if(d.dpo_contact){document.getElementById('dpo-name').textContent=d.dpo_contact;document.getElementById('dpo-footer').classList.remove('hidden')}

@@ -1,6 +1,122 @@
-@font-face { font-family:'Inter'; font-style:normal; font-weight:400; font-display:swap; src:url(/static/vendor/inter/Inter-400.ttf) format('truetype'); }
-@font-face { font-family:'Inter'; font-style:normal; font-weight:500; font-display:swap; src:url(/static/vendor/inter/Inter-500.ttf) format('truetype'); }
-@font-face { font-family:'Inter'; font-style:normal; font-weight:600; font-display:swap; src:url(/static/vendor/inter/Inter-600.ttf) format('truetype'); }
-@font-face { font-family:'Inter'; font-style:normal; font-weight:700; font-display:swap; src:url(/static/vendor/inter/Inter-700.ttf) format('truetype'); }
-@font-face { font-family:'Inter'; font-style:normal; font-weight:800; font-display:swap; src:url(/static/vendor/inter/Inter-800.ttf) format('truetype'); }
-@font-face { font-family:'Inter'; font-style:normal; font-weight:900; font-display:swap; src:url(/static/vendor/inter/Inter-900.ttf) format('truetype'); }
+/* Inter, self-hosted as subset WOFF2.
+ *
+ * These used to be six full-font TTFs (`Inter-400.ttf` … `Inter-900.ttf`), about
+ * 325 KB each — roughly 1.6 MB of font data per visitor, and the largest single
+ * thing a school phone on a slow connection had to download (measured against
+ * production: the CSS and JS together are ~157 KB gzipped, the fonts were ten
+ * times that). TTF is also the one asset class nginx does not gzip here, so
+ * none of it was compressed on the wire.
+ *
+ * WOFF2 carries the same glyphs at a fraction of the size, and a subset carries
+ * only the scripts this app can render. Measured, per weight: 325 KB TTF →
+ * ~24 KB latin WOFF2, a 13x reduction.
+ *
+ * Three deliberate choices:
+ *
+ *  * **Only the five weights Tailwind can ask for.** `font-normal` (400),
+ *    `font-medium` (500), `font-semibold` (600), `font-bold` (700) and
+ *    `font-extrabold` (800) are the weights used in this app's templates; 900
+ *    (`font-black`) is not used anywhere, so it is not shipped. The browser
+ *    only fetches a face whose weight a rendered element actually asks for, so
+ *    the six files that used to exist cost their bytes on most pages.
+ *
+ *  * **Latin + latin-ext, each with its `unicode-range`.** Indonesian and
+ *    English are entirely inside `latin`. The extra `latin-ext` face covers
+ *    Central/Eastern European diacritics and is only fetched when a page
+ *    actually renders one of those code points — so it costs nothing in the
+ *    common case and does not leave such a glyph to a fallback font.
+ *
+ *  * **`font-display: swap`.** Text paints in the fallback immediately and
+ *    re-flows when Inter arrives, instead of being invisible while the font
+ *    downloads — which is what a blank first paint looks like on a slow link.
+ *
+ * The files are the upstream Inter release as published by @fontsource/inter
+ * (v5.3.0). If they are ever updated, change the filenames too: nginx serves
+ * /static/ with `Cache-Control: immutable, max-age=31536000`, so a replacement
+ * served under the same URL would never reach a browser that has the old one.
+ */
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400;
+  src: url(/static/vendor/inter/inter-latin-ext-400-normal.woff2) format('woff2');
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400;
+  src: url(/static/vendor/inter/inter-latin-400-normal.woff2) format('woff2');
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 500;
+  src: url(/static/vendor/inter/inter-latin-ext-500-normal.woff2) format('woff2');
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 500;
+  src: url(/static/vendor/inter/inter-latin-500-normal.woff2) format('woff2');
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 600;
+  src: url(/static/vendor/inter/inter-latin-ext-600-normal.woff2) format('woff2');
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 600;
+  src: url(/static/vendor/inter/inter-latin-600-normal.woff2) format('woff2');
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 700;
+  src: url(/static/vendor/inter/inter-latin-ext-700-normal.woff2) format('woff2');
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 700;
+  src: url(/static/vendor/inter/inter-latin-700-normal.woff2) format('woff2');
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 800;
+  src: url(/static/vendor/inter/inter-latin-ext-800-normal.woff2) format('woff2');
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 800;
+  src: url(/static/vendor/inter/inter-latin-800-normal.woff2) format('woff2');
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
