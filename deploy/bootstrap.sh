@@ -23,16 +23,32 @@ sudo chown -R $(whoami):$(whoami) scangrade
 cd scangrade
 
 # 4. .env file
-cat > .env << 'EOF'
-SUPABASE_URL=https://roshkbzgfzpfedowozfo.supabase.co
-SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJvc2hrYnpnZnpwZmVkb3dvemZvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk0Mjg5MDYsImV4cCI6MjA5NTAwNDkwNn0.PChroG0l5LQ26kSgRXiL8_lHVT-tww0Rs24ucs4dZD0
-SUPABASE_SERVICE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJvc2hrYnpnZnpwZmVkb3dvemZvIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3OTQyODkwNiwiZXhwIjoyMDk1MDA0OTA2fQ.rKZCSie8a0WqxKxk3GrmRmRWteZbqUVjKq97BhXpNcA
-FLASK_SECRET_KEY=scan-grade-prod-2024-32char-secret-key!!
+#
+# These are the box's secrets, and they are demanded from the environment
+# rather than written here. This script once spelled out a **service-role** key
+# — the one credential that bypasses every row-level-security policy — and a
+# Flask secret key in a repository anyone can read; anything reading that file
+# could then act as the backend, or forge a session. Export them first:
+#
+#   export SUPABASE_URL=https://<ref>.supabase.co
+#   export SUPABASE_ANON_KEY=...      # public: it ships in every page's HTML
+#   export SUPABASE_SERVICE_KEY=...   # secret: it bypasses RLS, keep it off the repo
+#   export FLASK_SECRET_KEY=$(python3 -c 'import secrets; print(secrets.token_hex(32))')
+: "${SUPABASE_URL:?export SUPABASE_URL before running this bootstrap}"
+: "${SUPABASE_ANON_KEY:?export SUPABASE_ANON_KEY before running this bootstrap}"
+: "${SUPABASE_SERVICE_KEY:?export SUPABASE_SERVICE_KEY before running this bootstrap}"
+: "${FLASK_SECRET_KEY:?export FLASK_SECRET_KEY before running this bootstrap}"
+cat > .env <<EOF
+SUPABASE_URL=$SUPABASE_URL
+SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY
+SUPABASE_SERVICE_KEY=$SUPABASE_SERVICE_KEY
+FLASK_SECRET_KEY=$FLASK_SECRET_KEY
 FLASK_ENV=production
 FLASK_DEBUG=0
 REDIS_URL=redis://localhost:6379/0
 LOG_LEVEL=INFO
 EOF
+chmod 600 .env
 
 # 5. Virtual env
 python3 -m venv .venv
