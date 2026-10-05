@@ -76,7 +76,10 @@ rather than an incident response.
 - `tests/unit/test_no_committed_secrets.py` scans every tracked file for a JWT
   whose payload claims `service_role` (long enough to be a real key, so the fake
   fixture in `app/config.py` is not a false finding) and refuses a literal Flask
-  secret.
+  secret. It runs **inside `deploy/theme_gate.sh`**, which the VPS auto-deploy
+  runs as a hard gate before reloading the app and the pre-commit hook runs on a
+  commit: a release that carries such a value is refused and rolled back, rather
+  than only failing when somebody happens to run the unit suite.
 - `ProductionConfig.validate()` refuses to boot when `FLASK_SECRET_KEY` is unset
   or still the repository's placeholder, so a box that loses the line fails loudly
   instead of signing sessions with a public string.

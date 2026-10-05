@@ -27,6 +27,8 @@ from tests.unit.git_env import git
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 BOOTSTRAP = REPO / "deploy" / "bootstrap.sh"
+GATE = REPO / "deploy" / "theme_gate.sh"
+PRE_COMMIT = REPO / "deploy" / "git-hooks" / "pre-commit"
 
 #: A three-part JWT. The signature must be long enough to be a real one: a
 #: two-character stand-in used as a test fixture grants nothing and is not a leak.
@@ -101,3 +103,59 @@ class TestBootstrapTakesItsSecretsFromTheEnvironment:
             assert f'${{{name}:?' in text, (
                 f"{name} must be demanded from the environment with a message, so a "
                 f"box cannot silently boot with a value from the repository")
+
+
+class TestTheDeployGateRunsTheScan:
+    """A scan nobody runs is not a gate.
+
+    The service-role key is the one credential the whole design leans on RLS to
+    survive, and the Flask secret signs every session and CSRF token, so the scan
+    has to run on *every* release — not only when somebody remembers the unit
+    suite. `deploy/theme_gate.sh` is what the pre-commit hook and the VPS
+    auto-deploy both run before a release is allowed through, so the scan belongs
+    in its list of checks.
+    """
+
+    def test_the_gate_lists_the_scan(self):
+        src = GATE.read_text(encoding="utf-8")
+        listed = [ln for ln in src.splitlines() if ln.startswith("TESTS=")]
+        assert listed, "the gate no longer lists the checks it runs"
+        assert "tests/unit/test_no_committed_secrets.py" in listed[0], (
+            "the committed-secret scan is not in the gate's list, so a release "
+            "carrying a service-role key or a literal Flask secret would ship "
+            "unexamined")
+
+    def test_the_scan_is_armed_against_deletion(self):
+        """The gate's own arming list has to be built from that same line.
+
+        Otherwise the line could lose the scan and the gate would still report
+        green: it would be checking one fewer thing and saying nothing.
+        """
+        src = GATE.read_text(encoding="utf-8")
+        assert 'ARMAMENT="$TESTS' in src, (
+            "the gate no longer derives its arming list from the checks it runs, "
+            "so removing this scan would drop the check instead of refusing the "
+            "release")
+
+    def test_the_gate_names_the_secret_it_refuses(self):
+        src = GATE.read_text(encoding="utf-8")
+        assert "service-role" in src or "service_role" in src, (
+            "a reader told this release was refused has to see which secret the "
+            "scan found: the gate's own text never names it")
+
+    def test_the_pre_commit_hook_fires_when_a_script_changes(self):
+        """The real leak lived in a shell script, which the hook's filter ignored.
+
+        The hook only runs the gate when the staged paths match its filter, so a
+        filter that skips `deploy/*.sh` lets the very commit that put a
+        service-role key into `deploy/bootstrap.sh` through unchallenged.
+        """
+        src = PRE_COMMIT.read_text(encoding="utf-8")
+        trigger = [ln for ln in src.splitlines() if "grep -qE" in ln and "CHANGED" in ln]
+        assert trigger, "the hook no longer filters the staged files"
+        match = re.search(r"grep -qE '([^']+)'", trigger[0])
+        assert match, "the hook's filter is not a single-quoted pattern"
+        pattern = match.group(1)
+        assert re.search(pattern, "deploy/bootstrap.sh"), (
+            "the hook would not run the gate for the commit that first leaked the "
+            "service-role key; its filter is:\n    " + pattern)
