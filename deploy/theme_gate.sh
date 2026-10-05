@@ -93,8 +93,23 @@
 #     `/loaderio-<hash>.html` is exactly how a redundant static copy of that page
 #     went unnoticed in the served tree.
 #
+#   tests/unit/test_no_committed_secrets.py
+#     the one check here that is not about whether a page can be read, and it is
+#     here for the same reason as the rest: nothing else on the release path
+#     looks at it. A Supabase **service-role** key spelled out in the repository
+#     bypasses every RLS policy — it is the one credential the whole design leans
+#     on the database to survive — and a literal Flask secret lets anyone who
+#     reads the public repo forge a session cookie or a CSRF token. The scan
+#     reads every tracked file for a JWT whose payload says `service_role`, and
+#     refuses a hard-coded Flask secret, while a two-character stand-in (the shape
+#     a test fixture has and no real key does) is deliberately not a finding, so
+#     the guard cannot pass by looking at nothing nor fail on a placeholder that
+#     grants nothing.
+#
 # All of them belong in this gate because they fail the same way — invisibly,
-# with the page answering 200 and the other theme looking fine.
+# with the page answering 200 and the other theme looking fine. The secret scan
+# fails invisibly in the sharpest sense: the release works exactly as intended,
+# and hands the key that guards every other tenant to anyone who opens the repo.
 #
 # It exists as a script rather than a bare pytest line because two places run it
 # and they must run the *same* thing: the pre-commit hook (deploy/git-hooks/) and
@@ -127,7 +142,7 @@ set -uo pipefail
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # Word-split on purpose: pytest takes them as separate paths.
-TESTS="tests/unit/test_dark_theme_contrast.py tests/unit/test_tailwind_class_names.py tests/unit/test_theme_stylesheet.py tests/unit/test_language_toggle.py tests/unit/test_i18n_coverage.py tests/unit/test_css_freshness.py tests/unit/test_landing_facilities.py tests/unit/test_static_tree.py"
+TESTS="tests/unit/test_dark_theme_contrast.py tests/unit/test_tailwind_class_names.py tests/unit/test_theme_stylesheet.py tests/unit/test_language_toggle.py tests/unit/test_i18n_coverage.py tests/unit/test_css_freshness.py tests/unit/test_landing_facilities.py tests/unit/test_static_tree.py tests/unit/test_no_committed_secrets.py"
 
 # ── Armament ─────────────────────────────────────────────────────────────────
 # Everything that makes this a gate: the checks themselves, and the three tools
@@ -240,7 +255,7 @@ if [ "$RC" -eq 0 ]; then
   if [ "$CSS_RC" -eq 0 ]; then
     echo "$SCHEMA_OUT"
     echo "$CSS_OUT"
-    echo "theme gate: OK — readable in both themes, every named utility is compiled, the committed stylesheet is the one the templates produce, the app's own stylesheet stays a cached file, every file under /static/ is one the app asks for and in a commit, every page declares the language of its own copy, no template translates less than it did, and every table, column and policy the code names is one this repository declares, with every role it compares against one the database holds, and every facility the landing page advertises one this repository can show"
+    echo "theme gate: OK — readable in both themes, every named utility is compiled, the committed stylesheet is the one the templates produce, the app's own stylesheet stays a cached file, every file under /static/ is one the app asks for and in a commit, every page declares the language of its own copy, no template translates less than it did, no tracked file carries a service-role key or a hard-coded Flask secret, and every table, column and policy the code names is one this repository declares, with every role it compares against one the database holds, and every facility the landing page advertises one this repository can show"
     exit 0
   fi
   echo >&2
@@ -296,6 +311,14 @@ The check names every offender, and the fix depends on which rule failed:
   * delete it. `/static/` serves every file below it to anyone who guesses the
     name, so a scratch page there is a page on the site. A route whose path
     happens to contain the file's name is not a reference to it.
+
+  a service-role key or a literal Flask secret in a tracked file:
+  * take the value out of the repository and into the box's .env, where it
+    belongs — `deploy/bootstrap.sh` now demands all four values from the
+    environment (`: "${VAR:?}"`) instead of carrying them;
+  * then rotate it. Removing it from HEAD does not remove it from the history,
+    so the key that leaked is still readable there: see docs/SECRET_ROTATION.md
+    for the swap-and-revoke steps.
 
   a page that does not say which language it is in:
   * translate the page and add it to TRANSLATED in tests/unit/test_language_toggle.py;

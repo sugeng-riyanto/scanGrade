@@ -34,7 +34,13 @@ CHANGED=$(git diff --cached --name-only --diff-filter=ACMR)
 # caller can satisfy without a session (the anon key is public, so `USING (true)`
 # on `exams` handed out answer keys). A commit that touches neither is judged by
 # neither.
-if ! printf '%s\n' "$CHANGED" | grep -qE '^app/templates/.*\.html$|^app/static/css/|^tailwind\.config\.js$|^package\.json$|^app/.*\.py$|^supabase/.*\.sql$|^deploy/schema_contract\.py$'; then
+#
+# `deploy/` is in it whole — every shell script and every Python file — because
+# the check now includes the committed-secret scan, and the key that scan exists
+# to catch was committed in `deploy/bootstrap.sh`. A filter that watched only the
+# contract file there would have let the very commit that leaked a service-role
+# key through the hook that was meant to warn about it.
+if ! printf '%s\n' "$CHANGED" | grep -qE '^app/templates/.*\.html$|^app/static/css/|^tailwind\.config\.js$|^package\.json$|^app/.*\.py$|^supabase/.*\.sql$|^deploy/.*\.(sh|py)$'; then
   exit 0
 fi
 
