@@ -1,2 +1,0 @@
- * Serving Flask app 'wsgi.py'
- * Debug mode: off
