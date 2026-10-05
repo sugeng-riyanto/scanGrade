@@ -121,6 +121,9 @@ class TestWhatTheShuffleActuallyDoes:
             "    questions: CASES.questions.map((q) => ({type: q.type, origIdx: q.origIdx, answer: null})),",
             "    antiCheat: {randomize_options: CASES.randomize},",
             "    _shuffledOpts: {}, answered: {}, _answerTimestamps: null,",
+            # The page reports each change through `_ev`; this stub is about the
+            # shuffle and the marking, so the observation sink is a no-op.
+            "    _ev() {},",
             "    markDirty() {}, _shuffle, markAnswered,",
             "  };",
             "  buildOptions.call(comp);",

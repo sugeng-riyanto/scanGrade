@@ -259,6 +259,53 @@ def _check_rate_limit(row, server_now, min_interval=5):
     return not (0 <= age < min_interval)
 
 
+#: Where a sitting's own order lives, inside `answers`. Reserved exactly as
+#: `_device_info`, `_flags` and `_timestamps` are: a paper is marked by question
+#: index, so a key that is not one is ignored everywhere the answers are read.
+DRAFT_REV_KEY = "_rev"
+
+
+def _stored_revision(row) -> int:
+    """The order the stored answers carry, or 0 when they carry none."""
+    answers = (row or {}).get("answers")
+    if isinstance(answers, str):
+        try:
+            answers = json.loads(answers)
+        except (json.JSONDecodeError, TypeError):
+            answers = None
+    try:
+        return int((answers or {}).get(DRAFT_REV_KEY) or 0)
+    except (TypeError, ValueError, AttributeError):
+        return 0
+
+
+def _revision_is_stale(row, incoming) -> bool:
+    """Is ``incoming`` a copy of a batch the server has already moved past?
+
+    A payload that carries no order is **not** stale: the last-moment
+    `sendBeacon` and any older client send none, and refusing them would lose
+    exactly the answers this endpoint exists to save. What is refused is a payload
+    that carries a *concrete* number behind the stored one — a replay of an old
+    request, or two requests the network delivered out of order.
+    """
+    if incoming is None:
+        return False
+    try:
+        return int(incoming) < _stored_revision(row)
+    except (TypeError, ValueError):
+        return False
+
+
+def _next_revision(row, incoming) -> int:
+    """The order an accepted write leaves behind — always forward."""
+    base = _stored_revision(row)
+    try:
+        base = max(base, int(incoming))
+    except (TypeError, ValueError):
+        pass
+    return base + 1
+
+
 def _violation_outcome(supabase, exam, row, charged, penalty_info) -> dict:
     """What a charged violation does *besides* raising the penalty: lock the sitting.
 
@@ -1098,6 +1145,9 @@ def student_sync_draft():
     # request will be judged against — one clock, not two.
     server_iso = datetime.fromtimestamp(server_now, tz=timezone.utc).isoformat()
     server_time_left = None
+    # The order this sync leaves on the row, or None when it wrote nothing. Sent
+    # back so the page can adopt the server's number rather than guess at it.
+    stored_rev = None
     try:
         from app.utils.auth import get_supabase
         supabase = get_supabase()
@@ -1112,6 +1162,26 @@ def student_sync_draft():
                 return jsonify({"saved": True, "at": int(time.time()), "note": "already_submitted"})
             if not _check_rate_limit(sub, server_now, min_interval=10 if not is_light else 3):
                 return jsonify({"saved": True, "at": server_now, "throttled": True})
+            # ── The deadline, before anything is written ─────────────────────────
+            # The server's clock decides, counted from the *stored* start and the
+            # exam's own window — never from what the client claims. Past the
+            # deadline plus the one grace the submit route accepts papers within,
+            # the write is refused rather than stored in silence; inside that grace
+            # the paper is still saved and the final submit records it as late.
+            from app.services import attempt_status
+            now_dt = datetime.fromtimestamp(server_now, tz=timezone.utc)
+            if attempt_status.expired(exam_data or {}, sub, now_dt):
+                return jsonify({
+                    "saved": False, "at": server_now,
+                    "error": "past_deadline", "server_time_left": 0,
+                }), 409
+            # ── A replayed or reordered payload, refused by its order ───────────
+            incoming_rev = data.get("rev")
+            if _revision_is_stale(sub, incoming_rev):
+                return jsonify({
+                    "saved": False, "at": server_now, "error": "stale_rev",
+                    "rev": _stored_revision(sub),
+                }), 409
             if is_light and sub.get("answers"):
                 merged = sub["answers"]
                 if isinstance(merged, dict):
@@ -1152,6 +1222,11 @@ def student_sync_draft():
             # (`supabase/schema.sql`), so the stamp the next sync is judged by keeps
             # moving even on a box where that trigger is missing. Where it exists it
             # wins, with the database's `NOW()` — which only makes it more truthful.
+            # The order this write leaves behind. The next sync must carry it (or
+            # a later one), so an older payload replayed afterwards is refused.
+            stored_rev = _next_revision(sub, incoming_rev)
+            if isinstance(answers, dict):
+                answers[DRAFT_REV_KEY] = stored_rev
             supabase.table("submissions").update({
                 "answers": answers, "updated_at": server_iso,
             }).eq("id", sub["id"]).execute()
@@ -1192,19 +1267,21 @@ def student_sync_draft():
                 except Exception:
                     pass
         else:
-            client_started = data.get("started_at")
-            started_at_ts = client_started if client_started else server_now
-            if client_started:
-                client_ts = client_started // 1000 if client_started > 1e10 else client_started
-                if client_ts > server_now + 30:
-                    return jsonify({"saved": True, "at": server_now, "error": "invalid_timer", "server_time_left": duration if duration else None}), 400
-            started_at_dt = datetime.fromtimestamp(started_at_ts / 1000 if started_at_ts > 1e10 else started_at_ts, tz=timezone.utc).isoformat()
+            # ── The sitting's origin is the server's clock ───────────────────────
+            # The deadline is counted from this instant, so the value stored has to
+            # be the server's and never the one the client claims: a device that
+            # controls its own clock must not be able to move its own deadline. The
+            # claim is a signal now — a wrong-clock device is caught by the timer
+            # reconciliation on later syncs — never the origin.
+            started_at_dt = server_iso
+            stored_rev = 1
             if isinstance(answers, dict):
                 answers["_device_info"] = {
                     "user_agent": request.headers.get("User-Agent", ""),
                     "ip_address": request.remote_addr,
                     "recorded_at": int(time.time()),
                 }
+                answers[DRAFT_REV_KEY] = stored_rev
             supabase.table("submissions").insert({
                 "exam_id": exam_id,
                 "student_id": g.user_id,
@@ -1230,6 +1307,8 @@ def student_sync_draft():
     resp = {"saved": True, "at": server_now}
     if server_time_left is not None:
         resp["server_time_left"] = server_time_left
+    if stored_rev is not None:
+        resp["rev"] = stored_rev
     return jsonify(resp)
 
 

@@ -1852,12 +1852,27 @@ function sgKind(type) { return SG_QT.kinds[type || SG_QT.default] || SG_QT.kinds
 const SG_EXAM = '{{ exam.id }}';
 const SG_STUDENT = {{ (student_key or '') | tojson }};
 function sgLS(prefix) { return prefix + SG_EXAM + '__' + SG_STUDENT; }
+// The order of this sitting's drafts, as the server last told it to us. The page
+// sends it with every sync so a payload the network replays later — an old request
+// resent, or two delivered out of order — is refused by the server (`stale_rev`)
+// rather than overwriting answers that are already newer. Before the first reply
+// the number is 0, which the server reads as "nothing yet".
+function sgGetDraftRev() {
+    var v = parseInt(localStorage.getItem(sgLS('exam_rev_')));
+    return (isFinite(v) && v > 0) ? v : 0;
+}
+function sgSetDraftRev(value) {
+    var v = parseInt(value);
+    if (isFinite(v) && v >= 0) {
+        try { localStorage.setItem(sgLS('exam_rev_'), String(v)); } catch (e) {}
+    }
+}
 // A key with no student suffix can only be one a previous pupil wrote — this page
 // never produced one. Remove it once on load, so an upgrade cannot read a stale
 // draft that is not its author's. The server row still holds this pupil's answers.
 (function sgPurgeLegacySittingKeys() {
-    ['exam_draft_', 'exam_pending_submit_', 'exam_started_', 'exam_seen_',
-     'sg_agreed_', 'sg_exam_tab_'].forEach(function (prefix) {
+    ['exam_draft_', 'exam_pending_submit_', 'exam_started_', 'exam_rev_',
+     'exam_seen_', 'sg_agreed_', 'sg_exam_tab_'].forEach(function (prefix) {
         try { localStorage.removeItem(prefix + SG_EXAM); } catch (e) {}
     });
 })();
@@ -2507,7 +2522,7 @@ function examApp(duration, totalQ) {
                         });
                     });
                     navigator.sendBeacon('/api/student/sync-draft',
-                        new Blob([JSON.stringify({exam_id: '{{ exam.id }}', answers: data, light: true})], {type: 'application/json'}));
+                        new Blob([JSON.stringify({exam_id: '{{ exam.id }}', answers: data, light: true, rev: sgGetDraftRev()})], {type: 'application/json'}));
                 }
             });
             // Shuffle questions if enabled
@@ -4636,6 +4651,9 @@ function examApp(duration, totalQ) {
             });
             var ls = localStorage.getItem(sgLS('exam_started_'));
             if (ls) body.started_at = parseInt(ls);
+            // The order this payload belongs at. The server refuses one behind what
+            // it already holds, so a replay cannot rewrite the paper.
+            body.rev = sgGetDraftRev();
             fetch('/api/student/sync-draft', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
@@ -4643,6 +4661,18 @@ function examApp(duration, totalQ) {
             })
             .then(r => {
                 return r.json().then(data => {
+                    if (data && typeof data.rev === 'number') sgSetDraftRev(data.rev);
+                    if (data && data.error === 'stale_rev') {
+                        // The server holds a newer draft. Adopt its number (above) and
+                        // resend on the next tick rather than overwriting it.
+                        this.dirty = true;
+                    }
+                    if (data && data.error === 'past_deadline' && !this.submitted) {
+                        // The paper is over as far as the server is concerned; the
+                        // countdown on this page no longer decides.
+                        this.timeLeft = 0;
+                        this.submitExam(true);
+                    }
                     if (r.ok) {
                         this.lastSyncHash = hash;
                         this.dirty = false;
@@ -4686,12 +4716,17 @@ function examApp(duration, totalQ) {
             var body = { exam_id: '{{ exam.id }}', answers: data, light: false };
             var ls = localStorage.getItem(sgLS('exam_started_'));
             if (ls) body.started_at = parseInt(ls);
+            body.rev = sgGetDraftRev();
             fetch('/api/student/sync-draft', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify(body)
             })
-            .then(r => { if (r.ok) { this.canvasDirty = {}; this.lastSyncAt = Date.now(); this.syncStatus = 'synced'; this.setSyncLabel('synced'); } else throw new Error(); })
+            .then(r => r.json().then(d => {
+                if (d && typeof d.rev === 'number') sgSetDraftRev(d.rev);
+                if (r.ok) { this.canvasDirty = {}; this.lastSyncAt = Date.now(); this.syncStatus = 'synced'; this.setSyncLabel('synced'); }
+                else throw new Error();
+            }))
             .catch(() => { this.syncStatus = 'offline'; this.setSyncLabel('offline'); })
             .finally(() => { this._canvasSyncInFlight = false; });
         },
@@ -4838,6 +4873,7 @@ function examApp(duration, totalQ) {
                 if (r.ok) {
                     localStorage.removeItem(sgLS('exam_pending_submit_'));
                     localStorage.removeItem(sgLS('exam_draft_'));
+                    localStorage.removeItem(sgLS('exam_rev_'));
                     window.location.href = '/student/results';
                 } else {
                     return r.json().then(d => {

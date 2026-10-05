@@ -206,6 +206,7 @@ const obj = {{
   dirty: false, pendingSync: false,
   setSyncLabel() {{}},
   saveToLocal() {{}},
+  _ev() {{}},
   syncToServer() {{}},
   syncCanvasToServer() {{}},
   $nextTick(fn) {{ if (fn) fn(); }},
