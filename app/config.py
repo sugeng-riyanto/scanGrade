@@ -191,6 +191,23 @@ class ProductionConfig(Config):
     SESSION_COOKIE_SECURE = True
     SESSION_COOKIE_SAMESITE = "Lax"
     SENTRY_ENVIRONMENT = "production"
+
+    #: The value `Config.SECRET_KEY` falls back to when `FLASK_SECRET_KEY` is
+    #: unset. It is in this repository, so a box that boots on it signs every CSRF
+    #: token with a secret anyone who reads the repo can reproduce — and
+    #: `Config.validate()` only checks that the value is *non-empty*, which a
+    #: default always is. Production refuses this one value; development and the
+    #: suite keep it, so the documented dev flow stays bootable.
+    PLACEHOLDER_SECRET = "dev-secret-change-me"
+
+    @classmethod
+    def validate(cls):
+        super().validate()
+        if not cls.SECRET_KEY or cls.SECRET_KEY == cls.PLACEHOLDER_SECRET:
+            raise RuntimeError(
+                "FLASK_SECRET_KEY is unset or still the repository's placeholder; "
+                "refusing to sign sessions with a publicly-known value")
+
     # Never simulate a payment on a box that takes real money. Set as a class
     # attribute, not a read of the environment, so no `.env` on the box can turn it
     # on; `PAYMENT_SIMULATION` in `Config` is what the other environments inherit.
