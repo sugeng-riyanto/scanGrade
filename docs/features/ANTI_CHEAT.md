@@ -75,6 +75,29 @@ Guru dapat mengatur saat membuat/mengedit ujian:
 | Acak Soal | ❌ | Fisher-Yates shuffle |
 | Acak Opsi | ❌ | Opsi diacak per siswa |
 
+### Master switch: "Anti-Cheat Aktif" mati berarti tidak ada catatan
+
+Flag `exams.anti_cheat_enabled` (default `true`) adalah saklar milik sekolah. Saat
+sebuah ujian menyetelnya `false`, **tidak satu pun baris** boleh masuk ke
+`violation_logs` untuk ujian itu — bukan sekadar "tidak dihukum", tetapi tidak
+dicatat sama sekali:
+
+- `POST /api/violation/log` membaca baris ujian **lebih dulu**, lalu menolak menulis
+  (menjawab `{"logged": false, "reason": "anti_cheat_disabled"}`) bila flag itu
+  `false`. Urutan inilah perbaikannya: dulu barisnya ditulis sebelum ujian dibaca,
+  sehingga ujian yang dimatikan tetap memunculkan pelanggaran di laporan guru dan
+  tetap menaikkan `submissions.violations`.
+- Keputusannya milik server, bukan halaman: POST yang dibuat tangan pun ditolak sama
+  seperti POST halaman ujian. Halaman juga dibuat inert (`handleViolation` dan
+  `_maybeAutoSubmit` berhenti lebih dahulu) supaya tidak ada spanduk pelanggaran —
+  atau auto-submit — yang tidak disetujui oleh catatannya sendiri.
+- Dibaca sebagai `is False`, sama seperti `calculate_graduated_penalty`: baris yang
+  gagal dibaca bukan sekolah yang meminta senyap, jadi anti-cheat tidak pernah mati
+  diam-diam hanya karena barisnya hilang.
+
+Penalti dan penguncian (`resume_code`) sudah sejak awal menghormati flag ini; catatan
+adalah bagian yang belum. Dijaga oleh `tests/unit/test_anti_cheat_disabled.py`.
+
 ## Watermark
 
 Jika diaktifkan, nama siswa ditampilkan sebagai watermark transparan (6x4 grid, rotasi -25°) di seluruh halaman ujian. Mencegah foto layar/share jawaban.
