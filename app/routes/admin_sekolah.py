@@ -1989,12 +1989,19 @@ def admin_grade_weights():
         flags = (supabase.table("school_years").select("status").eq("id", year_id)
                  .eq("school_id", sid).execute().data or [])
         year_status = (flags[0].get("status") if flags else "") or ""
+    # Which grade levels teach each subject, so the page can say which subjects
+    # still follow the default and offer a one-click reset for a whole level. The
+    # offering rule lives in the service (a subject is taught unless a pair is
+    # closed), so the page and the reset door cannot disagree about it.
+    subject_levels = sl_service.levels_by_subject(supabase, sid)
+    grade_levels = sorted({lvl for lvls in subject_levels.values() for lvl in lvls})
     return render_template(
         "admin_sekolah/grade_weights.html",
         components=components, subjects=subjects, matrix=matrix, totals=totals,
         defaults=defaults, custom_subjects=custom_subjects,
         comp_names=comp_names, year=year, year_name=year.get("name") or "",
         year_status=year_status, required_total=grade_weighting.REQUIRED_TOTAL,
+        subject_levels=subject_levels, grade_levels=grade_levels,
     )
 
 
@@ -2083,6 +2090,99 @@ def admin_grade_weight_save(subject_id):
                  new_data={"weights": out.get("weights"), "cleared": out.get("cleared")},
                  user_id=g.user_id)
     return jsonify({"success": True, **out})
+
+
+@admin_sekolah_bp.route("/grade-weights/reset-level", methods=["POST"])
+@admin_sekolah_required
+def admin_grade_reset_level():
+    """Return every customised subject of one grade level to the school default.
+
+    The level is a **request**, never the subject list: the server derives which
+    subjects that level teaches through the same offering rule the page groups by,
+    so a form cannot clear a subject the level does not teach. Only subjects that
+    actually carry a distribution of their own are touched — a subject already on
+    the default has nothing to clear — and a closed year is refused before any
+    write, exactly as the KKM door refuses it.
+    """
+    sid = _school_id()
+    supabase = get_supabase()
+    payload = request.get_json(silent=True) or {}
+    level = str(payload.get("grade_level") or "").strip()
+    if not level:
+        return jsonify({"error": "Tingkat wajib dipilih"}), 400
+    year = ta_service.active_school_year(supabase, sid) or {}
+    year_id = year.get("id")
+    if not year_id:
+        return jsonify({"error": "Tahun ajaran aktif tidak ditemukan"}), 400
+    closed_reason = academic_year.write_refusal(supabase, year_id)
+    if closed_reason:
+        return jsonify({"error": closed_reason}), 403
+    subject_ids = sl_service.subjects_for_grade_level(supabase, sid, level)
+    custom = grade_weighting.configs_for_school(supabase, sid, year_id)
+    cleared = []
+    for sub_id in subject_ids:
+        if not custom.get(str(sub_id)):
+            continue
+        ok, out = grade_weighting.save_config(supabase, sid, sub_id, year_id, {},
+                                              actor_id=g.user_id)
+        if not ok:
+            return jsonify(out), out.get("status", 400)
+        cleared.append(str(sub_id))
+    invalidate_school(sid)
+    log_activity("update", "grade_weight_config", f"level:{level}",
+                 new_data={"grade_level": level, "cleared": cleared},
+                 user_id=g.user_id)
+    return jsonify({"success": True, "reset": len(cleared),
+                    "grade_level": level, "cleared": cleared})
+
+
+@admin_sekolah_bp.route("/grade-weights/pupils")
+@admin_sekolah_required
+def admin_grade_pupil_search():
+    """Find a pupil of **this school** by name, for the weight preview's picker.
+
+    The preview is the effect of a distribution on a learner, so the admin has to
+    be able to name one. The school comes from the session and is a *filter* in the
+    service, never a value the query can set, so this door can only ever answer
+    with this admin's own pupils. A query shorter than two characters returns
+    nothing — the picker is a lookup, not a roster dump.
+    """
+    sid = _school_id()
+    supabase = get_supabase()
+    q = (request.args.get("q") or "").strip()
+    return jsonify({"success": True,
+                    "pupils": grade_weighting.find_pupils(supabase, sid, q)})
+
+
+@admin_sekolah_bp.route("/grade-weights/pupil-marks")
+@admin_sekolah_required
+def admin_grade_pupil_marks():
+    """One pupil's own marks per component, so the preview can show a real record.
+
+    ``?student_id=…&subject_id=…``. Both ids are checked against the caller's own
+    school **before** any mark is read: the pupil by
+    :func:`grade_weighting.pupil_component_marks` (which answers ``None`` for a
+    pupil that is not this school's), and the subject by an explicit read here —
+    so neither id in the URL can widen the scope, and a foreign id is a refusal
+    rather than a quiet "no marks". Read-only by construction: nothing on this
+    path writes, because a preview must never become a save.
+    """
+    sid = _school_id()
+    supabase = get_supabase()
+    student_id = (request.args.get("student_id") or "").strip()
+    subject_id = (request.args.get("subject_id") or "").strip()
+    if not student_id or not subject_id:
+        return jsonify({"error": "Murid dan mapel wajib dipilih"}), 400
+    owned = (supabase.table("subjects").select("id")
+             .eq("id", subject_id).eq("school_id", sid).execute().data or [])
+    if not owned:
+        return jsonify({"error": "Mapel tidak ditemukan di sekolah ini"}), 404
+    year = ta_service.active_school_year(supabase, sid) or {}
+    found = grade_weighting.pupil_component_marks(
+        supabase, sid, subject_id, year.get("id"), student_id)
+    if not found:
+        return jsonify({"error": "Murid tidak ditemukan di sekolah ini"}), 404
+    return jsonify({"success": True, **found})
 
 
 # ─── PROMOTE (Naik Kelas) ────────────────────────────

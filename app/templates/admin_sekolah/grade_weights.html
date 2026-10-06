@@ -10,6 +10,50 @@
 // exceptions are typed out. A save only succeeds when a row (or the default)
 // reaches 100%, so every total is shown live and its Save stays disabled until it
 // adds up.
+// The preview's arithmetic: the mark a sample set of scores carries under a
+// distribution, before anything is saved. It is the same rule the server's
+// `grade_weighting.compute` keeps — a component with no sample counts as 0, a
+// component with no weight is ignored, a 0% weight is not a component, and a
+// distribution with no weights at all falls back to the simple mean — so the
+// number an admin previews is the number the roster will compute. Written as a
+// standalone function (like the pupil page's countdown) so its rule can be read
+// and run on its own.
+function sgPreviewFinal(weights, scores) {
+    const map = {};
+    Object.keys(weights || {}).forEach(function (id) {
+        const w = parseInt(weights[id], 10);
+        if (!isNaN(w) && w > 0) { map[id] = w; }
+    });
+    const has = function (id) {
+        const raw = scores ? scores[id] : undefined;
+        return raw !== undefined && raw !== null && raw !== '' && isFinite(Number(raw));
+    };
+    const ids = Object.keys(map);
+    if (!ids.length) {
+        const values = Object.keys(scores || {})
+            .filter(has).map(function (id) { return Number(scores[id]); });
+        const mean = values.length
+            ? Math.round((values.reduce(function (a, b) { return a + b; }, 0) / values.length) * 10) / 10
+            : null;
+        return {mode: 'simple', final: mean, detail: [], total: 0};
+    }
+    let total = 0;
+    const detail = ids.map(function (id) {
+        const scored = has(id);
+        const average = scored ? Number(scores[id]) : 0;
+        const weight = map[id];
+        total += average * weight / 100;
+        return {component_id: id, weight: weight,
+                average: scored ? average : null, count: scored ? 1 : 0};
+    });
+    return {
+        mode: 'weighted',
+        final: Math.round(total * 10) / 10,
+        detail: detail,
+        total: ids.reduce(function (a, id) { return a + map[id]; }, 0),
+    };
+}
+
 function gradeWeights() {
     return {
         components: {{ components|tojson }},
@@ -21,6 +65,8 @@ function gradeWeights() {
         compNames: {{ comp_names|tojson }},
         required: {{ required_total }},
         closed: {{ 'true' if year_status == 'closed' else 'false' }},
+        levels: {{ subject_levels|tojson }},
+        levelNames: {{ grade_levels|tojson }},
         newName: '',
         saving: '',
         msg: '',
@@ -37,6 +83,135 @@ function gradeWeights() {
         },
         total(subjectId) { return this.totals[subjectId] || 0; },
         canSave(subjectId) { return this.total(subjectId) === this.required; },
+
+        // ── custom vs default, by subject and by grade level ────────────────
+        // The page lists every subject flat, so nothing said which rows still
+        // follow the school default. These count them, group them by the grade
+        // levels that teach them, and let an admin return a whole level to the
+        // default in one click instead of saving each row back by hand.
+        customCount() { return this.subjects.filter(s => this.isCustom(s.id)).length; },
+        followCount() { return this.subjects.filter(s => !this.isCustom(s.id)).length; },
+        levelSubjects(level) {
+            const want = String(level);
+            return this.subjects.filter(s => (this.levels[String(s.id)] || []).indexOf(want) !== -1);
+        },
+        levelCustomCount(level) { return this.levelSubjects(level).filter(s => this.isCustom(s.id)).length; },
+        resetLevel(level) {
+            const n = this.levelCustomCount(level);
+            if (!n) { return; }
+            if (!confirm(this.t('Kembalikan mapel di tingkat ini ke default sekolah?',
+                                'Return the subjects in this level to the school default?'))) { return; }
+            this.saving = 'level:' + level; this.msg = '';
+            // The server derives the level's subjects; the page only names the level.
+            this.post('/admin-sekolah/grade-weights/reset-level', { grade_level: level })
+                .then(d => {
+                    if (d.ok) {
+                        this.levelSubjects(level).forEach(s => {
+                            this.weights[s.id] = Object.assign({}, this.defaults);
+                            this.totals[s.id] = this.defaultTotal();
+                            this.customSubjects = this.customSubjects.filter(v => v !== String(s.id));
+                        });
+                    }
+                    this.flash(d.ok, d.ok
+                        ? this.t('Mapel di tingkat ini kembali mengikuti default sekolah.','Subjects in this level follow the school default again.')
+                        : (d.data.error || this.t('Gagal.','Failed.')));
+                    this.saving = '';
+                });
+        },
+
+        // ── the preview ─────────────────────────────────────────────────────
+        // It reads whichever distribution is selected *live* — the school default
+        // or a subject's own row as typed, saved or not — so the effect of a
+        // change is visible before it is committed. It never posts: saving stays
+        // the admin's deliberate act.
+        previewSubject: '__default__',
+        previewScores: {},
+        previewWeights() {
+            return (this.previewSubject === '__default__'
+                ? this.defaults : this.row(this.previewSubject)) || {};
+        },
+        previewMark() { return sgPreviewFinal(this.previewWeights(), this.previewScores); },
+        setSample(compId, value) {
+            // A hand-typed sample is no longer the pupil's record, so the
+            // attribution drops here: the badge must not go on naming a learner
+            // whose marks the admin has just edited.
+            this.seedIntact = false;
+            if (value === '' || value === null || value === undefined) {
+                delete this.previewScores[compId];
+            } else {
+                this.previewScores[compId] = value;
+            }
+        },
+
+        // ── seeding the sample from a real pupil ─────────────────────────────
+        // Invented scores answer "what does 80/90 carry?". An admin changing a
+        // real policy wants the better question: what does a *named* learner
+        // carry out of this subject under the distribution being typed? The
+        // picker reads one pupil's own component means from the server — the
+        // same bucketing the roster computes — and fills the sample fields.
+        // Seeding is a read; nothing here posts, and saving stays the admin's
+        // deliberate act.
+        pupilQuery: '',
+        pupilResults: [],
+        pupilHint: '',
+        seedPupil: null,
+        seedIntact: false,
+        searchPupils() {
+            const q = this.pupilQuery.trim();
+            this.pupilHint = '';
+            if (q.length < 2) { this.pupilResults = []; return; }
+            this.get('/admin-sekolah/grade-weights/pupils?q=' + encodeURIComponent(q))
+                .then(d => { this.pupilResults = (d.ok && d.data.pupils) || []; });
+        },
+        seedFrom(pupil) {
+            if (!pupil || !pupil.id) { return; }
+            if (this.previewSubject === '__default__') {
+                // Marks belong to a subject, so the school default has no record
+                // to read. Say so rather than guessing which subject to read.
+                this.pupilHint = this.t('Pilih satu mapel dulu: nilai dibaca dari satu mapel.',
+                                        'Pick a subject first: marks are read from one subject.');
+                return;
+            }
+            this.seedPupil = pupil;
+            this.seedIntact = false;
+            this.pupilHint = '';
+            this.get('/admin-sekolah/grade-weights/pupil-marks?student_id=' + encodeURIComponent(pupil.id)
+                     + '&subject_id=' + encodeURIComponent(this.previewSubject))
+                .then(d => {
+                    if (!d.ok) {
+                        this.pupilHint = d.data.error
+                            || this.t('Gagal membaca nilai murid.', 'Could not read the pupil marks.');
+                        return;
+                    }
+                    this.previewScores = d.data.marks || {};
+                    this.seedIntact = Object.keys(this.previewScores).length > 0;
+                    this.pupilHint = d.data.scored
+                        ? this.t('Nilai murid ini dimuat.', 'This pupil marks are loaded.')
+                        : this.t('Murid ini belum punya nilai di mapel ini.',
+                                 'This pupil has no marks in this subject yet.');
+                });
+        },
+        clearSeed() {
+            this.seedPupil = null;
+            this.seedIntact = false;
+            this.previewScores = {};
+            this.pupilHint = '';
+            this.pupilResults = [];
+        },
+        onPreviewSubjectChange() {
+            // The seed belongs to a subject, so a new subject is a fresh read —
+            // re-seeding the same pupil keeps the comparison the admin is making.
+            const pupil = this.seedPupil;
+            this.seedIntact = false;
+            this.previewScores = {};
+            this.pupilHint = '';
+            if (pupil) { this.seedFrom(pupil); }
+        },
+        get(url) {
+            return fetch(url, {headers: {'Accept': 'application/json'}})
+              .then(r => r.json().then(data => ({ok: r.ok && !data.error, data})))
+              .catch(() => ({ok: false, data: {error: this.t('Gagal menghubungi server.', 'Could not reach the server.')}}));
+        },
 
         isCustom(subjectId) { return this.customSubjects.includes(String(subjectId)); },
 
@@ -135,6 +310,15 @@ function gradeWeights() {
         <div>
             <h2 class="text-lg font-extrabold text-slate-800" x-text="t('Komponen & Bobot Nilai','Grade Components & Weights')"></h2>
             <p class="text-xs text-slate-500 font-medium" x-text="t('Atur default sekolah sekali, lalu tiap mapel mengikutinya. Default diatur per tahun ajaran; totalnya harus 100%.','Set the school default once; each subject follows it. The default is per subject per year; the total must reach 100%.')"></p>
+            <!-- How much of the school is on the default and how much carries its
+                 own distribution — the question the flat subject list never
+                 answered. -->
+            <p class="text-xs font-bold mt-1.5">
+                <span class="text-brand-700" x-text="customCount()"></span>
+                <span class="text-slate-600" x-text="t('mapel punya bobot sendiri ·','subjects have their own weights ·')"></span>
+                <span class="text-slate-500" x-text="followCount()"></span>
+                <span class="text-slate-500" x-text="t('masih mengikuti default sekolah.','still follow the school default.')"></span>
+            </p>
         </div>
         <span class="text-xs font-bold px-2 py-1 rounded-lg bg-slate-100 text-slate-600" x-show="'{{ year_name }}'">{{ year_name or t('Tanpa tahun aktif','No active year') }}</span>
     </div>
@@ -204,6 +388,129 @@ function gradeWeights() {
                 </div>
             </div>
 
+            <!-- Which subjects still follow the default and which carry their own
+                 distribution, grouped by the grade levels that teach them, with a
+                 one-click reset that returns a whole level to the default. -->
+            <div class="card p-5 mb-6" data-level-resets x-show="levelNames.length > 0">
+                <div class="mb-3">
+                    <h3 class="text-sm font-extrabold text-slate-700"><i class="fas fa-layer-group text-brand-500 mr-1"></i><span x-text="t('Per Tingkat','By Grade Level')"></span></h3>
+                    <p class="text-xs text-slate-500 font-medium" x-text="t('Lihat mapel mana yang masih mengikuti default, dan kembalikan satu tingkat sekaligus ke default sekolah.','See which subjects still follow the default, and return a whole level to the school default at once.')"></p>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                    <template x-for="lvl in levelNames" :key="lvl">
+                        <div class="flex items-center justify-between gap-2 p-3 rounded-xl border border-slate-100 bg-slate-50">
+                            <div class="min-w-0">
+                                <p class="text-sm font-extrabold text-slate-700"><span x-text="t('Tingkat ','Level ')"></span><span x-text="lvl"></span></p>
+                                <p class="text-xs font-medium">
+                                    <span class="font-bold" :class="levelCustomCount(lvl) ? 'text-brand-700' : 'text-slate-400'" x-text="levelCustomCount(lvl)"></span>
+                                    <span class="text-slate-500" x-text="t(' punya bobot sendiri · total ',' have their own weights · total ')"></span>
+                                    <span class="text-slate-400" x-text="levelSubjects(lvl).length"></span>
+                                    <span class="text-slate-400" x-text="t(' mapel',' subjects')"></span>
+                                </p>
+                            </div>
+                            <button type="button" @click="resetLevel(lvl)"
+                                    :disabled="closed || levelCustomCount(lvl) === 0 || saving === 'level:' + lvl"
+                                    class="shrink-0 px-3 py-1.5 rounded-lg bg-slate-200 text-slate-700 text-xs font-bold hover:bg-slate-300 disabled:opacity-40 disabled:cursor-not-allowed">
+                                <i class="fas fa-rotate-left mr-1"></i><span x-text="t('Reset ke default','Reset to default')"></span>
+                            </button>
+                        </div>
+                    </template>
+                </div>
+            </div>
+
+            <!-- The preview: what a sample set of scores carries under the
+                 distribution currently selected, computed live and never saved.
+                 The number an admin sees here is the number the roster will
+                 compute, because the arithmetic is the server's own rule. -->
+            <div class="card p-5 mb-6" data-weight-preview>
+                <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
+                    <div>
+                        <h3 class="text-sm font-extrabold text-slate-700"><i class="fas fa-calculator text-brand-500 mr-1"></i><span x-text="t('Pratinjau Nilai Akhir','Final Mark Preview')"></span></h3>
+                        <p class="text-xs text-slate-500 font-medium" x-text="t('Masukkan contoh nilai tiap komponen untuk melihat Nilai Akhir yang akan dihasilkan. Belum tersimpan.','Enter a sample score per component to see the Final Mark it would produce. Nothing is saved here.')"></p>
+                    </div>
+                    <select x-model="previewSubject" @change="onPreviewSubjectChange()" :disabled="closed"
+                            class="px-3 py-1.5 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-brand-500 disabled:bg-slate-100">
+                        <option value="__default__" x-text="t('Bobot default sekolah','School default weights')"></option>
+                        <template x-for="s in subjects" :key="s.id">
+                            <option :value="String(s.id)" x-text="s.name"></option>
+                        </template>
+                    </select>
+                </div>
+                <!-- The preview is the effect of a distribution on a learner, so
+                     the admin can name one: the sample fields are filled with
+                     that pupil's own marks for the subject being previewed, read
+                     by the server through the same component bucketing the roster
+                     uses. A hand-edited field drops the attribution. -->
+                <div class="mb-3" data-preview-pupil>
+                    <div class="flex flex-col sm:flex-row sm:items-center gap-2">
+                        <label class="flex items-center gap-2">
+                            <span class="text-xs font-bold text-slate-600" x-text="t('Ambil dari murid','Seed from a pupil')"></span>
+                            <input type="text" x-model="pupilQuery" @input.debounce="searchPupils()"
+                                   :disabled="closed"
+                                   :placeholder="t('Cari nama murid…','Search a pupil by name…')"
+                                   class="px-3 py-1.5 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-brand-500 disabled:bg-slate-100">
+                        </label>
+                        <span class="flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-lg"
+                              :class="seedIntact ? 'bg-brand-50 text-brand-700' : 'bg-slate-100 text-slate-500'"
+                              x-show="seedPupil">
+                            <i class="fas" :class="seedIntact ? 'fa-user-check' : 'fa-pen'"></i>
+                            <span x-text="seedPupil && seedPupil.name"></span>
+                            <span class="text-slate-400" x-show="seedPupil && seedPupil.class_name"
+                                  x-text="seedPupil && seedPupil.class_name ? '· ' + seedPupil.class_name : ''"></span>
+                            <span x-show="!seedIntact" x-text="t('(diedit)','(edited)')"></span>
+                        </span>
+                        <button type="button" x-show="seedPupil" @click="clearSeed()"
+                                class="text-xs font-bold text-slate-500 hover:text-brand-700">
+                            <i class="fas fa-xmark mr-1"></i><span x-text="t('Kosongkan','Clear')"></span>
+                        </button>
+                    </div>
+                    <div class="flex flex-wrap gap-2 mt-2" x-show="pupilResults.length > 0">
+                        <template x-for="p in pupilResults" :key="p.id">
+                            <button type="button" @click="seedFrom(p)"
+                                    class="px-2 py-1 rounded-lg border border-slate-200 text-xs font-bold hover:bg-brand-100">
+                                <span x-text="p.name"></span>
+                                <span class="text-slate-400" x-text="p.class_name ? '· ' + p.class_name : ''"></span>
+                            </button>
+                        </template>
+                    </div>
+                    <p class="text-xs text-slate-500 font-medium mt-2" x-show="pupilHint" x-text="pupilHint"></p>
+                </div>
+                <div class="flex flex-wrap gap-3 mb-4">
+                    <template x-for="c in activeComponents()" :key="c.id">
+                        <label class="flex items-center gap-2">
+                            <span class="text-xs font-bold text-slate-600" x-text="c.name"></span>
+                            <input type="number" min="0" max="100" :disabled="closed"
+                                   :value="previewScores[c.id] === undefined ? '' : previewScores[c.id]"
+                                   @input="setSample(c.id, $event.target.value)"
+                                   class="w-16 text-center border border-slate-200 rounded-lg px-1 py-1 text-sm font-bold disabled:bg-slate-100">
+                        </label>
+                    </template>
+                </div>
+                <div class="flex flex-wrap items-center gap-4 p-3 rounded-xl bg-slate-50 border border-slate-100">
+                    <div class="flex items-baseline gap-2">
+                        <span class="text-xs font-bold text-slate-500" x-text="t('Nilai Akhir','Final Mark')"></span>
+                        <span class="text-2xl font-extrabold text-brand-700" data-preview-final
+                              x-text="previewMark().final === null ? '—' : previewMark().final.toFixed(1)"></span>
+                    </div>
+                    <span class="text-xs font-bold px-2 py-1 rounded-lg"
+                          :class="previewMark().mode === 'weighted' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'"
+                          x-text="previewMark().mode === 'weighted'
+                                    ? t('Berbobot ' + previewMark().total + '%','Weighted ' + previewMark().total + '%')
+                                    : t('Rata-rata sederhana','Simple mean')"></span>
+                    <span x-show="previewMark().mode === 'weighted' && previewMark().total !== required"
+                          class="text-xs font-bold text-red-500"
+                          x-text="t('Total bobot belum 100%.','The weights do not total 100% yet.')"></span>
+                </div>
+                <div class="mt-3 space-y-1" x-show="previewMark().detail.length > 0">
+                    <template x-for="d in previewMark().detail" :key="d.component_id">
+                        <p class="text-xs text-slate-500">
+                            <span class="font-bold text-slate-600" x-text="compNames[d.component_id] || d.component_id"></span>
+                            <span x-text="': ' + (d.average === null ? t('tanpa nilai','no score') : d.average) + ' × ' + d.weight + '%'"></span>
+                        </p>
+                    </template>
+                </div>
+            </div>
+
             <div class="card p-5">
                 <h3 class="text-sm font-extrabold text-slate-700 mb-3" x-text="t('Matriks Bobot per Mapel','Weight Matrix per Subject')"></h3>
                 <div class="overflow-x-auto">
@@ -222,7 +529,12 @@ function gradeWeights() {
                                     <td class="px-3 py-2 font-semibold text-slate-700">
                                         <span x-text="s.name"></span>
                                         <span x-show="!isCustom(s.id)" class="ml-1 text-[10px] font-bold text-brand-600 bg-brand-50 px-1.5 py-0.5 rounded"
-                                              x-text="t('default','default')"></span>
+                                              x-text="t('mengikuti default','follows the default')"></span>
+                                        <span x-show="isCustom(s.id)" class="ml-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded"
+                                              x-text="t('bobot sendiri','own weights')"></span>
+                                        <template x-for="lvl in (levels[String(s.id)] || [])" :key="lvl">
+                                            <span class="ml-1 text-[10px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded" x-text="lvl"></span>
+                                        </template>
                                     </td>
                                     <template x-for="c in activeComponents()" :key="c.id">
                                         <td class="px-1 py-2 text-center">

@@ -96,6 +96,12 @@ MACHINE = frozenset({
     # offered to, and `.../classes/<id>/roster` hands back that class's pupils and
     # their levels — both JSON for the Subjects modal, which is where the crumb is.
     "mapping", "roster",
+    # `/admin-sekolah/grade-weights/pupils` answers a name search and
+    # `.../pupil-marks` hands back one learner's own component marks, both JSON
+    # for the weight page's preview — the readbacks that seed its sample fields
+    # with a real pupil's record. Never pages of their own; the crumb is the
+    # weights page that asked.
+    "pupils", "pupil-marks",
     # `/student/attempt-status/<exam_id>` answers one sitting's state (status,
     # deadline, remaining seconds) as JSON for the exam page's own timer and
     # lock screen — a readback, never a page of its own.

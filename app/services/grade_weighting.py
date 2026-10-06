@@ -361,6 +361,127 @@ def save_config(supabase, school_id: str, subject_id: str, year_id: str,
     return True, {"weights": cleaned, "total": total, "cleared": not cleaned}
 
 
+# ── the preview's seed: a real pupil's own marks ─────────────────────────────
+
+def find_pupils(supabase, school_id: str, query, limit: int = 8) -> list[dict]:
+    """Active pupils of **this school** whose name contains ``query``.
+
+    A preview over invented scores answers "what does 80/90 carry?". The read
+    behind its picker is what lets an admin ask the better question — what does a
+    *named* learner's record carry out under the distribution being typed. Two
+    rules, both deliberate:
+
+    * the school is a required argument **and** a filter, so a name typed at one
+      school can never surface a pupil of another however the query is spelled;
+    * a query shorter than two characters finds **nothing**. A search box that
+      answers "" with the whole roster is a roster dump with a text field in
+      front of it, and this page never needed one.
+
+    Names come from ``profiles`` (the school's own pupils); the class is read from
+    the pupil's row so two learners with one name can be told apart. A pupil whose
+    record is ``alumni``/``dropped`` is not offered: weights are previewed for the
+    running year.
+    """
+    school = str(school_id or "")
+    term = " ".join((query or "").split())
+    if not school or len(term) < 2:
+        return []
+    try:
+        size = max(1, int(limit))
+    except (TypeError, ValueError):
+        size = 8
+    people = _rows(supabase.table("profiles").select("id, full_name")
+                   .eq("school_id", school).eq("role", "murid")
+                   .ilike("full_name", f"%{term}%").limit(size))
+    ids = [str(p["id"]) for p in people if p.get("id")]
+    if not ids:
+        return []
+    rows = _rows(supabase.table("students").select("id, classes(name)")
+                 .in_("id", ids).eq("status", "active"))
+    names = {str(p["id"]): (p.get("full_name") or "?") for p in people if p.get("id")}
+    out = []
+    for row in rows:
+        pid = str(row.get("id"))
+        if pid not in names:
+            continue
+        out.append({"id": pid, "name": names[pid],
+                    "class_name": (row.get("classes") or {}).get("name") or ""})
+    out.sort(key=lambda p: p["name"].casefold())
+    return out
+
+
+def pupil_component_marks(supabase, school_id: str, subject_id, year_id: str | None,
+                          student_id) -> dict | None:
+    """One pupil's own mean in each component of one subject — the preview's seed.
+
+    Returns ``{"pupil": {id, name, class_name}, "marks": {component_id: mean},
+    "scored": n}`` when the pupil is **this school's**, else ``None``. ``None`` is
+    the ownership answer, not an empty read: the caller refuses the request rather
+    than answering "no marks", so a forged id from another school cannot be told
+    apart from a real pupil with nothing graded.
+
+    ``marks`` holds only the components the pupil has a mark in, on purpose. A
+    component left out makes the preview apply this module's own
+    :data:`MISSING_COMPONENT_POLICY` ("zero") instead of a zero this read invented,
+    so the admin sees the same gap the roster will have.
+
+    The arithmetic is :func:`compute`'s: each component's mean over the pupil's
+    scored papers (``final_score`` when present, else ``score``), read through this
+    school's exams for this subject and year — so a paper of another subject, of
+    another year, or of another school's pupil is never counted. A paper the
+    teacher has not released **does** count here: this is the teacher's roster
+    arithmetic, which includes every graded paper, and the preview exists to agree
+    with it rather than to invent a second rule.
+    """
+    school = str(school_id or "")
+    student = str(student_id or "")
+    if not school or not subject_id or not student:
+        return None
+    pupil = _rows(supabase.table("students")
+                  .select("id, profiles!inner(full_name), classes(name)")
+                  .eq("id", student).eq("school_id", school)
+                  .eq("status", "active"))
+    if not pupil:
+        return None
+    row = pupil[0]
+    exams_q = (supabase.table("exams").select("id, grade_component_type_id")
+               .eq("school_id", school).eq("subject_id", subject_id))
+    if year_id:
+        exams_q = exams_q.eq("school_year_id", year_id)
+    exams = _rows(exams_q)
+    components = {str(e["id"]): e.get("grade_component_type_id")
+                  for e in exams if e.get("id")}
+    out = {
+        "pupil": {"id": student,
+                  "name": (row.get("profiles") or {}).get("full_name") or "?",
+                  "class_name": (row.get("classes") or {}).get("name") or ""},
+        "marks": {},
+        "scored": 0,
+    }
+    if not components:
+        return out
+    subs = _rows(supabase.table("submissions").select("exam_id, score, final_score")
+                 .in_("exam_id", list(components)).in_("student_id", [student]))
+    buckets: dict[str, list[float]] = {}
+    for sub in subs:
+        cid = components.get(str(sub.get("exam_id")))
+        if not cid:
+            continue                    # an uncategorised paper cannot be placed
+        raw = sub.get("final_score")
+        if raw is None:
+            raw = sub.get("score")
+        try:
+            score = float(raw) if raw is not None else None
+        except (TypeError, ValueError):
+            score = None
+        if score is None:
+            continue
+        buckets.setdefault(str(cid), []).append(score)
+    out["marks"] = {cid: round(sum(v) / len(v), 1) for cid, v in buckets.items()}
+    out["scored"] = sum(len(v) for v in buckets.values())
+    return out
+
+
 # ── the mark itself ──────────────────────────────────────────────────────────
 
 def compute(rows, weights: dict) -> dict:
