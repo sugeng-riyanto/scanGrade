@@ -311,10 +311,24 @@ class TestTheLiveColumnAgreesWithTheServer:
 # ── the door ────────────────────────────────────────────────────────────────
 
 def _body(name: str) -> str:
+    """A route function **with its own decorators**, which the guards have to read.
+
+    Taking them from whichever function follows (what this helper did before) let
+    "is it admin-only" pass on a door that was not: the `@admin_sekolah_required`
+    it matched belonged to the next route. A guard for a decorated route has to
+    take the decorators from above the `def`.
+    """
     src = ADMIN_SCHOOL.read_text(encoding="utf-8-sig")
     start = src.index(f"def {name}(")
+    lines = src[:start].splitlines()
+    if lines and not lines[-1].strip():
+        lines.pop()
+    decorators: list[str] = []
+    while lines and lines[-1].strip().startswith("@"):
+        decorators.insert(0, lines.pop())
+    head = "".join(line + "\n" for line in decorators)
     match = re.search(r"\r?\ndef ", src[start:])
-    return src[start:start + match.start()] if match else src[start:]
+    return head + (src[start:start + match.start()] if match else src[start:])
 
 
 class TestTheDoor:

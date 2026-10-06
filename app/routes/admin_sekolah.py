@@ -2212,6 +2212,79 @@ def admin_grade_pupil_subjects():
     return jsonify({"success": True, **found})
 
 
+def _typed_weights(supabase, school_id, pairs):
+    """``({component_id: percent}, None)`` from the page's ``w=<id>:<percent>`` pairs.
+
+    The ids are checked against the components **this school owns** before anything
+    is weighed: the weights come from the page, so an id the school does not have
+    would otherwise be applied as if the school had configured it — and the answer
+    would look like a policy nobody typed. A percentage is refused rather than
+    clamped, because a number outside 0–100 is a mistake worth naming.
+
+    The failure is ``(message, status)`` so the caller answers with the reason the
+    admin can act on: a foreign component is a 403 (not yours to weigh), junk is a
+    400.
+    """
+    owned = grade_weighting.component_ids(supabase, school_id)
+    out = {}
+    for raw in pairs or []:
+        text = (raw or "").strip()
+        if not text:
+            continue
+        component_id, _, value = text.rpartition(":")
+        if not component_id or not value:
+            return {}, ("Bobot tidak dikenal", 400)
+        if str(component_id) not in owned:
+            return {}, ("Ada komponen bukan milik sekolah ini", 403)
+        try:
+            percent = int(value)
+        except (TypeError, ValueError):
+            return {}, ("Bobot harus berupa angka", 400)
+        if percent < 0 or percent > 100:
+            return {}, ("Bobot harus 0-100", 400)
+        if percent:
+            out[str(component_id)] = percent
+    return out, None
+
+
+@admin_sekolah_bp.route("/grade-weights/class-impact")
+@admin_sekolah_required
+def admin_grade_class_impact():
+    """What the weights being typed would do to the class, not to one sample.
+
+    ``?scope=default|subject&subject_id=…&w=<component>:<percent>…``. A mark is
+    changed for a class, so the question that decides a save is which pupils move
+    and by how much: this weighs every pupil who has a mark in the **affected**
+    subjects against the marks they carry today. Which subjects those are is
+    derived here, not named by the caller — a default change covers every subject
+    that follows the default, a subject change covers that one — so the URL can
+    only narrow the question, never widen it into another school's pupils.
+
+    A **read**, on a GET, because it computes and stores nothing: it is the same
+    family as the preview's other doors, and a preview must never be able to save.
+    """
+    sid = _school_id()
+    supabase = get_supabase()
+    scope = (request.args.get("scope") or "").strip()
+    subject_id = (request.args.get("subject_id") or "").strip()
+    if scope == "subject":
+        owned = (supabase.table("subjects").select("id")
+                 .eq("id", subject_id).eq("school_id", sid).execute().data or [])
+        if not owned:
+            return jsonify({"error": "Mapel tidak ditemukan di sekolah ini"}), 404
+    elif scope != "default":
+        return jsonify({"error": "Cakupan tidak dikenal"}), 400
+    weights, problem = _typed_weights(supabase, sid, request.args.getlist("w"))
+    if problem:
+        return jsonify({"error": problem[0]}), problem[1]
+    year = ta_service.active_school_year(supabase, sid) or {}
+    subjects = grade_weighting.affected_subjects(supabase, sid, year.get("id"),
+                                                 scope, subject_id)
+    return jsonify({"success": True, "scope": scope,
+                    **grade_weighting.class_impact(supabase, sid, subjects,
+                                                   year.get("id"), weights)})
+
+
 # ─── PROMOTE (Naik Kelas) ────────────────────────────
 
 @admin_sekolah_bp.route("/promote", methods=["GET", "POST"])

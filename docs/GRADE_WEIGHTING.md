@@ -201,6 +201,45 @@ Three rules keep it honest:
   component is flagged on its row (*tanpa kategori*), because it cannot reach a
   weighted mark and would otherwise quietly shrink the list of what counted.
 
+### Judging a change against the class, not one learner
+
+The comparison above answers what a change does to **one** pupil. A mark is changed
+for a class, though — the default binds every subject that never saved its own row —
+so the same card carries **Dampak ke kelas**: a button that asks the server which
+pupils would move, and by how much, before anything is saved.
+
+| Column | What it is |
+|---|---|
+| **Murid** | the pupil, with their class, and a *sudah terbit* chip when a mark they can already open is one of the ones moving |
+| **Mapel** | the affected subject |
+| **Tersimpan** | the mark the roster reports today |
+| **Dengan bobot ini** | the same rule under the weights now in the matrix, saved or not |
+| **Selisih** | the movement, coloured by direction |
+
+Which subjects count as **affected** is derived server-side, never named by the
+page: a **default** change covers every active subject that follows the default (a
+subject with its own row is not touched by it, so it is not weighed), and a subject
+change covers that one subject. The headline counts are for the whole cohort while
+the table shows the largest movements — the display cap never shrinks the count.
+
+Three rules decide whether the numbers can be believed:
+
+- **only pupils who have a mark** in an affected subject are counted — a policy
+  cannot move a mark that does not exist;
+- **a movement below the threshold is not a movement** (both marks are rounded to
+  one decimal, so the floor only keeps float noise out);
+- **a released mark is flagged**, because a change to a number the pupil can already
+  open is the one that needs a decision, while a change to an unreleased draft is
+  ordinary work in progress.
+
+It is a deliberate button rather than a live panel: it weighs every pupil's graded
+papers in the affected subjects, which is the one heavy read on this page, and an
+answer computed before the next keystroke is labelled *stale* instead of being left
+to read as current. That read pages past PostgREST's own 1000-row window and **says
+so** when it hits its row cap rather than presenting a truncated cohort as a
+complete one. Like the preview's other readbacks it is a **GET**: it computes and
+stores nothing.
+
 ## Where the number appears
 
 - **`/teacher/exams/new`** — the **Komponen Nilai** picker offers every active
@@ -224,7 +263,7 @@ Three rules keep it honest:
 | Action | Who |
 |---|---|
 | Manage components & weights | `admin_sekolah` (scoped to its own school) |
-| Preview a distribution, seed it from a pupil's marks, and compare that pupil across their subjects | `admin_sekolah` (its own school's active pupils only) |
+| Preview a distribution, seed it from a pupil's marks, compare that pupil across their subjects, and see which pupils the change would move | `admin_sekolah` (its own school's subjects and pupils only) |
 | Tag a paper with a component | the paper's teacher / school admin |
 | Read the grade table & exports | the subject's teacher / school admin |
 
