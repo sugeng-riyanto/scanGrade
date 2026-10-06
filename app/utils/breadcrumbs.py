@@ -99,9 +99,11 @@ MACHINE = frozenset({
     # `/admin-sekolah/grade-weights/pupils` answers a name search and
     # `.../pupil-marks` hands back one learner's own component marks, both JSON
     # for the weight page's preview — the readbacks that seed its sample fields
-    # with a real pupil's record. Never pages of their own; the crumb is the
-    # weights page that asked.
-    "pupils", "pupil-marks",
+    # with a real pupil's record. `.../pupil-subjects` is the third: that same
+    # learner's mark in every subject they have one, so a distribution can be
+    # compared between subjects before it is saved. Never pages of their own; the
+    # crumb is the weights page that asked.
+    "pupils", "pupil-marks", "pupil-subjects",
     # `/student/attempt-status/<exam_id>` answers one sitting's state (status,
     # deadline, remaining seconds) as JSON for the exam page's own timer and
     # lock screen — a readback, never a page of its own.

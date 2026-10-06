@@ -155,9 +155,51 @@ graded paper, released or not, because this is the teacher's roster arithmetic �
 the pupil's own dashboard is the view that shows released papers only.
 
 The school default has no subject to read from, so seeding asks for a subject
-first instead of guessing one. Both doors are `admin_sekolah` only, take the school
+first instead of guessing one. The doors are `admin_sekolah` only, take the school
 from the session rather than from the URL, verify the pupil and the subject belong
 to it, and are **reads** — a preview never saves.
+
+### Comparing one pupil across their subjects
+
+A distribution is changed for a **whole school**, not for one subject at a time:
+the default covers every subject that never saved its own row. One mark on its own
+therefore cannot tell an admin whether a change is fair — so seeding a pupil also
+opens a comparison of that learner across the subjects they sit, in the same card:
+
+| Column | What it is |
+|---|---|
+| **Mapel** | the subjects this pupil has a **scored** paper in, in name order |
+| **Tersimpan** | what each subject reports today, from the server's own arithmetic |
+| **Dengan bobot ini** | the page's rule re-run over that learner's component means under **the weights currently in the matrix**, saved or not |
+| **Selisih** | the difference, coloured by direction, or *tetap* when nothing moves |
+
+This is what makes a change visibly between subjects: retyping the **school
+default** moves every subject that follows it and leaves a subject with its own
+row untouched, while editing one subject's row moves only that row.
+
+The comparison is a **read** (`/admin-sekolah/grade-weights/pupil-subjects`,
+`admin_sekolah` only, scoped to the session's school, refused with 404 for a pupil
+that is not this school's) and it is loaded **once per pupil** — it does not depend
+on the selected subject, so changing the preview's subject re-reads the sample but
+not the table.
+
+Three rules keep it honest:
+
+- **Every row comes from the roster's arithmetic.** The saved figure is
+  `grade_weighting.finals_for_student(..., released_only=False)` — the same call the
+  teacher's table makes — so the comparison cannot disagree with it. It therefore
+  **counts marked-but-unreleased papers** (the pupil's own dashboard does not); the
+  two reads differ for that one stated reason and no other.
+- **A subject with no mark is absent, not 0.** A row of empty cells would read as a
+  zero, so only subjects the pupil has a scored paper in appear; a pupil with no
+  marks anywhere gets a sentence instead of a table.
+- **The typed column refuses to invent a number.** It is shown only when the
+  weights in the matrix form a distribution. With no weights at all the mark falls
+  back to the mean over the learner's **papers**, and the page holds their
+  per-component means — a mean of those means is a different number, so the cell
+  shows `—` rather than a plausible-looking wrong figure. A paper filed under no
+  component is flagged on its row (*tanpa kategori*), because it cannot reach a
+  weighted mark and would otherwise quietly shrink the list of what counted.
 
 ## Where the number appears
 
@@ -182,7 +224,7 @@ to it, and are **reads** — a preview never saves.
 | Action | Who |
 |---|---|
 | Manage components & weights | `admin_sekolah` (scoped to its own school) |
-| Preview a distribution, and seed it from a pupil's marks | `admin_sekolah` (its own school's active pupils only) |
+| Preview a distribution, seed it from a pupil's marks, and compare that pupil across their subjects | `admin_sekolah` (its own school's active pupils only) |
 | Tag a paper with a component | the paper's teacher / school admin |
 | Read the grade table & exports | the subject's teacher / school admin |
 
