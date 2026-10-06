@@ -72,6 +72,43 @@ AWAY_GRACE_CHANCES = 2
 # the guards below keep one absence from being billed by two of them.
 PENALIZED_VIOLATION_TYPES = ("tab_switch", "fullscreen_exit", "focus_lost")
 
+# ── A rotated screen is not a pupil who left ─────────────────────────────────
+#
+# Reported from a tablet lab: a pupil who turned the screen was walked down the
+# same ladder as a pupil who left the exam. Rotating *does* drop the fullscreen
+# state on several tablet browsers — it is a side effect of the transition, not
+# an act — and the page charged it as `fullscreen_exit` because nothing in the
+# detection knew an orientation change had just happened.
+#
+# So the page now watches the orientation itself, and a fullscreen loss that
+# lands inside this window is treated as the transition's rather than the
+# pupil's: the overlay still goes up at once (the protection never waits — the
+# same rule the away-grace above rests on), but nothing is charged. What happens
+# when the window closes is the part that stops this being a free window:
+#
+#   * **it came back on its own** — every browser that can re-enter without a
+#     fresh gesture — and nothing happened at all;
+#   * **it did not, on a platform that holds fullscreen across a rotation** — the
+#     absence outlived its explanation, so it is charged as the real exit it is;
+#   * **it did not, on a platform whose fullscreen a rotation *drops* and which
+#     cannot re-enter without a fresh gesture** (iPadOS Safari) — charging there
+#     would bill a pupil for their device. It is recorded instead, as
+#     `orientation_shift`: present in the teacher's record, absent from the
+#     ladder.
+#
+# The window is deliberately short. It has to cover a device's rotation
+# animation and the browser's own `fullscreenchange`, and anything longer would
+# be a window in which a pupil could keep the paper on screen by rocking the
+# tablet.
+ROTATION_GRACE_SECONDS = 1.5
+
+#: A rotation the page saw while the paper was out of fullscreen. Recorded, never
+#: counted: `_as_event` marks any kind outside PENALIZED_VIOLATION_TYPES as
+#: `charged: False`, so it appears in the teacher's record with its own label and
+#: adds nothing to the ladder. Kept as a name rather than a literal because three
+#: files spell it — the page sends it, the report labels it, the tests pin it.
+ORIENTATION_SHIFT = "orientation_shift"
+
 #: How a recorded kind reads to a teacher, as an (Indonesian, English) pair.
 #: One table, so the pinned per-paper page and the bilingual results list cannot
 #: describe the same event two ways.
@@ -79,6 +116,8 @@ KIND_LABELS = {
     "tab_switch": ("Berpindah tab atau aplikasi", "Switched tab or app"),
     "fullscreen_exit": ("Keluar dari layar penuh", "Left fullscreen"),
     "focus_lost": ("Jendela ujian ditinggalkan", "Left the exam window"),
+    ORIENTATION_SHIFT: ("Layar diputar (bukan pelanggaran)",
+                        "Screen rotated (not a violation)"),
 }
 
 
@@ -290,11 +329,17 @@ def validate_violation_log(user_id: str, exam_id: str, timestamp: float) -> dict
         return {"valid": False, "reason": "timestamp_out_of_range"}
 
     supabase = current_app.extensions["supabase"]
+    # Only a *charged* row counts for the debounce. The window exists so one act
+    # cannot be billed several times over, and an informational row is not an act:
+    # a rotation recorded a tenth of a second earlier would otherwise shield the
+    # next real exit from the ladder entirely, which is a bypass the rotation fix
+    # would have introduced.
     recent = (
         supabase.table("violation_logs")
         .select("created_at")
         .eq("user_id", user_id)
         .eq("exam_id", exam_id)
+        .in_("violation_type", list(PENALIZED_VIOLATION_TYPES))
         .order("created_at", desc=True)
         .limit(1)
         .execute()

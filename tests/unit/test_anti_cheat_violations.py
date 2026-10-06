@@ -231,11 +231,13 @@ class _LogsOnlySupabase:
         return FakeQuery(self._rows)
 
 
-def _recent_row(value):
-    # The keys the query filters on have to be present, or FakeQuery filters the
-    # row away and the read looks like "no previous event".
+def _recent_row(value, vtype="tab_switch"):
+    # Every key the query filters on has to be present, or FakeQuery filters the
+    # row away and the read looks like "no previous event". That now includes the
+    # kind: the debounce only counts rows that would have been charged, so that an
+    # informational row (a rotation, say) cannot shield the next real one.
     return _LogsOnlySupabase([{"user_id": "stu-1", "exam_id": "exam-1",
-                               "created_at": value}])
+                               "created_at": value, "violation_type": vtype}])
 
 
 def test_one_instant_parses_to_one_epoch_on_any_machine():
@@ -291,6 +293,27 @@ def test_an_event_outside_the_window_is_accepted(app):
         out = svc.validate_violation_log("stu-1", "exam-1", time.time())
 
     assert out["valid"] is True
+
+
+def test_an_uncharged_row_does_not_shield_the_next_real_one(app):
+    """The debounce is about one *act* being billed twice, and an informational row
+    is not an act.
+
+    Measured against the code before this test existed: a rotation recorded a
+    tenth of a second before a pupil actually left fullscreen made
+    ``validate_violation_log`` answer ``rate_limited`` — so the real exit was
+    dropped, silently, in the one window the rotation fix had just started
+    writing rows into. The rotation repair would have opened that bypass itself.
+    """
+    from app.services import anti_cheat_service as svc
+
+    now = datetime.now(timezone.utc).isoformat()
+    with app.app_context():
+        app.extensions["supabase"] = _recent_row(now, vtype=svc.ORIENTATION_SHIFT)
+        out = svc.validate_violation_log("stu-1", "exam-1", time.time())
+
+    assert out["valid"] is True, (
+        "a rotation row let the next genuine exit through as a duplicate")
 
 
 def test_an_unreadable_timestamp_does_not_wedge_the_endpoint(app):
