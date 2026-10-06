@@ -92,6 +92,45 @@ after: **42 -> 0** at all four tablet widths, with no overflow, and the rule doe
 give: a 768px tablet is as much a finger as a 375px phone, while a 768px window on a
 mouse desktop is not — and `max-width` is wrong about both in the same direction.
 
+## The two clocks
+
+The form collects a **Durasi** ("counted from the moment *this* student starts")
+and an **Assignment window end** ("the last instant a student may *begin*"). They
+are different clocks, and nothing tied them together, so a 60-minute paper was
+routinely given a two-day window — and the pupil who began at the far end of it met
+the window's own deadline a few minutes into a paper they were entitled to sit for
+the full hour.
+
+With **Ikuti durasi otomatis** ticked (the default) the window end is
+`start + duration`: the paper stays open just long enough for one full sitting. It is
+a default and not a rule — untick it and the field is the teacher's again, which is
+what a school rotating five classes through one afternoon needs. Two rules the
+arithmetic obeys, both load-bearing:
+
+* **`0` is Unlimited, not zero minutes.** A stored 0 already means "no limit"
+  everywhere else, so the field is left alone rather than set to the start.
+* **A saved window is never rewritten by a page load.** Only an input the teacher
+  actually touches recomputes it; a *new* paper has no window yet, so its one pass
+  fills the field rather than changing one.
+
+**Auto-submit saat jendela berakhir** now opens **ticked for a new paper**. Off was
+the safe-sounding choice and the wrong one: a paper whose window ended with a sitting
+still running left that sitting open, and the teacher had to know to tick a box they
+were never shown a reason for. An existing paper keeps whatever it stored.
+
+## Reading size on the pupil's page
+
+The exam page offers **A- / A+** and a magnifier on the paper image. Neither is the
+browser's zoom and neither changes the viewport: the scale is one CSS custom
+property (`--sg-exam-scale`, read by `.sg-exam-zoom`) and the magnified diagram is an
+overlay inside the page. That restraint is the point — the anti-cheat ladder watches
+`resize`, `fullscreenchange` and `visibilitychange`, and a zoom that produced one
+would charge a pupil for enlarging the text.
+
+Pinch-zoom is left working on top of it (WCAG 1.4.4 / 1.4.10 forbid switching it
+off). The chosen size is stored as the `text_scale` preference, so it follows the
+pupil to their next device. See `docs/DESIGN_SYSTEM.md`.
+
 ## Where the code lives
 
 * `app/templates/teacher/exam_form.html` — the whole page. The PDF uploader
@@ -99,5 +138,9 @@ mouse desktop is not — and `max-width` is wrong about both in the same directi
   (`sgStatementLabel` / `sgMatchLabel` / `seedPgk` / `newPair`), and the scope walk
   (`sgNearestScope`).
 * `app/static/css/theme.css` — the `pointer: coarse` block for `.sg-exam-builder`.
+* `app/static/js/exam-window.js` — the duration-to-window arithmetic, run in node by
+  `tests/unit/test_exam_window_auto.py`.
+* `app/static/js/exam-view.js` — the pupil page's reading size and lightbox, run in
+  node by `tests/unit/test_exam_view_zoom.py`.
 * `tests/unit/test_exam_builder_tablet.py` — the guards, and the measurements they
   encode.
