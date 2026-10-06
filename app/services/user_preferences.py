@@ -12,7 +12,8 @@ at **no extra round-trip**. Only a *change* costs a write, which is rare.
 Storage shape: one JSON object on `profiles.preferences`, so a later preference
 does not need a column of its own.
 
-    {"theme": "dark", "lang": "en", "alert_volume": 0.5, "alert_muted": false}
+    {"theme": "dark", "lang": "en", "alert_volume": 0.5, "alert_muted": false,
+     "text_scale": 1.15}
 
 Two rules, and both exist because the client is not trusted:
 
@@ -20,8 +21,15 @@ Two rules, and both exist because the client is not trusted:
   into the column;
 * each value is checked against its own domain (a theme is `dark`/`light`, a
   language is `id`/`en`, the volume is a number clamped to `[0, 1]`, the mute is a
-  real boolean) — a string is never accepted where a boolean belongs, so `"false"`
-  cannot read as `True`.
+  real boolean, the text scale is one of the steps the A-/A+ control can reach) —
+  a string is never accepted where a boolean belongs, so `"false"` cannot read as
+  `True`.
+
+`text_scale` is the one preference with two reasons to exist: the pupil exam page's
+"Perbesar/Perkecil Teks" control *and* the general low-vision size the accessibility
+work asked for. They are one mechanism rather than two, which is why the value is a
+closed set of steps and not a free number — the control is a pair of buttons, so a
+value between two steps could not be reached by pressing either one.
 
 `normalize()` is used for both a client patch and the value read back, so a column
 that somehow holds an older shape is cleaned on the way out rather than trusted.
@@ -34,12 +42,18 @@ THEME = "theme"
 LANG = "lang"
 ALERT_VOLUME = "alert_volume"
 ALERT_MUTED = "alert_muted"
+TEXT_SCALE = "text_scale"
 
 #: The whole vocabulary. A key outside this set is dropped rather than stored.
-KEYS = (THEME, LANG, ALERT_VOLUME, ALERT_MUTED)
+KEYS = (THEME, LANG, ALERT_VOLUME, ALERT_MUTED, TEXT_SCALE)
 
 _THEMES = {"dark", "light"}
 _LANGS = {"id", "en"}
+
+#: The steps the pupil exam page's A-/A+ control moves through. `app/static/js/exam-view.js`
+#: carries the same list and `tests/unit/test_exam_view_zoom.py` pins the two together,
+#: so a value the server accepts is always a value one of the buttons can reach.
+TEXT_SCALES = (0.85, 1.0, 1.15, 1.3, 1.5)
 
 
 def _clean_volume(value):
@@ -54,6 +68,25 @@ def _clean_volume(value):
     if number != number:  # NaN
         return None
     return max(0.0, min(1.0, number))
+
+
+def _clean_text_scale(value):
+    """One of the steps, or ``None``.
+
+    A near-miss is *not* rounded into a step: the control could not have produced
+    it, so accepting it would leave the page showing a scale neither button can
+    reach and the next press jumping somewhere unexpected. ``bool`` is excluded for
+    the same reason as the volume — ``True`` is an ``int`` in Python.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    number = float(value)
+    if number != number:  # NaN
+        return None
+    for step in TEXT_SCALES:
+        if abs(number - step) < 1e-9:
+            return step
+    return None
 
 
 def normalize(patch) -> dict:
@@ -79,6 +112,10 @@ def normalize(patch) -> dict:
     muted = patch.get(ALERT_MUTED)
     if isinstance(muted, bool):
         out[ALERT_MUTED] = muted
+
+    scale = _clean_text_scale(patch.get(TEXT_SCALE))
+    if scale is not None:
+        out[TEXT_SCALE] = scale
 
     return out
 
