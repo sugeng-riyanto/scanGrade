@@ -1,0 +1,169 @@
+{
+  "base": "https://scangrade.web.id",
+  "duration_s": 180.0,
+  "error_rate_pct": 0.0,
+  "identity_checked": 51,
+  "identity_ok": 51,
+  "identity_wrong": {},
+  "latency_ms": {
+    "p50": 2036.0912550240755,
+    "p95": 4584.252300672233,
+    "p99": 10597.165784798563
+  },
+  "logins_failed": 0,
+  "logins_ok": 51,
+  "measured_at": "2026-10-06T11:51:17+00:00",
+  "per_endpoint": {
+    "GET /auth/me": {
+      "bytes_p50": 135,
+      "n": 51,
+      "p50": 2371.007935144007,
+      "p95": 3594.354322180152,
+      "p99": 3824.6017349883914,
+      "queries_p50": 0,
+      "roundtrips_p50": 0,
+      "rows_p50": 0
+    },
+    "GET /health": {
+      "bytes_p50": 295,
+      "n": 320,
+      "p50": 882.1383826434612,
+      "p95": 1907.1177104488015,
+      "p99": 2698.6200576648116,
+      "queries_p50": 0,
+      "roundtrips_p50": 0,
+      "rows_p50": 0
+    },
+    "GET /student/dashboard": {
+      "bytes_p50": 51336,
+      "n": 621,
+      "p50": 1519.953983835876,
+      "p95": 3403.1467847526073,
+      "p99": 4839.867913164198,
+      "queries_p50": 0,
+      "roundtrips_p50": 3,
+      "rows_p50": 0
+    },
+    "GET /student/exams": {
+      "bytes_p50": 47072,
+      "n": 920,
+      "p50": 2223.9007502794266,
+      "p95": 4020.60370426625,
+      "p99": 4988.9403795823455,
+      "queries_p50": 3,
+      "roundtrips_p50": 3,
+      "rows_p50": 0
+    },
+    "GET /student/exams/<id>": {
+      "bytes_p50": 47072,
+      "n": 428,
+      "p50": 2106.73541482538,
+      "p95": 3793.481864966452,
+      "p99": 4854.627828113735,
+      "queries_p50": 3,
+      "roundtrips_p50": 3,
+      "rows_p50": 0
+    },
+    "GET /student/results": {
+      "bytes_p50": 54291,
+      "n": 151,
+      "p50": 2115.804912522435,
+      "p95": 4247.644064947963,
+      "p99": 4631.500266492367,
+      "queries_p50": 2,
+      "roundtrips_p50": 2,
+      "rows_p50": 0
+    },
+    "GET /student/settings": {
+      "bytes_p50": 65187,
+      "n": 50,
+      "p50": 3533.918990753591,
+      "p95": 3837.3577687889338,
+      "p99": 3969.668527133763,
+      "queries_p50": 1,
+      "roundtrips_p50": 1,
+      "rows_p50": 1
+    },
+    "GET /teacher/dashboard": {
+      "bytes_p50": 61852,
+      "n": 11,
+      "p50": 2063.6300100013614,
+      "p95": 4267.217026092112,
+      "p99": 4267.217026092112,
+      "queries_p50": 1,
+      "roundtrips_p50": 3,
+      "rows_p50": 0
+    },
+    "GET /teacher/exams": {
+      "bytes_p50": 52367,
+      "n": 9,
+      "p50": 1949.159356765449,
+      "p95": 3878.877875395119,
+      "p99": 3878.877875395119,
+      "queries_p50": 2,
+      "roundtrips_p50": 2,
+      "rows_p50": 0
+    },
+    "GET /teacher/results": {
+      "bytes_p50": 49751,
+      "n": 19,
+      "p50": 1329.9835175275803,
+      "p95": 3799.098047427833,
+      "p99": 3799.098047427833,
+      "queries_p50": 1,
+      "roundtrips_p50": 1,
+      "rows_p50": 0
+    },
+    "GET /teacher/templates": {
+      "bytes_p50": 49526,
+      "n": 15,
+      "p50": 1562.337170355022,
+      "p95": 3505.7837776839733,
+      "p99": 3505.7837776839733,
+      "queries_p50": 1,
+      "roundtrips_p50": 1,
+      "rows_p50": 0
+    },
+    "LOGIN guru": {
+      "bytes_p50": 61852,
+      "n": 1,
+      "p50": 13966.293985024095,
+      "p95": 13966.293985024095,
+      "p99": 13966.293985024095,
+      "queries_p50": 3,
+      "roundtrips_p50": 3,
+      "rows_p50": 1
+    },
+    "LOGIN murid": {
+      "bytes_p50": 51336,
+      "n": 50,
+      "p50": 10663.560246117413,
+      "p95": 15013.063728809357,
+      "p99": 15264.479509554803,
+      "queries_p50": 4,
+      "roundtrips_p50": 4,
+      "rows_p50": 1
+    },
+    "POST settings/pdp-update": {
+      "bytes_p50": 70,
+      "n": 50,
+      "p50": 6448.503082618117,
+      "p95": 7550.753463059664,
+      "p99": 7625.218015164137,
+      "queries_p50": 2,
+      "roundtrips_p50": 2,
+      "rows_p50": 0
+    }
+  },
+  "rate_limited_429": 0,
+  "requests_total": 2696,
+  "roster_source": "/opt/scangrade/.freebuff/lt_roster.json",
+  "server_errors_5xx": 0,
+  "sessions_launched": 51,
+  "status_breakdown": {
+    "200": 2696
+  },
+  "throughput_rps": 12.25,
+  "transport_errors": 0,
+  "wall_s": 220.14
+}

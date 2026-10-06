@@ -57,21 +57,25 @@ class TestThePageIsTheSourceOfTheClaim:
         assert limit == 50, "the gate no longer reads the comfortable limit off the page"
         rung = gate.rung_for(limit, rungs)
         assert rung.students == 50
-        # 2,200 ms since the 25 Sep 2026 re-measurement: the page's 50-row is the
-        # union of the 14 Sep Locust run (94–620 ms) and the 25 Sep harness run
-        # (510–2186 ms), and the pessimistic end of the range is what the gate
-        # compares against.
-        assert rung.p50_high_ms == pytest.approx(2200.0), (
+        # 4,100 ms since the 6 Oct 2026 re-measurement: the page's 50-row is the
+        # union of the 14 Sep Locust run (94–620 ms), the 25 Sep harness run
+        # (510–2186 ms) and the 6 Oct run from the box itself (2287–4146 ms), and
+        # the pessimistic end of the range is what the gate compares against. The
+        # bound moved because the box's own gate history kept landing near the old
+        # one: publishing a p50 the box now exceeds on a busy afternoon is how a
+        # release gets rolled back for being busy.
+        assert rung.p50_high_ms == pytest.approx(4100.0), (
             "the p50 bound the gate compares against is no longer the one the page "
             f"publishes (got {rung.p50_high_ms}). Either the page changed and this "
             "test should follow it, or the parser is reading the wrong cell."
         )
-        # 4,800 ms since the 26 Sep 2026 re-scan (`rescan-050.json`, the harness run
-        # by hand at the advertised rung): it measured a 4.8 s worst p95, above the
-        # 3.7 s the 14 Sep Locust run had set and the 2.8 s of the 25 Sep harness
-        # run. Three artifacts of one rung, and the page publishes the worst figure
-        # any of them recorded — never the better one.
-        assert rung.p95_ms == pytest.approx(4800.0), (
+        # 4,900 ms since the 6 Oct 2026 re-measurement (`box-60s-050.json`, the
+        # harness run from the production box at the advertised rung): it measured
+        # a 4.9 s worst p95, above the 4.8 s the 26 Sep re-scan had set, the 3.7 s
+        # of the 14 Sep Locust run and the 2.8 s of the 25 Sep harness run. Five
+        # artifacts of one rung, and the page publishes the worst figure any of
+        # them recorded — never the better one.
+        assert rung.p95_ms == pytest.approx(4900.0), (
             "the p95 bound the gate compares against is no longer the worst figure the "
             "artifacts recorded. If a re-measurement moved it, update this number in the "
             "same commit as the page."
@@ -121,7 +125,7 @@ class TestThePageIsTheSourceOfTheClaim:
     def test_a_range_in_either_cell_is_read_pessimistically(self, tmp_path):
         """A published range is two figures; the gate may only use the worse one.
 
-        On the real page the p50 cell is a range ("0.1–2.2 s") and the p95 cell is a
+        On the real page the p50 cell is a range ("0.1–4.1 s") and the p95 cell is a
         single figure, so nothing there exercises this rule for p95 at all — and a
         gate that took the *better* end of a range would be checking the box against
         the page's most flattering sample, which is the defect this gate exists to
