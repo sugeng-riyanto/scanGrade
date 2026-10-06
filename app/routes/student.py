@@ -672,7 +672,9 @@ def take_exam(exam_id):
     # numbers live in the service (see AWAY_GRACE_SECONDS), so the countdown on
     # the exam screen, the terms the student agrees to and the guide that
     # documents them cannot drift apart.
-    from app.services.anti_cheat_service import AWAY_GRACE_CHANCES, AWAY_GRACE_SECONDS
+    from app.services.anti_cheat_service import (
+        AWAY_GRACE_CHANCES, AWAY_GRACE_SECONDS, ROTATION_GRACE_SECONDS,
+    )
     # The way back in when the phone dies or the WiFi does. Issued with the
     # session and shown in the exam topbar; never a precondition for opening.
     recovery_code = issue_code(supabase, g.user_id, exam_id)
@@ -722,7 +724,7 @@ def take_exam(exam_id):
     # URL at all.
     safe_exam["question_audio"] = exam_media.with_media_urls(
         safe_exam.get("question_audio"), subject=g.user_id, exam_id=exam_id)
-    resp = make_response(render_template("student/take_exam.html", exam=safe_exam, anti_cheat_config=anti_cheat_config, exam_started_at=exam_started_at, recovery_code=recovery_code, question_options=question_options, deadline=clocks["deadline_iso"], deadline_reason=clocks["reason"], seconds_left=clocks["seconds_left"], window_end=clocks["window_end_iso"], away_grace_seconds=AWAY_GRACE_SECONDS, away_grace_chances=AWAY_GRACE_CHANCES, student_name=student_name, student_class_label=student_class_label, student_key=g.user_id, media_used=media_used))
+    resp = make_response(render_template("student/take_exam.html", exam=safe_exam, anti_cheat_config=anti_cheat_config, exam_started_at=exam_started_at, recovery_code=recovery_code, question_options=question_options, deadline=clocks["deadline_iso"], deadline_reason=clocks["reason"], seconds_left=clocks["seconds_left"], window_end=clocks["window_end_iso"], away_grace_seconds=AWAY_GRACE_SECONDS, away_grace_chances=AWAY_GRACE_CHANCES, rotation_grace_seconds=ROTATION_GRACE_SECONDS, student_name=student_name, student_class_label=student_class_label, student_key=g.user_id, media_used=media_used))
     resp.headers["Cache-Control"] = "private, max-age=30, stale-while-revalidate=60"
     return resp
 

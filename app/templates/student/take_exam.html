@@ -359,6 +359,64 @@ body.sg-exam .sidebar-overlay { display: none !important; }
        `w-full` the grid already gives the button. A floor, not a size. */
     .q-btn { min-width: 44px !important; min-height: 44px !important; font-size: 13px !important; }
 }
+
+/* ── Tablet: the range neither pattern was written for ────────────────────────
+   This page had two layouts and only two: one from `min-width: 1024px`, one
+   from `max-width: 768px`. A tablet in portrait (768–1023px) and a tablet in
+   landscape that is narrower than 1024 — which is most of them — were therefore
+   drawn by the *desktop* rules: a cursor's targets on a finger's device, and a
+   question column sized for a monitor. This block is the range in between, and
+   it is a layout rather than a scale of either neighbour: the controls a pupil
+   actually reaches for during a paper get the 44px floor `.tap-44` already
+   answers to, and the question strip gets room to show its numbers instead of
+   the phone's tighter spacing. Both orientations are covered by one range
+   because the width is what the rules key on, not the orientation. */
+@media (min-width: 769px) and (max-width: 1023px) {
+    .math-tools-toggle,
+    .draw-toolbar button,
+    .tool-ctrl-btn,
+    .opt-btn,
+    .q-btn {
+        min-width: 44px;
+        min-height: 44px;
+    }
+    .draw-toolbar { gap: 6px; flex-wrap: wrap; }
+    .draw-toolbar button { padding: 8px 12px; }
+    /* The annotation controls sit over the canvas, so a tablet gets slightly
+       larger offsets rather than the phone's cramped ones — the finger is
+       bigger than the pointer that used to be the only device here. */
+    .tool-ctrl-btn { transform: scale(1.15); transform-origin: top left; }
+    .exam-qstrip { gap: 6px; }
+}
+
+/* ── Dark mode: the page's own controls, and the one rule about paper ─────────
+   The rest of the app follows the theme through Tailwind utilities plus the
+   token remap in theme.css, but this page's `<style>` is hand-written and was
+   written light-only: white boxes, pale greys. In dark mode a pale box under
+   the theme's own light `--text` is light-on-light, so these are repainted from
+   the tokens rather than left as the light theme's leftovers.
+
+   The drawing surfaces are the deliberate exception, and the reason is the
+   artefact rather than the theme: an answer canvas is *paper*. The ink drawn on
+   it is dark, so a dark sheet would make the answer invisible — the same
+   reasoning that keeps the OMR mockup light. What has to follow the theme on
+   those surfaces is the type, not the sheet: without pinning it, a `<textarea>`
+   on the paper inherited the dark theme's light `--text` and painted white text
+   on white. */
+.dark .math-tools-toggle { background: var(--bg-card); border-color: var(--border-strong); color: var(--text); }
+.dark .math-tools-toggle:not(.active):hover { background: var(--bg-hover); }
+.dark .draw-toolbar button { background: var(--bg-card); border-color: var(--border-strong); color: var(--text); }
+.dark .draw-toolbar button:hover { background: var(--bg-hover); border-color: var(--border); }
+.dark .opt-btn:not(.selected):hover { background: var(--bg-hover); border-color: var(--border-strong); }
+.dark .exam-qcol,
+.dark .exam-qcol--rail { background: var(--bg-card); }
+/* The backdrop behind a rendered document, not the document: the pages come back
+   as their own white raster whatever this is, so a fixed near-white panel here
+   was a bright rectangle in a dark room for no reason. */
+.dark .pdf-container { background: var(--bg-subtle) !important; }
+.dark .full-canvas-wrap { background: #ffffff; }
+.dark .text-box textarea { background: rgba(255, 255, 255, 0.95); color: #1f2937; }
+.dark .text-box textarea:focus { background: #ffffff; color: #111827; }
 </style>
 {% endblock %}
 {% block content %}
@@ -2332,6 +2390,20 @@ function examApp(duration, totalQ) {
         // Set when a minimise/tab-away was already charged, so the overlay that
         // follows it is not billed a second time.
         _hiddenAbsenceCharged: false,
+        // ─── A rotated screen is not a pupil who left ─────────────────────────
+        // Several tablet browsers drop the fullscreen state as a side effect of
+        // rotating, and nothing in this ladder used to know a rotation had
+        // happened — so turning the screen was billed as leaving the exam.
+        // `_rotationGraceUntil` is the window in which a fullscreen loss belongs
+        // to the transition rather than to the pupil; `_rotationForgiven`
+        // remembers that this absence began that way, so the window's end can
+        // decide whether it outlived the explanation. The overlay goes up either
+        // way — the grace forgives a penalty, never a question.
+        rotationGraceMs: {{ rotation_grace_seconds }} * 1000,
+        _rotationGraceUntil: 0,
+        _rotationTimer: null,
+        _rotationForgiven: false,
+        _rotationWatch: null,
         // The student has left the exam — a new tab, another app, a minimise.
         // The paper is blurred behind a panel until they come back and dismiss
         // it, so a window nobody is watching is not a window anybody can read.
@@ -2839,7 +2911,102 @@ function examApp(duration, totalQ) {
                 this._hiddenAbsenceCharged = false;
                 return;
             }
+            // A rotation can take fullscreen away as a side effect, and on some
+            // devices that is the *only* reason it went. While the transition is
+            // in flight this absence is not the pupil's: it is recorded (once,
+            // for the teacher's log) and `_endRotationWindow()` decides when the
+            // screen has settled whether it outlived its explanation. The overlay
+            // is already up — `fullscreenBlocked` was set above — so forgiving the
+            // penalty here cannot expose a question.
+            if (this._isRotationWindow()) {
+                if (!this._rotationForgiven) {
+                    this._rotationForgiven = true;
+                    this.recordNotCharged('orientation_shift',
+                                          'rotation_while_out_of_fullscreen');
+                }
+                return;
+            }
             this.handleViolation('fullscreen_exit');
+        },
+        // ─── Orientation: the transition, told apart from the act ────────────
+        //
+        // Both signals are watched, and that is not belt-and-braces: on a tablet
+        // `orientationchange` fires on the window, while a desktop window dragged
+        // across the portrait line fires only the media query. Neither is a
+        // violation by itself; together they are what lets the ladder tell a turn
+        // apart from a pupil who left.
+        watchOrientation() {
+            const shift = () => this._noteOrientationShift();
+            window.addEventListener('orientationchange', shift);
+            try {
+                this._rotationWatch = window.matchMedia('(orientation: portrait)');
+                if (this._rotationWatch.addEventListener) {
+                    this._rotationWatch.addEventListener('change', shift);
+                } else if (this._rotationWatch.addListener) {
+                    this._rotationWatch.addListener(shift);   // older Safari
+                }
+            } catch (e) { this._rotationWatch = null; }
+        },
+        _noteOrientationShift() {
+            if (this.submitted) return;
+            // Recorded for the paper's own timeline whatever it cost — a teacher
+            // reading the log should be able to see the screen was turned, not
+            // infer it from a penalty that should not be there.
+            this._ev('orientation_shift');
+            if (!this.antiCheat.enabled) return;
+            this._rotationGraceUntil = Date.now() + this.rotationGraceMs;
+            // Most browsers will let the page back in now, having taken it away
+            // themselves; one that will not resolves false and the overlay's own
+            // button is the gesture that grants it.
+            this._tryAutoRefullscreen();
+            clearTimeout(this._rotationTimer);
+            this._rotationTimer = setTimeout(() => this._endRotationWindow(),
+                                             this.rotationGraceMs + 100);
+        },
+        _isRotationWindow() {
+            return this._rotationGraceUntil > 0 && Date.now() < this._rotationGraceUntil;
+        },
+        _endRotationWindow() {
+            this._rotationGraceUntil = 0;
+            if (!this._rotationForgiven) return;
+            this._rotationForgiven = false;
+            if (this.submitted) return;
+            if (this._fsElement()) return;          // it came back: nothing happened
+            // A hidden document or a tab that no longer owns the sitting is billed
+            // by its own handler; charging it here would bill one absence twice.
+            if (!this._isFocusTab || document.hidden) return;
+            if (this._platformLosesFullscreenOnRotation()) {
+                // The device drops fullscreen on a turn and cannot give it back
+                // without a fresh gesture, which a rotation is not. Charging would
+                // be billing the pupil for their tablet; the row is already in the
+                // log (see checkFullscreen) and the overlay's button is the way
+                // back. The paper stays blocked either way, so this forgives a
+                // penalty and nothing else.
+                return;
+            }
+            // Everywhere else the rotation cannot be the whole explanation: the
+            // state either came back by itself or the absence is the pupil's.
+            this.handleViolation('fullscreen_exit', 'rotation');
+        },
+        // Whether this platform's fullscreen is *dropped by a rotation* rather than
+        // kept across it, and cannot be re-entered without a fresh gesture. iPadOS
+        // is the one that does this; everywhere else a turn either keeps fullscreen
+        // or the page can ask for it again. Fails to `false` (the strict rule) so a
+        // browser that hides its own identity cannot win a free window by hiding it.
+        _platformLosesFullscreenOnRotation() {
+            let ua = '', platform = '', touch = 0;
+            try {
+                ua = navigator.userAgent || '';
+                platform = navigator.platform || '';
+                touch = navigator.maxTouchPoints || 0;
+            } catch (e) { return false; }
+            return /iPad|iPhone|iPod/.test(ua) || (platform === 'MacIntel' && touch > 1);
+        },
+        _tryAutoRefullscreen() {
+            if (this.submitted) return;
+            if (!this.antiCheat.enabled || !this.antiCheat.fullscreen_required) return;
+            if (!this._fsSupported() || this._fsElement()) return;
+            Promise.resolve(this.requestExamFullscreen()).catch(() => {});
         },
         async resumeFullscreen() {
             this.fullscreenRetryFailed = false;
@@ -3161,6 +3328,10 @@ function examApp(duration, totalQ) {
             // promised no penalty, which is why a window restored or minimised
             // during an exam was not caught by anything at all.
             this._fsArmedAt = Date.now();
+            // Installed whenever the ladder is armed, not only when fullscreen is
+            // required: the timeline should show a turned screen on every paper,
+            // because it is what makes an absence beside it readable.
+            this.watchOrientation();
             if (this.antiCheat.fullscreen_required && this._fsSupported()) {
                 this.watchFullscreen();
                 this.checkFullscreen();
@@ -3272,6 +3443,37 @@ function examApp(duration, totalQ) {
                 // Offline: the count stays local and is reconciled by the next event
                 // or by seedViolationCount() after a reload.
             });
+        },
+        // A row the teacher can read that is not a rung on the ladder.
+        //
+        // It goes to the same endpoint — one record, one place to look — but
+        // through none of `handleViolation`: the local count, the banner and the
+        // auto-submit *are* the ladder, and a rotation is not on it. The response
+        // is deliberately ignored for the same reason; there is nothing in it that
+        // this row could change, and reconciling the ladder from it would be the
+        // double-count this function exists to avoid. The server decides what
+        // counts: a kind outside PENALIZED_VIOLATION_TYPES is stored and never
+        // charged (see `_as_event`).
+        recordNotCharged(kind, trigger) {
+            if (this.submitted) return;
+            const token = this._csrfToken();
+            try {
+                fetch('/api/violation/log', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json', 'X-CSRF-Token': token},
+                    keepalive: true,
+                    body: JSON.stringify({
+                        _csrf_token: token,
+                        logs: [{
+                            exam_id: '{{ exam.id }}',
+                            violation_type: kind,
+                            timestamp: Date.now() / 1000,
+                            metadata: {violation_count: this.violationCount, trigger: trigger,
+                                       charged: false},
+                        }],
+                    }),
+                }).catch(() => {});
+            } catch (e) { /* evidence, never the paper */ }
         },
         _applyViolationBanner(n, kind = 'tab_switch') {
             if (n <= 0) return;

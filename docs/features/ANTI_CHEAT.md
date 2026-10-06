@@ -7,6 +7,7 @@
 | **Pindah tab** | `visibilitychange` + timer 1.5s | Layar soal dikaburkan + penalti bertahap |
 | **Keluar layar penuh** | `fullscreenchange` + sampling tiap 2 detik | Overlay memblokir + tangga penalti yang sama |
 | **Beralih ke jendela lain** (`focus_lost`) | `window` blur + timer 1.5s, hanya saat halaman **tidak** hidden | Layar soal dikaburkan + tangga penalti yang sama |
+| **Rotasi layar** | `matchMedia("(orientation: portrait)")` + `orientationchange` | Dicatat (`orientation_shift`), **tidak** dihukum — lihat [Rotasi layar](#rotasi-layar-bukan-pelanggaran) |
 | **Klik kanan** | `contextmenu` | Diblokir |
 | **Copy/Paste** | `copy`, `cut`, `paste` event | Diblokir |
 
@@ -120,6 +121,47 @@ dapat dikerjakan: ditugaskan ke semua kelas sekolah demo, tanpa jendela waktu,
 anti-cheat dan fullscreen menyala, dan percobaan lama di-`retracted` supaya demo
 yang sudah mengumpulkan tidak menyembunyikannya. Yang bisa dilihat lewat HTTP
 hanyalah dokumen yang dikirim — render-nya sendiri diverifikasi lewat preview.
+
+## Rotasi layar bukan pelanggaran
+
+Laporan dari laboratorium tablet: murid yang memutar layar ikut turun tangga
+penalti yang sama dengan murid yang benar-benar meninggalkan ujian. Sebabnya
+mekanis, bukan misterius — sejumlah browser tablet **melepas status fullscreen
+sebagai efek samping rotasi**, dan tidak ada apa pun di deteksi dulu yang tahu
+bahwa orientasi baru saja berubah. Jadi `checkFullscreen()` melihat "tidak
+fullscreen" dan menagih `fullscreen_exit` untuk sebuah putaran.
+
+Sekarang halaman memantau orientasi sendiri (`orientationchange` **dan**
+`matchMedia`), lalu berlaku aturan berikut:
+
+| Kejadian | Hasil |
+|----------|-------|
+| Fullscreen lepas **di dalam** jendela rotasi | Overlay tetap naik saat itu juga, **nol** penalti, satu baris `orientation_shift` dicatat |
+| Fullscreen kembali sendiri sebelum jendela tutup | Tidak terjadi apa-apa |
+| Tetap di luar fullscreen setelah jendela tutup, di perangkat yang fullscreen-nya bertahan saat rotasi | Ditagih `fullscreen_exit` seperti biasa — absen yang melewati penjelasannya |
+| Tetap di luar fullscreen setelah jendela tutup, di perangkat yang fullscreen-nya **dilepas** rotasi (iPadOS Safari) | Dicatat, **tidak** ditagih: menagihnya sama dengan menghukum murid karena perangkatnya |
+
+Tiga sifat yang menjaga perbaikan ini agar tidak menjadi celah baru:
+
+* **Overlay selalu lebih dulu.** Jendela rotasi hanya memaafkan *penalti*, tidak
+  pernah *soal*: kertas tetap terkunci begitu absen terlihat, sama seperti di luar
+  jendela. Kalau cabang rotasi ini pernah pindah ke atas `fullscreenBlocked = true`,
+  murid bisa menggoyang tablet untuk membaca soal dari jendela biasa.
+* **Jendelanya pendek dan berbatas** (`ROTATION_GRACE_SECONDS`, dari service dan
+  diteruskan route — bukan angka yang ditulis di halaman). Ia harus menutup animasi
+  rotasi perangkat dan `fullscreenchange` browser; selebihnya menjadi jendela bebas.
+* **Debounce hanya menghitung baris yang ditagih.** Sebelum ini, satu baris
+  informasi membuat `validate_violation_log` menjawab `rate_limited` untuk keluar
+  sungguhan tepat setelahnya — jadi perbaikan rotasi sempat membuka bypass itu
+  sendiri. Baris `orientation_shift` juga **tidak** lewat `handleViolation`:
+  tidak menambah hitungan lokal, tidak memunculkan banner, tidak memicu
+  auto-submit. Server yang memutuskan apa yang dihitung, dan `orientation_shift`
+  ada di luar `PENALIZED_VIOLATION_TYPES` sehingga tampil di laporan guru tanpa
+  menjadi satu anak tangga.
+
+Dijaga oleh `tests/unit/test_rotation_vs_exit.py`, yang menjalankan metode asli
+yang diiris dari template di bawah node: rotasi murni tidak menagih apa pun,
+tetapi absen yang melewati jendela tetap ditagih di platform yang seharusnya.
 
 ## False Positive Handling
 

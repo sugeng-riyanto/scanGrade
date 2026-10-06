@@ -56,6 +56,7 @@ CLIENT_EVENT_KINDS = (
     "question_changed",      # the pupil moved to another question
     "answer_changed",        # the pupil edited an answer
     "control_unavailable",   # the device cannot offer a control (e.g. Fullscreen on iOS)
+    "orientation_shift",     # the screen was turned portrait<->landscape
 )
 
 #: One flush cannot be unbounded: the box is 1 vCPU and a page left open could
