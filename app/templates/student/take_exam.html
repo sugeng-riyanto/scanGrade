@@ -3398,6 +3398,14 @@ function examApp(duration, totalQ) {
         // can only tell them apart if the client names the right one — so the kind
         // is what the report prints and the trigger is the detail behind it.
         handleViolation(vtype = 'tab_switch', trigger = null, awaySeconds = null) {
+            // `exams.anti_cheat_enabled` is the school's switch, and a paper that
+            // set it false asked for no monitoring. The server refuses to record
+            // such an event at all (`/api/violation/log` reads the flag before it
+            // writes), so charging here would raise a banner and climb a ladder
+            // that nothing behind it agrees with — the student would be told they
+            // had a violation that the paper's own record denies. This is the
+            // page's half of the same promise; the server's is the one that binds.
+            if (!this.antiCheat.enabled) return;
             // Only the tab in front counts: a tab that another exam tab has taken
             // over from must not add a second charge for the same switch.
             if (!this._isFocusTab || this.submitted) return;
@@ -3510,6 +3518,11 @@ function examApp(duration, totalQ) {
             }
         },
         _maybeAutoSubmit() {
+            // The last rung hands the paper in, so it may only exist where the
+            // ladder does. A count can arrive from the server (`seedViolationCount`)
+            // rather than from an event, and a paper whose anti-cheat was switched
+            // off must not be ended by a number collected while it was on.
+            if (!this.antiCheat.enabled) return;
             const maxV = this.antiCheat.max_violations || 0;
             if (maxV <= 0 || this.violationCount < maxV) return;
             if (!this.antiCheat.auto_submit_on_max) return;

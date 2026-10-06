@@ -363,16 +363,50 @@ def log_violation():
     if not logs:
         return jsonify({"violations": []})
 
+    from app.services.anti_cheat_service import (
+        calculate_graduated_penalty, count_penalized_violations,
+    )
     supabase = get_supabase()
     results = []
     for log in logs:
+        exam_id = log.get("exam_id", "")
+        # The exam is read **before** anything is written, and a paper with
+        # anti-cheat switched off records nothing at all.
+        #
+        # `exams.anti_cheat_enabled` is the school's own switch, and a row in this
+        # table *is* the record the teacher reads — so writing one for a paper the
+        # school switched off puts a violation in front of them that nobody asked
+        # to have. The rest of the ladder already honours the flag
+        # (`calculate_graduated_penalty` charges nothing, and the resume-code
+        # service will not lock the sitting); the log was the half that did not,
+        # because it wrote the row before it had read the exam.
+        #
+        # The decision is taken here rather than in the page on purpose: a paper's
+        # promise is not the client's to keep, so a hand-crafted POST is refused
+        # exactly as the page's own is. Read as `is False`, like the penalty does:
+        # a row that could not be read is not a school asking for silence, and
+        # treating it as one would switch anti-cheat off for every paper whose row
+        # went missing.
+        #
+        # Read before the debounce as well, so a disabled paper answers without a
+        # second round-trip — and so nothing about the refusal depends on what is
+        # already in the log.
+        exam = row_or_none(
+            supabase.table("exams")
+            .select("anti_cheat_enabled, penalty_per_violation, max_violations,"
+                    " auto_submit_on_max, lock_pending_resume, resume_code_limit,"
+                    " duration_minutes, start_at, end_at, auto_submit_on_window_end")
+            .eq("id", exam_id).maybe_single().execute()
+        ) or {}
+        if exam.get("anti_cheat_enabled") is False:
+            results.append({"logged": False, "reason": "anti_cheat_disabled"})
+            continue
         valid = validate_violation_log(
             g.user_id,
-            log.get("exam_id", ""),
+            exam_id,
             log.get("timestamp", 0),
         )
         if valid["valid"]:
-            exam_id = log.get("exam_id", "")
             try:
                 supabase.table("violation_logs").insert({
                     "exam_id": exam_id,
@@ -384,20 +418,10 @@ def log_violation():
                 current_app.logger.warning("Violation log insert failed for exam %s", exam_id)
                 results.append({"logged": False, "reason": "db_error"})
                 continue
-            from app.services.anti_cheat_service import (
-                calculate_graduated_penalty, count_penalized_violations,
-            )
-            # The count is the source of truth for the ladder, and the exam row is
-            # read before it so the response carries the penalty the server would
+            # The count is the source of truth for the ladder, and the exam row was
+            # read above it so the response carries the penalty the server would
             # actually apply. The client displays that number: it must never show a
             # penalty the server will not charge (or hide one it will).
-            exam = row_or_none(
-                supabase.table("exams")
-                .select("anti_cheat_enabled, penalty_per_violation, max_violations,"
-                        " auto_submit_on_max, lock_pending_resume, resume_code_limit,"
-                        " duration_minutes, start_at, end_at, auto_submit_on_window_end")
-                .eq("id", exam_id).maybe_single().execute()
-            ) or {}
             total_count = count_penalized_violations(supabase, g.user_id, exam_id)
             penalty_info = calculate_graduated_penalty(total_count, exam)
             # Keep the submission's penalty in step with the ladder so the results
