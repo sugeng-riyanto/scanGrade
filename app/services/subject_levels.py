@@ -90,6 +90,55 @@ def mapped_class_ids(supabase, school_id, subject_id, all_class_ids=None) -> set
     return {str(c) for c in all_class_ids if str(c) not in closed}
 
 
+def levels_by_subject(supabase, school_id) -> dict:
+    """``{subject_id: [grade_level, …]}`` — the grade levels that teach a subject.
+
+    A subject is offered by a class **unless** a ``class_subjects`` row closes the
+    pair (``is_active=False``) — the same "absence means yes" rule
+    :func:`mapped_class_ids` reads — so a subject is taught in a grade level when
+    that level has at least one class still open for it. A school that has never
+    closed a pair therefore teaches every active subject in every level it has,
+    which is the honest answer and the one a per-level reset needs.
+
+    The level names come from ``classes.grade_level``, the school's own label, and
+    are returned sorted so a page renders the same order every time.
+    """
+    if not school_id:
+        return {}
+    classes = _rows(supabase, "classes", "id, grade_level",
+                    [("eq", "school_id", school_id)])
+    class_level = {str(r["id"]): str(r.get("grade_level") or "")
+                   for r in classes if r.get("id")}
+    subjects = _rows(supabase, "subjects", "id, is_active",
+                     [("eq", "school_id", school_id), ("eq", "is_active", True)])
+    closed = _rows(supabase, "class_subjects", "subject_id, class_id, is_active",
+                   [("eq", "school_id", school_id)])
+    closed_pairs = {(str(r.get("subject_id")), str(r.get("class_id")))
+                    for r in closed if not r.get("is_active", True)}
+    out = {}
+    for subject in subjects:
+        sid = str(subject.get("id") or "")
+        if not sid:
+            continue
+        out[sid] = sorted({lvl for cid, lvl in class_level.items()
+                           if lvl and (sid, cid) not in closed_pairs})
+    return out
+
+
+def subjects_for_grade_level(supabase, school_id, grade_level) -> list:
+    """The ids of the active subjects a grade level teaches.
+
+    The counterpart of :func:`levels_by_subject`, so a caller can ask either
+    direction without re-deriving the offering rule. An empty or missing level is
+    never a question — it answers ``[]`` rather than every subject.
+    """
+    if grade_level in (None, ""):
+        return []
+    level = str(grade_level)
+    levels = levels_by_subject(supabase, school_id)
+    return [sid for sid, lvls in levels.items() if level in lvls]
+
+
 def save_mapping(supabase, school_id, subject_id, class_ids, created_by=None):
     """Set which classes offer ``subject_id`` for this school.
 

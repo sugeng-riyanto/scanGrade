@@ -121,8 +121,43 @@ the components the school configured for its subject. The field is **optional**:
    and labelled *default* until it is saved with its own numbers. Each row's total
    is shown live; **Save stays disabled until the row sums to exactly 100%**. The
    *back to default* button clears the custom row so the subject follows again.
+4. **Pratinjau Nilai Akhir** — the preview card, which computes the Final Mark a
+   sample set of scores carries under the distribution *currently selected* — the
+   school default or a subject's own row, as typed and **before anything is
+   saved**. Its arithmetic is the page's own `sgPreviewFinal`, kept equal to
+   `grade_weighting.compute` by a guard, so the previewed number is the number the
+   roster will compute, including the "missing component is zero" policy. Seeding
+   it from a real pupil is described below.
 
 A closed academic year is read-only.
+
+### Seeding the preview from a real pupil
+
+An invented sample answers "what does 80/90 carry?". The admin's better question
+is what a *named* learner's record carries out under the distribution being typed,
+so the preview can be seeded from one pupil:
+
+1. type at least two characters of a name into **Ambil dari murid** — the search
+   returns this school's **active** pupils only, never another school's and never
+   an alumni row;
+2. click a result, and the sample fields are filled with **that pupil's own
+   component means** for the subject selected in the preview, read through this
+   school's exams for that subject and the running year;
+3. the badge names the pupil while the sample is exactly their record. Editing any
+   field drops the badge — an edited sample is no longer that pupil's marks;
+4. changing the preview's subject re-reads the same pupil for the new subject
+   rather than leaving another subject's marks under this subject's weights.
+
+A component the pupil has **no** mark in is left blank rather than filled with 0,
+so the preview shows the same gap the roster will: the module's *missing component
+is zero* policy, applied where the admin can see it. Marks are read from every
+graded paper, released or not, because this is the teacher's roster arithmetic —
+the pupil's own dashboard is the view that shows released papers only.
+
+The school default has no subject to read from, so seeding asks for a subject
+first instead of guessing one. Both doors are `admin_sekolah` only, take the school
+from the session rather than from the URL, verify the pupil and the subject belong
+to it, and are **reads** — a preview never saves.
 
 ## Where the number appears
 
@@ -147,6 +182,7 @@ A closed academic year is read-only.
 | Action | Who |
 |---|---|
 | Manage components & weights | `admin_sekolah` (scoped to its own school) |
+| Preview a distribution, and seed it from a pupil's marks | `admin_sekolah` (its own school's active pupils only) |
 | Tag a paper with a component | the paper's teacher / school admin |
 | Read the grade table & exports | the subject's teacher / school admin |
 

@@ -67,6 +67,7 @@ class _Query:
         self._payload = None
         self._order = None
         self._primed = None
+        self._limit = None
 
     # -- query building -----------------------------------------------------
     def select(self, *cols, **kw):
@@ -95,6 +96,17 @@ class _Query:
         self._filters.append(("in", column, list(values)))
         return self
 
+    def ilike(self, column, pattern):
+        # A case-insensitive `contains`, which is what `%term%` means to PostgREST.
+        # The `%` is the only wildcard any caller in this repo uses, so stripping
+        # it to a plain substring is the honest reading of the request.
+        self._filters.append(("ilike", column, pattern))
+        return self
+
+    def limit(self, count):
+        self._limit = count
+        return self
+
     def order(self, column, desc=False):
         self._order = (column, desc)
         return self
@@ -111,6 +123,10 @@ class _Query:
             if kind == "eq":
                 if str(row.get(column)) != str(value):
                     return False
+            elif kind == "ilike":
+                haystack = str(row.get(column) or "").lower()
+                if str(value).strip("%").lower() not in haystack:
+                    return False
             else:
                 if str(row.get(column)) not in {str(v) for v in value}:
                     return False
@@ -126,6 +142,8 @@ class _Query:
             if self._order:
                 column, desc = self._order
                 rows.sort(key=lambda r: str(r.get(column) or ""), reverse=bool(desc))
+            if self._limit is not None:
+                rows = rows[:int(self._limit)]
             return _Res(rows)
         if self._op == "insert":
             self.db._counter += 1
