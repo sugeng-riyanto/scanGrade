@@ -235,7 +235,7 @@
                     <i class="fas fa-chart-bar"></i> <span x-text="t('Bukti, bukan klaim','Evidence, not a claim')"></span>
                 </span>
                 <h2 class="text-2xl lg:text-3xl font-extrabold text-surface-900 mt-3" x-text="t('Kinerja Terukur','Measured Performance')"></h2>
-                <p class="text-sm text-surface-500 font-medium mt-1" x-text="t('Diukur 25 Sep 2026 pada produksi scangrade.web.id: VPS 1 vCPU, 957 MB RAM, 3 worker gevent. Angka di bawah ini hasil ukur, bukan proyeksi.','Measured 25 Sep 2026 on production at scangrade.web.id: a 1 vCPU, 957 MB VPS running 3 gevent workers. The figures below are measured, not projected.')"></p>
+                <p class="text-sm text-surface-500 font-medium mt-1" x-text="t('Diukur 6 Okt 2026 pada produksi scangrade.web.id: VPS 1 vCPU, 957 MB RAM, 3 worker gevent. Angka di bawah ini hasil ukur, bukan proyeksi.','Measured 6 Oct 2026 on production at scangrade.web.id: a 1 vCPU, 957 MB VPS running 3 gevent workers. The figures below are measured, not projected.')"></p>
             </div>
             <div class="grid grid-cols-2 lg:grid-cols-4 gap-6">
                 <div class="text-center p-5 bg-gradient-to-br from-blue-50 to-blue-50 rounded-2xl border border-blue-100">
@@ -246,7 +246,7 @@
                 <div class="text-center p-5 bg-gradient-to-br from-emerald-50 to-emerald-50 rounded-2xl border border-emerald-100">
                     <div class="text-3xl font-extrabold text-emerald-600">50</div>
                     <div class="text-xs font-bold text-emerald-700 mt-1" x-text="t('Murid Serentak','Concurrent Students')"></div>
-                    <div class="text-[10px] text-emerald-400 mt-0.5" x-text="t('disarankan, 0% error: p50 0.1–2.2 s','recommended, 0% errors: p50 0.1–2.2 s')"></div>
+                    <div class="text-[10px] text-emerald-400 mt-0.5" x-text="t('disarankan, 0% error: p50 0.1–4.1 s','recommended, 0% errors: p50 0.1–4.1 s')"></div>
                 </div>
                 <div class="text-center p-5 bg-gradient-to-br from-amber-50 to-amber-50 rounded-2xl border border-amber-100">
                     <div class="text-3xl font-extrabold text-amber-600">0</div>
@@ -254,7 +254,7 @@
                     <div class="text-[10px] text-amber-400 mt-0.5" x-text="t('bahkan pada 500 sesi','even at 500 sessions')"></div>
                 </div>
                 <div class="text-center p-5 bg-gradient-to-br from-primary-50 to-primary-50 rounded-2xl border border-primary-100">
-                    <div class="text-3xl font-extrabold text-primary-600" x-text="t('< 2.2 detik','< 2.2 seconds')"></div>
+                    <div class="text-3xl font-extrabold text-primary-600" x-text="t('< 4.1 detik','< 4.1 seconds')"></div>
                     <div class="text-xs font-bold text-primary-700 mt-1" x-text="t('Waktu Respon','Response Time')"></div>
                     <div class="text-[10px] text-primary-400 mt-0.5" x-text="t('p50 pada ~50 murid serentak','p50 at ~50 concurrent students')"></div>
                 </div>
@@ -272,7 +272,7 @@
                         </tr>
                     </thead>
                     <tbody class="text-slate-600">
-                        <tr class="border-b border-slate-100"><td class="py-2 font-bold">50</td><td class="text-right">0.1–2.2 s</td><td class="text-right">≤ 4.8 s</td><td class="text-right text-emerald-600">0%</td></tr>
+                        <tr class="border-b border-slate-100"><td class="py-2 font-bold">50</td><td class="text-right">0.1–4.1 s</td><td class="text-right">≤ 4.9 s</td><td class="text-right text-emerald-600">0%</td></tr>
                         <tr class="border-b border-slate-100"><td class="py-2 font-bold">100</td><td class="text-right">4.0–7.6 s</td><td class="text-right">≤ 8.5 s</td><td class="text-right text-emerald-600">0%</td></tr>
                         <tr class="border-b border-slate-100"><td class="py-2 font-bold">150</td><td class="text-right">6.6–9.8 s</td><td class="text-right">≤ 11.4 s</td><td class="text-right text-emerald-600">0%</td></tr>
                         <tr><td class="py-2 font-bold">500*</td><td class="text-right">5.6–7.0 s</td><td class="text-right">≤ 10.8 s</td><td class="text-right text-amber-600">2.31%</td></tr>
@@ -282,6 +282,7 @@
             <div class="mt-6 text-center text-[11px] text-slate-400 leading-relaxed space-y-1">
                 <p><span x-text="t('* Uji beban terhadap produksi','* Load tests against production')"></span> <span class="text-slate-500">scangrade.web.id</span><span x-text="t(', 14 Sep 2026, memakai harness di repositori ini: satu akun per sesi, identitas diverifikasi lewat /auth/me, dan baris 50/100/150 masing-masing dijaga 60 detik. Yang diukur hanya halaman murid — ini angka baca, belum termasuk kiriman jawaban ujian.',' on 14 Sep 2026, using the harness in this repository: one account per session, identity verified through /auth/me, and each of the 50/100/150 rows held for 60 seconds. Only student pages are measured — these are read figures and do not include answer submission.')"></span></p>
                 <p x-text="t('Baris 500* dijalankan 10 menit (682 detik, 13.573 request), bukan 60 detik: 500 murid serentak adalah klaim ketahanan dan probe singkat tidak bisa menjawabnya.','The 500* row ran for 10 minutes (682 seconds, 13,573 requests), not 60: 500 students at once is an endurance claim and a short probe cannot answer it.')"></p>
+                <p x-text="t('Baris 50 diukur ulang pada 6 Okt 2026 (60 detik dan 180 detik, dari kotak produksi itu sendiri): p50 halaman terburuk 3,5-4,1 detik, p95 4,9 detik, 0% error. Baris ini diterbitkan pada angka terburuk yang pernah terukur, bukan yang terbaik.','The 50 row was re-measured on 6 Oct 2026 (60 s and 180 s, run from the production box itself): a worst-page p50 of 3.5-4.1 seconds, a 4.9-second p95, 0% errors. The row is published at the worst figure ever measured, never the best.')"></p>
                 <p x-text="t('Pada run 500* hanya 174 sesi yang lolos login; sisanya ditolak 429 oleh pembatasan login per-IP di nginx, bukan oleh aplikasi. Server tidak mengeluarkan satu pun error 5xx sepanjang run itu.','In the 500* run only 174 sessions got past login; the rest were refused with 429 by the per-IP login limit at nginx, not by the application. The server produced no 5xx at all during that run.')"></p>
                 <p x-text="t('Karena itu error 2,31% pada baris 500* adalah penolakan login tersebut — baris 50, 100 dan 150 semuanya 0%. Bottleneck terukurnya CPU untuk merender halaman: user time 90–93%, idle 0%, bukan jaringan, memori, atau database. Angka dan berkas mentahnya ada di docs/measurements/.','The 2.31% error rate on the 500* row is those refused logins — the 50, 100 and 150 rows are all 0%. The measured bottleneck is CPU spent rendering pages: 90–93% user time, 0% idle, not network, memory or database. The figures and their raw files are in docs/measurements/.')"></p>
                 <p class="pt-1">
@@ -300,7 +301,7 @@
                     </span>
                 </div>
                 <p class="text-center text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed max-w-2xl mx-auto">
-                    <span x-text="t('Kapasitas mengikuti jumlah core: pada 1 vCPU, terukur ±20 akses per detik. Di konfigurasi 1 vCPU ini, batas yang nyaman adalah ~50 murid serentak per sesi ujian — p95 4,8 detik pada baris itu; pada 100 p95 8,5 detik dan pada 150 11,4 detik. Probe ini membaca halaman saja, sedangkan ujian sungguhan juga mengirim jawaban, jadi batasnya kami jaga konservatif. Untuk ujian dengan 500 murid serentak kami menyarankan server beberapa vCPU, dan kami bantu menghitung kebutuhannya.','Capacity scales with core count: on 1 vCPU the measured ceiling is about 20 requests per second. On this 1 vCPU configuration the comfortable limit is ~50 concurrent students per exam session — a 4.8-second p95 at that row; at 100 the p95 is 8.5 seconds and at 150 11.4 seconds. The probe only reads pages, while a real exam also submits answers, so we keep the limit conservative. For exams with 500 concurrent students we recommend a multi-vCPU server, and we will help size it.')"></span>
+                    <span x-text="t('Kapasitas mengikuti jumlah core: pada 1 vCPU, terukur ±20 akses per detik. Di konfigurasi 1 vCPU ini, batas yang nyaman adalah ~50 murid serentak per sesi ujian — p95 4,9 detik pada baris itu; pada 100 p95 8,5 detik dan pada 150 11,4 detik. Probe ini membaca halaman saja, sedangkan ujian sungguhan juga mengirim jawaban, jadi batasnya kami jaga konservatif. Untuk ujian dengan 500 murid serentak kami menyarankan server beberapa vCPU, dan kami bantu menghitung kebutuhannya.','Capacity scales with core count: on 1 vCPU the measured ceiling is about 20 requests per second. On this 1 vCPU configuration the comfortable limit is ~50 concurrent students per exam session — a 4.9-second p95 at that row; at 100 the p95 is 8.5 seconds and at 150 11.4 seconds. The probe only reads pages, while a real exam also submits answers, so we keep the limit conservative. For exams with 500 concurrent students we recommend a multi-vCPU server, and we will help size it.')"></span>
                 </p>
             </div>
         </div>
