@@ -634,7 +634,17 @@
             }
             </script>
 
-            <form method="POST" action="{{ url_for('teacher.exam_detail', exam_id=exam.id) if exam else url_for('teacher.exam_form') }}" class="space-y-6" onsubmit="return prepareSubmit()" enctype="multipart/form-data">
+            <form method="POST"
+                  action="{{ url_for('teacher.exam_detail', exam_id=exam.id) if exam else url_for('teacher.exam_form') }}"
+                  data-save-url="{{ url_for('teacher.exam_detail', exam_id='SG_DRAFT_ID') }}"
+                  class="space-y-6" onsubmit="return prepareSubmit()" enctype="multipart/form-data">
+                {# The draft this page is writing, if one has been minted yet. The
+                   autosave loop fills it on its first successful save and rewrites
+                   the form action to match, so the explicit Publish writes that same
+                   row instead of minting a second paper. `data-save-url` is the edit
+                   route with a placeholder, so the address is the server's own
+                   `url_for` rather than a path spelled out in JavaScript. #}
+                <input type="hidden" name="draft_id" value="{{ exam.id if exam else '' }}">
                 <div class="card p-6 space-y-4">
                     <div class="grid grid-cols-1 gap-3 sm:gap-4">
                         <div class="sm:col-span-2">
@@ -1608,6 +1618,20 @@
                             <span class="font-bold text-slate-700" x-text="t('Acak Urutan Opsi','Shuffle option order')"></span>
                         </label>
                     </div>
+                </div>
+
+                {# The autosave status. Quiet on purpose: the shared top bar in
+                   app/static/js/sg-ux.js already carries the *network* signal for a
+                   slow save, and its own delay keeps a quick one invisible, so this
+                   only says which of the three things is true — writing, written, or
+                   refused. `role="status"` announces it without stealing focus; the
+                   text is written by the module in the reader's language (see the
+                   `label` wiring at the bottom). It sits on its own line above the
+                   button so that neither has to share a row the button already
+                   fills on a laptop. #}
+                <div class="flex items-center gap-2 mb-3">
+                    <span id="autosave-status" data-sg-autosave="idle" role="status" aria-live="polite"
+                          class="text-xs font-bold text-surface-400"></span>
                 </div>
 
                 <div class="flex flex-col sm:flex-row justify-end gap-2">
@@ -2636,6 +2660,66 @@ function deleteExam(id) {
         duration: document.querySelector('input[name="duration_minutes"]'),
         follow: document.getElementById('window_follow_duration'),
         onLoad: {{ 'true' if (not exam or not exam.end_at) else 'false' }}
+    });
+})();
+</script>
+<script src="/static/js/exam-autosave.js"></script>
+<script>
+/* The draft writes itself while the teacher works. Loaded here, at the end of
+   the body, so the form and its status line exist.
+
+   The loop itself is app/static/js/exam-autosave.js; what the page supplies is
+   the three things only it can know: how to read the form, how to post it, and
+   where to put the id it is handed back. The status words come from here too,
+   as sgT pairs, because a literal in the module would be the one sentence on
+   the page the language toggle could not reach. */
+(function () {
+    var form = document.querySelector('form[data-save-url]');
+    if (!form || !window.SGExamAutosave) return;
+    var idField = form.querySelector('[name="draft_id"]');
+    window.SGExamAutosave.wire({
+        form: form,
+        indicator: document.getElementById('autosave-status'),
+        read: function () { return window.SGExamAutosave.collect(form); },
+        send: function (state) {
+            var body = new FormData();
+            state.body.forEach(function (pair) { body.append(pair[0], pair[1]); });
+            /* The two fields the module owns belong to this request, not to the
+               form the teacher is typing in: a draft id that is not there yet,
+               and the verb that tells the save door not to navigate. */
+            body.append('action', 'autosave');
+            body.append('draft_id', state.id || '');
+            return fetch(form.getAttribute('action'), {
+                method: 'POST',
+                body: body,
+                credentials: 'same-origin',
+                /* The save doors answer a JSON caller with a sentence instead of
+                   a redirect, so a refusal can land beside the field. */
+                headers: { 'Accept': 'application/json' }
+            }).then(function (reply) {
+                return reply.json().catch(function () { return {}; })
+                    .then(function (data) {
+                        return { ok: reply.ok && data.ok !== false,
+                                 exam_id: data.exam_id,
+                                 error: data.error };
+                    });
+            });
+        },
+        adopt: function (examId) {
+            /* The draft exists now, so every later save and the explicit Publish
+               write that row. The edit address is the server url_for with the
+               placeholder swapped, so no path is spelled out in JavaScript. */
+            if (idField) idField.value = examId;
+            form.setAttribute('action',
+                form.getAttribute('data-save-url').replace('SG_DRAFT_ID', examId));
+        },
+        label: function (state, detail) {
+            if (state === 'saving') return sgT('Menyimpan…', 'Saving…');
+            if (state === 'saved') return sgT('Tersimpan otomatis', 'Saved automatically');
+            if (state === 'error') return sgT('Gagal menyimpan', 'Not saved')
+                + (detail ? ': ' + detail : '');
+            return '';
+        }
     });
 })();
 </script>

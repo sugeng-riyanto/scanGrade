@@ -177,6 +177,50 @@ def _publication_state(existing, action):
     }
 
 
+def _exam_save_refused(autosave, message):
+    """Answer a builder save that was refused part-way through.
+
+    A browser post has always gotten the flash and the redirect it can read. An
+    autosave must never navigate: it answers JSON so the sentence lands beside
+    the field the teacher is editing instead of replacing the page with an exam
+    list they did not ask for.
+    """
+    if autosave:
+        return jsonify({"ok": False, "error": message}), 400
+    flash(message, "error")
+    return redirect(request.referrer or "/teacher/exams")
+
+
+def _owned_draft(supabase, draft_id, school_id, user_id):
+    """The caller's own un-published draft with this id, or ``None``.
+
+    Autosave is a create-then-update loop: the first save mints the row, every
+    later one writes it, and the id travels in the page. That id is untrusted
+    input, so a row that is not this school's, not this teacher's, or already
+    published is not a draft to keep writing. ``None`` makes the caller mint a
+    fresh row rather than write somebody else's paper.
+    """
+    if not draft_id:
+        return None
+    try:
+        rows = (supabase.table("exams")
+                .select("id,teacher_id,school_id,status,is_published")
+                .eq("id", draft_id).limit(1).execute().data or [])
+    except Exception:
+        current_app.logger.warning("draft lookup failed for %s", draft_id, exc_info=True)
+        return None
+    row = rows[0] if rows else None
+    if not row:
+        return None
+    if str(row.get("school_id") or "") != str(school_id or ""):
+        return None
+    if str(row.get("teacher_id") or "") != str(user_id or ""):
+        return None
+    if row.get("is_published") or (row.get("status") or "draft") != "draft":
+        return None
+    return row
+
+
 def _sync_exam_targets(supabase, exam_id, class_ids, form):
     """Write the per-pupil roster choices for a paper just created or edited.
 
@@ -1167,6 +1211,14 @@ def exam_form():
                                grade_components=_grade_components_by_subject(supabase, sid),
                                builder_defaults=_builder_defaults(supabase, g.user_id, subjects, classes))
 
+    # ── the builder's background save ─────────────────────────────────────────
+    # It posts the same body as an explicit save but must not navigate, and a
+    # create page carries the id of the draft it has already minted so its second
+    # save writes that row instead of minting a duplicate. Read first, because the
+    # refusals below answer differently for an autosave.
+    action = request.form.get("action", "save_draft")
+    autosave = action == "autosave"
+    draft_id = (request.form.get("draft_id") or "").strip() or None
     title = request.form.get("title")
     subject = request.form.get("subject")
     subject_id = request.form.get("subject_id") or None
@@ -1190,12 +1242,10 @@ def exam_form():
     publish_mode = request.form.get("publish_mode", "manual")
     total_questions = int(request.form.get("total_questions", 10))
     if total_questions < 1:
-        flash("Minimal 1 soal", "error")
-        return redirect(request.referrer or "/teacher/exams")
+        return _exam_save_refused(autosave, "Minimal 1 soal")
     duration_minutes = int(request.form.get("duration_minutes", 60))
     passing_score = int(request.form.get("passing_score", 70))
     description = request.form.get("description", "")
-    action = request.form.get("action", "save_draft")
     # Both ends of the window go through one converter, so the start and the end
     # cannot end up on different clocks — the one mistake here that would move a
     # deadline by seven hours without anything looking wrong.
@@ -1215,16 +1265,14 @@ def exam_form():
     auto_submit_on_window_end = request.form.get("auto_submit_on_window_end") == "true"
     _start_dt, _end_dt = exam_window.parse_dt(start_at), exam_window.parse_dt(end_at)
     if _start_dt and _end_dt and _end_dt <= _start_dt:
-        flash("Batas akhir ujian harus setelah waktu mulai", "error")
-        return redirect(request.referrer or "/teacher/exams")
+        return _exam_save_refused(autosave, "Batas akhir ujian harus setelah waktu mulai")
     # The calendar: a window outside the running assessment period is a paper filed
     # against a date the school never opened. The period names itself in the refusal,
     # and a school with no running period keeps the behaviour it had.
     _period, _off_calendar = assessment_periods.window_outside_running_period(
         supabase, g.get("user_school_id"), start_at, end_at, tz_off)
     if _off_calendar:
-        flash(_off_calendar_message(_period), "error")
-        return redirect(request.referrer or "/teacher/exams")
+        return _exam_save_refused(autosave, _off_calendar_message(_period))
     # Tag the paper with the period it belongs to, so results can be grouped and
     # compared by period across a year. At a write door the running period is the
     # only one a window may sit in (the check above refuses the rest), and an empty
@@ -1326,14 +1374,37 @@ def exam_form():
         "grade_component_type_id": grade_component_id,
         "school_year_id": active_year_id,
     }
+    # A draft save writes the row the page already holds; a paper never saved mints
+    # one. `_owned_draft` decides, so a `draft_id` naming another school's paper —
+    # or a published one — is ignored rather than written.
+    draft_row = _owned_draft(supabase, draft_id, g.get("user_school_id"), g.user_id)
     try:
-        res = supabase.table("exams").insert(data).execute()
+        if draft_row:
+            res = supabase.table("exams").update(data).eq("id", draft_row["id"]).execute()
+            exam_id = draft_row["id"]
+        else:
+            res = supabase.table("exams").insert(data).execute()
     except Exception:
         for key in ["question_weights", "question_texts", "anti_cheat_enabled", "penalty_per_violation", "max_violations", "auto_submit_on_max", "fullscreen_required", "randomize_questions", "randomize_options", "watermark_name", "block_copy_paste", "block_right_click", "block_screenshot", "allow_calculator", "lock_pending_resume", "resume_code_limit", "grade_component_type_id", "school_year_id", "subject_id", "class_ids", "start_at", "end_at", "assessment_period_id", "auto_submit_on_window_end", "is_template", "source_exam_id", "max_attempts", "publish_mode", "question_pages", "question_cognitive"]:
             data.pop(key, None)
-        res = supabase.table("exams").insert(data).execute()
-    exam_id = res.data[0]["id"]
-    log_activity("create", "exam", exam_id, new_data={"title": title, "subject": subject, "total_questions": total_questions}, user_id=g.user_id)
+        if draft_row:
+            res = supabase.table("exams").update(data).eq("id", draft_row["id"]).execute()
+            exam_id = draft_row["id"]
+        else:
+            res = supabase.table("exams").insert(data).execute()
+            exam_id = res.data[0]["id"]
+    # Logged once, when the row is minted. An autosave that keeps writing the same
+    # draft is not a new paper, and a "created" entry every few seconds would bury
+    # the one that matters.
+    if not draft_row:
+        log_activity("create", "exam", exam_id, new_data={"title": title, "subject": subject, "total_questions": total_questions}, user_id=g.user_id)
+    # The builder's background save stops here. Everything below — the weight-gap
+    # flash, the PDF re-upload, the publish side effects and the redirect — belongs
+    # to a *reported* save; an autosave answers JSON and writes the paper's own
+    # fields, nothing else. The per-pupil roster sync waits for the explicit save
+    # too: a background write every few seconds is the load it must not become.
+    if autosave:
+        return jsonify({"ok": True, "exam_id": exam_id})
     _sync_exam_targets(supabase, exam_id, class_ids, request.form)
     # Handle PDF upload inline
     pdf_file = request.files.get("pdf")
@@ -1507,6 +1578,14 @@ def exam_detail(exam_id):
                                grade_components=_grade_components_by_subject(supabase, sid),
                                builder_defaults=_builder_defaults(supabase, g.user_id, subjects, classes))
 
+    # ── the builder's background save ─────────────────────────────────────────
+    # It posts the same body as an explicit save but must not navigate, and a
+    # create page carries the id of the draft it has already minted so its second
+    # save writes that row instead of minting a duplicate. Read first, because the
+    # refusals below answer differently for an autosave.
+    action = request.form.get("action", "save_draft")
+    autosave = action == "autosave"
+    draft_id = (request.form.get("draft_id") or "").strip() or None
     title = request.form.get("title")
     subject = request.form.get("subject")
     subject_id = request.form.get("subject_id") or None
@@ -1530,12 +1609,10 @@ def exam_detail(exam_id):
     publish_mode = request.form.get("publish_mode", "manual")
     total_questions = int(request.form.get("total_questions", 10))
     if total_questions < 1:
-        flash("Minimal 1 soal", "error")
-        return redirect(request.referrer or "/teacher/exams")
+        return _exam_save_refused(autosave, "Minimal 1 soal")
     duration_minutes = int(request.form.get("duration_minutes", 60))
     passing_score = int(request.form.get("passing_score", 70))
     description = request.form.get("description", "")
-    action = request.form.get("action", "save_draft")
     # Both ends of the window go through one converter, so the start and the end
     # cannot end up on different clocks — the one mistake here that would move a
     # deadline by seven hours without anything looking wrong.
@@ -1555,16 +1632,14 @@ def exam_detail(exam_id):
     auto_submit_on_window_end = request.form.get("auto_submit_on_window_end") == "true"
     _start_dt, _end_dt = exam_window.parse_dt(start_at), exam_window.parse_dt(end_at)
     if _start_dt and _end_dt and _end_dt <= _start_dt:
-        flash("Batas akhir ujian harus setelah waktu mulai", "error")
-        return redirect(request.referrer or "/teacher/exams")
+        return _exam_save_refused(autosave, "Batas akhir ujian harus setelah waktu mulai")
     # The calendar: a window outside the running assessment period is a paper filed
     # against a date the school never opened. The period names itself in the refusal,
     # and a school with no running period keeps the behaviour it had.
     _period, _off_calendar = assessment_periods.window_outside_running_period(
         supabase, g.get("user_school_id"), start_at, end_at, tz_off)
     if _off_calendar:
-        flash(_off_calendar_message(_period), "error")
-        return redirect(request.referrer or "/teacher/exams")
+        return _exam_save_refused(autosave, _off_calendar_message(_period))
     # Tag the paper with the period it belongs to, so results can be grouped and
     # compared by period across a year. At a write door the running period is the
     # only one a window may sit in (the check above refuses the rest), and an empty
@@ -1679,6 +1754,13 @@ def exam_detail(exam_id):
             data.pop(key, None)
         supabase.table("exams").update(data).eq("id", exam_id).execute()
 
+    # The builder's background save stops here. Everything below — the weight-gap
+    # flash, the PDF re-upload, the publish side effects and the redirect — belongs
+    # to a *reported* save; an autosave answers JSON and writes the paper's own
+    # fields, nothing else. The per-pupil roster sync waits for the explicit save
+    # too: a background write every few seconds is the load it must not become.
+    if autosave:
+        return jsonify({"ok": True, "exam_id": exam_id})
     _sync_exam_targets(supabase, exam_id, class_ids, request.form)
 
     # Process PDF: upload to Supabase, generate page images for student canvas

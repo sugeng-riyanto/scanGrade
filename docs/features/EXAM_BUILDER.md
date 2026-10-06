@@ -118,6 +118,54 @@ the safe-sounding choice and the wrong one: a paper whose window ended with a si
 still running left that sitting open, and the teacher had to know to tick a box they
 were never shown a reason for. An existing paper keeps whatever it stored.
 
+## The draft saves itself
+
+Nothing on this page used to be kept until **Publish & Send to Classes** was pressed.
+A closed tab, a shut lid, or a school connection that dropped for a minute took the
+whole paper — title, classes, every question, the marks — with it. The form is now
+written by itself a couple of seconds after the teacher stops changing it, and the
+status line beside the Publish button says which of the three things is true:
+*Menyimpan…* / *Tersimpan otomatis* / *Gagal menyimpan*.
+
+Three rules make the loop safe, and each one is a decision rather than a detail:
+
+* **It never navigates.** The save is a `fetch` answered with JSON, so the teacher
+  keeps typing in the same page. Both save doors know the difference
+  (`_exam_save_refused` in `app/routes/teacher.py`): a browser post gets the flash and
+  the redirect it always had, an autosave gets a sentence and a `400`.
+* **It writes nothing that did not change.** The snapshot is the whole body minus the
+  two fields the loop owns (`action`, `draft_id`), so opening the page, clicking
+  around it, or letting Alpine touch a hidden input does not write. On a 1 vCPU box a
+  background loop that wrote on every click would be the problem it was meant to
+  solve.
+* **It mints the draft once.** The create page has no `exam_id` until its first save;
+  that save inserts the row, returns the id, and the page adopts it — rewriting the
+  form action to `/teacher/exams/<id>`. Without that rewrite the explicit **Publish**
+  would post to `/exams/new` a second time and the school would end up with two
+  papers for one exam. `_owned_draft` guards the other end: an id that names another
+  school's, another teacher's, or an already-published paper is ignored and a fresh
+  draft is minted instead of writing somebody else's.
+
+What an autosave deliberately does **not** do is everything else an explicit save
+reaches: no per-pupil roster sync, no PDF re-upload, no weight-gap flash, no publish
+side effects, no `log_activity("create")` for a draft that already exists. A PDF is
+excluded from the body too — the builder uploads it once through its own AJAX path,
+and re-sending the bytes every few seconds is not a draft write.
+
+A refusal is shown and *not* retried on its own: a body the server keeps refusing
+(the window end before its start, no questions at all, a window outside the running
+assessment period) must not become a request every few seconds. The teacher's next
+change tries again.
+
+The loop is `app/static/js/exam-autosave.js`, driven in node by
+`tests/unit/test_exam_autosave.py`. The page supplies the three things only it can
+know — how to read the form, how to post it, and where to put the id it is handed
+back — and the status words as `sgT` pairs, so the language toggle reaches them too.
+
+The shared top bar in `app/static/js/sg-ux.js` still carries the *network* signal for
+a slow save (its own delay keeps a quick one invisible); this status line only adds
+which of the three states is true.
+
 ## Reading size on the pupil's page
 
 The exam page offers **A- / A+** and a magnifier on the paper image. Neither is the
@@ -140,6 +188,8 @@ pupil to their next device. See `docs/DESIGN_SYSTEM.md`.
 * `app/static/css/theme.css` — the `pointer: coarse` block for `.sg-exam-builder`.
 * `app/static/js/exam-window.js` — the duration-to-window arithmetic, run in node by
   `tests/unit/test_exam_window_auto.py`.
+* `app/static/js/exam-autosave.js` — the debounced draft save, run in node by
+  `tests/unit/test_exam_autosave.py`.
 * `app/static/js/exam-view.js` — the pupil page's reading size and lightbox, run in
   node by `tests/unit/test_exam_view_zoom.py`.
 * `tests/unit/test_exam_builder_tablet.py` — the guards, and the measurements they
