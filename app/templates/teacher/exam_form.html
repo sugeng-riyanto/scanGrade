@@ -824,6 +824,19 @@
                             <input type="datetime-local" name="end_at" id="end_at_input"
                                    value="{% if exam and exam.end_at %}{{ (exam.end_at[:19] + '+00:00') | tz('%Y-%m-%dT%H:%M') }}{% endif %}"
                                    class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-500 font-bold transition">
+                            {# The two clocks, kept in step by one toggle. The arithmetic
+                               and the two rules it obeys (`0` is Unlimited, and a
+                               window a teacher already saved is never rewritten
+                               just because the page loaded) live in
+                               `app/static/js/exam-window.js`, which
+                               `tests/unit/test_exam_window_auto.py` runs in node. #}
+                            <label class="mt-1.5 flex items-center gap-2 cursor-pointer select-none">
+                                <input type="checkbox" id="window_follow_duration" checked
+                                       class="w-4 h-4 shrink-0 text-primary-600 border-slate-300 rounded focus:ring-primary-500">
+                                <span class="text-[11px] font-bold text-slate-600"
+                                      :title="t('Batas mulai terakhir dijaga di waktu mulai + durasi, supaya tidak ada murid yang dipotong sebelum durasinya habis.','The window end is kept at start + duration, so no student is cut off before their own clock runs out.')"
+                                      x-text="t('Ikuti durasi otomatis','Follow the duration automatically')"></span>
+                            </label>
                             <p class="text-xs text-slate-400 mt-1" x-text="t('Batas terakhir murid boleh MEMULAI. Kosongkan = tanpa batas.','The last date and time a student may BEGIN. Leave empty = no limit.')"></p>
                         </div>
                         <div>
@@ -832,7 +845,12 @@
                                    class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-500 font-bold transition">
                         </div>
                     </div>
-                    <div x-data="{ auto_submit_window_end: {{ 'true' if (exam.get('auto_submit_on_window_end') if exam else False) else 'false' }} }">
+                    {# Default ON for a brand-new paper. Off was the safe-sounding choice
+                       and the wrong one: a paper whose window ends with a sitting still
+                       running left that sitting open, and the teacher had to know to
+                       tick a box they were never shown a reason for. An existing paper
+                       keeps whatever it stored — the value below is the row's own. #}
+                    <div x-data="{ auto_submit_window_end: {{ 'true' if (exam.get('auto_submit_on_window_end') if exam else True) else 'false' }} }">
                     <label class="flex items-start gap-2.5 p-3 rounded-xl border-2 cursor-pointer transition"
                            :class="auto_submit_window_end ? 'border-primary-300 bg-primary-50' : 'border-slate-200'">
                         <input type="checkbox" x-model="auto_submit_window_end" name="auto_submit_on_window_end" value="true"
@@ -2599,5 +2617,26 @@ function deleteExam(id) {
         fetch('/teacher/exams/' + id, {method:'DELETE'}).then(() => window.location.href='/teacher/exams');
     }
 }
+</script>
+<script src="/static/js/exam-window.js"></script>
+<script>
+/* One toggle, two clocks: the duration the form already collects, and the window
+   end it used to leave the teacher to work out by hand. `onLoad` is the single
+   difference between filling a field and rewriting a deadline — it is true only
+   for a paper that has no window yet, and the module itself decides the rest
+   (see the two rules at the top of app/static/js/exam-window.js).
+
+   Loaded here, at the end of the body, so both inputs exist; the module listens
+   for the teacher's own changes rather than assuming any. */
+(function () {
+    if (!window.SGExamWindow) return;
+    window.SGExamWindow.wire({
+        start: document.getElementById('start_at_input'),
+        end: document.getElementById('end_at_input'),
+        duration: document.querySelector('input[name="duration_minutes"]'),
+        follow: document.getElementById('window_follow_duration'),
+        onLoad: {{ 'true' if (not exam or not exam.end_at) else 'false' }}
+    });
+})();
 </script>
 {% endblock %}
