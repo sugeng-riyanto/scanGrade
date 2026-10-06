@@ -155,7 +155,51 @@ The busy state is released on `pageshow` (Returning to a form via Back must not
 find a dead button) and by a slow safety timer, and every hook is wrapped so a
 failure here can never break the submit it is decorating.
 
-## 5. What is already good, and should stay that way
+## 5. Waiting is drawn, not announced: skeleton screens
+
+Section 4 covers the *action* the reader started. This covers the other wait:
+the page itself, which paints empty until its fetch settles. A spinner in the
+middle of an empty column says "something is happening" and nothing else — and
+then the real layout lands in one jump.
+
+A skeleton is the shape of what is coming, drawn immediately: the same cards, at
+the same sizes, so the column it holds open does not move when the data arrives.
+It lives in two files.
+
+**The rule is `theme.css`.** Every cell is `class="sg-skel <shape> bg-surface-100"`:
+
+| shape | is |
+| --- | --- |
+| `sg-skel-line` | a paragraph line (default 100% wide) |
+| `sg-skel-line-90` / `-80` | the shorter last lines of a paragraph |
+| `sg-skel-title` | a card heading |
+| `sg-skel-figure` | a stat number |
+| `sg-skel-label` | the caption under it |
+
+Two deliberate choices are worth keeping if this is extended:
+
+* **The band is the cell's own `background-image`, not a `::after` overlay.** An
+  absolute pseudo-element is a panel that leaves the flow, and
+  `tests/unit/test_layer_scale.py` requires every one of those to name a layer —
+  because otherwise what covers what is decided by document order. A background
+  is clipped to the box by the box, so there is nothing to order.
+* **The fill is `bg-surface-100`, not a colour in `theme.css`.** The dark theme
+  remaps that utility; a literal here would be a light-mode skeleton on a dark
+  page, and no contrast test would catch it, because a placeholder paints no
+  text. The heights and radii *are* in `theme.css`, so the same shape appears
+  everywhere rather than one `h-` per page.
+
+The sweep is decoration and is the first thing surrendered: under
+`prefers-reduced-motion: reduce` the cell keeps its shape and drops the movement.
+
+**A skeleton must not be silent.** It carries no text, so the region marked
+`data-sg-skeleton` also carries `aria-busy="true"` and an `sr-only` line naming
+the wait — otherwise a screen reader gets an empty page with better paint.
+`teacher/session_review.html` is the worked example (its four stat cards and two
+content cards); `tests/unit/test_skeleton_screens.py` guards the rule, the
+reduced-motion escape, the announcement, the theme fill and the shared shape.
+
+## 6. What is already good, and should stay that way
 
 * **Compression.** nginx gzips text assets (`gzip_types`), `gzip_static on` for
   js/css/woff2. Verified on production with `Accept-Encoding: gzip`: tailwind.css
@@ -169,14 +213,14 @@ failure here can never break the submit it is decorating.
   N+1 is refused by a number rather than inferred from a stopwatch. See
   `deploy/perf_gate.py`.
 
-## 6. What is not done yet
+## 7. What is not done yet
 
 Honest list, in rough order of value:
 
-* **Skeleton screens.** Data-backed pages still show a blank area until the
-  server answers. A shimmer placeholder shaped like the real content (the
-  Instagram/LinkedIn pattern) would make the same wait read as instant. Not
-  built.
+* **More skeletons.** The pattern exists (section 5) and one page uses it. Pages
+  that fetch after paint — the exam builder's per-pupil roster, the admin
+  school settings — still show a blank area until the answer arrives. Applying
+  the same markup there is mechanical; the shapes are the work.
 * **Chart.js is still downloaded by pages that do not chart.** Deferring it
   removed the parse block but not the 69 KB. The safe shape is a Jinja block
   that defaults to *including* it and lets a page opt out — the inverse of the
