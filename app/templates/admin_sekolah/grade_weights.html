@@ -156,6 +156,13 @@ function gradeWeights() {
         pupilHint: '',
         seedPupil: null,
         seedIntact: false,
+        // The comparison across subjects: this learner's saved final in every
+        // subject they have a mark in, plus the component means each figure was
+        // built from — so the "with these weights" column can re-run the page's
+        // own rule under the distribution being typed. Read once per seeded
+        // pupil; it does not depend on which subject is selected.
+        pupilSubjects: [],
+        pupilSubjectsNote: '',
         searchPupils() {
             const q = this.pupilQuery.trim();
             this.pupilHint = '';
@@ -165,6 +172,14 @@ function gradeWeights() {
         },
         seedFrom(pupil) {
             if (!pupil || !pupil.id) { return; }
+            this.seedPupil = pupil;
+            this.seedIntact = false;
+            this.pupilHint = '';
+            // The comparison belongs to the learner, not to the subject being
+            // previewed, so it is read whichever subject is selected — under
+            // the school default it is even the only figure the page can show
+            // for them.
+            this.loadPupilSubjects(pupil.id);
             if (this.previewSubject === '__default__') {
                 // Marks belong to a subject, so the school default has no record
                 // to read. Say so rather than guessing which subject to read.
@@ -172,9 +187,6 @@ function gradeWeights() {
                                         'Pick a subject first: marks are read from one subject.');
                 return;
             }
-            this.seedPupil = pupil;
-            this.seedIntact = false;
-            this.pupilHint = '';
             this.get('/admin-sekolah/grade-weights/pupil-marks?student_id=' + encodeURIComponent(pupil.id)
                      + '&subject_id=' + encodeURIComponent(this.previewSubject))
                 .then(d => {
@@ -191,12 +203,31 @@ function gradeWeights() {
                                  'This pupil has no marks in this subject yet.');
                 });
         },
+        loadPupilSubjects(studentId) {
+            this.pupilSubjects = [];
+            this.pupilSubjectsNote = '';
+            this.get('/admin-sekolah/grade-weights/pupil-subjects?student_id='
+                     + encodeURIComponent(studentId))
+                .then(d => {
+                    if (!d.ok) {
+                        this.pupilSubjectsNote = d.data.error
+                            || this.t('Gagal membaca nilai murid.', 'Could not read the pupil marks.');
+                        return;
+                    }
+                    this.pupilSubjects = d.data.subjects || [];
+                    this.pupilSubjectsNote = this.pupilSubjects.length ? ''
+                        : this.t('Murid ini belum punya nilai di mapel mana pun.',
+                                 'This pupil has no marks in any subject yet.');
+                });
+        },
         clearSeed() {
             this.seedPupil = null;
             this.seedIntact = false;
             this.previewScores = {};
             this.pupilHint = '';
             this.pupilResults = [];
+            this.pupilSubjects = [];
+            this.pupilSubjectsNote = '';
         },
         onPreviewSubjectChange() {
             // The seed belongs to a subject, so a new subject is a fresh read —
@@ -211,6 +242,48 @@ function gradeWeights() {
             return fetch(url, {headers: {'Accept': 'application/json'}})
               .then(r => r.json().then(data => ({ok: r.ok && !data.error, data})))
               .catch(() => ({ok: false, data: {error: this.t('Gagal menghubungi server.', 'Could not reach the server.')}}));
+        },
+
+        // ── the comparison across subjects ──────────────────────────────────
+        // A distribution is a policy for a whole school, so one mark on its own
+        // cannot say whether a change is fair: what decides a save is whether it
+        // is fair between the subjects *this learner* sits. "Saved" is what each
+        // subject reports today, from the server's own arithmetic. "With these
+        // weights" re-runs the page's rule over the learner's component means
+        // under whatever is in the matrix right now, saved or not — so a change
+        // to the school default moves every subject that follows it, while a
+        // change to one subject's own row moves only that row. Rows stay in
+        // subject-name order: this compares, it does not rank.
+        pupilRowTyped(row) { return this.weights[row.subject_id] || this.defaults; },
+        pupilRowLive(row) {
+            // Null when the weights typed for this subject are not a
+            // distribution (no weights at all = the fallback mean). That mean is
+            // taken over the learner's *papers*, and this page holds their
+            // per-component means, so printing the mean of those means would be a
+            // different number than the roster's. Saying nothing is right.
+            const preview = sgPreviewFinal(this.pupilRowTyped(row), row.marks || {});
+            return preview.mode === 'weighted' ? preview.final : null;
+        },
+        pupilRowLiveText(row) {
+            const live = this.pupilRowLive(row);
+            return live === null ? '—' : live.toFixed(1);
+        },
+        pupilRowDelta(row) {
+            const live = this.pupilRowLive(row);
+            const saved = row.final;
+            if (live === null || saved === null || saved === undefined) { return null; }
+            const diff = Math.round((live - Number(saved)) * 10) / 10;
+            return diff === 0 ? null : diff;
+        },
+        pupilRowDeltaText(row) {
+            const diff = this.pupilRowDelta(row);
+            if (diff === null) { return this.t('tetap','unchanged'); }
+            return (diff > 0 ? '+' : '') + diff.toFixed(1);
+        },
+        pupilRowDeltaClass(row) {
+            const diff = this.pupilRowDelta(row);
+            if (diff === null) { return 'text-slate-300'; }
+            return diff > 0 ? 'text-emerald-600' : 'text-red-500';
         },
 
         isCustom(subjectId) { return this.customSubjects.includes(String(subjectId)); },
@@ -508,6 +581,55 @@ function gradeWeights() {
                             <span x-text="': ' + (d.average === null ? t('tanpa nilai','no score') : d.average) + ' × ' + d.weight + '%'"></span>
                         </p>
                     </template>
+                </div>
+                <!-- The same learner across every subject they have a mark in.
+                     A distribution is changed for a whole school, so the number
+                     that decides a save is whether it is fair between these
+                     subjects: "saved" is what each reports today, "with these
+                     weights" re-runs the same rule under what is in the matrix
+                     now, and the last column is the difference. Shown only for a
+                     seeded pupil, because an invented sample has no record. -->
+                <div class="mt-4 pt-4 border-t border-slate-100" x-show="seedPupil" data-preview-subjects>
+                    <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+                        <h4 class="text-xs font-extrabold text-slate-700"
+                            x-text="t('Nilai murid ini antar mapel','This pupil across subjects')"></h4>
+                        <span class="text-xs font-medium text-slate-500"
+                              x-text="t('Tersimpan vs bobot yang sedang diketik.','Saved vs the weights being typed.')"></span>
+                    </div>
+                    <div class="overflow-x-auto" x-show="pupilSubjects.length > 0">
+                        <table class="w-full text-sm">
+                            <thead><tr class="text-left text-slate-500 bg-slate-50 border-b border-slate-100">
+                                <th class="px-3 py-2 font-semibold" x-text="t('Mapel','Subject')"></th>
+                                <th class="px-2 py-2 font-semibold text-center" x-text="t('Tersimpan','Saved')"></th>
+                                <th class="px-2 py-2 font-semibold text-center" x-text="t('Dengan bobot ini','With these weights')"></th>
+                                <th class="px-3 py-2 font-semibold text-center" x-text="t('Selisih','Change')"></th>
+                            </tr></thead>
+                            <tbody>
+                                <template x-for="row in pupilSubjects" :key="row.subject_id">
+                                    <tr class="border-b border-slate-50 last:border-0">
+                                        <td class="px-3 py-2 font-semibold text-slate-700">
+                                            <span x-text="row.name"></span>
+                                            <span class="ml-1 text-[10px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded"
+                                                  x-show="row.untagged > 0"
+                                                  :title="t('Ada kertas tanpa komponen, jadi tidak ikut nilai berbobot.','Some papers have no component, so they cannot count toward a weighted mark.')"
+                                                  x-text="row.untagged + ' ' + t('tanpa kategori','uncategorised')"></span>
+                                        </td>
+                                        <td class="px-2 py-2 text-center font-bold text-slate-500"
+                                            x-text="row.final === null ? '—' : Number(row.final).toFixed(1)"></td>
+                                        <td class="px-2 py-2 text-center font-extrabold text-brand-700"
+                                            x-text="pupilRowLiveText(row)"></td>
+                                        <td class="px-3 py-2 text-center">
+                                            <span class="text-xs font-bold"
+                                                  :class="pupilRowDeltaClass(row)"
+                                                  x-text="pupilRowDeltaText(row)"></span>
+                                        </td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+                    <p class="text-xs text-slate-500 font-medium mt-2" x-show="pupilSubjectsNote"
+                       x-text="pupilSubjectsNote"></p>
                 </div>
             </div>
 

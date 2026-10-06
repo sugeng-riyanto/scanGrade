@@ -658,6 +658,23 @@ def finals_for_student(supabase, school_id: str, subject_ids, year_id: str | Non
         # hard `0` on the pupil's own card. `scored` lets the page tell "no mark
         # yet" from a real zero without re-deriving the policy here.
         mark["scored"] = sum(1 for _cid, score in rows if score is not None)
+        # The pupil's own mean in each component they have a mark in. `compute`
+        # already buckets these rows this way for its weighted branch; this is
+        # the same bucketing kept **as data**, so a caller can re-run the
+        # arithmetic under other weights — which is what the weight page needs to
+        # show one learner across several subjects, under the distribution being
+        # typed rather than the saved one. A component with no mark is *absent*
+        # rather than 0, exactly as in :func:`pupil_component_marks`: the caller
+        # applies this module's own MISSING_COMPONENT_POLICY instead of a zero
+        # this read invented. Only scored rows with a component count — an
+        # uncategorised sitting has no component to be placed in.
+        buckets: dict[str, list[float]] = {}
+        for cid, score in rows:
+            if score is None or not cid:
+                continue
+            buckets.setdefault(str(cid), []).append(score)
+        mark["marks"] = {cid: round(sum(v) / len(v), 1)
+                         for cid, v in buckets.items()}
         return mark
 
     if not exam_subject:
@@ -692,6 +709,87 @@ def finals_for_student(supabase, school_id: str, subject_ids, year_id: str | Non
     out: dict[str, dict] = {}
     for subj in subjects:
         out[subj] = _entry(subj, by_subject[subj])
+    return out
+
+
+def pupil_subject_finals(supabase, school_id: str, student_id,
+                         year_id: str | None = None) -> dict | None:
+    """One pupil's final mark in **every** subject they have a mark in.
+
+    :func:`finals_for_student` answers the pupil's own page (one mark per subject
+    they are enrolled in). This answers the admin's question when a distribution
+    is about to change: *is this policy fair between the subjects this learner
+    actually sits?* Only subjects the pupil has a **scored** paper in are listed —
+    a subject with no mark has nothing to compare, and a row of empty cells would
+    read as a zero.
+
+    Returns ``{"pupil": {id, name, class_name}, "subjects": [ … ]}`` for a pupil
+    of **this school**, else ``None``. ``None`` is the ownership answer, not an
+    empty read — the same contract :func:`pupil_component_marks` keeps, so a
+    forged id from another school is a refusal rather than "no marks".
+
+    Each row carries both the arithmetic's result and its **input**:
+
+    * ``final``, ``mode``, ``total`` — the mark under the *saved* policy, exactly
+      as the teacher's roster and the pupil's card compute it;
+    * ``marks`` — the pupil's own mean per component, so the page can re-run the
+      same rule under the weights currently being typed and show the change
+      before it is saved. The arithmetic is still :func:`compute`'s (the page's
+      ``sgPreviewFinal`` is its mirror); this read only hands over the numbers it
+      works on;
+    * ``scored`` (graded papers) and ``untagged`` (graded papers filed under no
+      component, which therefore cannot reach a weighted mark) so a comparison
+      cannot silently imply that every paper counted.
+
+    The weights are read the roster's way, not the pupil's: ``released_only`` is
+    ``False`` here on purpose. The pupil's own page hides an unreleased paper
+    until the teacher releases it, but an admin comparing subjects is comparing
+    what the school's tables report — so this must equal
+    :func:`finals_for_student` at the roster's default, and a guard asserts that.
+    Rows come back in subject-name order, so the list is a comparison and never
+    a ranking.
+    """
+    school = str(school_id or "")
+    student = str(student_id or "")
+    if not school or not student:
+        return None
+    pupil = _rows(supabase.table("students")
+                  .select("id, profiles!inner(full_name), classes(name)")
+                  .eq("id", student).eq("school_id", school)
+                  .eq("status", "active"))
+    if not pupil:
+        return None
+    row = pupil[0]
+    # Only the subjects this page can weight: the matrix lists the school's
+    # **active** subjects, so a row for a retired subject would be a cell the
+    # admin has no weights for and could not act on.
+    people = _rows(supabase.table("subjects").select("id, name")
+                   .eq("school_id", school).eq("is_active", True))
+    ids = [str(s["id"]) for s in people if s.get("id")]
+    names = {str(s["id"]): (s.get("name") or "?") for s in people if s.get("id")}
+    out = {
+        "pupil": {"id": student,
+                  "name": (row.get("profiles") or {}).get("full_name") or "?",
+                  "class_name": (row.get("classes") or {}).get("name") or ""},
+        "subjects": [],
+    }
+    if not ids:
+        return out
+    finals = finals_for_student(supabase, school, ids, year_id, student,
+                                released_only=False)
+    listed = []
+    for sid in ids:
+        mark = finals.get(sid) or {}
+        if not mark.get("scored"):
+            continue
+        listed.append({"subject_id": sid, "name": names.get(sid, "?"),
+                       "final": mark.get("final"), "mode": mark.get("mode"),
+                       "scored": mark.get("scored", 0),
+                       "untagged": mark.get("untagged", 0),
+                       "total": mark.get("total", 0),
+                       "marks": mark.get("marks") or {}})
+    listed.sort(key=lambda r: r["name"].casefold())
+    out["subjects"] = listed
     return out
 
 

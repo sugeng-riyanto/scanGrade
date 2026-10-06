@@ -2185,6 +2185,33 @@ def admin_grade_pupil_marks():
     return jsonify({"success": True, **found})
 
 
+@admin_sekolah_bp.route("/grade-weights/pupil-subjects")
+@admin_sekolah_required
+def admin_grade_pupil_subjects():
+    """One pupil's mark in every subject they have a mark in — the compare read.
+
+    ``?student_id=…``. The page can already preview one subject against a real
+    learner's record; a distribution, though, is changed for a whole school, so
+    the question that decides a save is whether it is fair between the subjects
+    **that learner** actually sits. The pupil is checked against the caller's own
+    school inside the service (which answers ``None`` for anyone else's), so this
+    door can only answer with this school's pupils and a forged id is a refusal,
+    exactly as ``pupil-marks`` refuses one. Read-only by construction: nothing on
+    this path writes, because a comparison must never become a save.
+    """
+    sid = _school_id()
+    supabase = get_supabase()
+    student_id = (request.args.get("student_id") or "").strip()
+    if not student_id:
+        return jsonify({"error": "Murid wajib dipilih"}), 400
+    year = ta_service.active_school_year(supabase, sid) or {}
+    found = grade_weighting.pupil_subject_finals(
+        supabase, sid, student_id, year.get("id"))
+    if not found:
+        return jsonify({"error": "Murid tidak ditemukan di sekolah ini"}), 404
+    return jsonify({"success": True, **found})
+
+
 # ─── PROMOTE (Naik Kelas) ────────────────────────────
 
 @admin_sekolah_bp.route("/promote", methods=["GET", "POST"])
