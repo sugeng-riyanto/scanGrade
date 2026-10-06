@@ -683,3 +683,72 @@ html { transition: background-color .3s, color .3s; }
             body { background: #ffffff !important; color: #111827 !important; }
             .no-print { display: none !important; }
         }
+
+        /* ── skeleton screens ─────────────────────────────────────────────────
+           The page that waits for data used to say so with a spinner in the
+           middle of nothing: the layout arrived only when the fetch settled, so
+           the reader watched an empty column and then the whole page jumped.
+           A skeleton is the other half of that trade — the shape of what is
+           coming, drawn immediately, so the wait is about *content* rather than
+           about whether anything is happening at all.
+
+           The fill is Tailwind's (`bg-surface-100`), which the dark theme
+           remaps, so a skeleton follows whichever theme is on; what this file
+           adds is the sweep, which cannot be expressed as a utility, and the
+           cell shapes below. The sheen is a gradient of the *slate* tone at low
+           alpha rather than white, because a white sweep is invisible on the
+           light card and a stripe of paint on the dark one; a translucent
+           slate reads as a soft band on both.
+
+           Motion is decoration here, so it is the first thing surrendered: a
+           reader who asked the system for less movement gets the shape and the
+           wait, without the sweep. */
+        /* The band is the cell's *own* background, moved across it, and that is
+           deliberate rather than incidental: a pseudo-element needs
+           `position: absolute`, and an absolute element inside a box is a panel
+           the layer scale has to account for (see `test_layer_scale.py`). A
+           background is clipped to the cell by the box itself, so the sweep
+           cannot cover anything else however the page is arranged — which is
+           the property the layer rule is there to guarantee. Its colour and
+           opacity are the only choices left, and both are about the two themes. */
+        .sg-skel {
+            background-image: linear-gradient(90deg,
+                                              transparent,
+                                              rgba(148, 163, 184, 0.28),
+                                              transparent);
+            background-repeat: no-repeat;
+            background-size: 200% 100%;
+            background-position: -100% 0;
+            animation: sg-skel-sweep 1.4s ease-in-out infinite;
+        }
+        @keyframes sg-skel-sweep {
+            0%   { background-position: -100% 0; }
+            100% { background-position:  200% 0; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .sg-skel { animation: none; }
+        }
+
+        /* The cell shapes, kept here rather than as utilities on purpose. A
+           skeleton is one pattern used in many places: if each page picked its
+           own `h-3` and `rounded`, the same placeholder would be a different
+           height on every screen, and the column it is holding open would move
+           when the data landed — which is the jump the pattern exists to stop.
+           The fill is deliberately *not* set here: pages use `bg-surface-100`,
+           which the dark theme remaps. A height and a radius are the same in
+           both themes; a colour is not. */
+        .sg-skel-line,
+        .sg-skel-title,
+        .sg-skel-figure,
+        .sg-skel-label {
+            width: 100%;
+        }
+        .sg-skel-line   { height: .75rem;   border-radius: .375rem; }
+        .sg-skel-title  { height: 1rem;     border-radius: .375rem; width: 11rem; }
+        .sg-skel-figure { height: 2rem;     border-radius: .5rem;   width: 2.5rem; }
+        .sg-skel-label  { height: .625rem;  border-radius: .25rem;  width: 6rem; }
+        /* The ragged right edge of a paragraph. Three steps are enough to read
+           as text and not as a table, and they are named rather than inline so
+           the same three appear wherever a paragraph is being held open. */
+        .sg-skel-line-90 { width: 90%; }
+        .sg-skel-line-80 { width: 80%; }
