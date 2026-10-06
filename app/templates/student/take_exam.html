@@ -54,6 +54,12 @@
    152 of the 375 — the identical defect this page already fixed once for the
    question column. A preference a device cannot honour has to be refused by the
    stylesheet, not only by the control that offers it. */
+/* App-level content zoom. `--sg-exam-scale` is set on this box from the script
+   at the bottom of the page; `zoom` restyles the paper's own elements and changes
+   no window dimension, which is what keeps a press of A+ off the anti-cheat
+   ladder's `resize` / `fullscreenchange` signals. The lightbox below is a sibling
+   of this box, so a magnified paper never magnifies the lightbox. */
+.sg-exam-zoom { zoom: var(--sg-exam-scale, 1); }
 .exam-stage { display: block; }
 .exam-side-ctl { display: none; }
 @media (min-width: 641px) {
@@ -564,6 +570,23 @@ body.sg-exam .sidebar-overlay { display: none !important; }
                     :title="lang === 'id' ? 'Switch to English' : 'Ganti ke Bahasa Indonesia'"
                     :aria-label="lang === 'id' ? 'Switch to English' : 'Ganti ke Bahasa Indonesia'"
                     x-text="lang === 'id' ? 'EN' : 'ID'"></button>
+            <!-- The pupil's own reading size. This is the whole of the zoom: it
+                 resizes the paper through one CSS custom property and never touches
+                 the browser's zoom or the viewport, so pinch-zoom keeps working and
+                 the anti-cheat ladder is never asked to interpret a resize. One
+                 mechanism, two needs — the same `text_scale` is the accessibility
+                 text-size preference, and it follows the pupil to their next device. -->
+            <div class="flex items-center gap-0.5 rounded-lg border border-surface-200 px-0.5"
+                 :title="t('Ukuran teks','Text size')">
+                <button type="button" @click="stepTextScale(-1)" :disabled="isMinTextScale"
+                        class="w-7 h-7 rounded text-[11px] font-extrabold text-surface-500 hover:bg-surface-50 disabled:opacity-30 disabled:cursor-not-allowed transition"
+                        :aria-label="t('Perkecil teks','Decrease text size')">A-</button>
+                <span class="text-[10px] font-bold text-surface-400 tabular-nums w-8 text-center"
+                      x-text="Math.round(textScale * 100) + '%'"></span>
+                <button type="button" @click="stepTextScale(1)" :disabled="isMaxTextScale"
+                        class="w-7 h-7 rounded text-[11px] font-extrabold text-surface-500 hover:bg-surface-50 disabled:opacity-30 disabled:cursor-not-allowed transition"
+                        :aria-label="t('Perbesar teks','Increase text size')">A+</button>
+            </div>
             <div x-show="!submitted" class="text-xl font-extrabold tabular-nums" x-text="timeLeft === null ? t('Tak terbatas','Unlimited') : formatTime(timeLeft)" :class="timeLeft !== null && timeLeft < 60 ? 'text-red-500' : 'text-primary-600'"></div>
             <button x-show="!submitted" @click="submitExam()" :disabled="submitting" class="sg-submit bg-gradient-to-r from-primary-500 to-primary-600 hover:from-primary-600 hover:to-primary-700 text-white px-5 py-2.5 rounded-xl text-sm font-bold shadow-lg shadow-primary-500/25 transition disabled:opacity-50 disabled:cursor-not-allowed">
                 <i class="fas mr-1.5" :class="submitting ? 'fa-spinner fa-spin' : 'fa-check'"></i><span x-text="submitting ? t('Mengirim...','Sending...') : t('Kumpulkan','Submit')"></span>
@@ -1135,7 +1158,8 @@ body.sg-exam .sidebar-overlay { display: none !important; }
                  paper (the default, and what a phone needs) or in a column on its
                  left, the way an answer sheet is read. One wrapper, so all five
                  kinds move together; see .exam-stage--left above. -->
-            <div class="exam-stage" :class="answersSide === 'left' ? 'exam-stage--left' : ''">
+            <div class="exam-stage sg-exam-zoom" x-ref="examStage"
+                 :class="answersSide === 'left' ? 'exam-stage--left' : ''">
             <!-- MCQ: PDF + drawing canvas + tools — placed BEFORE soal -->
             <div x-show="!submitted" style="display:none" class="mb-3 exam-paper">
                 <template x-for="(q, i) in questions" :key="'mcq-area-'+i">
@@ -1192,11 +1216,22 @@ body.sg-exam .sidebar-overlay { display: none !important; }
                                     class="px-2.5 py-1.5 text-xs font-bold border-2 rounded-xl hover:bg-orange-50 disabled:opacity-40 border-stone-200 text-stone-600 transition flex items-center gap-1">
                                 <i class="fas fa-chevron-right text-[9px]"></i>
                             </button>
+                            <button type="button" @click="openPageZoom(pages[page - 1])"
+                                    class="px-2.5 py-1.5 text-xs font-bold border-2 rounded-xl hover:bg-orange-50 border-stone-200 text-stone-600 transition"
+                                    :title="t('Perbesar halaman','Magnify this page')"
+                                    :aria-label="t('Perbesar halaman','Magnify this page')"><i class="fas fa-magnifying-glass-plus"></i></button>
                         </div>
                         <div class="pdf-container p-4 flex items-start justify-center" style="min-height:50vh">
                             <div class="full-canvas-wrap max-w-full essay-canvas-area" :id="'ec-area-' + i" :style="pages.length > 0 ? '' : 'min-height:400px'">
+                                <!-- Two gestures on one image, and the flag is what
+                                     separates them: in text mode a tap places a text
+                                     box, and anywhere else it magnifies the page. The
+                                     magnified copy is an overlay inside this page — no
+                                     second tab, no browser zoom — so neither press can
+                                     be mistaken for leaving the exam. -->
                                 <img x-show="pages.length > 0" :src="pages[page - 1]" class="w-full" alt="PDF page" style="display:block"
-                                     @click="if(essayCanvasMode[i]==='text') onPdfClick(i, $event)">
+                                     data-lightbox
+                                     @click="essayCanvasMode[i]==='text' ? onPdfClick(i, $event) : openPageZoom(pages[page - 1])">
                                 <div x-show="pages.length === 0" class="flex items-center justify-center text-stone-300 border-2 border-dashed rounded-xl mb-3" style="height:300px">
                                     <div class="text-center">
                                         <i class="fas fa-image text-4xl mb-2"></i>
@@ -1866,6 +1901,19 @@ body.sg-exam .sidebar-overlay { display: none !important; }
             </div>
             </div><!-- /exam-stage -->
     </form>
+
+    <!-- The image lightbox: an overlay inside this page, and a sibling of the
+         zoomed stage so a magnified paper does not magnify its own magnification.
+         A pupil reads a diagram here; no tab is opened and the viewport is not
+         touched, so the exam behind it is exactly where they left it. -->
+    <div id="sg-exam-lightbox" class="hidden fixed inset-0 sg-layer-media flex items-center justify-center p-3 bg-stone-900/95"
+         role="dialog" aria-modal="true" aria-hidden="true">
+        <span id="sg-exam-lightbox-label" class="sr-only" x-text="t('Perbesar gambar','Magnified image')"></span>
+        <button type="button" id="sg-exam-lightbox-close"
+                class="absolute top-3 right-3 w-11 h-11 rounded-full bg-white/15 text-white text-xl hover:bg-white/25 transition flex items-center justify-center"
+                :title="t('Tutup','Close')" :aria-label="t('Tutup','Close')"><i class="fas fa-times"></i></button>
+        <img id="sg-exam-lightbox-img" src="" alt="" class="max-w-full max-h-full object-contain rounded-lg">
+    </div>
         </div>
     </div>
 </div>
@@ -1882,6 +1930,24 @@ body.sg-exam .sidebar-overlay { display: none !important; }
 {% block scripts %}
 <script src="/static/js/exam-media.js"></script>
 <script src="/static/js/tools.js"></script>
+<!-- Classic, for the same reason as the two above: `examApp(...)` reads the
+     module while it is built, and a deferred helper would not exist yet. -->
+<script src="/static/js/exam-view.js"></script>
+<script>
+// The lightbox is page furniture rather than exam state, so it is wired here and
+// not inside Alpine: the overlay has to work while a panel covers the exam bar.
+// Nothing here reads or writes an attempt, and nothing here can raise an event
+// the anti-cheat ladder watches — see app/static/js/exam-view.js.
+(function () {
+    if (!window.SGExamView) return;
+    window.SGExamView.wireLightbox({
+        container: document.getElementById('exam-form'),
+        overlay: document.getElementById('sg-exam-lightbox'),
+        image: document.getElementById('sg-exam-lightbox-img'),
+        close: document.getElementById('sg-exam-lightbox-close')
+    });
+})();
+</script>
 <script>
 const QUESTION_AUDIO = {{ (exam.question_audio or {}) | tojson | safe }};
 // How many times each question's media has already been played, as the server
@@ -2333,6 +2399,18 @@ function examApp(duration, totalQ) {
             if (typeof stored.alert_muted === 'boolean') return stored.alert_muted;
             try { return localStorage.getItem('sg_exam_alert_muted') === '1'; } catch (e) { return false; }
         })(),
+        // The reading size the paper is drawn at, as the pupil last set it: the
+        // profile's copy first (it is what follows them to their next device), then
+        // this device's cache, then the paper's own size. One mechanism serves both
+        // the A-/A+ control and the accessibility text-size preference — see
+        // `app/static/js/exam-view.js` and app/services/user_preferences.py.
+        textScale: (function () {
+            const v = (typeof window !== 'undefined' && window.SGExamView) || null;
+            if (!v) return 1;
+            const stored = (typeof window !== 'undefined' && window.__sgPrefs) || {};
+            if (stored.text_scale !== undefined) return v.normalize(stored.text_scale);
+            try { return v.normalize(localStorage.getItem(v.STORAGE_KEY)); } catch (e) { return v.DEFAULT; }
+        })(),
         _audioCtx: null,
         // One flag per warning, so each mark is announced once even though the
         // clock ticks a thousand times through it.
@@ -2515,6 +2593,9 @@ function examApp(duration, totalQ) {
         audioInputLabel: '',
         audioOutputLabel: '',
         init() {
+            // Reading comfort first: the paper is drawn at the pupil's chosen size
+            // before they read a word of it.
+            this._applyTextScale();
             // The clock belongs to the exam, so this page has to be able to say how
             // long it was not the one being looked at — see _startAwayWatch().
             this._startAwayWatch();
@@ -2898,6 +2979,8 @@ function examApp(duration, totalQ) {
             // which is what makes the next absence a new one.
             if (this.fullscreenBlocked) return;
             this.fullscreenBlocked = true;
+            // The blocker covers the paper, so it covers the magnifier too.
+            this.closePageZoom();
             // A page that was *loaded* outside fullscreen has nothing to charge.
             // A reload, a crash recovery, or a request the browser denied all land
             // here, and none of them is an act of leaving the exam — the exam page
@@ -3654,6 +3737,63 @@ function examApp(duration, totalQ) {
                     osc.stop(t0 + 0.2);
                 }
             } catch (e) { /* sound is a courtesy, never a requirement */ }
+        },
+        // ─── Reading size (`app/static/js/exam-view.js`) ─────────────────────
+        // The scale is written to one CSS custom property on the exam stage. It is
+        // *not* the browser's zoom and it is not a viewport change: the anti-cheat
+        // ladder watches `resize`, `fullscreenchange` and `visibilitychange`, and a
+        // custom property raises none of them — so a pupil cannot be charged for
+        // making the text bigger, and pinch-zoom is left alone on top of it.
+        _view() {
+            return (typeof window !== 'undefined' && window.SGExamView) || null;
+        },
+        _applyTextScale() {
+            const v = this._view();
+            if (!v) return false;
+            return v.apply(this.$refs && this.$refs.examStage, this.textScale);
+        },
+        // The two ends of the scale, read off the module's own list so the page and
+        // the module cannot disagree about where the ends are. A spent button is
+        // disabled rather than pressing into a no-op.
+        get isMinTextScale() {
+            const v = this._view();
+            return !v || this.textScale <= v.STEPS[0];
+        },
+        get isMaxTextScale() {
+            const v = this._view();
+            return !v || this.textScale >= v.STEPS[v.STEPS.length - 1];
+        },
+        stepTextScale(direction) {
+            const v = this._view();
+            if (!v) return;
+            const to = v.next(this.textScale, direction);
+            if (to === this.textScale) return;   // at an end: the button is spent
+            this.textScale = to;
+            this._applyTextScale();
+            this._remember(v.STORAGE_KEY, String(to));
+            // Follow the pupil to their next device. Fire-and-forget: a write that
+            // fails offline must not cost the button its immediacy.
+            try {
+                if (typeof window !== 'undefined' && window.sgSavePrefs) {
+                    window.sgSavePrefs({ [v.PREF_KEY]: to });
+                }
+            } catch (e) { /* offline or private mode */ }
+        },
+        openPageZoom(src) {
+            const v = this._view();
+            if (!v) return;
+            v.openImage(document.getElementById('sg-exam-lightbox'),
+                        document.getElementById('sg-exam-lightbox-img'), src);
+        },
+        // The magnified page sits on the maximized-viewer layer, which is above
+        // the fullscreen blocker's scrim — so losing fullscreen has to take the
+        // magnifier with it. Otherwise a pupil who left the exam could carry on
+        // reading the paper through the overlay while the answers behind it were
+        // blocked, which is the one thing the blocker exists to stop.
+        closePageZoom() {
+            const v = this._view();
+            if (!v) return;
+            v.closeImage(document.getElementById('sg-exam-lightbox'));
         },
         setAlertVolume(percent) {
             const v = Math.max(0, Math.min(100, parseInt(percent, 10) || 0)) / 100;

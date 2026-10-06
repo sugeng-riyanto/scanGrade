@@ -242,6 +242,10 @@ globalThis.fetch = (url, opts) => {
 
 const events = [];
 const charges = [];
+// Closes of the magnifier. `closePageZoom` is defined outside this slice, so it is
+// stood in for below; counting it is what lets a guard assert the blocker never
+// leaves the paper readable above it.
+const zoomCloses = [];
 
 function setNavigator(ua, platform, touch) {
   Object.defineProperty(globalThis, 'navigator', {
@@ -272,12 +276,15 @@ const FRESH = {
   _ev: function (kind) { events.push(kind); },
   handleViolation: function (vtype, trigger) { charges.push({ vtype: vtype, trigger: trigger }); },
   _applyViolationBanner: function () {}, _maybeAutoSubmit: function () {},
+  closePageZoom: function () { zoomCloses.push(true); },
 };
 
 // The real methods last, so the shipped code wins over the stand-ins above; the
 // stand-ins only cover what the slice does not contain (the browser, the clock,
 // the wire).
 function fresh(over) { return Object.assign({}, FRESH, M, over || {}); }
+
+let zoomClosedWhenBlocked = 0, zoomClosedOnPlainExit = 0;
 
 (async () => {
   const out = {};
@@ -300,7 +307,9 @@ function fresh(over) { return Object.assign({}, FRESH, M, over || {}); }
   // 2. The browser took fullscreen away. Inside the window this is the
   //    transition's, so nothing is charged — BUT the paper is blocked at once.
   a._inFullscreen = false;
+  const zoomBeforeBlock = zoomCloses.length;
   a.checkFullscreen();
+  zoomClosedWhenBlocked = zoomCloses.length - zoomBeforeBlock;
   out.duringWindow = { charged: charges.length, blocked: a.fullscreenBlocked,
                        leftFullscreenRows: rows.length,
                        kinds: rows.map((r) => r.violation_type),
@@ -359,8 +368,10 @@ function fresh(over) { return Object.assign({}, FRESH, M, over || {}); }
   //    the property the whole ladder rests on.
   let e = fresh();
   charges.length = 0;
+  const zoomBeforeExit = zoomCloses.length;
   e._inFullscreen = false;
   e.checkFullscreen();
+  zoomClosedOnPlainExit = zoomCloses.length - zoomBeforeExit;
   out.plainExit = { charged: charges.length, kinds: charges.map((c) => c.vtype) };
 
   // 9. The same absence is not billed twice by the sampler.
@@ -378,6 +389,9 @@ function fresh(over) { return Object.assign({}, FRESH, M, over || {}); }
   f.checkFullscreen();
   out.rotationAfterCharge = { charged: charges.length, rows: rows.length,
                               counter: f.violationCount, was: billedBefore };
+
+  out.magnifier = { closedWhenBlocked: zoomClosedWhenBlocked,
+                    closedOnPlainExit: zoomClosedOnPlainExit };
 
   console.log(JSON.stringify(out));
 })();
@@ -475,6 +489,18 @@ class TestTheRotationIsNotAnExit:
         assert out["plainExit"] == {"charged": 1, "kinds": ["fullscreen_exit"]}
         assert out["plainExitAgain"] == {"charged": 1}, (
             "the sampler billed one absence twice")
+
+    @needs_node
+    def test_the_blocker_takes_the_magnifier_down_with_it(self, tmp_path):
+        """The magnified page sits on the maximized-viewer layer, above the
+        blocker's scrim. Leaving it up while the answers behind it are blocked is
+        the one thing the blocker exists to stop — so raising the overlay closes
+        the magnifier, for a forgiven rotation and a billed exit alike."""
+        out = self.run(tmp_path)["magnifier"]
+        assert out["closedWhenBlocked"] == 1, (
+            "the overlay went up and the magnifier stayed on the paper")
+        assert out["closedOnPlainExit"] == 1, (
+            "a billed exit left the magnifier on the paper")
 
     @needs_node
     def test_a_rotation_cannot_undo_a_charge_that_already_happened(self, tmp_path):
