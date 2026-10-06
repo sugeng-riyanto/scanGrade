@@ -68,6 +68,7 @@ class _Query:
         self._order = None
         self._primed = None
         self._limit = None
+        self._range = None
 
     # -- query building -----------------------------------------------------
     def select(self, *cols, **kw):
@@ -107,6 +108,13 @@ class _Query:
         self._limit = count
         return self
 
+    def range(self, start, end):
+        # PostgREST's own window, which is how a caller reads past the 1000 rows a
+        # single request is allowed to hand back: `range(0, 999)`, then `range(1000,
+        # 1999)`, and so on until a short page says the data ended.
+        self._range = (start, end)
+        return self
+
     def order(self, column, desc=False):
         self._order = (column, desc)
         return self
@@ -144,6 +152,9 @@ class _Query:
                 rows.sort(key=lambda r: str(r.get(column) or ""), reverse=bool(desc))
             if self._limit is not None:
                 rows = rows[:int(self._limit)]
+            if self._range is not None:
+                start, end = self._range
+                rows = rows[int(start):int(end) + 1]
             return _Res(rows)
         if self._op == "insert":
             self.db._counter += 1

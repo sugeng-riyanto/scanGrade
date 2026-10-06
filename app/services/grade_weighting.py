@@ -712,6 +712,257 @@ def finals_for_student(supabase, school_id: str, subject_ids, year_id: str | Non
     return out
 
 
+# ── what a change does to the class, not to one sample ────────────────────────
+
+#: The movement that counts as a move. Both marks are rounded to one decimal, so a
+#: real change is a multiple of 0.1; this only keeps float noise out.
+IMPACT_MIN_DELTA = 0.05
+
+#: How many rows one impact read may page through before it says it may have
+#: stopped short. PostgREST hands back 1000 rows per request whatever the caller
+#: asked for, so a school-wide read that does not page is a *silently partial*
+#: answer — the counts would look plausible and be wrong.
+IMPACT_PAGE = 1000
+IMPACT_ROW_CAP = 20000
+
+
+def _paged_rows(build, *, page: int = IMPACT_PAGE,
+                cap: int = IMPACT_ROW_CAP) -> tuple[list[dict], bool]:
+    """``(rows, capped)`` — every row, past PostgREST's own 1000-row window.
+
+    ``build`` returns a **fresh** query each time it is called (a builder is
+    cheap; reusing one while moving its range is how a page gets skipped), and it
+    is called until a short page comes back — so the loop ends on the real end of
+    the data, not on a guess: a *full* page is followed by one more request, which
+    comes back empty at the true end (cheaper, and far safer, than a row count that
+    is one write out of date). ``capped`` is ``True`` only when the row cap was
+    reached, and it means "these counts may be short", never "these counts are
+    wrong": the caller reports it rather than rounding it away.
+    """
+    out: list[dict] = []
+    offset = 0
+    while True:
+        take = min(page, cap - len(out))
+        if take <= 0:
+            return out, True
+        try:
+            batch = build().range(offset, offset + take - 1).execute().data or []
+        except Exception as exc:                                    # noqa: BLE001
+            logger.warning("grade_weighting: paged read failed: %s", exc)
+            return out, bool(out)
+        out.extend(batch)
+        if len(batch) < take:
+            return out, False
+        offset += take
+
+
+def affected_subjects(supabase, school_id: str, year_id: str | None, scope: str,
+                      subject_id=None) -> list[dict]:
+    """The subjects a change to ``scope`` would actually move.
+
+    ``"subject"`` is the one subject named. ``"default"`` is every **active**
+    subject of the school that has no configuration of its own for this year — the
+    ones the school default binds. A subject with its own row is untouched by a
+    default change, so listing it would invent movement that will not happen; that
+    exclusion is the whole reason this is computed here and not by the caller.
+
+    Returns ``[{"subject_id", "name"}, …]`` in subject-name order, and **empty for
+    anything else** — an unknown scope, or a subject that is not this school's, is
+    nothing to weigh rather than the whole school.
+    """
+    if not school_id:
+        return []
+    rows = _rows(supabase.table("subjects").select("id, name").order("name")
+                 .eq("school_id", school_id).eq("is_active", True))
+    names = {str(r["id"]): (r.get("name") or "?") for r in rows if r.get("id")}
+    if scope == "subject":
+        sid = str(subject_id or "")
+        return [{"subject_id": sid, "name": names[sid]}] if sid in names else []
+    if scope != "default":
+        return []
+    custom = configs_for_school(supabase, school_id, year_id)
+    return [{"subject_id": sid, "name": name}
+            for sid, name in names.items() if not custom.get(sid)]
+
+
+def class_impact(supabase, school_id: str, subjects: list[dict], year_id: str | None,
+                 weights: dict, *, limit: int = 25,
+                 min_delta: float = IMPACT_MIN_DELTA) -> dict:
+    """Which pupils' final marks a distribution change would move, and by how much.
+
+    The weight preview answers what a change does to **one** learner. A mark is
+    changed for a class, though, so the question that decides a save is what it
+    does to everyone: this takes the weights *being typed* and returns the
+    movement they would cause across ``subjects``, against the marks those pupils
+    carry today.
+
+    Both sides are :func:`compute`: ``saved`` uses this year's saved policy for the
+    subject (its own row, else the school default), ``live`` uses ``weights`` — so
+    the same rule is compared with itself and no second arithmetic is invented.
+    With ``weights`` empty the live side is the simple mean, which is exactly what
+    the roster would fall back to, so the fallback is reported rather than refused.
+
+    The payload::
+
+        {
+          "pupils":  [ {student_id, name, class_name, subject_id,
+                        saved, live, delta, released}, … ],   # biggest |delta| first
+          "counts":  {pairs, moved, up, down, reported, pupils_marked,
+                      pupils_moved, max_up, max_down},
+          "subjects":[ {subject_id, name, evaluated, moved, up, down, reported}, … ],
+          "shown":   int,        # rows in "pupils" (the cap is per read, not per pupil)
+          "capped":  bool,       # the read hit its row cap: counts may be short
+          "typed_total": int,    # the weights as typed, so a caller can say "not 100%"
+        }
+
+    Rules worth stating, because each one is a way to mislead an admin:
+
+    * **only pupils who have a mark** in an affected subject are counted — a policy
+      cannot move a mark that does not exist, and a weighted ``0`` for a pupil with
+      no papers is the *policy*, not a pupil;
+    * **only subjects that are affected** are read (see :func:`affected_subjects`),
+      so a default change never reports movement in a subject that keeps its own
+      row;
+    * a movement smaller than ``min_delta`` is **not** a movement;
+    * a mark the pupil has already been shown is flagged (``released``): a change
+      to a number the child can open is the one that needs a decision, while a
+      change to an unreleased draft is ordinary work in progress;
+    * a name that cannot be read is ``"?"`` — the counts and the deltas do not
+      depend on it, and a pupil is never dropped for being unprintable.
+
+    Reads: the affected subjects' papers, their graded rows (paged), the saved
+    policy, and the names of the pupils actually shown. It writes nothing.
+    """
+    empty = {"pupils": [], "shown": 0, "capped": False, "typed_total": 0,
+             "subjects": [],
+             "counts": {"pairs": 0, "moved": 0, "up": 0, "down": 0,
+                        "reported": 0, "pupils_marked": 0, "pupils_moved": 0,
+                        "max_up": None, "max_down": None}}
+    ids = [str(s["subject_id"]) for s in (subjects or []) if s.get("subject_id")]
+    if not school_id or not ids:
+        return empty
+
+    typed: dict[str, int] = {}
+    for cid, raw in (weights or {}).items():
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if value > 0:
+            typed[str(cid)] = value
+
+    def _exams_query():
+        query = (supabase.table("exams")
+                 .select("id, subject_id, grade_component_type_id")
+                 .eq("school_id", school_id).in_("subject_id", ids))
+        return query.eq("school_year_id", year_id) if year_id else query
+
+    exams, capped = _paged_rows(_exams_query)
+    exam_subject = {str(e["id"]): str(e.get("subject_id"))
+                    for e in exams if e.get("id")}
+    exam_component = {str(e["id"]): e.get("grade_component_type_id")
+                      for e in exams if e.get("id")}
+    if not exam_subject:
+        return empty
+
+    subs, page_capped = _paged_rows(
+        lambda: supabase.table("submissions")
+        .select("student_id, exam_id, score, final_score, is_published, status")
+        .in_("exam_id", list(exam_subject)))
+    capped = capped or page_capped
+
+    rows_by: dict[tuple[str, str], list] = {}
+    released: dict[tuple[str, str], bool] = {}
+    for sub in subs:
+        student = str(sub.get("student_id") or "")
+        subject = exam_subject.get(str(sub.get("exam_id")))
+        if not student or subject is None:
+            continue
+        raw = sub.get("final_score")
+        if raw is None:
+            raw = sub.get("score")
+        try:
+            score = float(raw) if raw is not None else None
+        except (TypeError, ValueError):
+            score = None
+        if score is None:
+            continue                      # a sitting with no mark moves no mark
+        key = (student, subject)
+        rows_by.setdefault(key, []).append((exam_component.get(str(sub.get("exam_id"))), score))
+        if result_released(sub):
+            released[key] = True
+
+    custom = configs_for_school(supabase, school_id, year_id)
+    default = default_config(supabase, school_id)
+    name_of_subject = {str(s["subject_id"]): (s.get("name") or "?") for s in subjects}
+    per_subject = {sid: {"subject_id": sid, "name": name_of_subject.get(sid, "?"),
+                         "evaluated": 0, "moved": 0, "up": 0, "down": 0,
+                         "reported": 0} for sid in ids}
+
+    marked: set[str] = set()
+    moved: list[dict] = []
+    for (student, subject), rows in rows_by.items():
+        saved = compute(rows, custom.get(subject) or default)
+        live = compute(rows, typed)
+        if saved.get("final") is None or live.get("final") is None:
+            continue
+        entry = per_subject[subject]
+        entry["evaluated"] += 1
+        marked.add(student)
+        delta = round(live["final"] - saved["final"], 1)
+        if abs(delta) < min_delta:
+            continue                      # unchanged is the common answer, and not a finding
+        entry["moved"] += 1
+        entry["up" if delta > 0 else "down"] += 1
+        was_released = bool(released.get((student, subject)))
+        if was_released:
+            entry["reported"] += 1
+        moved.append({"student_id": student, "subject_id": subject, "name": "?",
+                      "class_name": "", "subject_name": entry["name"],
+                      "saved": saved["final"], "live": live["final"],
+                      "delta": delta, "released": was_released})
+
+    moved.sort(key=lambda r: (-abs(r["delta"]), r["subject_id"], r["student_id"]))
+    try:
+        size = max(1, int(limit))
+    except (TypeError, ValueError):
+        size = 25
+    top = moved[:size]
+    if top:
+        wanted = sorted({r["student_id"] for r in top})
+        people = _rows(supabase.table("students")
+                       .select("id, profiles!inner(full_name), classes(name)")
+                       .in_("id", wanted).eq("school_id", school_id))
+        names = {str(p["id"]): ((p.get("profiles") or {}).get("full_name") or "?")
+                 for p in people if p.get("id")}
+        classes = {str(p["id"]): ((p.get("classes") or {}).get("name") or "")
+                   for p in people if p.get("id")}
+        for row in top:
+            row["name"] = names.get(row["student_id"], "?")
+            row["class_name"] = classes.get(row["student_id"], "")
+
+    ups = [r["delta"] for r in moved if r["delta"] > 0]
+    downs = [r["delta"] for r in moved if r["delta"] < 0]
+    return {
+        "pupils": top,
+        "shown": len(top),
+        "capped": capped,
+        "typed_total": sum(typed.values()),
+        "subjects": [per_subject[sid] for sid in ids],
+        "counts": {
+            "pairs": sum(e["evaluated"] for e in per_subject.values()),
+            "moved": len(moved),
+            "up": sum(e["up"] for e in per_subject.values()),
+            "down": sum(e["down"] for e in per_subject.values()),
+            "reported": sum(e["reported"] for e in per_subject.values()),
+            "pupils_marked": len(marked),
+            "pupils_moved": len({r["student_id"] for r in moved}),
+            "max_up": max(ups) if ups else None,
+            "max_down": min(downs) if downs else None,
+        },
+    }
+
+
 def pupil_subject_finals(supabase, school_id: str, student_id,
                          year_id: str | None = None) -> dict | None:
     """One pupil's final mark in **every** subject they have a mark in.

@@ -101,9 +101,10 @@ MACHINE = frozenset({
     # for the weight page's preview — the readbacks that seed its sample fields
     # with a real pupil's record. `.../pupil-subjects` is the third: that same
     # learner's mark in every subject they have one, so a distribution can be
-    # compared between subjects before it is saved. Never pages of their own; the
-    # crumb is the weights page that asked.
-    "pupils", "pupil-marks", "pupil-subjects",
+    # compared between subjects before it is saved, and `.../class-impact` weighs
+    # the weights being typed against every pupil who has a mark in the affected
+    # subjects. Never pages of their own; the crumb is the weights page that asked.
+    "pupils", "pupil-marks", "pupil-subjects", "class-impact",
     # `/student/attempt-status/<exam_id>` answers one sitting's state (status,
     # deadline, remaining seconds) as JSON for the exam page's own timer and
     # lock screen — a readback, never a page of its own.

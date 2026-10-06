@@ -163,6 +163,18 @@ function gradeWeights() {
         // pupil; it does not depend on which subject is selected.
         pupilSubjects: [],
         pupilSubjectsNote: '',
+        // The same question asked of the whole class: which pupils' real marks the
+        // weights currently in the matrix would move, and by how much. Loaded on a
+        // button rather than live, because it is the one heavy read on this page.
+        impact: {
+            pupils: [], subjects: [], shown: 0, capped: false, typed_total: 0,
+            counts: {pairs: 0, moved: 0, up: 0, down: 0, reported: 0,
+                     pupils_marked: 0, pupils_moved: 0, max_up: null, max_down: null},
+        },
+        impactDone: false,
+        impactLoading: false,
+        impactNote: '',
+        impactSignature: '',
         searchPupils() {
             const q = this.pupilQuery.trim();
             this.pupilHint = '';
@@ -284,6 +296,50 @@ function gradeWeights() {
             const diff = this.pupilRowDelta(row);
             if (diff === null) { return 'text-slate-300'; }
             return diff > 0 ? 'text-emerald-600' : 'text-red-500';
+        },
+
+        // ── the same question, asked of the class ───────────────────────────
+        // The preview answers what a change does to one learner. A mark is changed
+        // for a class, so the question that decides a save is who moves: this asks
+        // the server to weigh every pupil who has a mark in the affected subjects
+        // against the marks they carry today, using the weights currently in the
+        // matrix — saved or not. It reads every graded paper in those subjects,
+        // which is the one heavy read on this page, so it is a deliberate button
+        // rather than something that fires while the admin types.
+        impactQuery() {
+            const weights = this.previewWeights() || {};
+            const parts = Object.keys(weights).sort().map(cid => {
+                const w = parseInt(weights[cid], 10);
+                return (!isNaN(w) && w > 0)
+                    ? 'w=' + encodeURIComponent(cid) + ':' + w : null;
+            }).filter(Boolean);
+            parts.push('scope=' + (this.previewSubject === '__default__' ? 'default' : 'subject'));
+            if (this.previewSubject !== '__default__') {
+                parts.push('subject_id=' + encodeURIComponent(this.previewSubject));
+            }
+            return '/admin-sekolah/grade-weights/class-impact?' + parts.join('&');
+        },
+        loadImpact() {
+            this.impactLoading = true;
+            this.impactNote = '';
+            const url = this.impactQuery();
+            this.get(url).then(d => {
+                this.impactLoading = false;
+                if (!d.ok) {
+                    this.impactNote = d.data.error
+                        || this.t('Gagal menghitung dampak.', 'Could not work out the impact.');
+                    return;
+                }
+                this.impact = d.data;
+                this.impactSignature = url;
+                this.impactDone = true;
+            });
+        },
+        impactStale() {
+            // A figure computed before the admin typed another weight answers for a
+            // policy that no longer exists, so it is labelled rather than left to be
+            // read as current.
+            return this.impactDone && this.impactSignature !== this.impactQuery();
         },
 
         isCustom(subjectId) { return this.customSubjects.includes(String(subjectId)); },
@@ -597,7 +653,7 @@ function gradeWeights() {
                               x-text="t('Tersimpan vs bobot yang sedang diketik.','Saved vs the weights being typed.')"></span>
                     </div>
                     <div class="overflow-x-auto" x-show="pupilSubjects.length > 0">
-                        <table class="w-full text-sm">
+                        <table class="w-full text-sm min-w-[640px]">
                             <thead><tr class="text-left text-slate-500 bg-slate-50 border-b border-slate-100">
                                 <th class="px-3 py-2 font-semibold" x-text="t('Mapel','Subject')"></th>
                                 <th class="px-2 py-2 font-semibold text-center" x-text="t('Tersimpan','Saved')"></th>
@@ -630,6 +686,97 @@ function gradeWeights() {
                     </div>
                     <p class="text-xs text-slate-500 font-medium mt-2" x-show="pupilSubjectsNote"
                        x-text="pupilSubjectsNote"></p>
+                </div>
+                <!-- What the change does to the class, not to one sample. A mark is
+                     changed for a class, so a save is judged by who moves: the same
+                     rule is run twice, once under the saved policy and once under the
+                     weights now in the matrix. Read from the server on request, since
+                     it weighs every pupil's graded papers in the affected subjects. -->
+                <div class="mt-4 pt-4 border-t border-slate-100" x-show="!closed" data-preview-impact>
+                    <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+                        <div>
+                            <h4 class="text-xs font-extrabold text-slate-700"
+                                x-text="t('Dampak ke kelas','Impact on the class')"></h4>
+                            <p class="text-xs text-slate-500 font-medium"
+                               x-text="t('Bobot mengubah nilai akhir murid, bukan hanya contoh di atas.','A weight change moves real final marks — not only the sample above.')"></p>
+                        </div>
+                        <button type="button" @click="loadImpact()" :disabled="impactLoading"
+                                class="px-3 py-1.5 rounded-lg bg-slate-800 text-white text-xs font-bold hover:bg-slate-900 disabled:opacity-40">
+                            <i class="fas mr-1" :class="impactLoading ? 'fa-circle-notch fa-spin' : 'fa-users-viewfinder'"></i><span x-text="impactLoading ? t('Menghitung…','Working…') : t('Hitung dampak','Check the impact')"></span>
+                        </button>
+                    </div>
+                    <p class="text-xs font-bold text-amber-700 bg-amber-50 px-2 py-1 rounded-lg inline-block"
+                       x-show="impactStale()"
+                       x-text="t('Bobot sudah berubah sejak perhitungan ini — hitung ulang.','The weights changed since this was computed — check again.')"></p>
+                    <div x-show="impactDone">
+                        <div class="flex flex-wrap items-center gap-2 mt-1">
+                            <span class="text-sm font-extrabold text-slate-700" x-text="t('Murid yang bergerak:','Pupils who would move:')"></span>
+                            <span class="text-sm font-extrabold text-slate-700" data-impact-moved
+                                  x-text="impact.counts.pupils_moved + ' / ' + impact.counts.pupils_marked"></span>
+                            <span class="text-xs font-bold text-emerald-600" x-show="impact.counts.up > 0"
+                                  x-text="impact.counts.up + ' ↑'"></span>
+                            <span class="text-xs font-bold text-red-500" x-show="impact.counts.down > 0"
+                                  x-text="impact.counts.down + ' ↓'"></span>
+                            <span class="text-xs font-bold text-slate-500" x-show="impact.counts.max_up !== null"
+                                  x-text="t('naik terbesar +','biggest rise +') + impact.counts.max_up.toFixed(1)"></span>
+                            <span class="text-xs font-bold text-slate-500" x-show="impact.counts.max_down !== null"
+                                  x-text="t('turun terbesar ','biggest fall ') + impact.counts.max_down.toFixed(1)"></span>
+                        </div>
+                        <div class="flex flex-wrap items-center gap-2 mt-1">
+                            <span class="text-xs font-bold text-amber-700 bg-amber-50 px-2 py-1 rounded-lg"
+                                  x-show="impact.counts.reported > 0"
+                                  x-text="impact.counts.reported + t(' di antaranya sudah terbit ke murid',' of them are already released to pupils')"></span>
+                            <span class="text-xs font-bold text-slate-500" x-show="impact.shown > 0"
+                                  x-text="t('menampilkan ','showing ') + impact.shown + t(' pergerakan terbesar',' largest moves')"></span>
+                            <span class="text-xs font-bold text-slate-500" x-show="impact.subjects.length > 0"
+                                  x-text="t('mapel terdampak: ','subjects affected: ') + impact.subjects.length"></span>
+                        </div>
+                        <p class="text-xs text-slate-500 font-medium mt-1" data-impact-empty
+                           x-show="impact.counts.pairs === 0"
+                           x-text="t('Belum ada nilai murid di cakupan ini.','No pupil has a mark in this scope yet.')"></p>
+                        <p class="text-xs text-slate-500 font-medium mt-1" data-impact-none
+                           x-show="impact.counts.pairs > 0 && impact.counts.moved === 0"
+                           x-text="t('Tidak ada nilai murid yang bergerak.','No pupil mark would move.')"></p>
+                        <p class="text-xs font-bold text-red-500 mt-1" x-show="impact.typed_total !== required"
+                           x-text="t('Total bobot belum 100% — angka ini baru gambaran.','The weights do not total 100% yet — these figures are indicative only.')"></p>
+                        <p class="text-xs font-bold text-amber-700 mt-1" x-show="impact.capped"
+                           x-text="t('Sebagian data melewati batas baca, jadi angka ini bisa kurang lengkap.','Part of the data exceeded the read cap, so these figures may be incomplete.')"></p>
+                        <div class="overflow-x-auto mt-3" x-show="impact.pupils.length > 0">
+                            <table class="w-full text-sm min-w-[640px]">
+                                <thead><tr class="text-left text-slate-500 bg-slate-50 border-b border-slate-100">
+                                    <th class="px-3 py-2 font-semibold" x-text="t('Murid','Pupil')"></th>
+                                    <th class="px-2 py-2 font-semibold" x-text="t('Mapel','Subject')"></th>
+                                    <th class="px-2 py-2 font-semibold text-center" x-text="t('Tersimpan','Saved')"></th>
+                                    <th class="px-2 py-2 font-semibold text-center" x-text="t('Dengan bobot ini','With these weights')"></th>
+                                    <th class="px-3 py-2 font-semibold text-center" x-text="t('Selisih','Change')"></th>
+                                </tr></thead>
+                                <tbody>
+                                    <template x-for="row in impact.pupils" :key="row.student_id + '-' + row.subject_id">
+                                        <tr class="border-b border-slate-50 last:border-0">
+                                            <td class="px-3 py-2 font-semibold text-slate-700">
+                                                <span x-text="row.name"></span>
+                                                <span class="text-slate-400" x-text="row.class_name ? ' · ' + row.class_name : ''"></span>
+                                                <span class="ml-1 text-[10px] font-bold text-brand-700 bg-brand-50 px-1.5 py-0.5 rounded"
+                                                      x-show="row.released"
+                                                      x-text="t('sudah terbit','released')"></span>
+                                            </td>
+                                            <td class="px-2 py-2 text-slate-500" x-text="row.subject_name"></td>
+                                            <td class="px-2 py-2 text-center font-bold text-slate-500"
+                                                x-text="Number(row.saved).toFixed(1)"></td>
+                                            <td class="px-2 py-2 text-center font-extrabold text-brand-700"
+                                                x-text="Number(row.live).toFixed(1)"></td>
+                                            <td class="px-3 py-2 text-center">
+                                                <span class="text-xs font-bold"
+                                                      :class="row.delta > 0 ? 'text-emerald-600' : 'text-red-500'"
+                                                      x-text="(row.delta > 0 ? '+' : '') + row.delta.toFixed(1)"></span>
+                                            </td>
+                                        </tr>
+                                    </template>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <p class="text-xs font-bold text-red-500 mt-2" x-show="impactNote" x-text="impactNote"></p>
                 </div>
             </div>
 
