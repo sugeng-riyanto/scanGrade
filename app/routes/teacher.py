@@ -25,7 +25,7 @@ from app.services.question_types import (
     canonical_type, complete_weights, default_weights, describe_answer, earned_points,
     essay_marker,
     grade_answer, has_answer, is_essay, is_objective, normalise_key,
-    objective_result, question_kind, scheme_in,
+    objective_result, public_options, question_kind, scheme_in,
 )
 from app.services import mark_scheme
 from app.services import assignments as assignments_service
@@ -1988,6 +1988,139 @@ def my_exams():
     # is there to catch.
     unassigned_ids = {e["id"] for e in exams if _needs_class_assignment(e)}
     return render_template("teacher/exams.html", exams=exams, unassigned_ids=unassigned_ids)
+
+
+#: The three sizes a paper is checked at, and each one's two orientations. A real
+#: frame at the real width, never a scaled-down picture of one: the regressions a
+#: teacher is looking for (a table that squeezes, a formula that wraps, a toolbar
+#: that collides) only appear at the width they happen at. 768 is not arbitrary —
+#: it is exactly Tailwind's `md` breakpoint, the width at which a layout switches
+#: to its wide form, and it is the tablet's own portrait width.
+PREVIEW_DEVICES = (
+    {"key": "laptop", "id": "Laptop", "en": "Laptop",
+     "portrait": (1366, 768), "landscape": (1366, 768), "rotatable": False},
+    {"key": "tablet", "id": "Tablet", "en": "Tablet",
+     "portrait": (768, 1024), "landscape": (1024, 768), "rotatable": True},
+    {"key": "phone", "id": "HP", "en": "Phone",
+     "portrait": (375, 812), "landscape": (812, 375), "rotatable": True},
+)
+
+
+@teacher_bp.route("/exams/<exam_id>/preview")
+@teacher_or_admin_required
+def exam_preview(exam_id):
+    """The pupil's view of one paper, in the frames a pupil might hold.
+
+    The page is only frames and switches; the paper inside them is rendered by
+    `exam_preview_paper`, which is where the promise that this creates nothing is
+    kept. This door reads a title and nothing else.
+    """
+    supabase = get_supabase()
+    exam, err = _guard_exam(supabase, exam_id,
+                            columns="id,title,teacher_id,school_id,total_questions",
+                            as_json=_wants_json())
+    if err:
+        return err
+    return render_template(
+        "teacher/exam_preview.html",
+        exam=exam,
+        devices=[dict(d) for d in PREVIEW_DEVICES],
+        paper_url=url_for("teacher.exam_preview_paper", exam_id=exam_id),
+    )
+
+
+@teacher_bp.route("/exams/<exam_id>/preview/paper")
+@teacher_or_admin_required
+def exam_preview_paper(exam_id):
+    """The real pupil page, rendered for its author — and *only* rendered.
+
+    The teacher's preview has to be the pupil's page, not a mock-up of it, or it
+    stops being evidence: same template, same question types, same media, same
+    navigation. What it must never be is a **sitting**, so this door does none of
+    the four things the pupil's door does on the way in:
+
+    * it does not call `open_sitting`, so **no attempt row is created** and a
+      preview can never count against `max_attempts`;
+    * it does not write `exam_target_student`, so a preview cannot enrol anybody;
+    * it does not issue a recovery code, and does not call `ensure_page_thumbs`;
+    * it arms nothing — the template is handed `preview=True`, which is what stops
+      it starting the clock, the heartbeat, the periodic sync, the tab watch and
+      the anti-cheat ladder (see the gates in `student/take_exam.html`).
+
+    The permission is the same one every other teacher door on a paper uses
+    (`_guard_exam` → `can_manage_exam`): the author, or the school's own admin —
+    nobody else's paper, and no other school's.
+
+    Renders read-only. There is no write in this function, which is the property
+    `test_exam_preview.py` asserts against a supabase that records every call.
+    """
+    from app.services.anti_cheat_service import (
+        AWAY_GRACE_CHANCES, AWAY_GRACE_SECONDS, ROTATION_GRACE_SECONDS,
+    )
+
+    supabase = get_supabase()
+    exam, err = _guard_exam(supabase, exam_id, columns="*", as_json=_wants_json())
+    if err:
+        return err
+    # JSON columns arrive as text often enough that the pupil's door parses them
+    # the same way — and a preview of a paper whose question types failed to parse
+    # would be a preview of nothing at all.
+    for field in ("question_types", "answer_key", "question_weights", "question_pages",
+                  "pdf_page_urls", "question_audio"):
+        value = exam.get(field)
+        if isinstance(value, str):
+            try:
+                exam[field] = json.loads(value)
+            except (json.JSONDecodeError, TypeError):
+                exam[field] = {}
+    # The answer key never reaches the page, and what a pairing question *is*
+    # allowed to show is decided in one place (`public_options`) — the same place
+    # the pupil's door asks, so the preview cannot be the one page that leaks a key.
+    qtypes = exam.get("question_types") or {}
+    answer_key = exam.get("answer_key") or {}
+    question_options = {}
+    for i in range(exam.get("total_questions") or 0):
+        public = public_options(qtypes.get(str(i)), answer_key.get(str(i)))
+        if public:
+            question_options[str(i)] = public
+    safe_exam = {k: v for k, v in exam.items() if k != "answer_key"}
+    # The pupil's own media, signed for *this* teacher and this paper. A read: it
+    # signs a URL, it does not move a play count — the count is charged by
+    # `/student/media-play`, which the preview never calls (`mediaClaim` returns
+    # before it speaks when `window.SG_EXAM_PREVIEW` is true).
+    safe_exam["question_audio"] = exam_media.with_media_urls(
+        safe_exam.get("question_audio"), subject=g.user_id, exam_id=exam_id)
+    return render_template(
+        "student/take_exam.html",
+        preview=True,
+        exam=safe_exam,
+        # The switches the page reads even in preview (they are interpolated as
+        # bare numbers, so leaving them out would be a broken script rather than a
+        # missing detail). They describe the paper's policy, which is exactly what
+        # a teacher is previewing.
+        anti_cheat_config=json.dumps({
+            "anti_cheat_enabled": bool(exam.get("anti_cheat_enabled")),
+            "away_grace_seconds": AWAY_GRACE_SECONDS,
+            "away_grace_chances": AWAY_GRACE_CHANCES,
+        }),
+        exam_started_at=None,
+        recovery_code="",
+        question_options=question_options,
+        # No deadline and no seconds left: the clock on a preview shows the paper's
+        # duration and nothing counts it. `deadline_reason` says so, so the page can
+        # label itself rather than leaving a stopped clock to be read as a fault.
+        deadline=None,
+        deadline_reason="preview",
+        seconds_left=None,
+        window_end=None,
+        away_grace_seconds=AWAY_GRACE_SECONDS,
+        away_grace_chances=AWAY_GRACE_CHANCES,
+        rotation_grace_seconds=ROTATION_GRACE_SECONDS,
+        student_name=(g.get("user_name") or ""),
+        student_class_label="",
+        student_key=g.user_id,
+        media_used={},
+    )
 
 
 @teacher_bp.route("/exams/<exam_id>/toggle-status", methods=["POST"])

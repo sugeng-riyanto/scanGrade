@@ -637,6 +637,12 @@
       "coverage": 100.0,
       "frozen": false
     },
+    "teacher/exam_preview.html": {
+      "pairs": 12,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
     "teacher/exams.html": {
       "pairs": 20,
       "leftovers": 5,

@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+{# The document title is a plain string, like every other page's: `t()` is a function
+   on the Alpine body scope, so it does not exist yet when this head is rendered.
+   The copy inside the body follows the toggle. #}
+{% block title %}Pratinjau Tampilan Murid - ScanGrade{% endblock %}
+{% block page_title %}{{ exam.title }}{% endblock %}
+
+{% block content %}
+{# `tojson` for the values the script reads, and a *single*-quoted x-data attribute:
+   Flask's `tojson` is HTML-safe for `<`, `>` and `&` but deliberately leaves `"`
+   alone, so a double-quoted attribute would be closed early by the JSON's own
+   quote. The same shapes as `tools/device_preview.html`. #}
+<div x-data='examPreview({{ devices | tojson }})' x-cloak data-exam-preview="{{ exam.id }}">
+
+    <div class="card p-4 mb-4">
+        <div class="flex flex-wrap items-start justify-between gap-3">
+            <div class="min-w-0">
+                <h1 class="text-lg font-extrabold text-surface-800 flex items-center gap-2">
+                    <i class="fas fa-user-graduate text-primary-500"></i>
+                    <span x-text="t('Pratinjau Tampilan Murid','Pupil View Preview')"></span>
+                </h1>
+                <p class="text-xs text-surface-500 mt-1 leading-relaxed max-w-2xl font-semibold"
+                   x-text="t('Yang Anda lihat di bawah adalah halaman ujian murid yang sebenarnya — soal, tipe soal, dan medianya sama persis. Tetapi ini BUKAN pengerjaan: tidak ada sesi yang dibuat, tidak ada jawaban yang tersimpan, tidak ada penilaian, dan tidak ada anti-cheat yang berjalan. Jam ujian tampil sebagai angka dan tidak berjalan.',
+                           'What you see below is the pupil’s real exam page — the same questions, the same question types, the same media. But it is NOT a sitting: no session is created, no answer is stored, nothing is scored, and no anti-cheat runs. The exam clock is shown as a number and does not run.')"></p>
+            </div>
+            <div class="flex items-center gap-2 shrink-0">
+                <a :href="paperUrl" target="_blank" rel="noopener"
+                   class="px-2.5 py-1.5 rounded-xl border border-surface-200 bg-white text-[11px] font-extrabold text-surface-600 hover:bg-surface-50 transition">
+                    <i class="fas fa-external-link-alt mr-1"></i><span x-text="t('Tab baru','New tab')"></span>
+                </a>
+                <button type="button" @click="reloadFrame()"
+                        class="px-2.5 py-1.5 rounded-xl border border-surface-200 bg-white text-[11px] font-extrabold text-surface-600 hover:bg-surface-50 transition">
+                    <i class="fas fa-sync-alt mr-1"></i><span x-text="t('Muat ulang','Reload')"></span>
+                </button>
+            </div>
+        </div>
+
+        {# The three sizes a paper is really held at. A laptop, a tablet and a phone
+           are not three widths of the same layout: the tablet is the one that
+           switches to the wide form, so it is offered in both orientations. #}
+        <div class="flex flex-wrap items-center gap-2 mt-3">
+            <span class="text-[10px] font-extrabold uppercase tracking-wider text-surface-400"
+                  x-text="t('Perangkat','Device')"></span>
+            <template x-for="d in DEVICES" :key="'dev-' + d.key">
+                <button type="button" @click="choose(d.key)"
+                        :data-device-btn="d.key"
+                        :class="device === d.key ? 'bg-primary-600 text-white border-primary-600' : 'bg-white text-surface-600 border-surface-200 hover:border-primary-400'"
+                        class="px-3 py-1.5 rounded-xl border-2 text-[11px] font-extrabold transition"
+                        x-text="label(d)"></button>
+            </template>
+            <template x-if="rotatable">
+                <button type="button" @click="flip()"
+                        data-orientation-btn
+                        class="px-3 py-1.5 rounded-xl border-2 border-surface-200 bg-white text-[11px] font-extrabold text-surface-600 hover:border-primary-400 transition">
+                    <i class="fas fa-rotate mr-1"></i>
+                    <span x-text="landscape ? t('Lanskap','Landscape') : t('Potret','Portrait')"></span>
+                </button>
+            </template>
+        </div>
+
+        <p class="mt-2 text-[10px] font-bold text-surface-400">
+            <span x-text="t('Bingkai','Frame')"></span>:
+            <span data-frame-size x-text="frameW + ' × ' + frameH + ' px'"></span>
+        </p>
+    </div>
+
+    {# One real frame at its real size, never a scaled-down picture of one: the
+       regressions a teacher is looking for — a table that squeezes, a formula that
+       wraps, a toolbar that collides — only appear at the width they happen at.
+       The row scrolls rather than shrinking the frame to fit. #}
+    <div class="overflow-auto pb-3">
+        <div class="inline-block min-w-full">
+            <div class="rounded-2xl border-2 border-surface-300 bg-surface-100 p-2 shadow-sm"
+                 :class="device === 'phone' ? 'rounded-[2rem] p-3' : ''">
+                <iframe :src="frameSrc" :width="frameW" :height="frameH"
+                        :data-frame-w="frameW" :data-frame-h="frameH"
+                        loading="lazy" @load="markLoaded($event)"
+                        class="block bg-white rounded-xl border border-surface-200"
+                        :title="t('Pratinjau halaman ujian','Exam page preview')"></iframe>
+            </div>
+            <p x-show="redirected" class="mt-1.5 text-[11px] font-bold text-amber-600"
+               x-text="t('Bingkai ini tidak menampilkan ujian: halaman mengalihkan ke','This frame is not showing the exam: the page redirected to') + ' ' + redirected"></p>
+            <p x-show="!loaded && !redirected" class="mt-1.5 text-[11px] font-semibold text-surface-300"
+               x-text="t('memuat…','loading…')"></p>
+        </div>
+    </div>
+
+    <p class="text-[10px] text-surface-400 mt-2 leading-relaxed max-w-2xl"
+       x-text="t('Catatan: pratinjau tidak memuat data pengerjaan murid mana pun, jadi kolom jawaban selalu kosong. Yang diperiksa di sini adalah tampilannya, bukan isinya.',
+               'Note: the preview holds no pupil’s work, so the answer fields are always empty. What is checked here is the layout, not the contents.')"></p>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const EP_DEVICES = {{ devices | tojson }};
+const EP_PAPER_URL = {{ paper_url | tojson }};
+
+function examPreview(devices) {
+    return {
+        DEVICES: devices,
+        device: 'laptop',
+        landscape: false,
+        tick: 0,
+        loaded: false,
+        redirected: '',
+        // `uiLang` and not `lang`: `lang` belongs to base.html's scope, and a page
+        // that declares its own shadows it — the header toggle would then flip the
+        // label while this page kept rendering the language it was loaded in,
+        // with no error anywhere. The watcher reads the inherited one.
+        uiLang: document.documentElement.lang === 'id' ? 'id' : 'en',
+        get spec() {
+            const found = this.DEVICES.filter(d => d.key === this.device)[0] || this.DEVICES[0];
+            return found;
+        },
+        get rotatable() { return !!(this.spec && this.spec.rotatable); },
+        get frameW() { return (this.landscape ? this.spec.landscape : this.spec.portrait)[0]; },
+        get frameH() { return (this.landscape ? this.spec.landscape : this.spec.portrait)[1]; },
+        get paperUrl() { return EP_PAPER_URL; },
+        get frameSrc() {
+            // The counter is a query parameter so Reload re-fetches: this route takes
+            // no parameters of its own, so nothing is overwritten.
+            return this.tick ? EP_PAPER_URL + '?preview=' + this.tick : EP_PAPER_URL;
+        },
+        label(d) { return this.uiLang === 'id' ? d.id : d.en; },
+        choose(key) {
+            this.device = key;
+            if (!this.rotatable) this.landscape = false;
+            this.redirected = '';
+            this.loaded = false;
+        },
+        flip() {
+            this.landscape = !this.landscape;
+            this.redirected = '';
+            this.loaded = false;
+        },
+        reloadFrame() {
+            this.redirected = '';
+            this.loaded = false;
+            this.tick += 1;
+        },
+        // A frame that landed somewhere else is the one failure this page can name,
+        // and it is the failure that matters — a redirect would otherwise be shown
+        // as if it were the paper.
+        markLoaded(event) {
+            this.loaded = true;
+            try {
+                const actual = event.target.contentWindow.location.pathname;
+                const wanted = EP_PAPER_URL.split('?')[0];
+                this.redirected = actual === wanted ? '' : actual;
+            } catch (e) {
+                this.redirected = '';
+            }
+        },
+        init() {
+            this.$watch('lang', () => {
+                this.uiLang = document.documentElement.lang === 'id' ? 'id' : 'en';
+            });
+        },
+    };
+}
+</script>
+{% endblock %}

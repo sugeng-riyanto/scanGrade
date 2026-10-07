@@ -599,6 +599,11 @@ TRANSLATED = [
     # three-reader contract — and its bulk-upload preview is the page an operator
     # reads line by line, which is the wrong place for a label in one language.
     "admin_sekolah/invigilation_matrix.html",
+    # The teacher's preview of a paper. It is opened *while* judging a layout —
+    # the same moment the device preview above is opened — and every word on it is
+    # a pair, including the banner that has to explain, in the reader's own
+    # language, that the clock on screen is a simulation and not a fault.
+    "teacher/exam_preview.html",
 ]
 # Partials are deliberately *not* on this list, and the assertion below says why:
 # an entry has to extend base.html, because it is the page's own scope that owns
@@ -944,7 +949,7 @@ def test_the_translated_list_only_grows_with_intent():
     a reader in the other language does. Bumping this number is the deliberate act
     that says "this page is translated now".
     """
-    assert len(TRANSLATED) == 53, (
+    assert len(TRANSLATED) == 54, (
         f"{len(TRANSLATED)} pages are on the translated list. Bump this number when "
         f"you translate another one — and if you *removed* a page, put it back, "
         f"because dropping it turns the sweep off for that page: {TRANSLATED}")
