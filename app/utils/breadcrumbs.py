@@ -186,6 +186,13 @@ NO_CHROME = frozenset({
     # a class. It extends no layout, so it shows no trail; the crumb is the results
     # page the school printed it from.
     "report-cards",
+    # `/teacher/exams/<id>/preview/paper` renders the pupil's own exam page — the
+    # same template a pupil sits in front of — either inside the preview page's
+    # frame or alone from that page's "new tab" link. That page switches the whole
+    # chrome off by `body_class` (`body.sg-exam`: the sidebar, the top bar and the
+    # phone's bottom nav), the trail with it, so there is no crumb to name — and
+    # the teacher's way back is the preview page that opened it.
+    "paper",
 })
 
 #: (why, which segments). The prose is the guard's documentation *and* the reason a

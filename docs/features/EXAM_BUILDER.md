@@ -179,8 +179,53 @@ Pinch-zoom is left working on top of it (WCAG 1.4.4 / 1.4.10 forbid switching it
 off). The chosen size is stored as the `text_scale` preference, so it follows the
 pupil to their next device. See `docs/DESIGN_SYSTEM.md`.
 
+## The teacher's preview of the pupil's page
+
+Every card on `/teacher/exams` offers **Pratinjau Tampilan Murid**
+(`/teacher/exams/<id>/preview`). The page it opens shows the paper in three frames —
+**Laptop** (1366×768, one shape), **Tablet** (768×1024, and the same frame flipped to
+1024×768) and **HP** (375×812 / 812×375) — because a tablet is not a narrow laptop: it
+is the width at which the layout switches to its wide form, and squeezing a layout to
+judge it is how a teacher approves something no pupil will ever see. The frame is a
+real frame at the real width (`:width="frameW"`, never a scaled image of one), and
+the device table is `PREVIEW_DEVICES` in `app/routes/teacher.py`.
+
+The paper inside the frame is the pupil's own template, not a mock-up: same
+`student/take_exam.html`, same question types, same media, same navigation. It is the
+same page because a mock-up stops being evidence the day the real page changes.
+
+What it must never be is a **sitting**. `/teacher/exams/<id>/preview/paper` renders
+with `preview=True`, and that one flag is the whole contract:
+
+* the route calls none of the four things the pupil's door does on the way in — no
+  `open_sitting` (so **no attempt row**, and a preview cannot count against
+  `max_attempts`), no `exam_target_student` write (nobody is enrolled), no recovery
+  code, no `ensure_page_thumbs` — and it writes nothing at all;
+* the page starts no watch: no anti-cheat ladder, no tab watch, no liveness ping, no
+  countdown, no draft beacon, and the agreement card dismisses without asking for
+  fullscreen. The exam bar, the question rail and the media render; the machinery
+  behind them does not;
+* the clock shows the paper's own duration and **does not run**. A stopped clock has
+to say so, or it reads as a fault, so the page carries a banner saying this is a
+preview — nothing is saved, nothing is scored, no anti-cheat runs;
+* the answer key never reaches the page, for the same reason it never reaches a
+  pupil's: the key is stripped and the public option list comes from the one place
+  (`public_options`) the pupil's door asks.
+
+The gate is the same one every other teacher door on a paper uses (`_guard_exam` →
+`can_manage_exam`): the author, or the school's own admin. `tests/unit/test_exam_preview.py`
+drives the door against a supabase that records every call and **renders** the page
+rather than grepping it, so "nothing was created" and "nothing was armed" are
+asserted against what happened, not what the source looks like.
+
 ## Where the code lives
 
+* `app/routes/teacher.py` — `PREVIEW_DEVICES` and the two preview doors
+  (`exam_preview`, `exam_preview_paper`).
+* `app/templates/teacher/exam_preview.html` — the frames and the device/orientation
+  switches.
+* `tests/unit/test_exam_preview.py` — the preview creates nothing, arms nothing, and
+  the frames are the sizes they claim.
 * `app/templates/teacher/exam_form.html` — the whole page. The PDF uploader
   (`pdfUpload()`), the question list (`questionManager()`), the defaults
   (`sgStatementLabel` / `sgMatchLabel` / `seedPgk` / `newPair`), and the scope walk

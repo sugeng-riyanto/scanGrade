@@ -426,7 +426,24 @@ body.sg-exam .sidebar-overlay { display: none !important; }
 </style>
 {% endblock %}
 {% block content %}
-<div x-data="examApp({{ exam.duration_minutes * 60 }}, {{ exam.total_questions }}, '{{ started_at }}')" data-exam-id="{{ exam.id }}">
+{# `preview` is the teacher's own read of this paper — the same components, the
+   same question types, the same media, with none of the machinery that makes a
+   *sitting*: no sitting row is opened, no clock is started, no anti-cheat is
+   armed, and nothing is sent anywhere. The route that renders it reads and
+   renders, and that is all it can do — see teacher_exam_preview_paper.
+
+   It defaults to False so the pupil's page is untouched by this flag. #}
+{% set preview = preview if preview is defined else False %}
+<div x-data="examApp({{ exam.duration_minutes * 60 }}, {{ exam.total_questions }}, '{{ started_at }}')" data-exam-id="{{ exam.id }}"{% if preview %} data-preview="1"{% endif %}>
+    {% if preview %}
+    {# Said once, at the top, in both languages: this is a picture of the paper,
+       not a sitting — so a teacher never mistakes a stopped clock for a fault. #}
+    <div class="mb-2 rounded-xl border border-sky-300 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-900 flex items-start gap-2"
+         data-preview-banner="1" role="note">
+        <i class="fas fa-eye mt-0.5"></i>
+        <span x-text="t('Pratinjau tampilan murid — bukan ujian sungguhan. Tidak ada jawaban yang tersimpan, tidak ada penilaian, dan tidak ada anti-cheat yang berjalan. Jam ujian ditampilkan sebagai angka, tidak berjalan.','Pupil view preview — not a real sitting. Nothing is saved, nothing is scored, and no anti-cheat runs. The exam clock is shown as a number; it does not run.')"></span>
+    </div>
+    {% endif %}
     <!-- sit strip -->
     <!-- Who is sitting this paper, and the controls a sitting needs. The chrome
          that normally carries a name is hidden for the exam, and the terms modal
@@ -588,8 +605,10 @@ body.sg-exam .sidebar-overlay { display: none !important; }
                         :aria-label="t('Perbesar teks','Increase text size')">A+</button>
             </div>
             <div x-show="!submitted" class="text-xl font-extrabold tabular-nums" x-text="timeLeft === null ? t('Tak terbatas','Unlimited') : formatTime(timeLeft)" :class="timeLeft !== null && timeLeft < 60 ? 'text-red-500' : 'text-primary-600'"></div>
-            <button x-show="!submitted" @click="submitExam()" :disabled="submitting" class="sg-submit bg-gradient-to-r from-primary-500 to-primary-600 hover:from-primary-600 hover:to-primary-700 text-white px-5 py-2.5 rounded-xl text-sm font-bold shadow-lg shadow-primary-500/25 transition disabled:opacity-50 disabled:cursor-not-allowed">
-                <i class="fas mr-1.5" :class="submitting ? 'fa-spinner fa-spin' : 'fa-check'"></i><span x-text="submitting ? t('Mengirim...','Sending...') : t('Kumpulkan','Submit')"></span>
+            <button x-show="!submitted" @click="submitExam()" :disabled="submitting || previewMode"
+                    :title="previewMode ? t('Pratinjau: pengumpulan tidak aktif','Preview: submitting is off') : ''"
+                    class="sg-submit bg-gradient-to-r from-primary-500 to-primary-600 hover:from-primary-600 hover:to-primary-700 text-white px-5 py-2.5 rounded-xl text-sm font-bold shadow-lg shadow-primary-500/25 transition disabled:opacity-50 disabled:cursor-not-allowed">
+                <i class="fas mr-1.5" :class="submitting ? 'fa-spinner fa-spin' : 'fa-check'"></i><span x-text="previewMode ? t('Simulasi','Simulated') : (submitting ? t('Mengirim...','Sending...') : t('Kumpulkan','Submit'))"></span>
             </button>
         </div>
     </div>
@@ -1974,6 +1993,12 @@ function sgKind(type) { return SG_QT.kinds[type || SG_QT.default] || SG_QT.kinds
 // pending submit is sent as theirs. Each per-sitting key now carries the sitter's
 // own id, so one device holds several pupils' keys and they never meet.
 const SG_EXAM = '{{ exam.id }}';
+// Read by the components that live *outside* `examApp` (the media players) as much
+// as by it. In the teacher's preview it is true, and every door that would write
+// anything — a submit, a heartbeat, a periodic sync, a charged media play — checks
+// it before it speaks. The page's own gates are in `init()`; this is the second
+// lock on the same door, for a function reached from somewhere the first cannot see.
+window.SG_EXAM_PREVIEW = {{ 'true' if preview else 'false' }};
 const SG_STUDENT = {{ (student_key or '') | tojson }};
 function sgLS(prefix) { return prefix + SG_EXAM + '__' + SG_STUDENT; }
 // The order of this sitting's drafts, as the server last told it to us. The page
@@ -2034,6 +2059,10 @@ function sgMediaPlay(i) {
             return meta ? meta.getAttribute('content') : '';
         },
         async mediaClaim() {
+            // The preview plays the question's own media without charging a play
+            // against anybody: there is no sitting to charge, and a teacher
+            // checking an audio clip must not spend a pupil's allowance.
+            if (window.SG_EXAM_PREVIEW) return true;
             if (this.mediaLocked) return false;
             try {
                 var token = this._mediaToken();
@@ -2598,6 +2627,7 @@ function examApp(duration, totalQ) {
             this._applyTextScale();
             // The clock belongs to the exam, so this page has to be able to say how
             // long it was not the one being looked at — see _startAwayWatch().
+            {% if not preview %}
             this._startAwayWatch();
             this.timer = setInterval(() => {
                 // No deadline, no clock: nothing to count down, and nothing this
@@ -2613,6 +2643,16 @@ function examApp(duration, totalQ) {
             // counts toward the wrong deadline, so the offset is re-read here.
             this._resyncClock();
             this.heartbeatTimer = setInterval(() => this._heartbeat(), SG_HEARTBEAT_MS);
+            {% else %}
+            // ── the preview's clock ─────────────────────────────────────
+            // `timeLeft` already holds the paper's own duration (it is handed to
+            // `examApp` above), and nothing here ever moves it: no countdown, no
+            // resync from `/student/attempt-status`, no heartbeat, no periodic
+            // sync, and no away watch. The banner above the paper says so in both
+            // languages, so a clock that is not running reads as a decision rather
+            // than a page that failed to start.
+            this.previewMode = true;
+            {% endif %}
             this.$watch('currentQ', (val, oldVal) => {
                 if (oldVal !== undefined) this.closeAllTools(oldVal);
                 // Move the paper only when the question does not live on the page
@@ -2655,6 +2695,7 @@ function examApp(duration, totalQ) {
             window.addEventListener('resize', _refit);
             window.addEventListener('orientationchange', _refit);
             this.$watch('chromeHidden', () => _refit());
+            {% if not preview %}
             window.addEventListener('beforeunload', (e) => {
                 this.saveToLocal();
                 if (this.dirty) {
@@ -2678,6 +2719,7 @@ function examApp(duration, totalQ) {
                         new Blob([JSON.stringify({exam_id: '{{ exam.id }}', answers: data, light: true, rev: sgGetDraftRev()})], {type: 'application/json'}));
                 }
             });
+            {% endif %}
             // Shuffle questions if enabled
             if (this.antiCheat.randomize_questions) {
                 this._shuffle(this.questions);
@@ -2705,9 +2747,16 @@ function examApp(duration, totalQ) {
                 // Navigate to first page of first question's range
                 var rng0 = this.parsePageRange(QUESTION_PAGES[v] || '');
                 if (rng0.length > 0) this.page = Math.max(1, Math.min(rng0[0], this.totalPages));
+                {% if not preview %}
                 this.watchOtherTabs();
                 this.armAntiCheat();
                 if (this.antiCheat.watermark_name) this.startWatermark();
+                {% else %}
+                // The preview draws the watermark (it is part of what a teacher
+                // came to see) but arms nothing: no tab watch, no anti-cheat
+                // ladder, no fullscreen blocker.
+                if (this.antiCheat.watermark_name) this.startWatermark();
+                {% endif %}
             });
         },
         // ── The server's clock, and the liveness ping ────────────────────────
@@ -2778,6 +2827,7 @@ function examApp(duration, totalQ) {
               });
         },
         _heartbeat() {
+            if (window.SG_EXAM_PREVIEW) return;   // no sitting, so nothing to keep alive
             if (this.submitted) return;
             fetch('/student/heartbeat/{{ exam.id }}', {
                 method: 'POST',
@@ -3873,6 +3923,7 @@ function examApp(duration, totalQ) {
             if (this._refreshAudio) this._refreshAudio();
         },
         periodicSync() {
+            if (window.SG_EXAM_PREVIEW) return;   // nothing is stored, so nothing to sync
             this.saveToLocal();
             if (this.dirty && navigator.onLine) this.syncToServer();
         },
@@ -5164,6 +5215,10 @@ function examApp(duration, totalQ) {
             return this.getAnswersWithCanvas();
         },
         submitExam(auto) {
+            // A preview has no submission and no attempt to hand in. Returning here
+            // rather than relying on the route being pupil-only is deliberate: the
+            // page must not be able to *try*.
+            if (window.SG_EXAM_PREVIEW) return;
             if (this.submitted) return;
             if (auto) {
                 this._executeSubmit();
@@ -5420,11 +5475,17 @@ function examApp(duration, totalQ) {
         agreeExam() {
             this.showExamAgreement = false;
             try { localStorage.setItem(sgLS('sg_agreed_'), '1'); } catch(e) {}
+            {% if not preview %}
             // Ask for fullscreen first — this click is the user gesture the
             // browser requires — then arm, which is what starts watching it.
             this.requestExamFullscreen();
             // The exam has started: this is when the anti-cheat may begin watching.
             this.armAntiCheat();
+            {% else %}
+            // This card still appears in a preview when the browser has not agreed
+            // before, and dismissing it is the whole of what it may do here: a
+            // preview never asks for fullscreen and never arms a watcher.
+            {% endif %}
         },
         toggleCalculator() { this.showCalculator = !this.showCalculator; },
         // Scientific calculator functions
