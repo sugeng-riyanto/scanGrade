@@ -44,9 +44,15 @@ A count above zero means pupils are working now — wait.
    # edit the SUPABASE_SERVICE_KEY line by hand; do not paste it into a shell history
    chmod 600 .env
    ```
+   The mode is safe to tighten because **both** units are handed the file as
+   `EnvironmentFile=/opt/scangrade/.env`, and systemd reads it as root — neither
+   process, both of which run as `User=scangrade`, ever needs to open it itself.
+   That was not always true of the worker, and it was not always the same account:
+   it read the file itself, so a `600` root-owned `.env` took it down in a restart
+   loop with nothing in the journal saying why.
 3. Restart the app and the worker, then confirm the box is healthy:
    ```bash
-   systemctl restart scangrade scangrade-worker
+   systemctl restart scangrade scangrade-celery
    curl -s http://127.0.0.1:8000/health
    ```
 4. Only once `/health` is `ok`, **revoke the old key** in the dashboard. That is
@@ -65,7 +71,7 @@ the same quiet window, not during a sitting:
 ```bash
 python3 -c 'import secrets; print(secrets.token_hex(32))'   # the new value
 # set FLASK_SECRET_KEY=… in /opt/scangrade/.env, then:
-systemctl restart scangrade scangrade-worker
+systemctl restart scangrade scangrade-celery
 ```
 
 The box's current value is not the leaked one, so this rotation is housekeeping

@@ -1,8 +1,54 @@
+import logging
 import os
 import re
 from dotenv import load_dotenv
 
-load_dotenv()
+logger = logging.getLogger(__name__)
+
+
+def load_env_file(path=None) -> str:
+    """Read the environment file; return ``""``, or why it could not be read.
+
+    Both systemd units hand this file to their process as ``EnvironmentFile=``,
+    which systemd reads **as root** — so the worker's environment does not depend
+    on the file's mode. But a checkout runs this module directly too (``wsgi.py``,
+    ``python manage.py``, a one-off ``python -c``), and there the read is the
+    process's own. python-dotenv lets a failed ``open()`` out, and a bare
+    ``load_dotenv()`` therefore turned a ``.env`` whose mode changed — the box's is
+    ``600`` (``docs/SECRET_ROTATION.md``) — into ``PermissionError`` at **import of
+    this module**: gunicorn could not boot, the Celery worker crash-looped under
+    ``Restart=always`` with one identical traceback every five seconds and nothing
+    saying why, and the suite or a manage.py command died before printing anything
+    useful. A file this user cannot read is a **missing** file, not a fatal one: the
+    reason is recorded on :data:`DOTENV_ERROR` and the process carries on with the
+    environment systemd and the shell already provided.
+
+    This cannot turn a real misconfiguration into a silent one. Whether the
+    environment is *complete* is a different question, and ``Config.validate()``
+    still refuses to boot production without the required variables — with a
+    message naming them, which is better than a traceback out of a file reader.
+
+    ``path`` is for a caller with an explicit file (and for the tests below); the
+    default is what ``load_dotenv()`` resolves — the nearest ``.env`` above this
+    module.
+    """
+    try:
+        load_dotenv() if path is None else load_dotenv(path)
+    except OSError as exc:              # unreadable, a directory, a broken link
+        reason = f"{type(exc).__name__}: {exc}"
+        logger.warning(
+            "could not read the environment file (%s); continuing with the "
+            "environment as given — `EnvironmentFile=` in the systemd unit is "
+            "what supplies the box's variables", reason)
+        return reason
+    return ""
+
+
+#: Why the environment file could not be read, or ``""`` when it was read (or when
+#: the box has none, which python-dotenv treats as success). Published so a test, a
+#: probe or a future health check can tell "no ``.env`` here" from "a ``.env`` this
+#: user cannot read" — the two look identical from the environment alone.
+DOTENV_ERROR = load_env_file()
 
 _INLINE_COMMENT = re.compile(r"\s+#")
 

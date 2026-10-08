@@ -2106,6 +2106,21 @@ Three differences from the app gate, each of them a decision:
   worker's own app and uses `control.broadcast`, which reaches the registered command.
 * **A box with no worker unit is not a failure.** `scangrade-celery` missing means
   async OMR simply queues; the block logs that and moves on.
+* **It runs as the app's account, not the web server's.** The two processes hand each
+  other *paths inside this checkout* — the scan route writes the upload under
+  `app/static/uploads/scans/` and enqueues the worker with that path, not with the
+  bytes — so ownership and mode decide, per file, whether the work can be done at all,
+  and two accounts are two answers to that one question: a `0750` directory, or any
+  umask stricter than the writer's, leaves the file the app has just written
+  unreadable to a worker running as `www-data`, and the task fails on a file that is
+  plainly there. `deploy/celery.service` therefore names the same `User=`/`Group=` as
+  `deploy/scangrade.service` — the pair `install-auto-deploy.sh` already reads as the
+  identity the box runs as, and from which it builds the deploy state directory's
+  ownership. The installer installs the worker's unit as well (as
+  `scangrade-celery.service`, the name the roster and the runner use), because the
+  runner restarts the units the roster names and installs none; and because a process
+  keeps the account it started as, a unit that run wrote is followed by a restart of
+  the unit — the tick after an arm deploys nothing, so no later release would do it.
 
 ### Every long-lived process, and the roster that closes the set
 

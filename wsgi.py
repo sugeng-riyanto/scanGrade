@@ -1,7 +1,10 @@
+# The `.env` is read once, tolerantly, by `app.config` — importing the package
+# below is what runs that, before `create_app()` reads a single setting. Calling
+# python-dotenv here instead made an unreadable `.env` fatal to *this* file too:
+# the read was unguarded, so gunicorn's workers died at import with
+# `PermissionError` while the unit's own `EnvironmentFile=` was loading the box's
+# variables perfectly well (see `app.config.load_env_file`).
 import os
-from dotenv import load_dotenv
-
-load_dotenv()
 
 from app import create_app
 
