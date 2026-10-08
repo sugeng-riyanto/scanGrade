@@ -82,6 +82,25 @@ ALTER TABLE exams ADD COLUMN IF NOT EXISTS require_seb BOOLEAN NOT NULL DEFAULT 
 COMMENT ON COLUMN exams.require_seb IS
     'Bila true, kertas ini hanya boleh dibuka dari Safe Exam Browser. DEFAULT false, dan itu bukan kehati-hatian berlebihan: SEB TIDAK ADA untuk Android dan ChromeOS, jadi menyalakan ini pada ujian yang dikerjakan dari HP akan memblokir total mayoritas murid. Hanya untuk ujian di laptop/lab/iPad.';
 
+-- Config Key — "kunci masuk", dan SATU nilai untuk seluruh kelas.
+--
+-- Hitungan server dari SEB-JSON pengaturan yang server hasilkan sendiri (lihat
+-- app/services/seb_config_key.py), lalu divalidasi terhadap header klien
+-- `X-SafeExamBrowser-ConfigKeyHash` = SHA256(URL absolut tanpa fragment + Config Key).
+--
+-- KENAPA BUKAN BROWSER EXAM KEY, dan ini keputusan yang tidak boleh dibalik tanpa
+-- membaca sumber resminya: BEK dihitung dari pengaturan config **DAN tanda tangan
+-- biner aplikasi SEB itu sendiri**, yang berbeda per versi/platform, sehingga TIDAK
+-- BISA dihitung server — satu-satunya jalan adalah mengumpulkan kunci terdaftar dari
+-- setiap platform. Config Key tidak memuat tanda tangan apa pun: spesifikasi resmi
+-- menyatakan ia "same in each platform version of SEB" dan justru "can be calculated
+-- in an exam system (server-side)". Jadi tidak ada kolom BEK di skema ini, dan
+-- ketiadaannya adalah penegakannya: kolom yang tidak ada tidak bisa dipakai.
+ALTER TABLE exams ADD COLUMN IF NOT EXISTS seb_config_key TEXT;
+
+COMMENT ON COLUMN exams.seb_config_key IS
+    'Config Key (kunci masuk) yang dihitung server dari SEB-JSON pengaturan ujian ini. BUKAN Browser Exam Key: BEK memuat tanda tangan biner aplikasi SEB sehingga TIDAK BISA dihitung server, sedangkan Config Key dirancang tepat untuk skenario ini dan tidak berubah antar versi/platform SEB.';
+
 -- ── 2. sinyal lingkungan (probabilistik, non-punitif) ───────────────────────
 
 CREATE TABLE IF NOT EXISTS public.environment_signal (
@@ -141,17 +160,11 @@ CREATE TABLE IF NOT EXISTS public.exam_seb_credential (
     quit_password_enc TEXT NOT NULL,
     admin_password_hash TEXT NOT NULL,
     admin_password_enc TEXT NOT NULL,
-    -- Config Key = SHA-256 Base16 dari JSON kanonik pengaturan SEB yang server
-    -- hasilkan sendiri (lihat app/services/seb_service.py). SEB mengirim
-    -- `X-SafeExamBrowser-ConfigKeyHash` = SHA256(URL absolut + Config Key);
-    -- itulah "kunci masuk" yang bisa diverifikasi server tanpa menebak.
-    config_key TEXT,
-    -- Browser Exam Key: dibiarkan NULL dan TIDAK PERNAH di-generate server.
-    -- BEK memuat tanda tangan kode aplikasi SEB, jadi hanya klien SEB yang bisa
-    -- membuatnya (dinyatakan resmi oleh proyek SEB). Kolom ini menerima nilai
-    -- yang di-*daftarkan* sekolah dari SEB Config Tool, dan server hanya
-    -- membandingkan. Kunci yang bisa dibuat server tidak membuktikan apa pun.
-    browser_exam_key TEXT,
+    -- Config Key sengaja TIDAK di sini melainkan di `exams.seb_config_key`: ia
+    -- milik UJIAN (satu nilai untuk seluruh kelas, dihitung dari pengaturan ujian),
+    -- sedangkan tabel ini memegang RAHASIA keluar. Menaruhnya di dua tempat adalah
+    -- cara dua nilai mulai berbeda — dan yang basi akan tampak benar sampai ada
+    -- murid yang tidak bisa membuka kertasnya.
     created_by UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -159,9 +172,6 @@ CREATE TABLE IF NOT EXISTS public.exam_seb_credential (
 
 COMMENT ON TABLE public.exam_seb_credential IS
     'Satu baris per ujian: hash password keluar/admin (masuk ke berkas .seb) DAN salinan plain text terenkripsi (untuk staf berwenang). Plain text TIDAK PERNAH ikut ke berkas .seb yang diunduh siapa pun.';
-COMMENT ON COLUMN public.exam_seb_credential.browser_exam_key IS
-    'BEK yang didaftarkan sekolah dari SEB Config Tool. SERVER TIDAK PERNAH MEMBUATNYA: BEK memuat tanda tangan kode aplikasi SEB, jadi hanya klien SEB yang bisa menghasilkannya — kunci yang bisa dibuat server tidak membuktikan kliennya SEB asli.';
-
 -- Satu ujian, satu baris: menerbitkan ulang password memperbarui barisnya.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_exam_seb_credential_exam
     ON public.exam_seb_credential(exam_id);

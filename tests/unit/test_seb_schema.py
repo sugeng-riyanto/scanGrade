@@ -112,19 +112,43 @@ class TestTheSwitchCannotBlockAPupilByDefault:
         assert "memblokir total mayoritas murid" in SQL or "blocks the majority" in SQL
 
 
-class TestTheServerNeverMintsTheBrowserExamKey:
-    def test_the_column_is_nullable_with_no_default(self):
-        match = re.search(r"(?im)^\s*browser_exam_key .*$", SQL)
-        assert match, "browser_exam_key is missing"
-        line = match.group(0)
-        assert "NOT NULL" not in line.upper(), (
-            "a BEK that has not been registered is *absent*, not empty-string defaulted")
-        assert "DEFAULT" not in line.upper(), "no default may fabricate a BEK"
+class TestThereIsNoBrowserExamKeyAtAll:
+    """The correction that shapes this feature, and it is enforced by *absence*.
 
-    def test_the_migration_says_only_a_client_can_produce_one(self):
-        assert "TIDAK PERNAH" in SQL or "never" in SQL.lower()
-        assert "klien SEB" in SQL or "SEB client" in SQL, (
-            "the file must record that only an SEB client can produce a BEK")
+    Rewritten from the shape this class had before, and the rewrite is stricter
+    rather than looser: it used to require a `browser_exam_key` column kept nullable
+    and never populated. The BEK hashes the config **and the SEB binary's own
+    signature**, so it differs per version and platform and cannot be computed by a
+    server — the only road would be collecting a registered key per platform, which is
+    precisely the complexity the Config Key removes. A column that does not exist
+    cannot be filled in by a mistaken writer; a nullable one only documents that
+    nobody should. So the assertion is now that the column is gone.
+    """
+
+    def test_no_bek_column_exists_anywhere(self):
+        assert not re.search(r"(?im)^\s*browser_exam_key\b", SQL), (
+            "a `browser_exam_key` column is back. It cannot be produced server-side, so "
+            "its existence only invites a writer to try — the Config Key replaces it, "
+            "and absence is the enforcement.")
+
+    def test_the_servers_own_key_is_the_config_key_on_the_exam(self):
+        assert re.search(
+            r"(?is)ALTER TABLE exams ADD COLUMN IF NOT EXISTS seb_config_key\b", SQL), \
+            "exams.seb_config_key is missing"
+        assert not re.search(r"(?im)^\s*config_key\s+(TEXT|UUID|JSONB)", SQL), (
+            "the Config Key is declared a second time. It belongs to the *exam* — one "
+            "value for the whole class — and two homes is how two values start to "
+            "differ, with the stale one looking correct until a pupil cannot open "
+            "their paper.")
+
+    def test_the_migration_records_why_config_key_replaces_the_bek(self):
+        """The next reader has to meet the reason, not just the shape."""
+        assert "Browser Exam Key" in SQL, (
+            "the file must name the thing it is replacing")
+        assert "dihitung server" in SQL, (
+            "the file must record that the BEK cannot be computed server-side")
+        assert "Config Key" in SQL and "platform" in SQL, (
+            "and that the Config Key is the value that holds across platforms")
 
 
 class TestTheWeakSignalIsNotPunitive:
