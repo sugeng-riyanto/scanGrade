@@ -190,9 +190,144 @@ def accept_invite(supabase, user_id, school_id) -> dict:
     return (res.data or [{}])[0]
 
 
-def deactivate(supabase, school_id, user_id) -> None:
-    (supabase.table("teacher_school_membership")
-     .update({"status": "inactive"})
-     .eq("school_id", school_id)
-     .eq("user_id", user_id)
+#: Roles that may DECIDE a join request (approve or reject) in the destination
+#: school. Read side by side with `admin_sekolah_required` on purpose: approving a
+#: new request is a decision THREE roles may take, and one is enough.
+APPROVER_ROLES = ("admin_sekolah", "principal", "vice_principal")
+
+#: Roles that may REOPEN a closed membership. ONE role — and that asymmetry is the
+#: product decision, not an oversight: approving a new request is academic, while
+#: reopening a membership that was closed is administrative and is kept to the
+#: school admin alone. `reopen_membership` enforces it at the service, so the rule
+#: holds for every caller and not only for the route that remembers a decorator.
+REOPEN_ROLES = ("admin_sekolah",)
+
+#: The single canonical status for ANY closure, since migration 064. The 044 value
+#: `inactive` is migrated to this and is no longer written by any code path — a
+#: second name for one state is how a page ends up showing two kinds of closure.
+CLOSED_STATUS = "closed"
+
+
+def may_approve(role) -> bool:
+    return role in APPROVER_ROLES
+
+
+def may_reopen(role) -> bool:
+    return role in REOPEN_ROLES
+
+
+def deactivate(supabase, school_id, user_id, actor_id=None) -> dict:
+    """Close a membership: the canonical closure, `closed`, never `inactive`.
+
+    `closed_by`/`closed_at` are written so the closure has an author — a closure
+    with no author is the record a school cannot act on. Scoped to the
+    `(school, user)` pair, so a caller cannot close a membership in another school
+    by passing an id alone.
+    """
+    from datetime import datetime, timezone
+    res = (supabase.table("teacher_school_membership")
+           .update({"status": CLOSED_STATUS,
+                    "closed_by": actor_id,
+                    "closed_at": datetime.now(timezone.utc).isoformat()})
+           .eq("school_id", school_id)
+           .eq("user_id", user_id)
+           .execute())
+    return (res.data or [{}])[0]
+
+
+def reopen_membership(supabase, school_id, user_id, actor_id=None,
+                      actor_role=None) -> dict:
+    """Reopen a closed membership — and refuse anyone but `REOPEN_ROLES`.
+
+    The role is checked HERE, not only in the route. A route decorator protects the
+    one door it is written on; this function protects every caller, including a
+    future one that forgets the decorator. The refusal happens BEFORE any write, so
+    an unauthorised attempt leaves no row changed and no field cleared.
+
+    The closure's own history (`closed_by`/`closed_at`) is KEPT: reopening is a new
+    fact, not an erasure of the old one.
+    """
+    from datetime import datetime, timezone
+    if not may_reopen(actor_role):
+        return {"ok": False, "reason": "not_authorised"}
+    res = (supabase.table("teacher_school_membership")
+           .update({"status": "active",
+                    "reopened_by": actor_id,
+                    "reopened_at": datetime.now(timezone.utc).isoformat()})
+           .eq("school_id", school_id)
+           .eq("user_id", user_id)
+           .eq("status", CLOSED_STATUS)
+           .execute())
+    rows = res.data or []
+    if not rows:
+        return {"ok": False, "reason": "not_closed_or_missing"}
+    return {"ok": True, "membership": rows[0]}
+
+
+def grant_membership(supabase, school_id, user_id, actor_id=None,
+                     role="guru") -> dict:
+    """Give an active membership — what an approved request amounts to.
+
+    Upserts on the `(user_id, school_id)` pair, so a teacher who re-applies and is
+    approved again re-activates their existing row instead of creating a second one
+    for the same pair.
+    """
+    from datetime import datetime, timezone
+    res = (supabase.table("teacher_school_membership").upsert({
+        "user_id": user_id,
+        "school_id": school_id,
+        "school_role": role,
+        "status": "active",
+        "invited_by": actor_id,
+        "joined_at": datetime.now(timezone.utc).isoformat(),
+    }, on_conflict="user_id,school_id").execute())
+    return (res.data or [{}])[0]
+
+
+def decide_request(supabase, school_id, user_id_request, decision,
+                   actor_id=None, actor_role=None, reason=None) -> dict:
+    """Approve or reject a join request — in the destination school only.
+
+    Three checks, each a refusal BEFORE any write:
+
+    1. the caller's role may approve at all (`APPROVER_ROLES`);
+    2. the request exists AND its `target_school_id` is the caller's own school —
+       a request in another school reads as **not found**, not as forbidden, so
+       the caller cannot even learn that it exists;
+    3. the request is still `pending` — an already-decided request is not decided
+       twice.
+
+    Approval also grants the membership in the same call, so a request can never
+    read `approved` while the access it promised does not exist.
+    """
+    from datetime import datetime, timezone
+    if not may_approve(actor_role):
+        return {"ok": False, "reason": "not_authorised"}
+    if decision not in ("approved", "rejected"):
+        return {"ok": False, "reason": "bad_decision"}
+    try:
+        rows = (supabase.table("school_membership_request")
+                .select("id,teacher_id,target_school_id,status")
+                .eq("id", user_id_request)
+                .eq("target_school_id", school_id)
+                .eq("status", "pending")
+                .limit(1).execute().data or [])
+    except Exception:
+        logger.debug("request read failed; refusing", exc_info=True)
+        return {"ok": False, "reason": "read_failed"}
+    if not rows:
+        return {"ok": False, "reason": "not_found"}
+    row = rows[0]
+    (supabase.table("school_membership_request")
+     .update({"status": decision,
+              "decided_by": actor_id,
+              "decided_role": actor_role,
+              "decision_reason": reason,
+              "decided_at": datetime.now(timezone.utc).isoformat()})
+     .eq("id", row["id"])
+     .eq("target_school_id", school_id)
+     .eq("status", "pending")
      .execute())
+    if decision == "approved":
+        grant_membership(supabase, school_id, row["teacher_id"], actor_id=actor_id)
+    return {"ok": True, "request_id": row["id"], "decision": decision}
