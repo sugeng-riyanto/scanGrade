@@ -44,12 +44,22 @@ A count above zero means pupils are working now — wait.
    # edit the SUPABASE_SERVICE_KEY line by hand; do not paste it into a shell history
    chmod 600 .env
    ```
-   The mode is safe to tighten because **both** units are handed the file as
-   `EnvironmentFile=/opt/scangrade/.env`, and systemd reads it as root — neither
-   process, both of which run as `User=scangrade`, ever needs to open it itself.
-   That was not always true of the worker, and it was not always the same account:
-   it read the file itself, so a `600` root-owned `.env` took it down in a restart
-   loop with nothing in the journal saying why.
+   `chmod 600` is safe to tighten, and **the owner is the part that matters**: leave
+   the file owned by `scangrade`. **Both units** are handed it as
+   `EnvironmentFile=/opt/scangrade/.env`, which systemd reads as root, so neither the
+   app nor the worker needs to open it itself — and that was not always true of the
+   worker, nor was it always the same account: it read the file itself, so a `600`
+   `.env` took it down in a restart loop with nothing in the journal saying why.
+
+   The **deploy** is a third reader, and it does open the file. `scangrade-deploy`
+   constructs the app as `User=scangrade` in a bare process, with no
+   `EnvironmentFile` in front of it, so a `.env` that account cannot read fails the
+   release with `app did not construct (exit 9)` and quarantines the commit — every
+   release, until the ownership is put back. Owner `scangrade` at mode `600`
+   satisfies all three readers; a **root-owned** `600` file (or any mode that drops
+   the owner's read) appears to work on the running box and then refuses the next
+   release. Measured on the box: with `root:root 600` the deploy logged exactly that
+   refusal, and with `scangrade:scangrade 600` the same commit deployed.
 3. Restart the app and the worker, then confirm the box is healthy:
    ```bash
    systemctl restart scangrade scangrade-celery
