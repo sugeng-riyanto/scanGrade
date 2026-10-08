@@ -326,10 +326,26 @@ def test_the_installer_installs_the_worker_unit_too():
     all use.
     """
     install = INSTALL_SH.read_text(encoding="utf-8")
-    assert re.search(r"^\s*celery\.service:\$WORKER_UNIT$", install, re.M), (
+    assert re.search(r"^\s*celery\.service:\$WORKER_UNIT\.service$", install, re.M), (
         "the installer does not install the worker's unit, so a repository edit to "
         "it cannot reach a box; the entry belongs in the unit loop, named from "
         "$WORKER_UNIT so the installed name has one home")
+    # The suffix is the half that landed wrong the first time. `WORKER_UNIT` names the
+    # **unit** — what `systemctl restart scangrade-celery` takes — while the *file* must
+    # be `scangrade-celery.service`. An entry ending at `$WORKER_UNIT` wrote
+    # `/etc/systemd/system/scangrade-celery`, which systemd does not read at all: the
+    # install logged "installed", the restart logged "active", and the box went on
+    # running the previous unit's account, because the file it wrote was never the file
+    # it restarted. Nothing else in this file can see that — a copy that succeeds is a
+    # copy that succeeds, whether or not systemd will ever look at the destination.
+    assert not re.search(r"^\s*celery\.service:\$WORKER_UNIT$", install, re.M), (
+        "the worker's unit is installed without its `.service` suffix, which is a "
+        "file systemd never reads; the install and the restart would then both "
+        "report success while the box kept the old unit")
+    assert re.search(r'if \[ "\$dest_unit" = "\$WORKER_UNIT\.service" \]; then', install), (
+        "the marker that decides whether to restart no longer matches the name the "
+        "loop writes, so a worker unit this run wrote is never brought into force "
+        "and the process keeps the account it was started with")
 
 
 def test_a_worker_unit_this_run_wrote_is_restarted_into_it():
