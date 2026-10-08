@@ -5,9 +5,36 @@ Wants=redis-server.service
 
 [Service]
 Type=simple
-User=www-data
-Group=www-data
+
+# The account the app runs as, and deliberately not a second one. The two
+# processes share this checkout and hand work to each other **by path**: the scan
+# route writes the upload under `app/static/uploads/scans/` and enqueues this
+# worker with that path, so the worker opens a file the app has just created. The
+# answer to "may this file be read" is ownership and mode, one decision per file,
+# and two accounts is two answers — a `0750` directory, or any umask stricter than
+# the writer's, leaves the file the app just wrote unreadable here, and the task
+# fails with `PermissionError` on a file that is sitting right there.
+#
+# `www-data` was never a wrong account in itself; it was a *different* one, and it
+# is the box's web server's identity rather than this checkout's. It also made the
+# unit a copy: `install-auto-deploy.sh` reads the app unit's `User=`/`Group=` as the
+# identity the box runs as and builds the deploy state directory's ownership from
+# them, so a worker outside that pair is a second identity on one box. Same account,
+# same answer, and a file either process creates is one the other can read and
+# remove.
+User=scangrade
+Group=scangrade
 WorkingDirectory=/opt/scangrade
+
+# The same file the app unit is given, and for the same reason: systemd reads it
+# **as root**, so the worker's environment no longer depends on whether `www-data`
+# can open a `.env` that `docs/SECRET_ROTATION.md` tells an operator to `chmod 600`.
+# That mode change is the failure this closes — the worker used to read the file
+# itself and a root-only `.env` took it down in a restart loop that said nothing.
+# No `-` prefix on purpose: a `.env` that cannot be loaded is a worker that must not
+# start, and the deploy's worker gate refuses a release with no worker (exit 4)
+# rather than shipping one that cannot run a task.
+EnvironmentFile=/opt/scangrade/.env
 Environment=FLASK_ENV=production
 Environment=PYTHONUNBUFFERED=1
 ExecStart=/opt/scangrade/.venv/bin/celery -A app.celery_app worker --loglevel=info --concurrency=1 --max-memory-per-child=300000

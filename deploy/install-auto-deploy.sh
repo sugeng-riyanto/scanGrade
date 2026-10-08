@@ -16,6 +16,11 @@ set -euo pipefail
 
 REPO="/opt/scangrade"
 SERVICE="scangrade"
+#: The worker, under the name the box knows it by. `deploy/celery.service` is
+#: installed as `scangrade-celery.service` — the name `/etc/systemd/system`,
+#: `deploy/long_lived.py`'s roster and `deploy/deploy.sh` all use — so it is a
+#: variable rather than a literal repeated in the unit loop below.
+WORKER_UNIT="scangrade-celery"
 BRANCH="main"
 DEPLOY_BIN="/usr/local/bin/scangrade-deploy"
 SNAPSHOT_BIN="/usr/local/bin/scangrade-db-snapshot"
@@ -613,20 +618,40 @@ fi
 # ── 4. Unit files. Back up anything we replace: this is the file that keeps the
 #       site up, and a silent overwrite with a wrong copy would be unrecoverable.
 say "Installing systemd units"
-for unit in scangrade.service scangrade-deploy.service scangrade-deploy.timer; do
-  dest="/etc/systemd/system/$unit"
-  src="$REPO/deploy/$unit"
+# `source:installed`, because a unit's file is not always named what the box calls
+# the unit: `deploy/celery.service` is installed as `$WORKER_UNIT`. It is in this
+# list because nothing else installs it — the runner restarts the units the roster
+# names and installs none, and the tick after an arm finds the checkout already at
+# origin/main, so no release is left to carry a unit edit. A unit missing here is a
+# unit the repository can never correct on a box, which is how the worker went on
+# running as an account the app does not while every change to the app's own unit
+# landed.
+WORKER_UNIT_CHANGED=0
+for entry in \
+    scangrade.service: \
+    scangrade-deploy.service: \
+    scangrade-deploy.timer: \
+    celery.service:$WORKER_UNIT
+do
+  src_unit=${entry%%:*}
+  dest_unit=${entry#*:}
+  [ -n "$dest_unit" ] || dest_unit="$src_unit"
+  dest="/etc/systemd/system/$dest_unit"
+  src="$REPO/deploy/$src_unit"
   if [ -f "$dest" ] && cmp -s "$src" "$dest"; then
-    echo "   $unit — unchanged"
+    echo "   $dest_unit — unchanged"
     continue
   fi
   if [ -f "$dest" ]; then
     cp -a "$dest" "$dest.bak-$STAMP"
-    echo "   $unit — replaced (previous kept as $unit.bak-$STAMP)"
+    echo "   $dest_unit — replaced (previous kept as $dest_unit.bak-$STAMP)"
   else
-    echo "   $unit — installed"
+    echo "   $dest_unit — installed"
   fi
   install -m 0644 -o root -g root "$src" "$dest"
+  if [ "$dest_unit" = "$WORKER_UNIT" ]; then
+    WORKER_UNIT_CHANGED=1
+  fi
 done
 
 systemctl daemon-reload
@@ -655,6 +680,23 @@ echo "   app answered $PROBE on 127.0.0.1:8000"
 if [ "$PROBE" != "200" ]; then
   echo "!! the app is not serving; check: journalctl -u $SERVICE -n 50"
   exit 7
+fi
+
+# ── 4c. Bring the worker onto the unit just written. Installing a unit is not
+#        running it: `daemon-reload` changes what systemd *would* start, and the
+#        worker process keeps the account it was started as. Nothing else does it
+#        for you — the runner restarts the roster's units into a *release*, and the
+#        tick after an arm finds the checkout already at origin/main, so there is no
+#        release left to carry a unit edit. Conditional on the unit having actually
+#        been written, because an unnecessary restart interrupts async OMR for no
+#        reason; reported, because a worker that does not come back is the other
+#        half of the same bug.
+if [ "$WORKER_UNIT_CHANGED" = "1" ]; then
+  say "Restarting $WORKER_UNIT so it runs as $SERVICE_USER"
+  systemctl restart "$WORKER_UNIT" 2>/dev/null \
+    || echo "   $WORKER_UNIT did not restart — async OMR queues until it does"
+  sleep 1
+  echo "   $WORKER_UNIT is $(systemctl is-active "$WORKER_UNIT" 2>/dev/null || true)"
 fi
 
 # ── 5. Turn the timer on. start, not restart: an in-flight run is left alone.

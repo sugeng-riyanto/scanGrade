@@ -206,6 +206,156 @@ def test_the_worker_unit_runs_this_app_from_the_checkout():
     )
 
 
+def test_the_worker_is_given_the_env_file_by_systemd():
+    """The worker used to read `.env` itself, as `www-data` — and the box's is 600.
+
+    `docs/SECRET_ROTATION.md` tells an operator to `chmod 600` the box's `.env`, and
+    `deploy/deploy.sh` writes it while running as root, so a worker running as
+    `www-data` could not open it: an unguarded `load_dotenv()` raised
+    `PermissionError` at import, and `Restart=always` turned that into a restart
+    loop whose only trace was a journal of identical tracebacks — the worker gone
+    and nothing saying why. `EnvironmentFile=` is read by systemd **as root**, which
+    is what makes the file's mode irrelevant to the process.
+
+    Parity is the rule, not convenience: the app unit is handed this same file, so
+    a variable the worker needs cannot be one the app has and the worker does not.
+    """
+    app_unit = APP_SERVICE.read_text(encoding="utf-8")
+    worker = WORKER_UNIT.read_text(encoding="utf-8")
+
+    env_files = re.findall(r"^EnvironmentFile=(.+)$", app_unit, re.M)
+    assert env_files, (
+        "scangrade.service no longer names an EnvironmentFile, so this guard cannot "
+        "say what the worker should be given")
+    given = env_files[0].strip()
+    assert f"EnvironmentFile={given}" in worker, (
+        f"the worker is not given {given}, so its environment depends on whether "
+        "the app's user can open a file an operator is told to keep root-only")
+    assert f"EnvironmentFile=-{given}" not in worker, (
+        "an optional EnvironmentFile lets the worker start with an empty "
+        "environment — a worker that boots and fails every task is the silent "
+        "half of this bug; the deploy's worker gate refuses a release with no "
+        "worker at all (exit 4), so a unit that will not start is the loud one")
+
+
+def _unit_directive(text: str, key: str) -> str:
+    """One `User=`/`Group=` out of a unit file, or the empty string.
+
+    Read rather than assumed: the app unit is the authority on the account the box
+    runs as (`install-auto-deploy.sh` derives the service user and group from it and
+    builds the state directory's ownership out of them), so the worker is compared
+    against the app's answer instead of a name repeated here.
+    """
+    m = re.search(rf"^{key}=(.+)$", text, re.M)
+    return m.group(1).strip() if m else ""
+
+
+def test_the_worker_runs_as_the_same_account_as_the_app():
+    """One checkout, one account: "may I read this file" has to have one answer.
+
+    The two processes are not independent, and the file they hand each other is
+    inside this checkout: the scan route writes the upload under
+    `app/static/uploads/scans/` and enqueues the worker **with that path**, so the
+    worker opens a file the app has just created, and the app reads back and removes
+    what the worker leaves. Ownership and mode are one decision *per file*, and a
+    second account is a second answer to it: a `0750` directory, or any umask
+    stricter than the writing process's, leaves the file the app just wrote
+    unreadable to a worker running as somebody else — the task fails with
+    `PermissionError` on a file that is demonstrably there, and the process that can
+    read it is the one that did not fail.
+
+    `www-data` is not a worse account than any other; it is that it is a *different*
+    one, and it is the box's web server's identity rather than this checkout's. The
+    app unit's answer is the answer.
+    """
+    app_unit = APP_SERVICE.read_text(encoding="utf-8")
+    worker = WORKER_UNIT.read_text(encoding="utf-8")
+
+    app_user = _unit_directive(app_unit, "User")
+    app_group = _unit_directive(app_unit, "Group")
+    assert app_user and app_group, (
+        "scangrade.service names no User/Group, so this guard cannot say which "
+        "account the worker should run as")
+
+    worker_user = _unit_directive(worker, "User")
+    assert worker_user == app_user, (
+        f"the worker runs as {worker_user or 'an unstated account'} while the app "
+        f"runs as {app_user}: two answers to whether a file the other wrote may be "
+        "read, and the box's web-server account is not this checkout's")
+    assert _unit_directive(worker, "Group") == app_group, (
+        f"the worker's group is not the app's ({app_group}), so a file the app "
+        "creates group-readable is not group-readable to the worker")
+
+
+def test_the_two_processes_still_hand_each_other_files_by_path():
+    """The premise of the guard above, checked so it is a requirement, not a habit.
+
+    If the worker stopped being handed a path inside the checkout — the bytes
+    posted to the broker, an object store, the app reading its own result — the
+    account would stop mattering, and the guard above would be pinning a
+    coincidence. So the handing is read: the upload lands under the checkout's
+    `static/uploads/scans`, the worker is enqueued with that path, not with the
+    bytes.
+    """
+    api = (ROOT / "app" / "routes" / "api.py").read_text(encoding="utf-8")
+    assert re.search(
+        r'UPLOAD_SCAN_DIR = os\.path\.join\(.*"static", "uploads", "scans"\)', api), (
+        "the scan upload no longer lands inside the checkout, so the account "
+        "parity this file guards needs re-reading before it is trusted")
+    assert re.search(r'scan_dir = os\.path\.join\(UPLOAD_SCAN_DIR, "tmp"\)', api)
+    assert re.search(r"scan_temp_path = os\.path\.join\(scan_dir", api)
+    assert "image_path=scan_temp_path" in api, (
+        "the worker is no longer handed the upload's path, so it no longer reads "
+        "a file the app wrote")
+
+
+def test_the_installer_installs_the_worker_unit_too():
+    """A unit the installer does not copy is one the repository cannot correct.
+
+    The box's `/etc/systemd/system/scangrade-celery.service` is re-read from the
+    checkout by nothing: the runner restarts the units the roster names and installs
+    none, and the tick after an arm finds the checkout already at `origin/main`, so
+    there is no release left to carry a unit edit either. That is how the worker went
+    on running as an account the app does not while every improvement to the app's
+    own unit landed. So the worker's file belongs in the same loop that already
+    compares, backs up and installs the app's unit.
+
+    Installed under a different name than the file it comes from, on purpose:
+    `celery.service` becomes `scangrade-celery.service` — the name
+    `/etc/systemd/system`, `deploy/long_lived.py`'s roster and `deploy/deploy.sh`
+    all use.
+    """
+    install = INSTALL_SH.read_text(encoding="utf-8")
+    assert re.search(r"^\s*celery\.service:\$WORKER_UNIT$", install, re.M), (
+        "the installer does not install the worker's unit, so a repository edit to "
+        "it cannot reach a box; the entry belongs in the unit loop, named from "
+        "$WORKER_UNIT so the installed name has one home")
+
+
+def test_a_worker_unit_this_run_wrote_is_restarted_into_it():
+    """Installing a unit is not running it: a process keeps the account it started as.
+
+    `daemon-reload` changes what systemd *would* start. So an install that wrote a
+    worker unit naming another `User=` and stopped there would leave the running
+    worker holding the old identity indefinitely — and nothing else would correct it,
+    because the runner restarts the roster's units into a *release* and the tick
+    after an arm deploys nothing. The restart is conditional, because an unnecessary
+    one interrupts async OMR for no reason, and it is reported, because a worker that
+    does not come back is the other half of this bug.
+    """
+    install = INSTALL_SH.read_text(encoding="utf-8")
+    assert re.search(r'^WORKER_UNIT="scangrade-celery"$', install, re.M), (
+        "the installer no longer names the worker's unit, so it cannot restart it")
+    units = install.index('say "Installing systemd units"')
+    rest = install[units:]
+    assert re.search(r'if \[ "\$WORKER_UNIT_CHANGED" = "1" \]; then', rest), (
+        "the installer restarts the worker unconditionally, or never: only a unit "
+        "this run wrote needs the process brought onto it")
+    assert re.search(r'systemctl restart "\$WORKER_UNIT"', rest), (
+        "a worker unit this run wrote is never brought into force, so the process "
+        "keeps the account it was started with")
+
+
 # ── the bytes Gate 0 compares ────────────────────────────────────
 
 #: The files that are read as *bytes* rather than as text. Gate 0 compares the
