@@ -7,5 +7,5 @@
 # Obeyed once per exact content: the `issued` stamp below is what makes a
 # re-issued command a new plan rather than one already obeyed.
 command: recover
-issued: 2026-10-10T06:08:56Z
-note: the box has refused every tick since 9 October 03:29 (main was rewritten); the lineages are joined now, and this asks the lever to clear whatever box-side state is still holding it
+issued: 2026-10-10T06:57:07Z
+note: the reconcile is on main now: run the lever so the box records the migrations its schema already carries (064 among them) and then lands the release
