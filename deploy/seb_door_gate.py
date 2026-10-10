@@ -183,6 +183,10 @@ BROWSER_UA = "ScanGrade-SebDoorGate-browser/1"
 CLIENT_BUDGET = 20.0
 POLL_EVERY = 0.5
 
+#: The two states the handshake page's own script settles into. `checking` is where it
+#: starts and is not an answer: a page still there has not finished asking the client.
+SETTLED_STATES = ("refused", "error")
+
 #: The throwaway row's title. It *is* the sweep's key, so a run that is killed leaves
 #: something the next run deletes rather than something a school has to find.
 TITLE = "ZZ SEB DOOR SMOKE - throwaway, safe to delete"
@@ -231,6 +235,7 @@ class Seen:
     client_measured: bool = False        # a browser reading was taken at all
     client_seb_api: bool = False         # ...and the browser really had no SEB API
     client_state: str = ""               # what the page's own state ended on
+    client_initialized: bool = True      # ...and the page's script ran at all
     client_refused_shown: bool = False   # the refusal panel is the one laid out
     client_reports: int = 0              # POSTs the page made to the refusal route, first load
     client_reports_total: int = 0        # ...and across the whole visit, which loads it twice
@@ -285,6 +290,20 @@ def _client_verdict(seen: Seen, lines: list[str]) -> None:
             "route whose record this database does not have yet (migration 064 is not "
             "applied here), so the row the client half is judged by cannot exist. "
             "This database is older than the record the release writes."
+        )
+        return
+
+    # Named before the state, because it is the *cause* and the other lines are its
+    # symptoms: a page whose script never started ends in state `''` with every panel
+    # laid out, and reporting that as "ended in state ''" sends the next reader looking
+    # for a state name instead of at a script that did not run. One finding, its cause.
+    if not seen.client_initialized:
+        lines.append(
+            "seb door: FAILED — the handshake page's own script never initialized in "
+            "the browser: the card was still carrying `x-cloak` and no Alpine scope "
+            "existed after the whole budget, so every `x-show` was unprocessed and "
+            "the refusal panel only *looked* laid out. A pupil is shown a blank card "
+            "for as long as that lasts, and the page never reports who was turned away."
         )
         return
 
@@ -696,6 +715,7 @@ class ClientReading:
     """What the browser's page did on its own. No verdict in here, on purpose."""
 
     state: str = ""                  # the page's own state when it settled
+    initialized: bool = False        # ...and whether the page's script ran at all
     refused_shown: bool = False      # the refusal panel is the one it laid out
     seb_api: bool = False            # ...and whether the browser had a SEB API
     reports: int = 0                 # POSTs the page made to the refusal route, first load
@@ -725,6 +745,23 @@ def client_expression() -> str:
     the state names are the page's own contract — `student/seb_claim.html` writes
     `state === 'refused'` and the test file fails if that string leaves the page.
 
+    Two things this read has to get right, and both were measured on the live box
+    rather than reasoned about — the first run of this gate against a served release
+    reported a working page as broken:
+
+    * **A panel is not a page that ran.** `x-show` is an attribute until Alpine
+      processes it, and an unprocessed one carries no `display: none` — so *every*
+      panel on a page whose script has not started reads as laid out. The timeline of
+      a real load was `t=+1.9s refused panel shown: true, state absent` … `t=+3.6s
+      state: 'refused'` (4.0s on a second run), and the gate had already believed the
+      first reading and navigated away. The panels are therefore read **within the
+      element that owns a `state`**,
+      which is empty until the script exists, and `initialized` says out loud whether
+      that element has been through Alpine at all.
+    * **The page is not the only thing on it.** A page-wide scan for `x-show` finds
+      the app shell's `x-show="toast.type==='error'"`, and the last match wins: the
+      toast's visibility was being read as the handshake page's `error` panel.
+
     `seb` is the gate's own honesty check about its population: an empty
     `SafeExamBrowser` object would mean this is not the client the `no_client` branch
     exists for, and the reading would be about something else.
@@ -732,33 +769,76 @@ def client_expression() -> str:
     return (
         "(() => {"
         f"  const names = {json.dumps(['checking', 'refused', 'error'])};"
+        # The *scope that has a `state`*, not the first `[x-data]` on the page. The
+        # layout is full of them (the app's own shell carries one), and the first
+        # match is the outermost: reading `[0].state` off it answered `null` on a page
+        # whose panel was unmistakably refused. Measured, not deduced — this read was
+        # wrong until a real browser was pointed at it.
+        "  let owner = null;"
+        "  let state = null;"
+        "  for (const el of document.querySelectorAll('[x-data]')) {"
+        "    for (const scope of (el._x_dataStack || [])) {"
+        "      if (scope && typeof scope.state === 'string') { owner = el; state = scope.state; }"
+        "    }"
+        "  }"
         "  const panels = {};"
-        "  for (const el of document.querySelectorAll('[x-show]')) {"
+        "  for (const el of (owner ? owner.querySelectorAll('[x-show]') : [])) {"
         "    const attr = el.getAttribute('x-show') || '';"
         "    const shown = getComputedStyle(el).display !== 'none';"
         "    for (const name of names) {"
         "      if (attr.indexOf(name) !== -1) panels[name] = shown;"
         "    }"
         "  }"
-        # The *scope that has a `state`*, not the first `[x-data]` on the page. The
-        # layout is full of them (the app's own shell carries one), and the first
-        # match is the outermost: reading `[0].state` off it answered `null` on a page
-        # whose panel was unmistakably refused. Measured, not deduced — this read was
-        # wrong until a real browser was pointed at it.
-        "  let state = null;"
-        "  for (const el of document.querySelectorAll('[x-data]')) {"
-        "    for (const scope of (el._x_dataStack || [])) {"
-        "      if (scope && typeof scope.state === 'string') state = scope.state;"
-        "    }"
-        "  }"
         "  return {"
         "    path: location.pathname,"
         "    state: state,"
         "    panels: panels,"
+        # Alpine's own witness that it has been through this element: it removes
+        # `x-cloak` from what it initializes, and the card carries `x-cloak` until it
+        # does. `owner` is the stronger of the two (a scope with `state` cannot exist
+        # before Alpine built it), and the attribute is reported beside it because it
+        # is what makes the page *look* settled — hidden card, unprocessed panels — to
+        # anyone asking the layout.
+        "    initialized: !!(owner && !(owner.hasAttribute && owner.hasAttribute('x-cloak'))),"
+        "    cloaked: !!document.querySelector('[x-data][x-cloak]'),"
         "    seb: !!(window.SafeExamBrowser && window.SafeExamBrowser.security),"
         "  };"
         "})()"
     )
+
+
+def refusal_posts(events: list) -> int:
+    """Refusal reports the browser has put on the wire so far, out of its own events.
+
+    The same count `_client_from` makes, on the same events, and named here because
+    the driver now *waits* on it: the page posts its report from the same handler that
+    flips its state, so "the page settled" and "the report is on the wire" are one
+    moment, and cutting the window between them counted zero reports for a page that
+    reported. Counting it twice would be two spellings of one fact.
+    """
+    seen = 0
+    for ev in events:
+        if ev.get("method") != "Network.requestWillBeSent":
+            continue
+        request = (ev.get("params") or {}).get("request") or {}
+        if str(request.get("method") or "").upper() == "POST" \
+                and str(request.get("url") or "").endswith(REFUSAL_SUFFIX):
+            seen += 1
+    return seen
+
+
+def settled(value: dict, posts: int, *, want_reports: int = 1) -> bool:
+    """Whether the page's own script has *finished*, and its report left.
+
+    The decision table, kept pure so it can be driven with the exact values a real
+    load produced: the layout of an un-run page (`state` absent, panels shown) is not
+    settled however many panels are on the screen, a page still `checking` is not an
+    answer, and a page that settled without a report on the wire is not ready to be
+    counted — that report is the whole reason this half of the gate exists.
+    """
+    if str(value.get("state") or "") not in SETTLED_STATES:
+        return False
+    return posts >= want_reports
 
 
 def _client_from(value: dict, landed: str, events: list, first_load: int) -> ClientReading:
@@ -778,6 +858,10 @@ def _client_from(value: dict, landed: str, events: list, first_load: int) -> Cli
     panels = value.get("panels") or {}
     reading = ClientReading(
         state=str(value.get("state") or ""),
+        # Fail-closed on purpose: a reading that cannot say whether the page's script
+        # ran is not a page that ran. The expression always sends it, so an absent key
+        # means the probe and the page have drifted apart — which is a finding.
+        initialized=bool(value.get("initialized")),
         refused_shown=bool(panels.get("refused")),
         seb_api=bool(value.get("seb")),
         landed=landed or str(value.get("path") or ""),
@@ -878,21 +962,35 @@ async def _drive_client(base_url, browser, cookies, claim_url, paper, insecure):
                              domain=host, path="/", secure=secure)
             await c.send("Emulation.setDeviceMetricsOverride", width=1280, height=900,
                          deviceScaleFactor=1, mobile=False)
-            await c.send("Page.navigate", url=claim_url)
-            deadline = time.time() + CLIENT_BUDGET
-            while True:
+            async def read_page() -> dict:
+                """One pump for the network, then the page's own answer.
+
+                Both halves matter, and in this order: the reading is what the page's
+                script *decided*, and the pump is what puts its decision on the wire —
+                the report leaves from the same handler that sets the state, so the
+                request trails the state by however long a fetch takes to start.
+                """
                 await c.pump(POLL_EVERY)
                 out = await c.send("Runtime.evaluate", expression=client_expression(),
                                    returnByValue=True, awaitPromise=True)
-                if not out.get("exceptionDetails"):
-                    value = (out.get("result") or {}).get("value") or {}
-                if str(value.get("state") or "") == "refused" \
-                        or (value.get("panels") or {}).get("refused"):
-                    # Settle a touch longer: the report leaves from the same handler
-                    # that sets the state, so the request has to be on the wire before
-                    # the socket closes or the count would read zero on a page that
-                    # worked.
-                    await c.pump(POLL_EVERY * 2)
+                if out.get("exceptionDetails"):
+                    return value
+                return (out.get("result") or {}).get("value") or {}
+
+            await c.send("Page.navigate", url=claim_url)
+            deadline = time.time() + CLIENT_BUDGET
+            while True:
+                value = await read_page()
+                # Not "a panel is laid out". An `x-show` that Alpine has not processed
+                # carries no `display: none`, so a page whose script has not started
+                # shows *all* of its panels — measured on this box: the refusal panel
+                # read as laid out from the first reading taken (t=+1.9s, `x-cloak`
+                # still on and no Alpine scope anywhere) and the script settled at
+                # t=+3.6s, 4.0s on a second run: a cold `alpine.js` fetch on a 1 vCPU
+                # box while the other gates ran. Waiting
+                # for the state and for the report it implies is the difference between
+                # measuring the page and measuring its placeholder.
+                if settled(value, refusal_posts(events)):
                     break
                 if time.time() >= deadline:
                     break
@@ -901,15 +999,29 @@ async def _drive_client(base_url, browser, cookies, claim_url, paper, insecure):
             # handshake page a second time (the paper refuses it again), and a second
             # visit legitimately reports a second time. Counting both would make every
             # run a finding, which is what the first version of this did.
-            await c.pump(POLL_EVERY)
             first_load = len(events)
             # And then the paper, in the same browser: a report must open nothing.
             await c.send("Page.navigate", url=paper)
-            await c.pump(POLL_EVERY * 2)
-            out = await c.send("Runtime.evaluate", expression="location.pathname",
-                               returnByValue=True)
-            if not out.get("exceptionDetails"):
-                landed = str((out.get("result") or {}).get("value") or "")
+            # That navigation is answered by the door, which sends this browser back to
+            # the handshake page — a *second* load, which reports a second time. Waiting
+            # for that report is not decoration: the count is compared against the rows
+            # the server holds, so a report still in flight when the socket closes reads
+            # as a lost write and fails a page that worked.
+            deadline = time.time() + CLIENT_BUDGET
+            while True:
+                await c.pump(POLL_EVERY)
+                out = await c.send("Runtime.evaluate", expression="location.pathname",
+                                   returnByValue=True)
+                if not out.get("exceptionDetails"):
+                    here = str((out.get("result") or {}).get("value") or "").strip()
+                    landed = here or landed
+                # One report for the visit, two if the door handed this browser the
+                # handshake page again — which is what a refused paper does.
+                want = 2 if landed.endswith(CLAIM_SUFFIX) else 1
+                if refusal_posts(events) >= want:
+                    break
+                if time.time() >= deadline:
+                    break
         return _client_from(value, landed, events, first_load), None
     finally:
         proc.terminate()
@@ -1141,6 +1253,7 @@ def main(argv: list[str] | None = None) -> int:
         else:
             seen.client_measured = True
             seen.client_seb_api = reading.seb_api
+            seen.client_initialized = reading.initialized
             seen.client_state = reading.state
             seen.client_refused_shown = reading.refused_shown
             seen.client_reports = reading.reports
@@ -1151,6 +1264,7 @@ def main(argv: list[str] | None = None) -> int:
             seen.client_relocked = reading.relocked
             seen.client_reports_total = reading.reports_total
             print(f"   C6  browser               -> state={reading.state!r} "
+                  f"script ran={reading.initialized} "
                   f"refusal shown={reading.refused_shown} "
                   f"reports={reading.reports} of {reading.reports_total} "
                   f"({reading.reason!r}) claims={reading.claims} -> "
