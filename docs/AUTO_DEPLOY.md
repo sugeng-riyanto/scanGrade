@@ -1005,6 +1005,40 @@ door is measured nowhere. The gate's name is also in the list of blocks a stale
 copy lacks (`no seb_door_gate`), which is the only symptom a box that predates this
 check ever shows.
 
+### One file, one verdict — whichever user is asking
+
+The confs hold passwords, so the installer writes them `0600 root:root`. The checker
+is run by three different callers: an operator at a console, the deploy runner's own
+preflight (as root), and two that run as the **service user** — the app's construct
+probe (the deploy runs the app's construction through `as_owner`, and the probe shells
+out to this checker) and the deploy-status page.
+
+A reading that changes with the caller is not a reading, and on this box it *was* the
+failure. Asked as the service user, `sed` and `grep` failed on every conf with
+`Permission denied`; a failure looks exactly like an absence, and the `seb` line below
+read a **present** `SMOKE_MURID` as missing. The app printed `SCANGRADE-UNARMED`, the
+construct gate failed the release, the commit was quarantined, and the box went four
+commits behind and stayed there — while the console, running the same file as root,
+printed `ARMED` about the same box in the same minute. The deadlock is the shape of it:
+the release that fixes the reading is refused by the reading.
+
+So a conf has **three** states and the middle one is not absence:
+
+| state | meaning |
+|---|---|
+| `value` | this caller read it, and this is what it says |
+| `unreadable` | it is there, but this caller cannot read it — reported as **present**, and the content question is left to the caller that can (the preflight, as root) |
+| absent | not there at all — the one state that disarms |
+
+The state is decided by **attempting the read**, not by `test -r`: a read that failed is
+a fact, and a permission bit is a guess about what the read will do (`test -r` says yes
+to a directory and no to a 0600 file). A service-user run now prints
+`smoke      : present (/etc/scangrade-smoke.conf — mode 0600 root:root, so this caller
+(scangrade) cannot read it; the runner's preflight runs as root and does)`, which is
+true, and the SEB line says the same about `SMOKE_MURID` instead of calling the gate
+missing. The same fix stopped the report from claiming `enforcement unset` for gates
+that *are* enforced — that line was a read that had failed, printed as a value.
+
 Two consequences worth stating, because both bit a real box:
 
 * **The wrapper's "After" report runs the checkout's checker, not its own copy.**
@@ -1019,6 +1053,12 @@ Two consequences worth stating, because both bit a real box:
   needs, and presence is the whole question — a `.env` still carrying the dashboard
   placeholder `[YOUR-PASSWORD]` counts as missing. Put the session-mode pooler URL
   there, from Supabase's *Project Settings → Database*, and re-run `--check`.
+* **A conf only root can read is `present`, not missing.** Two of the callers ask as
+  the service user, so a reading decided by a permission bit disarms a fully armed
+  box: every tick refused as `runner not armed`, the release quarantined, and the fix
+  unable to arrive because the fix is a release. The block is the *reading*, not the
+  box — see "One file, one verdict" above for the three states and why only `absent`
+  disarms.
 
 ### Seeing it without a shell
 
@@ -1040,7 +1080,10 @@ The record above is written by a refusal, so a box that is *about to be* refused
 shows nothing on the page until the first tick turned it away — and "nothing has
 been refused" reads like an all-clear. So the page runs the same checker the deploy
 refuses on, `bash deploy/arm-auto-deploy.sh --check`, read-only, and prints **every
-reading by name**, in the checker's own spelling:
+reading by name**, in the checker's own spelling (it runs it as the service user, the
+same way the app's construct probe does, so a conf it cannot read is reported as
+`present` with that stated rather than as a missing gate — see "One file, one
+verdict" above):
 
 ```
 schema     : present — the schema gate can hold a release against the catalogue

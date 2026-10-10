@@ -22,7 +22,19 @@ Mutation-checked, **12/12 injected defects caught**
 (`.freebuff/mutate_arm_auto_deploy.py`, the general set), plus **4/4** for the SEB
 door gate's own lines (`.freebuff/mutate_arm_seb_check.py`, which derives its anchors
 from the script rather than typing them a second time — three hand-typed anchors came
-out one character off, and an anchor that does not match is a catch never made): the
+out one character off, and an anchor that does not match is a catch never made), plus
+**4/4** for the conf reading (`.freebuff/mutate_arm_conf_reading.py`): the
+three confs are mode 0600 root:root and this checker is run by three callers, one of
+which is the app's own probe as the service user, so a reading that changes with the
+caller disarms a box that is armed — measured on the box, which went four commits
+behind refusing every tick as "runner not armed" while the console printed ARMED.
+`TestAConfOnlyRootCanRead` is that class, and its fixture is a directory where the conf
+should be, because a directory exists, `test -r` calls it readable, and no sed or grep
+will read it as a file: it is the one fixture that tells a read-the-file design apart
+from a permission-bit one. The mutation set is a failed read that stops being its own
+state, the conf loop's `unreadable` arm folded back into missing, the SEB line
+disarming on a conf it cannot read, and the presence probe becoming `-f`. The general
+set's defects (unchanged, and included in the count above) are: the
 copy state read as armed, the
 unrendered state read as armed, a missing snapshot a missing conf a missing roster
 and a missing `DIRECT_URL` each read as armed, the no-terminal refusal removed, the
@@ -327,6 +339,97 @@ class TestEveryMissingPieceIsNamed:
         r = run(env, "--check")
         assert "arm-auto-deploy.sh" in r.stdout
         assert "bash " in r.stdout
+
+
+# ── one file, one verdict ────────────────────────────────────────────────────
+
+class TestAConfOnlyRootCanRead:
+    """The three gate confs are mode 0600 root:root — they hold passwords — and this
+    checker is run by three callers: an operator, the runner's preflight as root, and
+    the app's construct probe, which the deploy runs through `as_owner` and so as the
+    service user. A reading that changes with the caller is not a reading.
+
+    Measured on the box: asked as the service user, `sed` and `grep` failed on the
+    confs with "Permission denied", the failure was indistinguishable from absence,
+    the SEB line read a *present* SMOKE_MURID as missing, and the app refused every
+    tick of every release as "runner not armed" while the console — same file, as
+    root — printed ARMED. The box went four commits behind and could never merge the
+    fix, because the fix had to pass the check that was wrong.
+
+    A conf that cannot be read is a *file that is there*. The fixture is a directory
+    where the conf should be: it exists (so `test -e` is true, as it is for a 0600
+    file), it is readable as a directory (so `test -r` is true, which is why the
+    state is decided by attempting the read), and reading it as a file always fails —
+    on GNU and on this checkout's sed/grep alike.
+    """
+
+    @staticmethod
+    def _unreadable(env, *keys):
+        for key in keys:
+            path = Path(env[key])
+            path.unlink()
+            path.mkdir()
+
+    def test_a_conf_only_root_can_read_is_present_not_missing(self, tmp_path):
+        _, _, _, env = scratch(tmp_path, runner=LAUNCHER)
+        self._unreadable(env, "SG_SMOKE_CONF", "SG_CLAIMS_CONF", "SG_PERF_CONF")
+        r = run(env, "--check")
+        assert r.returncode == 0, r.stdout + r.stderr
+        for name in ("smoke", "claims", "perf"):
+            assert f"{name:<10} : present" in r.stdout, r.stdout
+        assert "MISSING" not in r.stdout, r.stdout
+        assert "ARMED" in r.stdout
+
+    def test_a_root_only_smoke_conf_does_not_take_the_seb_gate_down(self, tmp_path):
+        """The exact shape of the refusal: the SEB door gate's pupil lives in the one
+        conf only root can open, so the caller that cannot open it has to leave the
+        question to the caller that can."""
+        _, _, _, env = scratch(tmp_path, runner=LAUNCHER)
+        self._unreadable(env, "SG_SMOKE_CONF")
+        r = run(env, "--check")
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert "seb        : present" in r.stdout, r.stdout
+        assert "seb        : MISSING" not in r.stdout, r.stdout
+        # And it says whose verdict counts, rather than leaving the reader to guess
+        # whether the door gate is measured on this box.
+        assert "root-only" in r.stdout and "as root" in r.stdout, r.stdout
+
+    def test_it_does_not_report_the_enforcement_it_could_not_read(self, tmp_path):
+        """The quieter half of the same bug: "enforcement unset" was printed for a
+        conf that was enforced, because the reading had failed rather than said
+        nothing."""
+        _, _, _, env = scratch(tmp_path, runner=LAUNCHER)
+        self._unreadable(env, "SG_SMOKE_CONF", "SG_CLAIMS_CONF", "SG_PERF_CONF")
+        r = run(env, "--check")
+        assert "enforcement unset" not in r.stdout, r.stdout
+        assert r.stdout.count("cannot read it") == 3, r.stdout
+
+    def test_an_absent_conf_is_still_a_refusal(self, tmp_path):
+        """The distinction the fix turns on, in one run: a conf that is not there
+        disarms the box, and a conf that is there but unreadable does not."""
+        _, _, _, env = scratch(tmp_path, runner=LAUNCHER, claims=False, perf=False)
+        self._unreadable(env, "SG_SMOKE_CONF")
+        r = run(env, "--check")
+        assert r.returncode == 1, r.stdout + r.stderr
+        assert "smoke      : present" in r.stdout, r.stdout
+        assert "claims     : MISSING" in r.stdout, r.stdout
+        assert "perf       : MISSING" in r.stdout, r.stdout
+        assert "NOT ARMED" in r.stdout
+
+    def test_the_state_is_not_decided_by_a_permission_bit(self, tmp_path):
+        """`test -r` says yes to a directory and no to a 0600 file, so it cannot be
+        what decides: the read is attempted and its own failure is the answer. The
+        fixture above is a directory for exactly this reason."""
+        text = SCRIPT.read_text(encoding="utf-8")
+        checker = text[text.index("conf_read() {"):text.index("report_state()")]
+        assert "2>/dev/null" in checker, "a failed read is left shouting on the console"
+        assert "CONF_STATE=\"unreadable\"" in checker, (
+            "a read that failed is not its own state, so absence and permission are "
+            "one answer again")
+        assert "[ ! -r " not in checker and "[ -r " not in checker, (
+            "the state is decided by a permission bit, which is a guess about what "
+            "the read will do")
+        assert "conf_has " in text, "the SEB line does not read the conf through the helper"
 
 
 # ── --check must be free of consequences ─────────────────────────────────────
