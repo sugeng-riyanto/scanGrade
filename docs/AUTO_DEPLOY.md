@@ -303,6 +303,37 @@ is caught earlier and harder: `--check` reports it as part of what arms the box,
 the preflight refuses the whole run (exit 15) before any release is fetched. It is
 the only gate that needs a database credential.
 
+**And when the schema is complete, the ledger is brought into agreement with it.**
+The gate above proves the *database* carries what the release names. It says nothing
+about the ledger, and that gap is the two-ledger problem: migrations in this
+repository are applied from a workstation (nothing logs into the VPS), so
+`/var/lib/scangrade-migrations` reads `no record` — *unknown* — for a migration the
+catalogue plainly holds. `no record` is the one answer an operator cannot act on,
+and on a box with no shell it never becomes an answer at all.
+
+```bash
+python deploy/apply_migration.py --reconcile --repo /opt/scangrade \
+    --out /var/backups/scangrade
+```
+
+It runs as **root**, not through the owner hop: the ledger and `--out` are root's
+directories, and the service user can write neither — run as the owner it would
+silently record nothing. It writes a record for every file the catalogue confirms,
+saying `adopted` (this box did not watch the migration run), and names a recovery
+point only when this box holds the archive taken **for that migration** — the
+applying run labels an archive with the file's own stem, so the name is the proof.
+Any other archive cannot undo it, and the record says so instead. It rules on
+nothing else: ruling on whether the schema is behind the code is `--verify`'s job
+(exit 6 → quarantine), and a second verdict from here would either cry wolf on every
+release or wave one through.
+
+It **fails open**: exit 0 means it wrote every record it could, and anything else is
+logged with the output that names the cause while the release carries on — the same
+call the snapshot pin above makes, for the same reason. A release whose code and
+schema agree must not be held over the bookkeeping of a record. The migration
+ledger's line appears in the journal on every release, because "N records written" is
+the number that says whether the box knows what its database contains.
+
 Because a release that ships a migration is refused until the migration is applied,
 the order is: apply it, then release the quarantined commit —
 
@@ -1994,7 +2025,11 @@ of that file is only the fallback on a box that has not ticked yet.
 2. applies the migrations `apply_migration.py --verify` reports as missing, each one
    after its own rolled-back trial run. Before the release and not after: the schema
    gate refuses a release whose database is behind its code, so applying them later
-   would only earn that refusal;
+   would only earn that refusal. The same step, before that loop, runs
+   `--reconcile`: a box that never reaches a release is exactly the box whose ledger
+   says `no record` about migrations the schema already carries, and the record the
+   reconcile writes is what turns *unknown* into an answer. A failure there is
+   reported and recorded and never ends the run;
 3. runs one release;
 4. answers the refusals it can, and runs the release once more after each: a
    **box-local edit** is set aside — a patch against `HEAD` for a tracked path, the
@@ -2453,6 +2488,7 @@ python deploy/apply_migration.py supabase/migrations/025_x.sql            # tria
 python deploy/apply_migration.py supabase/migrations/025_x.sql --commit   # trial, then apply
 python deploy/apply_migration.py --status                                 # what has a record
 python deploy/apply_migration.py --verify                                 # what is really in the schema
+python deploy/apply_migration.py --reconcile                              # record what the schema confirms
 ```
 
 The trial is not optional — `--commit` runs it first in the same invocation. It
@@ -2495,6 +2531,40 @@ whole file back — taking its own `ADD COLUMN` statements with it.
 a release whose declared objects are not in the database is refused and quarantined,
 so a migration written but never applied can no longer reach production behind a
 green box.
+
+### A ledger that says `no record` about a migration that is in
+
+`--verify` answers the schema's question and writes nothing, so a migration applied
+from a workstation leaves `--status` saying `no record` for ever — and the operator
+reading it cannot tell *unknown* from *absent*. `--reconcile` closes that gap from
+inside the box, which is the only place it can be closed, since nothing logs into the
+VPS:
+
+```bash
+python deploy/apply_migration.py --reconcile --repo /opt/scangrade \
+    --out /var/backups/scangrade
+```
+
+Same catalogue read as `--verify`, same read-only session, no DDL. For every file
+whose record is missing **and** whose declared objects are all in the schema it
+writes the record the applying machine would have written, flagged `adopted`, and
+prints the count. A file the schema contradicts is named with its objects and left
+unrecorded — the one lie a ledger must never tell — and one that declares no object
+(a data-only file) stays unknown, because the catalogue cannot settle it either way.
+
+**A recovery point is named only when the archive proves itself.** The run that
+applies a file takes a snapshot immediately before it and labels the archive with the
+file's own stem, so `scangrade-db-<stamp>-<stem>.tar.gz` is a snapshot of the schema
+just before that migration ran, and restoring it undoes it. Nothing else on the disk
+qualifies — notably nothing selected by date: this repository applies migrations from
+a working tree and commits them afterwards, so a commit date is *later* than the
+application and a snapshot taken in between is older than the commit while already
+containing the change. A first version of this mode picked by date, and against the
+live database it named `...-063_school_membership_requests.tar.gz` (taken 05:42Z) as
+the recovery point for `064`, which had been applied at 03:44Z — a restore that would
+have left the migration exactly where it was. When the box holds no archive for that
+migration, the record names none, says why in `recovery_point_basis`, and prints the
+`--adopt <archive>` line to run with the archive from the machine that has it.
 
 ### A migration pasted in by hand is invisible to that check
 

@@ -33,6 +33,7 @@ Usage
     python deploy/apply_migration.py supabase/migrations/025_x.sql --commit
     python deploy/apply_migration.py --status
     python deploy/apply_migration.py --verify
+    python deploy/apply_migration.py --reconcile
     python deploy/apply_migration.py supabase/migrations/062_x.sql --adopt <archive>
 
 Safety rails
@@ -63,6 +64,20 @@ Safety rails
   of wherever it happens to live (a temp directory, a workstation) into the
   directory the deploy and `--restore` already agree on, and pins it there, so
   the one archive that could undo that migration is not rotation fodder.
+* **``--reconcile`` writes no DDL either, and names a recovery point only when the
+  archive proves itself.** It is ``--adopt`` for every file at once, driven by the
+  catalogue rather than by an operator: a migration this box never recorded while
+  the schema plainly carries it gets its record, and one the schema contradicts is
+  reported and left unrecorded. A recovery point is named only when this box holds
+  the archive that was taken **for that migration** — the run that applies a file
+  takes one immediately before it and labels it with the file's stem, so the name
+  is the proof and no date is consulted (a snapshot taken after a migration cannot
+  undo it, and this repository applies migrations from a working tree and commits
+  them later, which makes every date-based rule unsound). When no such archive is
+  here, the migration is still recorded, the record names none, and the reason is
+  printed and kept. This is the mode a box runs on its own tick, because the
+  two-ledger problem — applied from a workstation, unknown on the box — cannot be
+  fixed by hand on a box nobody can log into.
 
 What the ledger cannot answer
 -----------------------------
@@ -84,9 +99,10 @@ Exit codes
   3  refused: the file manages its own transactions
   4  refused: the file needs statements that cannot run in a transaction
   5  refused: the recovery point could not be taken
-  6  ``--verify``: at least one file declares objects that are not in the schema.
-     ``--adopt`` refuses with the same code, because a record saying "applied"
-     over a schema that contradicts it is the one lie a ledger must never tell
+  6  at least one file declares objects that are not in the schema. ``--verify``
+     reports it, ``--adopt`` refuses with it, and ``--reconcile`` leaves those
+     files unrecorded with it — because a record saying "applied" over a schema
+     that contradicts it is the one lie a ledger must never tell
 """
 
 from __future__ import annotations
@@ -558,7 +574,8 @@ def _current_user() -> str:
 
 def record(ledger: Path, path: Path, digest: str, delta: list[str],
            archive: str | None, adopted_from: str | None = None,
-           applied_at: str | None = None) -> Path:
+           applied_at: str | None = None,
+           recovery_point_basis: str | None = None) -> Path:
     """Note what was applied, so "is migration X in?" stops being a guess.
 
     A JSON file per migration rather than a table: a ledger table would itself need
@@ -572,6 +589,12 @@ def record(ledger: Path, path: Path, digest: str, delta: list[str],
     the recovery point's own timestamp) and `adopted_at` is when the record was
     written. The distinction is the whole value of the file — a ledger that cannot
     tell a witnessed application from a reconstruction is a ledger that lies.
+
+    `recovery_point_basis` says *why* an archive is named, when the reason is not
+    "the operator took it for this migration": a `--reconcile` record may only name
+    one it can prove predates the migration, and a later reader asking why a
+    September archive is attached to an October migration gets the reason from the
+    file rather than from somebody's memory.
     """
     ledger.mkdir(parents=True, exist_ok=True)
     entry = {
@@ -589,6 +612,8 @@ def record(ledger: Path, path: Path, digest: str, delta: list[str],
         entry["adopted"] = True
         entry["adopted_from"] = adopted_from
         entry["adopted_at"] = datetime.now(timezone.utc).isoformat()
+    if recovery_point_basis:
+        entry["recovery_point_basis"] = recovery_point_basis
     target = ledger / f"{path.stem}.json"
     target.write_text(json.dumps(entry, indent=2) + "\n", encoding="utf-8")
     return target
@@ -612,6 +637,16 @@ def ledger_note(entry_path: Path, digest: str) -> str:
         when = str(entry.get("applied_at", ""))[:10]
         return f"adopted {when}" if entry.get("adopted") else f"applied {when}"
     return "APPLIED, THEN EDITED"
+
+
+def recovery_basis(entry_path: Path) -> str | None:
+    """Why the record's recovery point was chosen, when the file says so."""
+    try:
+        entry = json.loads(entry_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    basis = entry.get("recovery_point_basis")
+    return str(basis) if basis else None
 
 
 def recovery_line(entry_path: Path) -> str | None:
@@ -658,15 +693,17 @@ def status(ledger: Path, migrations: Path) -> int:
         print(f"{path.name:<58} {note:<30} {digest[:12]}")
         detail = recovery_line(entry_path)
         if detail:
-            print(f"{'':<58} {detail}")
+            for line in detail.splitlines():
+                print(f"{'':<58} {line}")
     print()
     print(f"{unrecorded} of {len(files)} have no record.")
     print("Run --verify to settle those against the schema instead.")
     print("No record does not mean 'not applied'. Migrations pasted into the SQL")
     print("editor before this tool existed were never recorded anywhere, so")
     print("`--status` cannot see them; only a schema check can settle those.")
-    print("For one that is applied and unrecorded, `--adopt <archive>` records it")
-    print("and puts its recovery point where rotation cannot delete it.")
+    print("For one that is applied and unrecorded, `--reconcile` records it from the")
+    print("live schema and names a recovery point only when it can prove one, and")
+    print("`--adopt <archive>` records it with an archive named by hand.")
     return 0
 
 
@@ -687,6 +724,8 @@ def status(ledger: Path, migrations: Path) -> int:
 
 def stamp_of(archive) -> str | None:
     """The UTC instant in a snapshot's filename, ISO, or None if it has none."""
+    if archive is None:
+        return None
     found = STAMP_RE.search(Path(archive).name)
     if not found:
         return None
@@ -695,6 +734,35 @@ def stamp_of(archive) -> str | None:
     except ValueError:
         return None
     return when.replace(tzinfo=timezone.utc).isoformat()
+
+
+# ── which archive can undo a migration: its own ----
+#
+# A `recovery_point` is a claim with one meaning — **restoring this archive undoes
+# that migration** — so one is only named when that is provable. The proof is in the
+# filename, and it needs no dates: `--commit` takes its recovery point immediately
+# *before* it applies the file, labelled with the file's own stem, so
+# `scangrade-db-<stamp>-<stem>.tar.gz` is a snapshot of the schema as it was just
+# before this migration ran.
+#
+# Everything else on the disk is a guess, and one guess in particular had to be
+# measured to be believed: a first version of `--reconcile` named the newest archive
+# older than the file's first *commit*. Run against the live database it picked
+# `...-063_school_membership_requests.tar.gz` (taken 05:42Z) for `064`, which had been
+# applied at 03:44Z and committed at 05:44Z — this repository applies migrations from
+# a working tree and commits them afterwards, so a commit date is *later* than the
+# application and a snapshot taken in between is older than the commit while already
+# containing the change. Restoring it would have left the migration exactly where it
+# was, under a record calling it the way back. A deploy's own snapshot is labelled
+# with the commit it was taken for, so it never matches a stem either.
+
+def own_archive(out_dir: Path, path: Path) -> Path | None:
+    """The newest archive taken for this migration, if this box still has one."""
+    if not out_dir.is_dir():
+        return None
+    matches = sorted(out_dir.glob(f"{db_snapshot.ARCHIVE_PREFIX}*-{path.stem}.tar.gz"),
+                     key=lambda candidate: candidate.name)
+    return matches[-1] if matches else None
 
 
 def durable_copy(archive: Path, out_dir: Path, prune_source: bool = False):
@@ -730,14 +798,21 @@ def durable_copy(archive: Path, out_dir: Path, prune_source: bool = False):
     return dest, str(archive)
 
 
-def adopt(ledger: Path, out_dir: Path, path: Path, archive: Path, live: dict[str, str],
-          applied_at: str | None = None, prune_source: bool = False) -> int:
+def adopt(ledger: Path, out_dir: Path, path: Path, archive: Path | None,
+          live: dict[str, str], applied_at: str | None = None,
+          prune_source: bool = False, basis: str | None = None) -> int:
     """Record an already-applied migration from the recovery point taken then.
 
     `live` is what the catalogue actually carries, so the record is written from a
     measurement and not from an assertion. Everything is done in the order that
     leaves nothing half-done: the live reading first (which can refuse), then the
     durable copy, then the pin, then the entry.
+
+    `archive=None` is the one shape `--reconcile` needs and `--adopt` never had: the
+    migration is in the schema, but this box holds no archive that can undo it. The
+    record then names no recovery point at all — `--status` prints `none recorded`
+    under the file — rather than attaching a snapshot taken afterwards, which a
+    restore would not undo. `basis` carries the same fact into the record.
     """
     sql, digest = describe_file(path)
     masked, hidden = mask_do_bodies(strip_sql_comments(sql))
@@ -767,25 +842,38 @@ def adopt(ledger: Path, out_dir: Path, path: Path, archive: Path, live: dict[str
     if hidden:
         print(f"   note: {hidden} DO body/bodies hide DDL this cannot read")
 
-    try:
-        durable, source = durable_copy(archive, out_dir, prune_source)
-    except (OSError, RuntimeError) as exc:
-        print(f"   FAILED: could not put the recovery point in {out_dir} "
-              f"({type(exc).__name__}: {exc})")
-        print("   Nothing was written — a record naming an archive that is not there"
-              " would be worse than no record.")
-        return 1
-    if source:
-        print(f"   recovery point copied into place: {durable}")
-        print(f"      from {source}"
-              + (" (removed)" if prune_source else " (kept; --prune-source removes it)"))
+    durable: Path | None = None
+    source: str | None = None
+    if archive is not None:
+        try:
+            durable, source = durable_copy(archive, out_dir, prune_source)
+        except (OSError, RuntimeError) as exc:
+            print(f"   FAILED: could not put the recovery point in {out_dir} "
+                  f"({type(exc).__name__}: {exc})")
+            print("   Nothing was written — a record naming an archive that is not there"
+                  " would be worse than no record.")
+            return 1
+        if source:
+            print(f"   recovery point copied into place: {durable}")
+            print(f"      from {source}"
+                  + (" (removed)" if prune_source
+                     else " (kept; --prune-source removes it)"))
+        else:
+            print(f"   recovery point already in place: {durable}")
+        pin_recovery_point(durable)
     else:
-        print(f"   recovery point already in place: {durable}")
-    pin_recovery_point(durable)
+        print("   recovery point: none — no archive on this box can undo this")
+        print("   migration, and naming one taken afterwards would claim a restoration")
+        print("   it cannot perform. The record says so"
+              + (f" ({basis})" if basis else "") + ".")
 
     when = applied_at or stamp_of(durable)
-    entry = record(ledger, path, digest, [f"+ {key}" for key in present], str(durable),
-                   adopted_from=source or str(archive), applied_at=when)
+    adopted_from = source or (str(archive) if archive is not None
+                              else (basis or "the live schema — no archive here"))
+    entry = record(ledger, path, digest, [f"+ {key}" for key in present],
+                   str(durable) if durable is not None else None,
+                   adopted_from=adopted_from, applied_at=when,
+                   recovery_point_basis=basis)
     written = json.loads(entry.read_text(encoding="utf-8"))["applied_at"]
     print(f"   recorded in {entry}")
     print(f"      applied_at {written}"
@@ -993,6 +1081,72 @@ def connect_readonly(url: str):
     return conn
 
 
+def judge(name: str, declared, dropped, droppers, live):
+    """One file's declared objects against the catalogue.
+
+    Returns ``(present, explained, gaps, superseded)``: how many of the declared
+    objects are there, how many are accounted for without being there (made and
+    unmade by this file, replaced by another, or named in `SUPERSEDED` with a
+    reason), the ones that are nowhere, and the named exceptions.
+
+    Shared by ``--verify`` and ``--reconcile`` on purpose. Two implementations of
+    this reading is how the report a person reads and the lines a box writes come to
+    disagree about one file — and a reconcile that called a replaced object missing
+    would cry wolf on every release.
+    """
+    present, explained, gaps = 0, 0, []
+    superseded: list[tuple[str, str]] = []
+    for kind, key, index in declared:
+        if key in live:
+            present += 1
+            continue
+        name_only = bare_name(key)
+        if any(when > index for when in dropped.get(name_only, ())):
+            explained += 1              # made and unmade by this file, on purpose
+        elif any(who != name for who in droppers.get(name_only, ())):
+            explained += 1              # a different file replaced it
+        else:
+            reason = SUPERSEDED.get(name, {}).get(key)
+            if reason:
+                explained += 1          # named in this tool, with its reason
+                superseded.append((key, reason))
+            else:
+                gaps.append((kind, key + gap_note(kind, key, live)))
+    return present, explained, gaps, superseded
+
+
+def verdict_of(declared, present: int, gap) -> str:
+    """The word `--verify` prints for one file, and the one `--reconcile` acts on."""
+    if not declared:
+        return "no objects"
+    if gap:
+        return "PARTIAL" if present else "OUT"
+    if not present:
+        return "superseded"
+    return "IN"
+
+
+def read_declarations(files: list[Path]):
+    """Every file's `(hidden DO bodies, declared objects, dropped names)`.
+
+    `droppers` is the reverse index — which file drops a name — because "the object
+    is not there" has to be told apart from "a later file replaced it", and that
+    question is about the whole directory, not about one file. Shared by `--verify`
+    and `--reconcile`, so the report a person reads and the lines a box writes are
+    two readings of one judgement rather than two judgements.
+    """
+    prepared: dict[str, tuple[int, list[tuple[str, str, int]], dict[str, list[int]]]] = {}
+    droppers: dict[str, set[str]] = {}
+    for path in files:
+        masked, hidden = mask_do_bodies(
+            strip_sql_comments(path.read_text(encoding="utf-8-sig")))
+        dropped = dropped_names(masked)
+        prepared[path.name] = (hidden, declared_objects(masked), dropped)
+        for name in dropped:
+            droppers.setdefault(name, set()).add(path.name)
+    return prepared, droppers
+
+
 def verify(ledger: Path, migrations: Path, cur) -> int:
     """Report every file's declared objects against the live catalogue."""
     files = sorted(migrations.glob("*.sql"))
@@ -1004,15 +1158,7 @@ def verify(ledger: Path, migrations: Path, cur) -> int:
     # a check that cannot see them calls a present file absent.
     live = schema_snapshot(cur, extra_schemas=("storage",))
 
-    prepared: dict[str, tuple[int, list[tuple[str, str, int]], dict[str, list[int]]]] = {}
-    droppers: dict[str, set[str]] = {}
-    for path in files:
-        masked, hidden = mask_do_bodies(
-            strip_sql_comments(path.read_text(encoding="utf-8-sig")))
-        dropped = dropped_names(masked)
-        prepared[path.name] = (hidden, declared_objects(masked), dropped)
-        for name in dropped:
-            droppers.setdefault(name, set()).add(path.name)
+    prepared, droppers = read_declarations(files)
 
     width = max(len(path.name) for path in files) + 2
     print(f"{'file':<{width}} {'schema':<11} {'record':<22} sha256")
@@ -1026,33 +1172,12 @@ def verify(ledger: Path, migrations: Path, cur) -> int:
     for path in files:
         hidden, declared, dropped = prepared[path.name]
         digest = hashlib.sha256(path.read_bytes()).hexdigest()
-        present, explained, gap = 0, 0, []
+        present, explained, gap, superseded = judge(path.name, declared, dropped,
+                                                   droppers, live)
+        named_superseded.extend((path.name, key, reason)
+                                for key, reason in superseded)
 
-        for kind, key, index in declared:
-            if key in live:
-                present += 1
-                continue
-            name = bare_name(key)
-            if any(when > index for when in dropped.get(name, ())):
-                explained += 1              # made and unmade by this file, on purpose
-            elif any(who != path.name for who in droppers.get(name, ())):
-                explained += 1              # a different file replaced it
-            else:
-                reason = SUPERSEDED.get(path.name, {}).get(key)
-                if reason:
-                    explained += 1          # named in this tool, with its reason
-                    named_superseded.append((path.name, key, reason))
-                else:
-                    gap.append((kind, key + gap_note(kind, key, live)))
-
-        if not declared:
-            verdict = "no objects"
-        elif gap:
-            verdict = "PARTIAL" if present else "OUT"
-        elif not present:
-            verdict = "superseded"
-        else:
-            verdict = "IN"
+        verdict = verdict_of(declared, present, gap)
         tally[verdict] += 1
         if gap:
             gaps.append((path.name, [text for _, text in gap]))
@@ -1106,6 +1231,138 @@ def verify(ledger: Path, migrations: Path, cur) -> int:
     return 0
 
 
+# ── reconciling the ledger with the schema ───────────────────────────────────
+#
+# The two-ledger problem, ended from inside the box. A migration applied from a
+# workstation (or the SQL editor, or an older copy of this tool) leaves the box's
+# ledger saying "no record" while the catalogue plainly carries the objects — and
+# "no record" reads as *unknown*, which is the one answer an operator cannot act
+# on. `--verify` answers it from the schema; this mode writes that answer down, so
+# the next reader of `--status` does not have to ask a database a second time.
+#
+# Three properties, each because the alternative is a mode that writes "applied"
+# over anything:
+#
+#   * a record is written only for a file the catalogue **confirms** — every object
+#     it declares is in the live schema. `--adopt`'s own rule, not a second one:
+#     a file that declares objects the schema does not have is reported by name and
+#     left unrecorded, because a record saying "applied" over a schema that
+#     contradicts it is the one lie a ledger must never tell;
+#   * the record says `adopted`, because this box did not watch the migration run;
+#   * a recovery point is named only when this box holds the archive taken **for
+#     that migration** (see `own_archive`), and the record carries that reason. Every
+#     other case records the migration with no archive named and says why, because a
+#     snapshot that is not the one taken before the migration ran cannot undo it.
+#
+# What it deliberately does **not** do is rule on whether the schema is behind the
+# release's code: it answers "can this record be justified", and `--verify` answers
+# "is this file in effect", accounting for objects a later generation replaced. So a
+# file this mode leaves unrecorded is named with its objects and the run still
+# succeeds — the gate that refuses a release is `--verify`, and a reconcile that
+# exited non-zero over files `--verify` calls fine would be a second, quietly
+# different verdict about the same directory.
+
+def reconcile(ledger: Path, out_dir: Path, migrations: Path,
+              live: dict[str, str]) -> int:
+    """Record what the live schema carries and this ledger has never recorded."""
+    files = sorted(migrations.glob("*.sql"))
+    if not files:
+        print(f"no .sql files in {migrations}")
+        return 0
+
+    # Only the sha256 of each file is read here: an already-recorded migration is
+    # not re-judged, and one whose record was written for a *different* sha
+    # ("APPLIED, THEN EDITED") is left exactly as it is — this mode records what is
+    # unrecorded, and never overwrites somebody's record of an edit.
+    recorded = 0
+    pending: list[Path] = []
+    for path in files:
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        if ledger_note(ledger / f"{path.stem}.json", digest) == "no record":
+            pending.append(path)
+        else:
+            recorded += 1
+    print(f"{len(files)} file(s): {recorded} recorded, {len(pending)} with no record")
+    if not pending:
+        print()
+        print("Nothing to reconcile: every migration file has a record.")
+        return 0
+
+    # The whole directory is read, because "the object is not there" has to be told
+    # apart from "a later file replaced it" — and that question is about every file,
+    # not about this one. `judge` is `--verify`'s own reading, so what this mode
+    # reports about a file is what the report a person reads says about it.
+    prepared, droppers = read_declarations(files)
+
+    adopted, unproved, failed = 0, 0, 0
+    no_objects: list[str] = []
+    unconfirmable: list[tuple[str, list[str], list[str], int]] = []
+
+    for path in pending:
+        _hidden, declared, dropped = prepared[path.name]
+        if not declared:
+            no_objects.append(path.name)
+            continue
+        present, explained, gap, _named = judge(path.name, declared, dropped,
+                                                droppers, live)
+        if present != len(declared):
+            unconfirmable.append((path.name, [key for _kind, key, _index in declared
+                                             if key not in live],
+                                  [text for _kind, text in gap], explained))
+            continue
+
+        archive = own_archive(out_dir, path)
+        basis = None
+        if archive is not None:
+            basis = (f"its own name: `{archive.name}` — what the run that applied "
+                     "this migration took for it, immediately before it ran")
+        else:
+            print(f"\n   {path.name}")
+            print(f"      no `{db_snapshot.ARCHIVE_PREFIX}*-{path.stem}.tar.gz` in "
+                  f"{out_dir}")
+            print("      the archive that can undo this migration is the one the run that"
+                  " applied it took,")
+            print("      and that run was on another machine — recording it without a"
+                  " recovery point:")
+            print("      `--adopt <archive>` names it here, moves it into "
+                  f"{out_dir} and pins it")
+            unproved += 1
+
+        if adopt(ledger, out_dir, path, archive, live, basis=basis) == 0:
+            adopted += 1
+        else:
+            failed += 1
+
+    print()
+    print(f"reconciled: {adopted} record(s) written, {unproved} without a recovery "
+          f"point, {len(no_objects) + len(unconfirmable)} the catalogue cannot "
+          "confirm")
+    for name in no_objects:
+        print(f"   not recorded: {name} — declares no object, so the catalogue cannot"
+              " settle it either way — 'unknown', not 'applied'")
+    for name, missing, unexplained, explained in unconfirmable:
+        print(f"   not recorded: {name} — {len(missing)} declared object(s) are not in"
+              " the schema")
+        for text in unexplained:
+            print(f"      MISSING  {text}")
+        if explained:
+            print(f"      {explained} of them were replaced by a later file, which is"
+                  " why `--verify` may call this file present")
+    if unconfirmable:
+        print()
+        print("Those stay 'no record', which means unknown rather than absent. They are")
+        print("not recorded here because a record saying 'applied' over a schema that")
+        print("contradicts it is the one lie a ledger must never tell; `--verify` is the")
+        print("mode that rules on whether a file is really in effect.")
+    if failed:
+        print()
+        print(f"{failed} record(s) could not be written — the ledger says 'no record'")
+        print("for those, and the reason is above.")
+    print()
+    print("Run --status to read the ledger back.")
+    return 1 if failed else 0
+
+
 # ── cli ──────────────────────────────────────────────────────────────────────
 
 def main() -> int:
@@ -1131,6 +1388,10 @@ def main() -> int:
                         help="report which migrations have a record")
     parser.add_argument("--verify", action="store_true",
                         help="report which migrations are actually in the schema")
+    parser.add_argument("--reconcile", action="store_true",
+                        help="record every migration the live schema carries and"
+                             " this ledger has never recorded, naming a recovery"
+                             " point only when one provably predates the migration")
     parser.add_argument("--adopt", metavar="ARCHIVE",
                         help="record an already-applied migration from the recovery"
                              " point taken then, moving it out of wherever it lives"
@@ -1168,6 +1429,26 @@ def main() -> int:
         finally:
             conn.close()
 
+    if args.reconcile:
+        url = load_migration_url(repo)
+        ref = check_target(url, repo)
+        print("=" * 74)
+        print("RECONCILING the ledger against the live schema")
+        print("=" * 74)
+        print(f"   repo:    {repo}")
+        print(f"   ledger:  {ledger}")
+        print(f"   out:     {Path(args.out)}")
+        print(f"   target:  project {ref}")
+        print("   session: read-only — this mode writes no DDL, anywhere")
+        print()
+        conn = connect_readonly(url)
+        try:
+            with conn.cursor() as cur:
+                live = schema_snapshot(cur, extra_schemas=("storage",))
+        finally:
+            conn.close()
+        return reconcile(ledger, Path(args.out), migrations, live)
+
     if args.adopt:
         if not args.file:
             parser.error("--adopt also needs the migration file it records, e.g. "
@@ -1204,7 +1485,7 @@ def main() -> int:
                      applied_at=args.applied_at, prune_source=args.prune_source)
 
     if not args.file:
-        parser.error("give a .sql file, --status, or --verify")
+        parser.error("give a .sql file, --status, --verify or --reconcile")
 
     path = Path(args.file)
     if not path.is_file():

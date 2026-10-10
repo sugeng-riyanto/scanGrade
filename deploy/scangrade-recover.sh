@@ -106,6 +106,10 @@ REBASELINE_REQUEST="${SG_REBASELINE_REQUEST:-$STATE_DIR/requests/rebaseline}"
 ARM_SCRIPT="${SG_ARM_SCRIPT:-$REPO/deploy/arm-auto-deploy.sh}"
 HEALTH="${SG_HEALTH_URL:-http://127.0.0.1:8000/health}"
 LEDGER="${SG_MIGRATION_LEDGER:-/var/lib/scangrade-migrations}"
+#: Where this box keeps its recovery points. Named here rather than left to the
+#: tool's default so the reconcile below and the runner's snapshot block cannot
+#: come to disagree about the one directory an archive must be in to be restoreable.
+BACKUP_DIR="${SG_BACKUP_DIR:-/var/backups/scangrade}"
 PY="${SG_PYTHON:-$REPO/.venv/bin/python}"
 MIGRATE="${SG_MIGRATE:-$REPO/deploy/apply_migration.py}"
 PAUSE_FILE="${SG_PAUSE_FILE:-/etc/scangrade-deploy.pause}"
@@ -577,6 +581,33 @@ case "$VERIFY_RC" in
      note "the schema gate treats an unmeasurable box the same way"
      printf 'migrations unmeasured (exit %s)\n' "$VERIFY_RC" >> "$RECORD" ;;
 esac
+
+# ── and the same step's other half: what the schema carries but this box never
+# wrote down ────────────────────────────────────────────────────────────────────
+# `--verify` answers "is it in the schema" from the catalogue and says nothing
+# about the ledger, so a migration applied from a workstation reads *unknown* here
+# for ever — and on the box that got stuck, that is the whole reason nobody could
+# say whether its database was behind its code. The reconcile records what the
+# catalogue confirms (a record that says `adopted`), names a recovery point only
+# when this box holds the archive taken for that migration, and rules on nothing
+# else: a file the schema still lacks is reported there and left to the loop below,
+# which is what applies it. It runs as root, which this script already is, because
+# the ledger and $BACKUP_DIR are root's.
+#
+# Exit 0 is the whole of "it wrote what it could"; a failure is bookkeeping —
+# reported, recorded, and never allowed to stop a recovery.
+RECONCILE_OUT="$("$PY" "$MIGRATE" --reconcile --repo "$REPO" --ledger "$LEDGER" \
+    --out "$BACKUP_DIR" 2>&1)"
+RECONCILE_RC=$?
+if [ "$RECONCILE_RC" = "0" ]; then
+  RECONCILE_LINE="$(printf '%s\n' "$RECONCILE_OUT" | grep -m1 '^reconciled: ' || true)"
+  [ -n "$RECONCILE_LINE" ] && note "$RECONCILE_LINE"
+  printf 'RECONCILE (%s) %s\n' "$RECONCILE_RC" "${RECONCILE_LINE:-nothing to reconcile}" >> "$RECORD"
+else
+  note "could not reconcile the ledger (exit $RECONCILE_RC) — not fatal:"
+  printf '%s\n' "$RECONCILE_OUT" | tail -n 4 | sed 's/^/   | /'
+  printf 'RECONCILE FAILED %s\n' "$RECONCILE_RC" >> "$RECORD"
+fi
 
 APPLIED=0
 if [ "$VERIFY_RC" = "6" ] && [ -n "$PENDING" ]; then
