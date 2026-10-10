@@ -315,9 +315,11 @@ class TestTheRoute:
         assert "/teacher/dashboard" in r.headers["Location"]
 
     def test_no_session_is_sent_to_a_login_door(self, client):
+        from app.utils.auth import LOGIN_URL
+
         r = client.get("/metrics/processes")
         assert r.status_code == 302
-        assert "/auth/login" in r.headers["Location"]
+        assert r.headers["Location"].split("?")[0] == LOGIN_URL
 
     def test_the_route_carries_the_super_admin_guard_and_not_a_lesser_one(self):
         src = INIT.read_text(encoding="utf-8")

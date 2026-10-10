@@ -11,7 +11,8 @@ from app.decorators.year_lock import open_year_required
 from flask import Blueprint, render_template, g, request, jsonify, redirect, flash, send_file, current_app
 from openpyxl import load_workbook, Workbook
 from app.utils.auth import (admin_sekolah_required, get_supabase,
-                            subscription_write_required, list_all_auth_users)
+                            subscription_write_required, list_all_auth_users,
+                            login_door_for)
 from app.utils import failure
 from app.utils.cache import cache_get, cache_set
 from app.utils.helpers import row_or_none
@@ -377,7 +378,7 @@ def dashboard():
     sid = _school_id()
     if not sid:
         flash("Sekolah belum terdaftar. Hubungi Super Admin.", "error")
-        return redirect("/auth/login")
+        return redirect(login_door_for(g.get("user_role"), request.path))
 
     supabase = get_supabase()
 
@@ -1189,7 +1190,7 @@ def assessment_periods_page():
     """Admin sekolah: kalender penilaian sekolahnya, plus wewenang menyusunnya."""
     sid = _school_id()
     if not sid:
-        return redirect("/auth/login")
+        return redirect(login_door_for(g.get("user_role"), request.path))
     supabase = get_supabase()
     return render_template(
         "principal/assessment_periods.html",
@@ -1211,7 +1212,7 @@ def assessment_period_save():
     """Create or edit one period. The school is the session's, never the form's."""
     sid = _school_id()
     if not sid:
-        return redirect("/auth/login")
+        return redirect(login_door_for(g.get("user_role"), request.path))
     out = assessment_periods.save_period(
         get_supabase(), sid,
         period_id=request.form.get("period_id") or None,
@@ -1233,7 +1234,7 @@ def assessment_period_delete(period_id: str):
     """Remove one period, scoped to this school by the service's own filter."""
     sid = _school_id()
     if not sid:
-        return redirect("/auth/login")
+        return redirect(login_door_for(g.get("user_role"), request.path))
     out = assessment_periods.delete_period(get_supabase(), sid, period_id)
     flash(out["reason"] if not out.get("ok") else "period_deleted",
           "error" if not out.get("ok") else "success")
@@ -3888,7 +3889,7 @@ def invigilation_page():
     """Admin sekolah: jadwal pengawasan sekolahnya, plus wewenang menyusunnya."""
     sid = _school_id()
     if not sid:
-        return redirect("/auth/login")
+        return redirect(login_door_for(g.get("user_role"), request.path))
     supabase = get_supabase()
     schedules = invigilation.list_schedules(supabase, sid)
     # The school's codes, read-only — the admin's authority is the whole school, the
@@ -3921,7 +3922,7 @@ def invigilation_save():
     """Create or move one sitting. The school is the session's, never the form's."""
     sid = _school_id()
     if not sid:
-        return redirect("/auth/login")
+        return redirect(login_door_for(g.get("user_role"), request.path))
     out = invigilation.save_schedule(
         get_supabase(), sid,
         exam_id=request.form.get("exam_id", ""),
@@ -3942,7 +3943,7 @@ def invigilation_assign(schedule_id: str):
     """Put a teacher on a sitting, or make them its lead."""
     sid = _school_id()
     if not sid:
-        return redirect("/auth/login")
+        return redirect(login_door_for(g.get("user_role"), request.path))
     out = invigilation.assign_invigilator(
         get_supabase(), sid,
         schedule_id=schedule_id,
@@ -3962,7 +3963,7 @@ def invigilation_unassign(assignment_id: str):
     """Take a teacher off a sitting."""
     sid = _school_id()
     if not sid:
-        return redirect("/auth/login")
+        return redirect(login_door_for(g.get("user_role"), request.path))
     _invigilation_refused(invigilation.remove_assignment(
         get_supabase(), sid, assignment_id))
     return redirect("/admin-sekolah/invigilation")
@@ -3983,7 +3984,7 @@ def unlock_locked_sitting(exam_id: str, student_id: str):
     """
     sid = _school_id()
     if not sid:
-        return redirect("/auth/login")
+        return redirect(login_door_for(g.get("user_role"), request.path))
     out = sitting_unlock.unlock_sitting(
         get_supabase(), sid, exam_id, student_id, g.get("user_id"))
     if out.get("action") == "finalize":
@@ -4002,7 +4003,7 @@ def retake_decide(request_id: str):
     """Decide a retake request as the school's own authority."""
     sid = _school_id()
     if not sid:
-        return redirect("/auth/login")
+        return redirect(login_door_for(g.get("user_role"), request.path))
     out = invigilation.decide_retake(
         get_supabase(), sid, request_id,
         decision=request.form.get("decision", ""),
@@ -4122,7 +4123,7 @@ def invigilation_matrix_page():
     """The grid for one day, its two axes, and the bulk-upload door."""
     sid = _matrix_school()
     if not sid:
-        return redirect("/auth/login")
+        return redirect(login_door_for(g.get("user_role"), request.path))
     supabase = get_supabase()
     exam_date = (request.args.get("date") or date.today().isoformat()).strip()
     context = _matrix_context(supabase, sid, exam_date,
@@ -4141,7 +4142,7 @@ def invigilation_matrix_period():
     """Add or rename one slot of the day. No developer, no SQL."""
     sid = _matrix_school()
     if not sid:
-        return redirect("/auth/login")
+        return redirect(login_door_for(g.get("user_role"), request.path))
     out = inv_matrix.save_period(
         get_supabase(), sid,
         period_id=request.form.get("period_id") or None,
@@ -4160,7 +4161,7 @@ def invigilation_matrix_room():
     """Add or rename one exam room, with its capacity."""
     sid = _matrix_school()
     if not sid:
-        return redirect("/auth/login")
+        return redirect(login_door_for(g.get("user_role"), request.path))
     out = inv_matrix.save_room(
         get_supabase(), sid,
         room_id=request.form.get("room_id") or None,
@@ -4177,7 +4178,7 @@ def invigilation_matrix_assign():
     """Fill one cell. A conflict is refused with a sentence, not a 500."""
     sid = _matrix_school()
     if not sid:
-        return redirect("/auth/login")
+        return redirect(login_door_for(g.get("user_role"), request.path))
     out = inv_matrix.assign(
         get_supabase(), sid,
         exam_date=request.form.get("exam_date", ""),
@@ -4198,7 +4199,7 @@ def invigilation_matrix_clear():
     """Empty one cell."""
     sid = _matrix_school()
     if not sid:
-        return redirect("/auth/login")
+        return redirect(login_door_for(g.get("user_role"), request.path))
     _invigilation_refused(inv_matrix.clear_cell(
         get_supabase(), sid, request.form.get("duty_id", "")))
     return _matrix_back(request.form.get("exam_date", ""))
@@ -4215,7 +4216,7 @@ def invigilation_matrix_seed():
     """
     sid = _matrix_school()
     if not sid:
-        return redirect("/auth/login")
+        return redirect(login_door_for(g.get("user_role"), request.path))
     out = inv_matrix.seed_from_classes(get_supabase(), sid)
     if not out.get("ok"):
         flash(out.get("reason") or "write_failed", "error")
@@ -4245,7 +4246,7 @@ def invigilation_matrix_cell():
     """
     sid = _matrix_school()
     if not sid:
-        return redirect("/auth/login")
+        return redirect(login_door_for(g.get("user_role"), request.path))
     exam_date = request.form.get("exam_date", "")
     period = request.form.get("period_id", "")
     out = inv_matrix.set_cell(
@@ -4288,7 +4289,7 @@ def invigilation_matrix_cells():
     """
     sid = _matrix_school()
     if not sid:
-        return redirect("/auth/login")
+        return redirect(login_door_for(g.get("user_role"), request.path))
     exam_date = request.form.get("exam_date", "")
     period = request.form.get("period_id", "")
     room_ids = request.form.getlist("room_id")[:60]
@@ -4328,7 +4329,7 @@ def invigilation_matrix_auto_fill():
     """Fill every empty room of the current session with the next free teacher."""
     sid = _matrix_school()
     if not sid:
-        return redirect("/auth/login")
+        return redirect(login_door_for(g.get("user_role"), request.path))
     exam_date = request.form.get("exam_date", "")
     period = request.form.get("period_id", "")
     out = inv_matrix.auto_fill(
@@ -4350,7 +4351,7 @@ def invigilation_matrix_template():
     """The blank workbook, with one marked example row and this school's own lists."""
     sid = _matrix_school()
     if not sid:
-        return redirect("/auth/login")
+        return redirect(login_door_for(g.get("user_role"), request.path))
     supabase = get_supabase()
     data = inv_matrix.build_template(
         inv_matrix.list_periods(supabase, sid, active_only=True),
@@ -4391,7 +4392,7 @@ def invigilation_matrix_upload():
     """
     sid = _matrix_school()
     if not sid:
-        return redirect("/auth/login")
+        return redirect(login_door_for(g.get("user_role"), request.path))
     file = request.files.get("file")
     if not file:
         flash("bad_file", "error")
@@ -4462,7 +4463,7 @@ def invigilation_matrix_apply():
     """
     sid = _matrix_school()
     if not sid:
-        return redirect("/auth/login")
+        return redirect(login_door_for(g.get("user_role"), request.path))
     try:
         rows = json.loads(request.form.get("rows") or "[]")
     except (TypeError, ValueError):

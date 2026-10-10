@@ -20,11 +20,11 @@ here it does not exist anywhere.
 
 What one card carries
 ---------------------
-The **login identity** is not the email for either role — the pupil/teacher door
-(``LOGIN_URL_USER`` in :mod:`app.utils.auth`, which the sheet also prints) finds a
-pupil by ``students.nisn`` and a teacher by ``teachers.employee_id`` (the page calls
-it "Nomor Pegawai"). A card that printed only the email would look right and not
-work, so the identity is read from the same column the login route matches on.
+The **login identity** is not the email for either role — the sign-in page
+(``LOGIN_URL`` in :mod:`app.utils.auth`, which the sheet also prints) finds a pupil
+by ``students.nisn`` and a teacher by ``teachers.employee_id`` (the page calls it
+"Nomor Pegawai"). A card that printed only the email would look right and not work,
+so the identity is read from the same column the login route matches on.
 
 Scoping, and why a bad id is refused rather than skipped
 --------------------------------------------------------
@@ -44,10 +44,11 @@ import secrets
 import string
 from datetime import datetime, timezone
 
-# The door, not a copy of it: `tests/unit/test_login_door.py` keeps the pupil/teacher
-# login URL spelled in exactly one place, and a sheet that printed its own string
-# would be a second copy to keep in sync.
-from app.utils.auth import LOGIN_URL_USER
+# The page, not a copy of it: `tests/unit/test_login_door.py` keeps the sign-in URL
+# spelled in exactly one place, and a sheet that printed its own string would be a
+# second copy to keep in sync. One sheet covers a whole school — pupils and teachers
+# together — so there is no role to hint at and it prints the bare page.
+from app.utils.auth import LOGIN_URL
 from app.services.school_officials import OFFICIAL_ROLES
 
 #: ``kind -> everything that differs between a pupil's card and a teacher's``.
@@ -331,7 +332,7 @@ def meta_for(school_name: str, requested: int, issued: int, failed: int,
             "School": school_name, "Made": stamp,
             "Accounts requested": str(requested), "Passwords issued": str(issued),
             "Could not be reset": str(failed),
-            "Login page": LOGIN_URL_USER,            "Note": ("Passwords are shown only in this file — nothing on the site can "
+            "Login page": LOGIN_URL,            "Note": ("Passwords are shown only in this file — nothing on the site can "
                      "read them back. Each one was set on the account just now."),
             "First sign-in": ("This is a one-time password: the account is asked to "
                               "choose its own before any other page opens."),
@@ -340,7 +341,7 @@ def meta_for(school_name: str, requested: int, issued: int, failed: int,
         "Sekolah": school_name, "Dibuat": stamp,
         "Akun diminta": str(requested), "Password diterbitkan": str(issued),
         "Gagal direset": str(failed),
-        "Halaman login": LOGIN_URL_USER,
+        "Halaman login": LOGIN_URL,
         "Catatan": ("Password hanya ada di berkas ini — tidak ada halaman yang bisa "
                     "membacanya kembali. Setiap password baru saja dipasang ke akunnya."),
         "Login pertama": ("Ini password sekali pakai: akunnya diminta membuat password "

@@ -42,38 +42,66 @@ workspace).
 
 | Role | Tujuan | Dibuat oleh | Dashboard | Login di |
 |------|--------|-------------|-----------|----------|
-| `super_admin` | Mengelola SEMUA sekolah + pengguna + data lintas sekolah | Via Supabase Console | `/super-admin/dashboard` | `/auth/login` |
-| `admin_sekolah` | Mengelola 1 sekolah (guru, siswa, kelas, mapel) | Register mandiri (perlu approval) | `/admin/dashboard` | `/auth/login` |
-| `principal` | Mengawasi sekolahnya sendiri (baca saja); boleh mengajar bila ditugaskan | Dibuat admin_sekolah | `/principal/dashboard` | `/auth/login_user` |
-| `vice_principal` | Mengawasi sekolahnya sendiri (baca saja); boleh mengajar bila ditugaskan | Dibuat admin_sekolah | `/vice-principal/dashboard` | `/auth/login_user` |
-| `guru` | Membuat ujian, mengoreksi, melihat hasil | Di-import oleh admin_sekolah | `/teacher/dashboard` | `/auth/login_user` |
-| `murid` | Mengerjakan ujian, melihat nilai | Di-import oleh admin_sekolah | `/student/dashboard` | `/auth/login_user` |
+| `super_admin` | Mengelola SEMUA sekolah + pengguna + data lintas sekolah | Via Supabase Console | `/super-admin/dashboard` | `/auth/sign-in` |
+| `admin_sekolah` | Mengelola 1 sekolah (guru, siswa, kelas, mapel) | Register mandiri (perlu approval) | `/admin-sekolah/dashboard` | `/auth/sign-in` |
+| `principal` | Mengawasi sekolahnya sendiri (baca saja); boleh mengajar bila ditugaskan | Dibuat admin_sekolah | `/principal/dashboard` | `/auth/sign-in` |
+| `vice_principal` | Mengawasi sekolahnya sendiri (baca saja); boleh mengajar bila ditugaskan | Dibuat admin_sekolah | `/vice-principal/dashboard` | `/auth/sign-in` |
+| `guru` | Membuat ujian, mengoreksi, melihat hasil | Di-import oleh admin_sekolah | `/teacher/dashboard` | `/auth/sign-in` |
+| `murid` | Mengerjakan ujian, melihat nilai | Di-import oleh admin_sekolah | `/student/dashboard` | `/auth/sign-in` |
 
 ---
 
 ## 2. Authentication Flow
 
-### 2.1. Login Admin (super_admin & admin_sekolah)
+### 2.1. Satu halaman login untuk semua peran
 ```
-Browser → /auth/login → POST (email + password)
+Browser → /auth/sign-in → POST (identifier + password)
   → Supabase Auth sign_in_with_password()
   → Cek profile.status (pending → redirect /auth/activate)
-  → Cek role (super_admin/admin_sekolah saja)
-  → Set cookies: access_token (24h) + refresh_token (7d)
-  → Redirect ke /admin/dashboard
+  → Cocokkan role terhadap SELURUH peran yang punya dashboard (`ALL_ROLES`)
+  → Set cookies: access_token (24h) + refresh_token (7d) + session_start
+  → Redirect ke dashboard peran tersebut (`dashboard_for`)
 ```
 
-### 2.2. Login Guru/Murid/Kepala Sekolah/Wakil Kepala Sekolah
-```
-Browser → /auth/login_user → POST (email + password)
-  → Supabase Auth sign_in_with_password()
-  → Cek profile.status (pending → redirect /auth/activate)
-  → Cek role (guru/murid/principal/vice_principal — `USER_ROLES`)
-  → Set cookies + redirect ke dashboard masing-masing
-```
-Empat peran masuk lewat pintu yang sama. Satu akun dengan peran di luar keempatnya
-(super_admin, admin_sekolah) ditolak dengan pesan bahwa ia salah pintu — mereka memakai
-`/auth/login`.
+`identifier` menerima **email, NISN murid, atau NIP pegawai** dalam satu field, dan
+server yang menentukan peran dari akun yang cocok — bukan tab yang dipilih pembaca.
+Tab pada halaman (`Admin`, `Staf Sekolah`, `Guru`, `Murid`, dari `SIGN_IN_TABS`)
+hanya mengubah placeholder dan teks bantuan; nilainya tidak pernah dikirim sebagai
+klaim dan tidak pernah mempersempit pencarian. Inilah sebabnya tidak ada lagi
+"halaman yang salah": sebuah peran tidak lagi bisa ditolak hanya karena ia mendarat
+lewat pintu yang bukan miliknya.
+
+Enam peran, satu halaman, masing-masing punya rumah:
+
+| Peran | Dashboard |
+|---|---|
+| `super_admin` | `/super-admin/dashboard` |
+| `admin_sekolah` | `/admin-sekolah/dashboard` |
+| `principal` | `/principal/dashboard` |
+| `vice_principal` | `/vice-principal/dashboard` |
+| `guru` | `/teacher/dashboard` |
+| `murid` | `/student/dashboard` |
+
+### 2.2. Kontrak URL lama dan parameter `?role=`
+
+`/auth/login` dan `/auth/login-user` tetap **dijawab** sebagai alias: GET
+meneruskan pembaca ke `/auth/sign-in` sambil membawa `?role=` dan `?next=` apa pun,
+dan POST tetap memproses login (menjawab POST dengan redirect akan membuang
+kredensial yang baru saja diketik). Keduanya dipertahankan karena sudah
+*dipublikasikan*: `/tutorial/guru`, `/tutorial/murid`, `/tutorial/admin-sekolah`,
+kartu-kartu di `/demo`, dan kartu login cetak yang beredar di sekolah menaut ke sana.
+
+`?role=<peran>` hanya membuka halaman dengan tab kelompok itu sudah terpilih;
+nilainya divalidasi (`sign_in_tab` menjawab `""` untuk yang tidak dikenal), tidak
+digemakan, dan tidak pernah sampai ke backend. Redirect internal sekarang menunjuk
+langsung ke `/auth/sign-in` (dengan `?role=` bila perannya diketahui) sehingga
+pembaca yang sesinya berakhir tidak lagi mendarat di tab admin.
+
+Satu pesan penolakan untuk semua sebab: identifier tidak dikenal, password salah,
+dan akun dengan peran yang tidak dikenal menghasilkan kalimat generik yang sama
+("Email atau password salah"). Pesan lama — "Halaman ini untuk Admin" dan "Halaman
+ini untuk Guru/Murid" — dihapus: keduanya menyebut halaman lain, yang berarti
+menyebut peran pembaca.
 
 ### 2.3. Register Admin Sekolah
 ```
@@ -369,39 +397,37 @@ Super Admin juga masih bisa mengakses `/admin/*` untuk approval registrasi dan c
 ## 8. Flow Diagram (Text)
 
 ```
-                    ┌───────────────────┐
-                    │   Landing (/auth)  │
-                    └────────┬──────────┘
-                             │
-              ┌──────────────┼──────────────┐
-              ▼              ▼              ▼
-       /auth/login     /auth/login_user  /auth/register
-       (super_admin,   (guru, murid)     (admin_sekolah)
-        admin_sekolah)      │                │
-              │              │                ▼
-              │              ▼          Pending approval
-              │         /teacher/*       by super_admin
-              │         /student/*            │
-              │                                ▼
-              │                           /auth/activate
-              │                           (activation code)
-              │                                │
-              │                                ▼
-              │                           /admin-sekolah/*
-              │                                │
-              │                           Import guru/siswa
-              │                                │
-              │                           ┌────┴────┐
-              │                           ▼         ▼
-              │                       /teacher/*   /student/*
-              │                       (guru)       (murid)
+                    ┌─────────────────────┐
+                    │  Landing (/auth)    │
+                    └──────────┬──────────┘
+                               │
+              ┌────────────────┼────────────────┐
+              ▼                                 ▼
+   /auth/sign-in                        /auth/register
+   SATU halaman, semua peran            (admin_sekolah)
+   (email / NISN / NIP + password)            │
+              │                              ▼
+              │                        Pending approval
+              │                        by super_admin
+              │                              │
+              │                              ▼
+              │                        /auth/activate
+              │                        (activation code)
+              │                              │
+              │                              ▼
+              │                        /admin-sekolah/*
+              │                              │
+              │                        Import guru/siswa
+              │                              │
+              │                        ┌─────┴─────┐
+              │                        ▼           ▼
+              │                    /teacher/*   /student/*
+              │                    (guru)       (murid)
               │
-              ▼
-     /super-admin/dashboard
-     /super-admin/schools
-     /super-admin/users
-     /super-admin/exams
-     /super-admin/logs
+              └──► dashboard peran itu sendiri (`dashboard_for`):
+                   /super-admin/dashboard, /admin-sekolah/dashboard,
+                   /principal/dashboard, /vice-principal/dashboard,
+                   /teacher/dashboard, /student/dashboard
 ```
 
 ## Penugasan guru–kelas–mapel (banyak-ke-banyak)

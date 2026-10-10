@@ -32,23 +32,29 @@ def _html(name: str) -> str:
     return (AUTH / name).read_text(encoding="utf-8")
 
 
-# ── every door has a way back in ─────────────────────────────────────────────
+# ── the one door has a way back in ───────────────────────────────────────────
 
-def test_the_user_door_offers_a_way_back_in():
-    """Teachers, pupils and both officials sign in here, so the link has to be here."""
-    assert "auth.forgot_password" in _html("login_user.html"), (
-        "the teacher/student door offers no forgot-password link, so the four roles "
-        "it signs in can reset only by guessing the URL")
+def test_the_one_sign_in_page_offers_a_way_back_in():
+    """Every role signs in here, so the link has to be here.
 
-
-def test_the_admin_door_still_offers_one():
-    assert "auth.forgot_password" in _html("login.html")
+    This used to be asserted twice — once per door — because there were two pages.
+    There is one, and a second copy of the assertion would only be the same
+    assertion twice; what is worth keeping instead is that the second one stays
+    gone, since two pages that both claim to sign a reader in is the design this
+    was merged out of.
+    """
+    assert "auth.forgot_password" in _html("login.html"), (
+        "the sign-in page offers no forgot-password link, so an account that has "
+        "forgotten its password can reset only by guessing the URL")
+    assert not (AUTH / "login_user.html").exists(), (
+        "a second login page is on disk again: one page signs everyone in now, and "
+        "two of them is how a reader ends up refused by the one they did not pick")
 
 
 def test_the_new_link_is_bilingual():
     """Every other label on that page is a `t()` pair; a bare one would be the only
     string that ignores the toggle, and the i18n gate counts it as an offender."""
-    html = _html("login_user.html")
+    html = _html("login.html")
     assert re.search(r"t\('[^']+','[^']+'\)[^>]*></a>\s*\n", html) or \
         "t('Lupa password?','Forgot password?')" in html, (
         "the forgot-password link is not a bilingual pair")

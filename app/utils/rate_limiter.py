@@ -195,7 +195,16 @@ ACCOUNT_IP_BACKSTOP = {
 }
 
 _exempt_paths = {"/health", "/static/"}
-_exact_exempt = {"/", "/pricing", "/demo", "/auth/login-user", "/auth/login"}
+# The public pages, and every URL that checks a password: the sign-in page's own
+# address is here for the same reason its two legacy URLs are. Each of the three is
+# throttled *inside* the view (`@_rate_limit("300 per minute")` plus the per-account
+# counter), so leaving one out does not protect it — it applies the strict per-IP
+# group on top of the view's own limit, and applies it to the merged page but not to
+# the aliases that forward to it. That is how a whole school behind one NAT loses
+# the login the aliases would have let through, and `tests/unit/test_sign_in_merged.py`
+# asserts all three keep the same backstop.
+_exact_exempt = {"/", "/pricing", "/demo",
+                 "/auth/sign-in", "/auth/login-user", "/auth/login"}
 # Routes that throttle themselves inside the handler (via check_account_limit).
 # The hook must skip them or the strict per-IP group is applied on top — which
 # is what locked a whole school out of a single NAT'd address.

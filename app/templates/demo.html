@@ -137,7 +137,7 @@
                         <h3 class="text-lg sm:text-xl font-extrabold text-surface-800">Super Admin</h3>
                         <p class="text-sm text-surface-500 mt-1 leading-relaxed" x-text="t('Akses penuh ke semua sekolah, pengaturan sistem, dan manajemen pengguna.','Full access to every school, the system settings and user management.')"></p>
                     </div>
-                    {{ login_link('/auth/login', 'Login', 'Log in', 'purple') }}
+                    {{ login_link('/auth/sign-in', 'Login', 'Log in', 'purple') }}
                 </div>
                 <div class="mt-4 p-4 bg-purple-50/60 rounded-2xl border border-purple-100/60">
                     <div class="flex flex-wrap items-center gap-2">
@@ -158,7 +158,7 @@
                         <h3 class="text-lg sm:text-xl font-extrabold text-surface-800" x-text="t('Admin Sekolah','School Admin')"></h3>
                         <p class="text-sm text-surface-500 mt-1 leading-relaxed" x-text="t('Kelola guru, siswa, kelas, mata pelajaran, dan langganan sekolah.','Manage teachers, students, classes, subjects and the school subscription.')"></p>
                     </div>
-                    {{ login_link('/auth/login', 'Login', 'Log in', 'blue') }}
+                    {{ login_link('/auth/sign-in', 'Login', 'Log in', 'blue') }}
                 </div>
                 <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     {% for jenjang, nama, npsn, email in [
@@ -187,7 +187,7 @@
                         <h3 class="text-lg sm:text-xl font-extrabold text-surface-800" x-text="t('Kepala Sekolah','Principal')"></h3>
                         <p class="text-sm text-surface-500 mt-1 leading-relaxed" x-text="t('Mengawasi sekolahnya sendiri: angka, ujian dan laporan seluruh sekolah — hanya baca, tanpa wewenang mengubah data. Akunnya dibuat dan dicabut oleh Admin Sekolah, seperti akun guru dan murid.','Oversight of their own school: the figures, the exams and every report — read-only, with no authority to change data. The school admin creates the account, and can revoke it, like a teacher or student account.')"></p>
                     </div>
-                    {{ login_link('/auth/login-user?role=principal', 'Login Kepala Sekolah', 'Log in as Principal', 'indigo') }}
+                    {{ login_link('/auth/sign-in?role=principal', 'Login Kepala Sekolah', 'Log in as Principal', 'indigo') }}
                 </div>
                 <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     {% for jenjang, nama, npsn, email in [
@@ -216,7 +216,7 @@
                         <h3 class="text-lg sm:text-xl font-extrabold text-surface-800" x-text="t('Wakil Kepala Sekolah','Vice Principal')"></h3>
                         <p class="text-sm text-surface-500 mt-1 leading-relaxed" x-text="t('Halaman pengawasan yang sama dengan kepala sekolah, untuk hal-hal yang didelegasikan kepadanya. Yang berbeda hanya siapa yang membaca — wewenang menulisnya sama-sama tidak ada.','The same oversight page the principal reads, for whatever is delegated to them. Only the reader differs — neither of them can write.')"></p>
                     </div>
-                    {{ login_link('/auth/login-user?role=vice_principal', 'Login Wakil Kepsek', 'Log in as Vice Principal', 'cyan') }}
+                    {{ login_link('/auth/sign-in?role=vice_principal', 'Login Wakil Kepsek', 'Log in as Vice Principal', 'cyan') }}
                 </div>
                 <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     {% for jenjang, nama, npsn, email in [
@@ -245,7 +245,7 @@
                         <h3 class="text-lg sm:text-xl font-extrabold text-surface-800" x-text="t('Guru','Teachers')"></h3>
                         <p class="text-sm text-surface-500 mt-1 leading-relaxed" x-text="t('Buat ujian, koreksi esai dengan AI, dan lihat analitik hasil belajar.','Create exams, grade essays with AI and read the analytics on student results.')"></p>
                     </div>
-                    {{ login_link('/auth/login-user?role=guru', 'Login Semua Guru', 'Log in as any Teacher', 'emerald') }}
+                    {{ login_link('/auth/sign-in?role=guru', 'Login Semua Guru', 'Log in as any Teacher', 'emerald') }}
                 </div>
                 <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                     {% for jenjang, mapel_id, mapel_en, kelas, email in [
@@ -277,7 +277,7 @@
                         <h3 class="text-lg sm:text-xl font-extrabold text-surface-800" x-text="t('Siswa','Students')"></h3>
                         <p class="text-sm text-surface-500 mt-1 leading-relaxed" x-text="t('Kerjakan ujian dengan alat gambar, penggaris digital, dan kalkulator ilmiah.','Take an exam with drawing tools, a digital ruler and a scientific calculator.')"></p>
                     </div>
-                    {{ login_link('/auth/login-user?role=murid', 'Login Semua Siswa', 'Log in as any Student', 'amber') }}
+                    {{ login_link('/auth/sign-in?role=murid', 'Login Semua Siswa', 'Log in as any Student', 'amber') }}
                 </div>
                 <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                     {% for jenjang, nama, kelas, ok, email in [

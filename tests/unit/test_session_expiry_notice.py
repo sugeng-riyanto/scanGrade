@@ -7,9 +7,12 @@ composed into that:
 1. ``_unauthorized()`` flashed one blanket sentence for every cause, so a
    15-minute idle timeout (or the 4-hour absolute limit) read as a permissions
    problem on whatever URL the user was opening.
-2. Neither login page rendered flashes — ``get_flashed_messages`` was absent from
-   ``auth/login.html``, ``auth/login_user.html`` and ``base.html``. The redirect
-   target silently swallowed the notice, so it stayed queued in the session.
+2. Neither of the two login pages rendered flashes — ``get_flashed_messages`` was
+   absent from ``auth/login.html``, ``auth/login_user.html`` and ``base.html``. The
+   redirect target silently swallowed the notice, so it stayed queued in the session.
+   (There is one page now, so the half of this that used to be about *which* page the
+   notice landed on is about the alias: a GET on an old door forwards, and the notice
+   has to survive the hop.)
 3. A successful login did not clear the queue, so the stale notice was finally
    printed by the next page that *does* render flashes — the page the user had
    just opened, which then looked like the thing rejecting them.
@@ -23,7 +26,13 @@ from types import SimpleNamespace
 import pytest
 
 from app.utils import auth as authmod
+from app.utils.auth import LOGIN_URL, login_door_for
 from app.routes import auth as routes_auth
+
+
+def _hint(role: str) -> str:
+    """Where a reader refused *as* ``role`` now lands: the one page, on their tab."""
+    return login_door_for(role)
 
 
 # ── fakes ────────────────────────────────────────────────────────
@@ -106,8 +115,8 @@ def test_unauthorized_without_a_reason_keeps_the_generic_message(app):
     resp = client.get("/_probe_protected")   # no access_token cookie at all
 
     assert resp.status_code == 302
-    assert resp.headers["Location"].endswith("/auth/login")
-    assert "Silakan login terlebih dahulu" in client.get("/auth/login").get_data(as_text=True)
+    assert resp.headers["Location"] == LOGIN_URL
+    assert "Silakan login terlebih dahulu" in client.get(LOGIN_URL).get_data(as_text=True)
 
 
 def test_unauthorized_reason_reaches_the_json_caller(app):
@@ -132,10 +141,10 @@ def test_idle_timeout_names_the_idle_window(app, monkeypatch):
     resp = client.get("/_probe_protected")
 
     assert resp.status_code == 302
-    assert resp.headers["Location"].endswith("/auth/login")
+    assert resp.headers["Location"] == _hint("super_admin")
 
     # The notice is now carried into the login page, not left unread.
-    page = client.get("/auth/login")
+    page = client.get(_hint("super_admin"))
     body = page.get_data(as_text=True)
     assert "tidak ada aktivitas" in body
     assert "15 menit" in body
@@ -155,7 +164,7 @@ def test_absolute_limit_names_the_hour_budget(app, monkeypatch):
     resp = client.get("/_probe_protected")
 
     assert resp.status_code == 302
-    page = client.get("/auth/login")
+    page = client.get(_hint("super_admin"))
     assert "4 jam" in page.get_data(as_text=True)
 
 
@@ -203,11 +212,11 @@ def test_the_clamp_does_not_weaken_the_timeout(app, monkeypatch):
     resp = client.get("/_probe_protected")
 
     assert resp.status_code == 302
-    # A guru is refused, and lands on the door that says so: the admin page
-    # heading "Masuk Admin" is not where a teacher should be told to log in
-    # again. See tests/unit/test_login_door.py.
-    assert resp.headers["Location"].endswith("/auth/login-user")
-    assert "60 menit" in client.get("/auth/login-user").get_data(as_text=True)
+    # A guru is refused, and lands on the page opened for teachers: being shown the
+    # admin tab is not how a teacher should be told to log in again. See
+    # tests/unit/test_login_door.py.
+    assert resp.headers["Location"] == _hint("guru")
+    assert "60 menit" in client.get(_hint("guru")).get_data(as_text=True)
 
 
 def test_a_login_with_no_idle_cookie_still_works(app, monkeypatch):
@@ -229,20 +238,32 @@ def test_login_page_renders_a_flashed_notice(app):
     client = app.test_client()
     _set_session(client, _flashes=[("error", "Silakan login terlebih dahulu")])
 
-    page = client.get("/auth/login")
+    page = client.get(LOGIN_URL)
 
     assert page.status_code == 200
     assert "Silakan login terlebih dahulu" in page.get_data(as_text=True)
 
 
-def test_login_user_page_renders_a_flashed_notice(app):
+@pytest.mark.parametrize("door", ["/auth/login", "/auth/login-user"])
+def test_an_old_door_carries_the_notice_through_the_hop(app, door):
+    """The alias answers a GET with a redirect, so nothing renders there.
+
+    A flash is consumed by the page that *reads* it, never by a 302 — which is why
+    this is worth asserting: the hop must not swallow it, and the reader must arrive
+    somewhere that prints it. The destination is asserted exactly, and it carries no
+    role hint on purpose: a bookmark is just a URL, and the door is handed no
+    evidence of who the reader is, so guessing a group for them here would be the
+    kind of guess `sign_in_tab` refuses to make.
+    """
     client = app.test_client()
     _set_session(client, _flashes=[("error", "Sesi Anda berakhir")])
 
-    page = client.get("/auth/login-user")
+    resp = client.get(door)
 
-    assert page.status_code == 200
-    assert "Sesi Anda berakhir" in page.get_data(as_text=True)
+    assert resp.status_code == 302, "the old door renders a second form again"
+    assert resp.headers["Location"] == LOGIN_URL
+    assert "Sesi Anda berakhir" in client.get(LOGIN_URL).get_data(as_text=True), (
+        "the notice was dropped by the hop between the old door and the one page")
 
 
 def test_a_flash_is_shown_once(app):
@@ -250,8 +271,8 @@ def test_a_flash_is_shown_once(app):
     client = app.test_client()
     _set_session(client, _flashes=[("error", "sekali saja")])
 
-    assert "sekali saja" in client.get("/auth/login").get_data(as_text=True)
-    assert "sekali saja" not in client.get("/auth/login").get_data(as_text=True)
+    assert "sekali saja" in client.get(LOGIN_URL).get_data(as_text=True)
+    assert "sekali saja" not in client.get(LOGIN_URL).get_data(as_text=True)
 
 
 # ── 3. a finished session's notice must not outlive the login ────

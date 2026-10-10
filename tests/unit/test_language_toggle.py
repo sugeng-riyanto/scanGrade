@@ -529,7 +529,6 @@ TRANSLATED = [
     # one carries its own control from `auth/_chrome.html`, the same convention the
     # landing page and /capacity use.
     "auth/login.html",
-    "auth/login_user.html",
     "auth/register.html",
     "auth/forgot_password.html",
     "auth/verify_code.html",
@@ -989,7 +988,12 @@ def test_the_translated_list_only_grows_with_intent():
     The bump is still the deliberate act: it is what turns the sweep on for each of
     them.
     """
-    assert len(TRANSLATED) == 58, (
+    # 57, and the one that moved is this merge's own: main carried 58, and the
+    # merge *deletes* `auth/login_user.html` — the two sign-in pages are one page
+    # now. The guard's rule is unchanged: bumping the number is the deliberate act
+    # for a page that is *added*, and a page that no longer exists has to leave the
+    # list, or the existence check above fails on a file that is not there.
+    assert len(TRANSLATED) == 57, (
         f"{len(TRANSLATED)} pages are on the translated list. Bump this number when "
         f"you translate another one — and if you *removed* a page, put it back, "
         f"because dropping it turns the sweep off for that page: {TRANSLATED}")

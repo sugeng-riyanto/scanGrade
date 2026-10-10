@@ -3,7 +3,7 @@ import json
 import os
 from datetime import datetime, timezone
 from flask import Blueprint, render_template, request, redirect, g, jsonify, current_app, make_response, flash, session, url_for
-from app.utils.auth import login_required, get_supabase
+from app.utils.auth import login_required, get_supabase, login_door_for
 from app.utils.cache import cache_get, cache_set
 from app.utils.helpers import read_with_retry, row_or_none
 from app.utils.exam_access import (
@@ -1347,7 +1347,11 @@ def request_retake():
         return redirect("/teacher/dashboard")
     school_id = g.get("user_school_id")
     if not school_id:
-        return redirect("/auth/login")
+        # Their own door, with their own hint. Writing `/auth/login` here would send a
+        # pupil to the page opened on the admin group — no longer a refusal, since the
+        # aliases forward, but still the page telling them the wrong thing about
+        # themselves. `login_door_for` is the one mapping that owns that question.
+        return redirect(login_door_for(g.get("user_role"), request.path))
     out = invigilation.request_retake(
         get_supabase(), school_id,
         exam_id=request.form.get("exam_id", ""),

@@ -153,11 +153,13 @@ class TestTheRoute:
         assert "methods=" not in source.split('"/deploy-status/perf/<which>"')[1][:40]
 
     def test_an_anonymous_visitor_is_sent_to_the_door(self, app):
+        from app.utils.auth import LOGIN_URL
+
         client = app.test_client()
         for which in ("evidence", "baseline"):
             response = client.get(f"/super-admin/deploy-status/perf/{which}")
             assert response.status_code in (301, 302), response.status_code
-            assert "/auth/login" in response.headers.get("Location", "")
+            assert response.headers.get("Location", "").split("?")[0] == LOGIN_URL
 
     def test_an_absent_file_is_a_404_that_names_which_answer_it_is(self, app, tmp_path,
                                                                   monkeypatch):

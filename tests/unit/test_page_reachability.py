@@ -197,9 +197,26 @@ def _transitive_includes(start: str, texts: dict[str, str]) -> set[str]:
 # ── the walk ─────────────────────────────────────────────────────────────────
 
 #: The doors a reader arrives at without following a link inside the app: the
-#: landing page and the authentication doors (plus everything they redirect to
+#: landing page, the sign-in page and the demo (plus everything they redirect to
 #: after a successful sign-in, which the walk reaches through the view bodies).
-SEED_RULES = ("/", "/auth/login", "/auth/login-user", "/demo")
+#:
+#: The sign-in page is named by its canonical URL rather than by the two legacy
+#: ones, because the walk follows *references*, and a route that only forwards has
+#: none: `/auth/login` and `/auth/login-user` were the seeds until the merge made
+#: them aliases, at which point seeding there reached nothing and the two pages below
+#: the form (`/auth/forgot-password`, `/auth/verify-reset-code`) read as orphans.
+#: `test_the_walk_seeds_from_a_page_that_renders_something` keeps that from recurring.
+SEED_RULES = ("/", "/auth/sign-in", "/demo")
+
+#: Templates a seed renders through a *helper* rather than in its own body.
+#:
+#: `sign_in` delegates to `_sign_in_page`, and the `render_template` literal lives
+#: there — so the walk, which reads a view body, found no template at the sign-in
+#: rule at all and credited the door with no references. The two legacy doors were the
+#: seeds before the merge *and* rendered the page directly, which is why nobody
+#: noticed: the day they became aliases, everything below the form became an orphan
+#: and the guard reported it as those pages' fault.
+SEED_TEMPLATES = ("auth/login.html",)
 
 
 def reachable_pages(app) -> tuple[set[str], set[str]]:
@@ -218,11 +235,21 @@ def reachable_pages(app) -> tuple[set[str], set[str]]:
         edges[rule.rule] = found
 
     reached: set[str] = set()
-    frontier = [seed for seed in SEED_RULES if seed in pages or True]
-    # A seed that is not itself a page route still contributes its references, so
-    # the walk starts from its view body (this is how a dashboard is reached: the
-    # sign-in route redirects to it).
     pending = list(SEED_RULES)
+    # A door a reader opens directly contributes its references, whether or not the
+    # rule is itself a page route: through its view body (a dashboard is reached
+    # because the sign-in route redirects to it), and through the template its helper
+    # renders, which is where a merged page's links actually are.
+    #
+    # Queued rather than written straight into `reached`, and that is not a detail:
+    # `reached` is also the walk's *visited* set, so a page marked reached here would
+    # be skipped when it came up — and its own edges, the pages only it links, would
+    # never be expanded. Seeding the sign-in page's chrome this way hid
+    # `/teacher/templates` behind exactly that: base.html names `/teacher/exams`, the
+    # exams page names the template marketplace, and nothing else does.
+    for name in SEED_TEMPLATES:
+        for part in _transitive_includes(name, texts):
+            pending.extend(refs.in_text(texts.get(part, "")))
     while pending:
         rule_text = pending.pop()
         if rule_text in reached:
@@ -254,6 +281,31 @@ def test_every_exemption_says_why():
 
 
 # ── the guard has teeth ──────────────────────────────────────────────────────
+
+def test_the_walk_seeds_from_the_sign_in_pages_own_links(app):
+    """A door that renders its page through a helper still has to be walked.
+
+    `sign_in` does not call `render_template` itself — it delegates to
+    `_sign_in_page`, where the literal lives — so `_page_routes` does not see it and
+    the walk credited the door with nothing. The two legacy doors that used to seed
+    this walk rendered the page directly, which is why the orphaning only appeared
+    the day they became aliases.
+
+    Both halves are asserted: the template the walk is told to seed from is the one
+    the route really renders (so a rename cannot quietly empty it), and the links that
+    template carries are reached.
+    """
+    from app.routes import auth as routes_auth
+
+    assert 'render_template("auth/login.html"' in inspect.getsource(routes_auth._sign_in_page), (
+        "the sign-in route no longer renders the template the walk seeds from, so "
+        "everything below the form reads as an orphan")
+
+    reached, _ = reachable_pages(app)
+    for linked in ("/auth/forgot-password", "/auth/register"):
+        assert linked in reached, (
+            f"{linked} is linked from the sign-in page but the walk did not reach it")
+
 
 def test_it_finds_a_page_it_knows_is_linked(app):
     """`/teacher/templates` is linked from the exams list, so it must be reached —

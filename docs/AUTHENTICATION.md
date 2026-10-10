@@ -5,7 +5,8 @@ This document describes the authentication implementation in the current applica
 ## 1. Components
 
 - **Supabase Auth**: identity provider and password authentication.
-- **Flask auth routes**: `/auth/login`, `/auth/login-user`, registration, and activation.
+- **Flask auth routes**: `/auth/sign-in` (the one sign-in page), the two aliases
+  `/auth/login` and `/auth/login-user`, registration, and activation.
 - **Auth utilities**: `app/utils/auth.py` extracts tokens, resolves sessions, refreshes access tokens, applies identity to Flask `g`, and enforces role requirements.
 - **Role decorators**: `@super_admin_required`, `@admin_sekolah_required`, `@guru_required`, `@murid_required`, plus compatibility aliases.
 - **School boundary check**: `@require_school_access` verifies that the requested resource belongs to the signed-in user's school.
@@ -14,36 +15,64 @@ This document describes the authentication implementation in the current applica
 
 ## 2. Login Request Flow
 
-### Admin / Super Admin
+There is one page, and one code path behind it. The role is a property of the
+account, so it is read from the account — never from the page the reader opened:
 
 ```
 Browser
-  -> GET /auth/login
-  -> POST /auth/login (email, password)
+  -> GET /auth/sign-in            (optionally ?role=<hint>, ?next=<path>)
+  -> POST /auth/sign-in (identifier, password)
+  -> _identifier_email(): an address, a NISN (profiles.nisn), or an employee id
+     (teachers.employee_id) -> the account's email
   -> _sign_in_with_retry()
   -> Supabase Auth sign_in_with_password()
-  -> read profiles(role, status, school_id)
-  -> reject pending or wrong role
+  -> _role_and_status(): profiles(role, status) with the account's own metadata role
+     as the fallback when the row cannot be read
+  -> role not in ALL_ROLES  -> one generic credential refusal (or the transient one,
+                               which does not spend the account's attempt budget)
+  -> status == "pending"    -> /auth/activate
   -> set access_token cookie
   -> set refresh_token cookie
   -> set session_start cookie
-  -> redirect to role dashboard
+  -> redirect to dashboard_for(role)
 ```
 
-### Teacher / Student
+`?role=` preselects a tab and nothing else. The page validates it rather than
+echoing it (`sign_in_tab` answers `""` for a value it does not know), the tab only
+changes the placeholder and the helper line, and it is never sent to the server as
+a claim — a tab is a hint the reader chose, not evidence about them.
 
-```
-Browser
-  -> GET /auth/login-user
-  -> POST /auth/login-user
-  -> optional NISN/NIP -> resolve account email
-  -> _sign_in_with_retry()
-  -> Supabase Auth sign_in_with_password()
-  -> read profiles(role, status)
-  -> reject pending or wrong role
-  -> set access_token + refresh_token + session_start
-  -> redirect to /teacher/dashboard or /student/dashboard
-```
+### The two legacy URLs
+
+`/auth/login` and `/auth/login-user` are **aliases**, kept because they are
+published: the three `/tutorial/*` pages, the cards on `/demo`, and a school's
+printed login cards name them. A GET forwards to `/auth/sign-in` carrying `?role=`
+and `?next=`; a POST is signed in by the same handler (a redirect on a POST would
+discard the credentials). **No route and no page spells either door.** Internal
+redirects — logout, the session-expiry notice, the 401 handler, and a role-scoped
+route that finds no school for the account — all go to the canonical URL through
+`login_door_for`, which also carries the reader's own group so the form opens on it;
+a page that needs the URL (the scan page's expired-session bounce, the reset-success
+page) is handed it by its own route rather than building it. Two guards hold that:
+`tests/unit/test_login_door.py` refuses a `/auth/login-user` literal in any app
+module, and refuses a `/auth/login` literal in an app module *or* a template. Prose
+is not a choice — a docstring or a `{# … #}` comment that names a page to explain it
+is skipped, because the door is spelled where it is chosen.
+
+### Which identifier wins, and what happens when two could match
+
+The one field takes three shapes, and they are tried in one order: an **address**
+(`@`) first — the only shape that cannot be mistaken for another — then a pupil's
+**NISN** (`profiles.nisn`), then a staff **employee id** (`teachers.employee_id`).
+The two numeric shapes are the ambiguous pair, and the order *is* the decision: a
+NISN match wins, because a NISN is issued to every pupil of every school while an
+employee id is one school's own numbering — the column a school can also correct if
+it has typed something odd into it. When `profiles.nisn` cannot be queried at all
+(the column is not on every school's schema) the account's own `user_metadata.nisn`
+is tried through the admin listing, so the pupil path does not depend on one column
+existing. When nothing matches, the text is passed through unchanged and the sign-in
+fails exactly as a wrong password does — being told "no such NISN" would be being
+told which NISNs exist.
 
 ## 3. Credentials and Tokens
 

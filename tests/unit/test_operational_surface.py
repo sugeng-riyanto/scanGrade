@@ -89,9 +89,11 @@ class TestTheAppMetricsAreASuperAdminRead:
         assert b"scangrade_requests_total" in r.data
 
     def test_no_session_is_sent_to_a_login_door(self, client):
+        from app.utils.auth import LOGIN_URL
+
         r = client.get("/metrics")
         assert r.status_code == 302
-        assert "/auth/login" in r.headers["Location"]
+        assert r.headers["Location"].split("?")[0] == LOGIN_URL
 
     def test_the_route_carries_the_super_admin_guard(self):
         src = INIT.read_text(encoding="utf-8")

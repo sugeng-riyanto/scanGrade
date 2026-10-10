@@ -357,11 +357,13 @@ PRINT_URLS = [
 
 class TestWhoMayPrint:
     def test_every_print_route_needs_a_login(self, app):
+        from app.utils.auth import LOGIN_URL
+
         client = app.test_client()
         for url in PRINT_URLS:
             resp = client.get(url)
             assert resp.status_code == 302, url
-            assert "/auth/login" in resp.headers["Location"], url
+            assert resp.headers["Location"].split("?")[0] == LOGIN_URL, url
 
     def test_a_student_prints_their_own_released_card(self, app):
         client = sign_in(app, "murid-1", "murid", "school-a")

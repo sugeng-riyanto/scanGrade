@@ -16,7 +16,7 @@
     <div class="absolute -top-40 -right-40 w-96 h-96 rounded-full bg-emerald-100/30 blur-3xl"></div>
     <div class="absolute -bottom-40 -left-40 w-96 h-96 rounded-full bg-blue-100/30 blur-3xl"></div>
     {{ header('from-emerald-500 to-emerald-600', 'text-emerald-600', 'fa-chalkboard-teacher',
-              'Guru', 'Teacher', '/auth/login-user?role=guru',
+              'Guru', 'Teacher', '/auth/sign-in?role=guru',
               'Masuk sebagai Guru', 'Log in as Teacher') }}
 
     <main class="max-w-5xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
@@ -133,7 +133,7 @@
         <div class="mt-12 text-center bg-gradient-to-r from-emerald-500 to-emerald-600 rounded-2xl p-8 lg:p-12 shadow-xl">
             <h2 class="text-2xl font-extrabold text-white" x-text="t('Siap memulai?','Ready to start?')"></h2>
             <p class="mt-2 text-emerald-100" x-text="t('Masuk dengan akun guru yang diberikan oleh sekolah Anda.','Log in with the teacher account your school gave you.')"></p>
-            <a href="/auth/login-user?role=guru" class="mt-4 inline-flex items-center gap-2 px-8 py-3.5 bg-white text-emerald-700 rounded-xl font-extrabold hover:bg-emerald-50 transition"><span x-text="t('Masuk sebagai Guru','Log in as Teacher')"></span> <i class="fas fa-arrow-right"></i></a>
+            <a href="/auth/sign-in?role=guru" class="mt-4 inline-flex items-center gap-2 px-8 py-3.5 bg-white text-emerald-700 rounded-xl font-extrabold hover:bg-emerald-50 transition"><span x-text="t('Masuk sebagai Guru','Log in as Teacher')"></span> <i class="fas fa-arrow-right"></i></a>
         </div>
     </main>
 </div>

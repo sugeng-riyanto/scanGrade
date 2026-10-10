@@ -223,12 +223,6 @@
       "coverage": 100.0,
       "frozen": false
     },
-    "auth/login_user.html": {
-      "pairs": 18,
-      "leftovers": 0,
-      "coverage": 100.0,
-      "frozen": false
-    },
     "auth/register.html": {
       "pairs": 38,
       "leftovers": 0,

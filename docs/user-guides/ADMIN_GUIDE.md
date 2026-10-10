@@ -2,7 +2,12 @@
 
 ## 1. Login
 
-Buka `/auth/login` dan masuk dengan akun admin sekolah (demo: `admin_smp@scan-grade.app` / `demo123`).
+Buka `/auth/sign-in` dan masuk dengan akun admin sekolah (demo: `admin_smp@scan-grade.app` / `demo123`).
+
+Halaman login sekarang **satu untuk semua pengguna** — admin, guru, dan murid. Yang lama
+(`/auth/login` dan `/auth/login-user`) tetap berfungsi: keduanya mengantar ke halaman itu,
+jadi tautan yang sudah dibagikan ke grup WhatsApp atau tercetak di kartu login tidak perlu
+diganti.
 
 ## 2. Dashboard
 

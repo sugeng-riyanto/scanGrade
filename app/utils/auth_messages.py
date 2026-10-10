@@ -108,11 +108,14 @@ MESSAGES: dict[str, tuple[str, str]] = {
     ),
 
     # ── login ──────────────────────────────────────────────────────
+    # Two sentences used to live here — one per door — each telling the reader they
+    # were on the wrong page and naming the other one. Naming the other page names
+    # the reader's *role*, which a refusal may not do, and there is no wrong page to
+    # be on now that one page signs everyone in; they are gone rather than kept
+    # unused, because the guard below is right that a message nobody can reach picks
+    # up no translator. `tests/unit/test_sign_in_merged.py` still asserts their
+    # wording never comes back.
     "login_required_fields": ("Email dan password wajib diisi", "Email and password are required"),
-    "login_wrong_page": (
-        "Halaman ini untuk Admin. Guru/Murid silakan masuk di halaman login terpisah.",
-        "This page is for Admins. Teachers and students should use the separate login page.",
-    ),
     "login_bad_credentials": ("Email atau password salah", "Wrong email or password"),
     "login_auth_busy": (
         "Server autentikasi sedang sibuk (batas permintaan). Tunggu beberapa detik, lalu coba lagi.",
@@ -121,14 +124,6 @@ MESSAGES: dict[str, tuple[str, str]] = {
     "login_transient": (
         "Gagal masuk karena gangguan sementara. Silakan coba lagi sebentar lagi.",
         "Login failed because of a temporary problem. Please try again shortly.",
-    ),
-    "login_user_required": (
-        "Email/NISN dan password wajib diisi",
-        "Email/NISN and password are required",
-    ),
-    "login_user_wrong_page": (
-        "Halaman ini untuk Guru/Murid. Admin silakan masuk di halaman login utama.",
-        "This page is for Teachers and students. Admins should use the main login page.",
     ),
 
     # ── password reset ─────────────────────────────────────────────
