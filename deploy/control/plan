@@ -1,52 +1,11 @@
 # ScanGrade — the pipeline's way into a box that cannot deploy.
 #
-# The runner reads this out of the commit it has already fetched, on every tick, and
-# obeys it BEFORE it decides anything about a release. That ordering is the point: a
-# box whose release is refused, quarantined or paused is exactly the box that cannot be
-# reached by pushing a fix, because the thing that would apply the fix is the thing
-# that is refusing. This file is read without merging anything, so it arrives on a box
-# whose tree is dirty, rolled back or frozen.
+# Written by deploy/scangrade-plan.sh. Read by deploy/scangrade-deploy.sh on every
+# tick, before it decides anything about a release. See deploy/control/plan in the
+# repository for the full format, and docs/AUTO_DEPLOY.md for the channel itself.
 #
-# Format — one `key: value` per line, `#` lines and blank lines ignored:
-#
-#   command   none | recover | release | rebaseline | pause | resume
-#   issued    when the command was published (UTC, ISO-8601). It is what makes a
-#             re-issued command a *new* plan: a plan is obeyed once per exact content,
-#             so re-publishing only the same bytes would be obeyed once and then never
-#             again. `deploy/scangrade-plan.sh` writes a fresh one every run.
-#   note      one line of free text, carried into the record and the journal.
-#
-# What each command does, and what it deliberately does not:
-#
-#   recover     runs the box's own recovery lever (`deploy/scangrade-recover.sh`,
-#               installed as `sgfix`) and ends the tick — the lever runs a release of
-#               its own, so carrying on would deploy twice for one command. It answers
-#               a missing migration, a stale perf baseline and a box-local edit.
-#   release     writes the same release request the deploy-status page writes, so the
-#               quarantine on the currently-held commit is lifted and that commit tried
-#               once more.
-#   rebaseline  asks the perf gate to re-measure the box (`--rebaseline`) instead of
-#               comparing against a baseline that may no longer describe it.
-#   pause       freezes deploys (the exam-week freeze), so a freeze can be set from the
-#               pipeline rather than from a shell.
-#   resume      removes that freeze. This is the one state with no other way out: the
-#               runner exits on the pause file, so a command read *after* the pause
-#               check could never arrive.
-#   none        the no-op. It exists so the channel has a state that means "nothing is
-#               being asked" rather than an absent file, which is indistinguishable
-#               from a branch the box has not fetched yet.
-#
-# Unknown commands are refused by name and recorded — never ignored — because a plan
-# the reader silently skips is a box nobody can command and nobody can tell is
-# uncommanded.
-#
-# Publish with:
-#
-#     bash deploy/scangrade-plan.sh recover "why, in one line"
-#
-# The record of what was obeyed lands on the box at
-# /var/lib/scangrade-deploy/control/<plan-hash>.applied, and the same file is what the
-# runner reads to know a plan has already been obeyed.
-command: none
-issued: 2026-09-30T22:00:00Z
-note: the channel exists, and is asking for nothing
+# Obeyed once per exact content: the `issued` stamp below is what makes a
+# re-issued command a new plan rather than one already obeyed.
+command: recover
+issued: 2026-10-10T06:08:56Z
+note: the box has refused every tick since 9 October 03:29 (main was rewritten); the lineages are joined now, and this asks the lever to clear whatever box-side state is still holding it
