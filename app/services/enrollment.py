@@ -40,6 +40,26 @@ def normalise_status(value, default="aktif") -> str:
     return value if value in STATUSES else default
 
 
+#: Roman numerals as Indonesian schools write grades. Stated once, on purpose: the
+#: *order* of grades decides which one is final, and a second copy of this table is how
+#: one caller's `VII` becomes 7 while another caller's becomes 0.
+_ROMAN = {"i": 1, "ii": 2, "iii": 3, "iv": 4, "v": 5, "vi": 6,
+          "vii": 7, "viii": 8, "ix": 9, "x": 10, "xi": 11, "xii": 12}
+
+
+def grade_number(label) -> int:
+    """The grade a label names, or `0` when it names none.
+
+    `VII` -> 7, `7` -> 7, and a label with nothing numeric in it answers 0 — the caller
+    decides what an unparseable grade means instead of being handed a guess.
+    """
+    word = str(label or "").strip().lower()
+    if word in _ROMAN:
+        return _ROMAN[word]
+    digits = "".join(ch for ch in word if ch.isdigit())
+    return int(digits) if digits else 0
+
+
 def grade_order(levels) -> list[str]:
     """Grade labels ordered low → high, best-effort.
 
@@ -47,18 +67,8 @@ def grade_order(levels) -> list[str]:
     order decides which grade is *final*, so it has to be recovered from the
     labels the school actually uses rather than assumed.
     """
-    roman = {"i": 1, "ii": 2, "iii": 3, "iv": 4, "v": 5, "vi": 6,
-             "vii": 7, "viii": 8, "ix": 9, "x": 10, "xi": 11, "xii": 12}
-
-    def rank(label):
-        word = str(label or "").strip().lower()
-        if word in roman:
-            return roman[word]
-        digits = "".join(ch for ch in word if ch.isdigit())
-        return int(digits) if digits else 0
-
     ordered, seen = [], set()
-    for label in sorted(levels or [], key=rank):
+    for label in sorted(levels or [], key=grade_number):
         if not str(label or "").strip():
             continue
         if label in seen:

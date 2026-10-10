@@ -604,6 +604,17 @@ TRANSLATED = [
     # a pair, including the banner that has to explain, in the reader's own
     # language, that the clock on screen is a simulation and not a fault.
     "teacher/exam_preview.html",
+    # Cross-school membership, the two halves of one feature. The teacher's half is
+    # the destination search: the stage a school serves, the sentence that says the
+    # stage is not recorded yet, and the consent text that is *shown and hashed* —
+    # all of it pairs, because the reader may be the one who cannot read Indonesian
+    # and the consent they are agreeing to is printed on the page. The school's half
+    # is the queue and the membership list, where three roles read one decision, and
+    # a refusal in one language is a school admin who does not learn why a
+    # principal's reopen button is absent (`Only the school admin`). Both measured
+    # at 100% coverage by deploy/i18n_coverage.py.
+    "teacher/membership.html",
+    "admin_sekolah/membership.html",
 ]
 # Partials are deliberately *not* on this list, and the assertion below says why:
 # an entry has to extend base.html, because it is the page's own scope that owns
@@ -949,7 +960,7 @@ def test_the_translated_list_only_grows_with_intent():
     a reader in the other language does. Bumping this number is the deliberate act
     that says "this page is translated now".
     """
-    assert len(TRANSLATED) == 54, (
+    assert len(TRANSLATED) == 56, (
         f"{len(TRANSLATED)} pages are on the translated list. Bump this number when "
         f"you translate another one — and if you *removed* a page, put it back, "
         f"because dropping it turns the sweep off for that page: {TRANSLATED}")

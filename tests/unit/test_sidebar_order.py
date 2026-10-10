@@ -53,8 +53,11 @@ EXPECTED: dict[str, list[tuple[str, list[str]]]] = {
                       "/admin-sekolah/promote",
                       "/admin-sekolah/assessment-periods",
                       "/admin-sekolah/invigilation"]),
+        # `/admin-sekolah/membership` sits with the people, not with the data: it
+        # answers who works here and who asked to join from another NPSN, which is
+        # the same question the three entries above it answer.
         ("Pengguna", ["/admin-sekolah/teachers", "/admin-sekolah/students",
-                      "/admin-sekolah/officials"]),
+                      "/admin-sekolah/officials", "/admin-sekolah/membership"]),
         ("Data", ["/admin-sekolah/import", "/admin-sekolah/accounts"]),
         ("Laporan", ["/admin-sekolah/analytics", "/admin-sekolah/reports"]),
         ("Komunikasi", ["/admin-sekolah/comms"]),

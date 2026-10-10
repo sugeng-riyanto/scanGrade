@@ -547,13 +547,49 @@ def _session_for(token):
     return data
 
 
+def _resolved_school(token, data):
+    """The school THIS request is for — resolved, not read off the session row.
+
+    For a pupil or a school admin it is ``profiles.school_id``, unchanged, and the
+    membership table is never consulted. For the roles that may belong to more than
+    one school (guru, principal, vice_principal) it is the verified active
+    membership, read fresh once per request: that is what makes a closure total
+    rather than eventual, because the session cache holds the *profile* (whose
+    `school_id` is the home school) and never the resolved answer, so nothing in a
+    cache can keep serving a school a membership row no longer grants.
+
+    See ``app/services/school_membership.py`` for the order of the resolution and
+    for why a database that cannot answer leaves the home school in place: a
+    closure narrows, an outage narrows nothing.
+    """
+    from app.services.school_membership import (is_cross_school_role,
+                                                resolve_for_request)
+    school = data.get("school_id")
+    role = data.get("role", "murid")
+    if not is_cross_school_role(role):
+        return school
+    try:
+        return resolve_for_request(token, data.get("user_id"), school, role)
+    except Exception:
+        # An *unexpected* failure is treated exactly like a read that failed: it
+        # narrows nothing. Without this guard the exception lands in
+        # `login_required`'s own handler, which tries a token refresh and then signs
+        # the reader out — so a membership lookup nobody could answer would end every
+        # teacher's session, the worst outcome available here. The rule cannot be
+        # smuggled through this door either: a closure arrives as *rows*, never as an
+        # exception, so no exception can keep a closed school alive.
+        logger.debug("membership resolution failed; keeping the profile's school",
+                     exc_info=True)
+        return school
+
+
 def _apply_session(data, token):
     g.user_id = data["user_id"]
     g.user_token = token
     g.user_email = data.get("email", "")
     g.user_name = data.get("name", "")
     g.user_role = data.get("role", "murid")
-    g.user_school_id = data.get("school_id")
+    g.user_school_id = _resolved_school(token, data)
     g.user_class_id = data.get("class_id")
     g.user_status = data.get("status", "active")
     # Whether the password on this account is still the one the school printed. False
@@ -717,6 +753,15 @@ def _refresh_token():
             g.user_role = _normalize_role(pd.get("role", "murid"))
             g.user_school_id = pd.get("school_id") or res.user.user_metadata.get("school_id")
             if g.user_school_id == "None": g.user_school_id = None
+            # The same resolution the cached-session path makes: a refreshed token
+            # for a cross-school role must land in a verified membership, not in the
+            # profile's home school — otherwise refreshing would be a way back into
+            # a school a closure removed.
+            from app.services.school_membership import (is_cross_school_role as _cross,
+                                                        resolve_for_request as _resolve)
+            if _cross(g.user_role):
+                g.user_school_id = _resolve(token, g.user_id, g.user_school_id,
+                                            g.user_role)
             g.user_class_id = pd.get("class_id")
             if g.user_class_id in ("None", ""): g.user_class_id = None
             g.user_status = pd.get("status", "active")

@@ -448,3 +448,64 @@ Aturan yang ditegakkan server, bukan UI:
 Sumber otorisasi guru tetap `app/services/assignments.py`: guru hanya boleh membuat/mengubah
 ujian untuk pasangan yang benar-benar dipegangnya, dan daftar dropdown yang kosong **menutup**
 (admin sekolah & super admin tidak dibatasi per pasangan).
+
+## Keanggotaan lintas sekolah (migration 063 + 064)
+
+Satu akun, banyak sekolah. `teacher_school_membership` memisahkan **identitas** (satu baris
+`profiles`, satu email) dari **keanggotaan** (satu baris per sekolah). Peran yang boleh
+memegang lebih dari satu keanggotaan hanya `guru`, `principal`, dan `vice_principal`;
+murid dan admin sekolah tetap satu sekolah lewat `profiles.school_id`, sehingga perilaku
+mereka tidak berubah karena fitur ini.
+
+Perannya **sengaja tidak seragam**, dan asimetri itu keputusan produk:
+
+| Tindakan | Peran yang berwenang |
+|---|---|
+| Mengajukan bergabung (sisi guru) | `guru`, `principal`, `vice_principal` |
+| Menyetujui / menolak permintaan | `admin_sekolah`, `principal`, `vice_principal` |
+| Menutup keanggotaan | `admin_sekolah`, `principal`, `vice_principal` |
+| **Membuka kembali** keanggotaan | **hanya `admin_sekolah`** |
+
+Alasannya: menyetujui permintaan baru dan menutup akses adalah tindakan operasional yang
+boleh dibagi tiga peran; membuka kembali akses yang sudah ditutup adalah keputusan
+administratif yang dipersempit ke satu peran. Aturan itu ditegakkan **dua lapis** —
+dekorator rute (`@admin_sekolah_required` pada pembukaan kembali) dan service
+(`school_membership.reopen_membership` menolak **sebelum** menulis apa pun), sehingga
+pemanggil masa depan yang lupa dekorator tetap tidak bisa membuka kembali. Halaman
+`/admin-sekolah/membership` hanya merender tombol buka-kembali untuk pembaca yang berwenang;
+untuk principal/wakilnya ia mengatakan *"Hanya admin sekolah"*.
+
+### Penutupan itu total, bukan bertahap
+
+`closed` adalah **satu-satunya** status penutupan sejak migrasi 064 (nilai `inactive` dari
+migrasi 044 dipindahkan ke sana dan tidak ditulis kode mana pun lagi — ditegakkan test).
+Setiap nilai selain `active` berarti **tanpa akses**, jadi penutupan tidak butuh jalan baca
+kedua. Sekolah yang ditutup:
+
+- dihapus dari `memberships_for`, `member_school_ids`, `is_active_member`, dan resolusi
+  sekolah aktif;
+- hilang dari sesi **pada request berikutnya**, bukan setelah cache sesi kedaluwarsa:
+  sekolah aktif diresolusi ulang tiap request dari pembacaan keanggotaan yang segar
+  (`school_membership.resolve_for_request`), sedangkan cache sesi hanya memegang profil;
+- tidak bisa dimasuki kembali lewat permintaan baru maupun lewat persetujuan — jalannya
+  hanya `reopen`.
+
+Dua arah kegagalan dibedakan dengan sadar: **pembacaan yang gagal tidak menyempitkan apa
+pun** (sekolah dari `profiles` tetap dipakai, supaya gangguan database tidak mengunci guru
+keluar), sedangkan **penutupan yang diketahui menyempitkan** (baris yang ada dan tidak
+`active` mencabut sekolahnya). Baris yang tidak ada sama sekali bukan penutupan — akun yang
+dibuat setelah migrasi 044 memang tidak punya baris keanggotaan.
+
+### Sekolah tujuan: aturan yang terlihat di halaman
+
+- Sekolah yang belum punya kelas terdaftar **tetap muncul** di hasil pencarian, dengan
+  jenjang yang dikatakan *"Jenjang belum terdata"* — bukan disembunyikan. Sekolah tanpa
+  kelas justru tujuan baru yang paling mungkin, dan sekolah yang tidak muncul tidak bisa
+  diajukan sama sekali. Pembacaan kelas yang gagal hanya menghilangkan kolom jenjangnya.
+- Sekolah tempat guru itu sudah menjadi anggota tampil sebagai *flag*, bukan disaring keluar.
+- Kebijakan privasi: sekolah tujuan menerima **nama, email, dan status akun** saja. Tidak ada
+  kolom sekolah asal di skema, karena kolom yang tidak ada tidak bisa ikut ter-SELECT.
+- Persetujuan dicatat sebagai bukti: `membership_consent_log` menyimpan nomor versi dokumen
+  dan SHA-256 teks yang ditampilkan. Halaman mencetak teks itu dari service yang sama yang
+  menghitung hash-nya, jadi bukti yang tersimpan benar-benar tentang teks yang dibaca guru;
+  versi/hash yang tidak cocok ditolak (`consent_required`) sebelum baris apa pun ditulis.

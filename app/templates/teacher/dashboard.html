@@ -424,6 +424,14 @@
                         <div class="w-10 h-10 rounded-xl bg-amber-50 flex items-center justify-center text-amber-600 group-hover:scale-110 transition-transform"><i class="fas fa-chart-bar"></i></div>
                         <div><p class="text-sm font-bold text-surface-700"><span x-text="t('Hasil & Analitik','Results & Analytics')"></span></p><p class="text-xs text-surface-400">Export XLSX/PDF</p></div>
                     </a>
+                    {# Mengajar di NPSN lain: halaman yang mencari sekolah tujuan, menampilkan
+                       jenjang yang kelasnya memang terdaftar (atau mengatakan jenjangnya belum
+                       terdata), dan mengajukan permintaan bergabung. Tanpa pintu ini halaman
+                       itu hanya bisa dibuka kalau alamatnya sudah dihafal. #}
+                    <a href="/teacher/membership" class="flex items-center gap-3 p-3 rounded-xl hover:bg-indigo-50 transition group">
+                        <div class="w-10 h-10 rounded-xl bg-indigo-50 flex items-center justify-center text-indigo-600 group-hover:scale-110 transition-transform"><i class="fas fa-id-badge"></i></div>
+                        <div><p class="text-sm font-bold text-surface-700"><span x-text="t('Keanggotaan Sekolah','School Membership')"></span></p><p class="text-xs text-surface-400"><span x-text="t('Mengajar di sekolah lain','Teach at another school')"></span></p></div>
+                    </a>
                 </div>
             </div>
         </div>

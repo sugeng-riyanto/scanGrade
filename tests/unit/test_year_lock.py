@@ -295,6 +295,26 @@ EXEMPT = {
     "super_bp /api/privacy-settings/save": "platform privacy configuration",
     "super_bp /email-settings": "platform SMTP configuration",
     "super_bp /email-settings/test": "sends a test email",
+    # ── cross-school membership: who may work here, not what a year holds ──
+    # An academic year being closed says nothing about whether a teacher may be
+    # taken on or let go: a school hires and offboards between years, and a
+    # membership row carries no marks, no pupils and no exam of any year. Refusing
+    # these while a year is closed would leave a school unable to close an
+    # offboarded teacher's access at exactly the moment it needs to. The four doors
+    # are also the ones a *decision* travels through, so gating them on a year would
+    # make a pending request depend on which year happens to be running.
+    "teacher_membership_bp /membership/request":
+        "a teacher asking to join another school; belongs to no year, writes no "
+        "mark, and is refused or approved before it grants anything",
+    "membership_bp /membership-requests/<request_id>/<decision>":
+        "a decision on one join request — the access it grants is a membership "
+        "row, not a year's data, and it is taken by the destination school alone",
+    "membership_bp /memberships/<user_id>/close":
+        "closing a membership is offboarding: it must never wait on a year, since "
+        "leaving access open until a year closes is the failure it prevents",
+    "membership_bp /memberships/<user_id>/reopen":
+        "reopening is the school admin's own decision about a person, and the way "
+        "back from a closure; it touches no mark of any year",
 }
 
 MUTATING = ("POST", "PUT", "PATCH", "DELETE")

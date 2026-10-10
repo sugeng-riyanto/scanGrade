@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+{% block title %}Keanggotaan Sekolah - ScanGrade{% endblock %}
+{% block page_title %}Keanggotaan Sekolah{% endblock %}
+{% block content %}
+{# The destination search a teacher uses to ask to teach at another NPSN.
+
+   Two rules are visible on this page rather than buried in the service, because
+   both are about what the reader is shown:
+
+   * a school whose classes have not been registered yet is **listed**, with the
+     stage said in words instead of the row being dropped — a hidden school is a
+     school that cannot be applied to, and a brand-new destination is exactly the
+     one likeliest to have no classes yet;
+   * the consent the request records is the text printed below, and both halves
+     come from the service (`consent_id`/`consent_en`) rather than from here. The
+     hash posted with the request is computed from those same two strings, so an
+     edit to this paragraph without a version bump is caught instead of silently
+     re-consented. #}
+{% set REFUSALS = {
+    'ok': ('Pengajuan terkirim. Sekolah tujuan yang memutuskan.', 'Your request was sent — the destination school decides.'),
+    'already_member': ('Anda sudah menjadi anggota aktif sekolah itu.', 'You are already an active member of that school.'),
+    'already_pending': ('Sudah ada pengajuan yang menunggu di sekolah itu.', 'A request to that school is already waiting.'),
+    'consent_required': ('Persetujuannya belum tercatat. Muat ulang halaman ini, lalu coba lagi.', 'Your consent was not recorded. Reload this page and try again.'),
+    'membership_closed': ('Keanggotaan Anda di sekolah itu sudah ditutup. Pembukaan kembali hanya oleh admin sekolah.', 'Your membership there was closed. Only that school admin reopens it.'),
+    'school_inactive': ('Sekolah itu sedang tidak aktif.', 'That school is not active right now.'),
+    'not_authorised': ('Peran akun Anda tidak bisa menjadi anggota lebih dari satu sekolah.', 'Your role cannot belong to more than one school.'),
+    'bad_target': ('Sekolah tujuannya tidak ditemukan.', 'That destination school was not found.'),
+    'read_failed': ('Datanya belum bisa dibaca sekarang. Coba lagi sebentar lagi.', 'The data could not be read just now. Try again shortly.'),
+    'failed': ('Pengajuan tidak tersimpan.', 'The request was not saved.'),
+} %}
+{% set STATUS_PAIRS = {
+    'pending': ('Menunggu', 'Pending'),
+    'approved': ('Disetujui', 'Approved'),
+    'rejected': ('Ditolak', 'Rejected'),
+    'cancelled': ('Dibatalkan', 'Cancelled'),
+    'expired': ('Kedaluwarsa', 'Expired'),
+} %}
+<div class="space-y-6" :lang="lang">
+
+    {% if status_code %}
+    {% set pair = REFUSALS.get(status_code) or REFUSALS['failed'] %}
+    <div class="rounded-2xl border-2 {% if status_code == 'ok' %}border-emerald-200 bg-emerald-50{% else %}border-amber-200 bg-amber-50{% endif %} p-4 flex items-start gap-3">
+        <i class="fas {% if status_code == 'ok' %}fa-circle-check text-emerald-600{% else %}fa-circle-exclamation text-amber-600{% endif %} mt-0.5"></i>
+        <p class="text-sm font-semibold {% if status_code == 'ok' %}text-emerald-800{% else %}text-amber-800{% endif %}"
+           x-text="t('{{ pair[0] }}','{{ pair[1] }}')"></p>
+    </div>
+    {% endif %}
+
+    <div>
+        <h2 class="text-2xl font-extrabold text-slate-800" x-text="t('Keanggotaan Sekolah','School Membership')"></h2>
+        <p class="text-sm text-slate-500 font-medium mt-0.5"
+           x-text="t('Cari sekolah tujuan, lalu ajukan diri. Sekolah itu hanya menerima nama, email dan status akun Anda — bukan daftar sekolah tempat Anda mengajar.','Search for a destination school, then apply. That school receives your name, your email and your account status only — never the list of schools you teach in.')"></p>
+    </div>
+
+    <form method="GET" class="flex flex-col sm:flex-row gap-3">
+        <input type="text" name="q" value="{{ q }}" maxlength="120"
+               :placeholder="t('Nama sekolah, NPSN atau kota','School name, NPSN or city')"
+               class="flex-1 px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500">
+        <button type="submit"
+                class="tap-44 px-5 py-2.5 bg-primary-600 hover:bg-primary-700 text-white rounded-xl font-bold text-sm transition"
+                x-text="t('Cari sekolah','Search schools')"></button>
+    </form>
+
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="overflow-x-auto">
+            <table class="w-full min-w-[760px] text-sm">
+                <thead class="bg-slate-50">
+                    <tr class="text-left text-xs uppercase text-slate-500 font-bold">
+                        <th class="px-3 py-3" x-text="t('Sekolah','School')"></th>
+                        <th class="px-3 py-3" x-text="t('NPSN','NPSN')"></th>
+                        <th class="px-3 py-3" x-text="t('Kota','City')"></th>
+                        <th class="px-3 py-3" x-text="t('Jenjang','Level')"></th>
+                        <th class="px-3 py-3" x-text="t('Aksi','Action')"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for school in schools %}
+                    <tr class="border-t border-slate-100">
+                        <td class="px-3 py-3 font-semibold text-slate-800">{{ school.name }}</td>
+                        <td class="px-3 py-3 text-slate-600">{{ school.npsn }}</td>
+                        <td class="px-3 py-3 text-slate-600">{{ school.city }}</td>
+                        <td class="px-3 py-3">
+                            {% if school.jenjang %}
+                            <span class="inline-flex items-center px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 text-xs font-bold">{{ school.jenjang }}</span>
+                            {% else %}
+                            <span class="inline-flex items-center px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-xs font-bold"
+                                  x-text="t('Jenjang belum terdata','Level not recorded yet')"></span>
+                            {% endif %}
+                        </td>
+                        <td class="px-3 py-3">
+                            {% if school.member %}
+                            <span class="inline-flex items-center px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold"
+                                  x-text="t('Sudah anggota','Already a member')"></span>
+                            {% else %}
+                            <form method="POST" action="{{ url_for('membership_teacher.teacher_membership_request') }}"
+                                  class="flex flex-col sm:flex-row sm:items-center gap-2">
+                                <input type="hidden" name="school_id" value="{{ school.id }}">
+                                <input type="hidden" name="q" value="{{ q }}">
+                                <input type="hidden" name="document_version" value="{{ consent_version }}">
+                                <input type="hidden" name="document_sha256" value="{{ consent_sha256 }}">
+                                <button type="submit"
+                                        class="tap-44 px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-xl font-bold text-xs transition"
+                                        x-text="t('Ajukan bergabung','Request to join')"></button>
+                                {% if school.status != 'active' %}
+                                <span class="text-xs font-bold text-slate-500" x-text="t('Tidak aktif','Not active')"></span>
+                                {% endif %}
+                            </form>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% if not schools %}
+        <p class="px-4 py-6 text-sm text-slate-500 font-medium text-center"
+           x-text="t('Tidak ada sekolah yang cocok dengan pencarian itu.','No school matches that search.')"></p>
+        {% endif %}
+    </div>
+
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
+        <h3 class="text-sm font-extrabold text-slate-700" x-text="t('Persetujuan yang dicatat','The consent recorded')"></h3>
+        <p class="text-sm text-slate-700 mt-2">{{ consent_id }}</p>
+        <p class="text-sm text-slate-500 mt-2">{{ consent_en }}</p>
+        <p class="text-xs text-slate-500 font-medium mt-3"
+           x-text="t('Kedua kalimat di atas yang dicatat sebagai persetujuan Anda, bersama nomor versi dokumen dan sidik teksnya.','Both sentences above are what gets recorded as your consent, with the document version and the hash of that text.')"></p>
+        <p class="text-xs text-slate-400 font-medium mt-1">v{{ consent_version }}</p>
+    </div>
+
+    {% if my_requests %}
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="px-4 py-3 border-b border-slate-100">
+            <h3 class="text-sm font-extrabold text-slate-700" x-text="t('Pengajuan saya','My requests')"></h3>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full min-w-[560px] text-sm">
+                <thead class="bg-slate-50">
+                    <tr class="text-left text-xs uppercase text-slate-500 font-bold">
+                        <th class="px-3 py-3" x-text="t('Sekolah','School')"></th>
+                        <th class="px-3 py-3" x-text="t('Status','Status')"></th>
+                        <th class="px-3 py-3" x-text="t('Diajukan','Requested')"></th>
+                        <th class="px-3 py-3" x-text="t('Keputusan','Decision')"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for req in my_requests %}
+                    {% set pair = STATUS_PAIRS.get(req.status) or (req.status, req.status) %}
+                    <tr class="border-t border-slate-100">
+                        <td class="px-3 py-3 font-semibold text-slate-800">{{ req.school_name }}</td>
+                        <td class="px-3 py-3">
+                            <span class="inline-flex items-center px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 text-xs font-bold"
+                                  x-text="t('{{ pair[0] }}','{{ pair[1] }}')"></span>
+                        </td>
+                        <td class="px-3 py-3 text-slate-600">{{ (req.created_at or '')[:10] }}</td>
+                        <td class="px-3 py-3 text-slate-600">
+                            {% if req.decided_at %}{{ req.decided_at[:10] }}{% endif %}
+                            {% if req.decision_reason %}<span class="block text-xs text-slate-500">{{ req.decision_reason }}</span>{% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

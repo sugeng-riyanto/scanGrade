@@ -184,11 +184,28 @@ def test_a_closed_school_drops_out_of_the_chooser():
                                             "guru") == "sc-home"
 
 
-def test_a_missing_table_still_fails_closed():
+def test_a_missing_table_still_fails_closed_where_access_is_decided():
+    """One direction for the access question, the other for the resolution.
+
+    This assertion used to read `... is None` for the resolution as well, and the
+    change is deliberate: a table the database does not have yet is an *outage*, not
+    a closure, and returning `None` for it signed every teacher out of the school
+    their profile names — the pre-064 box was exactly that box. So the two answers
+    are kept apart on purpose:
+
+    * "is this user an active member of sc-A?" — answered from a read that failed —
+      is **no** (fail closed: nothing is granted on an unknown row);
+    * "which school is this request for?" — an unknown answer **narrows nothing**,
+      because the profile's own school is what every read used before this table
+      existed.
+
+    The other half of the same boundary — that a *known* closure does narrow — is
+    `test_a_closed_school_drops_out_of_the_chooser` above.
+    """
     sb = _Sb(fail_tables=("teacher_school_membership",))
     assert membership.is_active_member(sb, "u-1", "sc-A") is False
     assert membership.resolve_active_school(sb, "u-1", "sc-home", "sc-A",
-                                            "guru") is None
+                                            "guru") == "sc-home"
 
 
 # ── asimetri approve vs reopen ───────────────────────────────────────────────
