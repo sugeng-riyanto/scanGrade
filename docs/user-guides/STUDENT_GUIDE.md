@@ -2,7 +2,7 @@
 
 ## 1. Akses Ujian
 
-1. Buka link ujian dari guru atau login di `/auth/login-user`
+1. Buka link ujian dari guru atau login di `/auth/sign-in` (halaman login yang sama untuk guru dan admin; tautan lama `/auth/login-user` tetap berfungsi)
 2. Masukkan email dan password (demo: `siswa1_smp@scan-grade.app` / `demo123`)
 3. Klik ujian yang tersedia di dashboard
 

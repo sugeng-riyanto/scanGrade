@@ -47,12 +47,38 @@ Two layers:
 
 | Group | Limit | Scope |
 |-------|-------|-------|
-| Auth (login) | 5/minute | Per IP |
+| Auth (login) | 300/minute (in-view backstop) + 8 failed / 15 min | Per IP + per account (identifier) |
 | Register | 10/10 minutes | Per IP |
 | API | 30/minute | Per IP |
 | OMR Scan | 20/minute | Per user |
 | Upload | 10/5 minutes | Per IP |
 | Default | 60/minute | Per IP |
+
+### Satu pintu login
+
+`/auth/sign-in` adalah satu-satunya halaman yang memeriksa password; `/auth/login`
+dan `/auth/login-user` adalah alias yang meneruskan (GET) atau tetap memproses
+login (POST). Identifier yang sama — email, NISN, atau NIP — dicocokkan terhadap
+seluruh peran, dan tab pada halaman tidak pernah dipakai untuk mempersempit
+pencarian, sehingga tidak ada "pintu yang salah" yang bisa ditolak.
+
+Penolakan selalu satu kalimat generik yang sama untuk identifier tidak dikenal,
+password salah, dan peran yang tidak dikenal aplikasi ini. Yang sengaja **berbeda**
+hanya kegagalan infrastruktur (baris profil yang tidak terbaca *dan* tidak ada peran
+di metadata akun): kalimat sementara, dan — ini bagian pentingnya — percobaan itu
+**tidak** memakan jatah percobaan akun, supaya lonjakan rate limit di sisi kami
+tidak mengunci sebuah sekolah selama 15 menit.
+
+Rate limiting tidak dilonggarkan:
+
+- ketiga URL yang memeriksa password memakai backstop `300 per minute` per IP **di
+dalam view**, plus penghitung **per akun** (`check_account_limit("login_failed",
+  identifier)`, 8 percobaan / 15 menit) yang dikunci pada identifier yang diketik —
+  bukan pada IP — supaya satu sekolah di balik satu NAT tidak saling mengunci;
+- ketiganya juga ada di `_exact_exempt` middleware rate limiter, sebab bucket grup
+  per-IP di middleware bersifat **tambahan**, bukan pengganti: halaman yang tidak
+  dikecualikan akan dihitung dua kali untuk perbuatan yang sama sementara aliasnya
+  dihitung sekali. `tests/unit/test_sign_in_merged.py` menjaga ketiganya tetap sama.
 
 ## File Upload Security
 

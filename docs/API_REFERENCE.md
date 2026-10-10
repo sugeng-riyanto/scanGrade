@@ -15,8 +15,9 @@ Unathenticated requests return 401.
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | GET/POST | /auth/register | No | Register new school |
-| GET/POST | /auth/login | No | Admin login |
-| GET/POST | /auth/login-user | No | Teacher/student login |
+| GET/POST | /auth/sign-in | No | **The sign-in page** — every role, one form (`?role=` only preselects a tab) |
+| GET/POST | /auth/login | No | Alias of `/auth/sign-in` (published: printed cards, bookmarks). GET forwards, POST signs in |
+| GET/POST | /auth/login-user | No | Alias of `/auth/sign-in`, same contract as above |
 | POST | /auth/logout | Yes | Logout (clear session) |
 
 ### Teacher Exams (`/teacher/`)

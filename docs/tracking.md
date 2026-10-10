@@ -115,7 +115,7 @@
 - **Landing page**: Added "Tutorial Admin" button alongside Guru & Siswa
 - **CRUD verified**: Admin sekolah — full CRUD classes & subjects. Teacher — read-only view. Student — exam/results only.
 - **Duplicate routes**: None found. All endpoints unique.
-- **Auth redirects**: admin_sekolah → `/admin-sekolah/dashboard`, guru/murid → `/auth/login-user`
+- **Auth redirects**: setiap peran → dashboard-nya sendiri; halaman login tunggalnya `/auth/sign-in` (sejak halaman login digabung; `/auth/login` dan `/auth/login-user` kini alias yang meneruskan)
 
 ### 30 June 2026 — Final Audit & Demo Data Refresh
 - **Database schema verified**: All columns exist (`active_prompt_id`, `prompts`, `base_url`, `model_name`)

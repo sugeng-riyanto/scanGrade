@@ -55,9 +55,11 @@ POST /auth/login_user   (email + password)
   → redirect ke /principal/dashboard atau /vice-principal/dashboard
 ```
 
-`super_admin` dan `admin_sekolah` yang salah masuk ke pintu ini ditolak dengan pesan
-"wrong door" dan diarahkan ke `/auth/login`. Halaman `/demo` menautkan
-`/auth/login-user?role=principal` / `?role=vice_principal`.
+Sejak halaman login digabung, tidak ada lagi "wrong door": satu halaman
+(`/auth/sign-in`) memeriksa password untuk semua peran, dan peran sebuah akun dibaca
+dari akunnya — bukan dari halaman yang dibukanya. Halaman `/demo` menautkan
+`/auth/sign-in?role=principal` / `?role=vice_principal`, dan tautan itu hanya membuka
+halaman dengan kelompok **Staf Sekolah** sudah terpilih.
 
 ## 4. Akun dibuat oleh sekolah
 
