@@ -86,6 +86,58 @@ done
 
 say() { echo; echo "── $* ────────────────────────────────────────"; }
 
+# ── Reading the gate config, whichever user is asking ────────────────────────
+#
+# The three confs are mode 0600 root:root — they hold passwords, and the installer
+# pins that. This checker, meanwhile, is run by three callers: an operator at a
+# console, the deploy runner's own preflight (as root), and the app's construct
+# probe, which the deploy runs through `as_owner` and so as the service user.
+#
+# A reading that changes with the caller is not a reading. Asked as the service
+# user, `sed` and `grep` failed on the confs with "Permission denied"; the failure
+# was indistinguishable from absence, and the SEB line below read a *present*
+# SMOKE_MURID as missing. A fully armed box was then reported unarmed by its own
+# app, refused every tick of every release, and could never merge the fix — while
+# the console, running the same file as root, said ARMED about the same box in the
+# same minute. Two callers, one file, two verdicts: the box is held by that, not by
+# the gate.
+#
+# So a conf has three states and the middle one is not absence:
+#
+#   value      — this caller read it, and this is what it says
+#   unreadable — it is there, but this caller cannot read it. Presence is all this
+#                caller can establish, and presence is all the *copy* question below
+#                needs; the content questions are answered by the caller that can
+#                read it, which is the runner's preflight running as root
+#   absent     — not there at all, which is the one state that disarms
+#
+# The state is decided by attempting the read rather than by `test -r`, because a
+# read that failed is a fact and a permission bit is a guess.
+CONF_STATE="absent"
+CONF_VALUE=""
+
+conf_read() {  # conf_read <file> <sed script>; the answer lands in CONF_STATE/CONF_VALUE
+  local file="$1" program="$2" out=""
+  CONF_STATE="absent"; CONF_VALUE=""
+  [ -e "$file" ] || return 0
+  out=$(sed -n "$program" "$file" 2>/dev/null) || { CONF_STATE="unreadable"; return 0; }
+  CONF_STATE="value"
+  CONF_VALUE=$(printf '%s\n' "$out" | head -1)
+}
+
+conf_has() {  # 0 the conf says it · 1 it does not · 2 this caller could not read it
+  local file="$1" pattern="$2" rc=0
+  [ -e "$file" ] || return 1
+  grep -qE "$pattern" "$file" 2>/dev/null; rc=$?
+  case "$rc" in
+    0) return 0 ;;
+    1) return 1 ;;
+    # grep's own third answer: it could not read the file. Not a match and not a
+    # miss — the caller that can read it decides.
+    *) return 2 ;;
+  esac
+}
+
 # ── What the box is running ──────────────────────────────────────────────────
 # Printed before anything changes and again as the receipt, so "before" and
 # "after" are the same measurement rather than two different claims. The three
@@ -182,14 +234,20 @@ report_state() {
   # the release, so "every role still works" stops being checked by anything. It
   # belongs in the same list, and its enforcement is reported by the same rule.
   for conf in "$SMOKE_CONF" "$CLAIMS_CONF" "$PERF_CONF"; do
-    local name; name=$(basename "$conf" | sed 's/scangrade-//; s/\.conf//')
-    if [ -f "$conf" ]; then
-      local enf; enf=$(sed -n 's/^[A-Z_]*ENFORCE=//p' "$conf" | tr -d '"' | head -1)
-      printf '   %-10s : present — enforcement %s\n' "$name" "${enf:-unset}"
-    else
-      printf '   %-10s : MISSING (%s)\n' "$name" "$conf"
-      armed=0
-    fi
+    local name enf; name=$(basename "$conf" | sed 's/scangrade-//; s/\.conf//')
+    conf_read "$conf" 's/^[A-Z_]*ENFORCE=//p'
+    case "$CONF_STATE" in
+      value)
+        enf=$(printf '%s' "$CONF_VALUE" | tr -d '"')
+        printf '   %-10s : present — enforcement %s\n' "$name" "${enf:-unset}" ;;
+      unreadable)
+        printf '   %-10s : present (%s — mode 0600 root:root, so this caller (%s)\n' \
+          "$name" "$conf" "$(id -un)"
+        echo  "                cannot read it; the runner's preflight runs as root and does)" ;;
+      *)
+        printf '   %-10s : MISSING (%s)\n' "$name" "$conf"
+        armed=0 ;;
+    esac
   done
 
   # The SEB door gate is the one gate whose verdict cannot be read anywhere else in
@@ -205,28 +263,43 @@ report_state() {
   # require below — a box with no browser already refuses there, so a browser is not
   # counted twice. That half's arrival is why this line no longer says the SEB gate
   # measures in no browser: it did, until the page's own script was measured too.
-  local seb_enf
-  seb_enf=$(sed -n 's/^SEB_ENFORCE=//p' "$SMOKE_CONF" 2>/dev/null | tr -d '"' | head -1)
+  # CONF_STATE now describes the smoke conf: the SEB gate's two content questions
+  # (is the pupil there, is the gate enforced) are the only ones this report asks of
+  # a conf, and both are asked of the caller that can read it.
+  local seb_enf seb_has
+  conf_read "$SMOKE_CONF" 's/^SEB_ENFORCE=//p'
+  seb_enf=$(printf '%s' "$CONF_VALUE" | tr -d '"')
   if [ ! -f "$REPO/deploy/seb_door_gate.py" ]; then
     printf '   %-10s : MISSING — %s/deploy/seb_door_gate.py, so "SEB is\n' \
       "seb" "$REPO"
     echo  '                enforced" would be asserted on every release rather than'
     echo  '                measured. Pull the checkout, or re-run the installer.'
     armed=0
-  elif [ ! -f "$SMOKE_CONF" ]; then
+  elif [ "$CONF_STATE" = "absent" ]; then
     printf '   %-10s : MISSING (%s) — the gate signs in as its SMOKE_MURID\n' \
       "seb" "$SMOKE_CONF"
     armed=0
-  elif ! grep -qE '^SMOKE_MURID=' "$SMOKE_CONF" 2>/dev/null; then
-    printf '   %-10s : MISSING — no SMOKE_MURID in %s, so the gate has no\n' \
-      "seb" "$SMOKE_CONF"
-    echo  "                pupil to open a paper as and reports \"could not"
-    echo  "                measure\" on every release. Add the demo pupil as"
-    echo  "                email:password (the smoke test already signs in as it)."
-    armed=0
   else
-    printf '   %-10s : present — one throwaway paper as the smoke pupil, then the handshake page in a browser; enforcement %s\n' \
-      "seb" "${seb_enf:-unset}"
+    conf_has "$SMOKE_CONF" '^SMOKE_MURID='; seb_has=$?
+    case "$seb_has" in
+      0)
+        printf '   %-10s : present — one throwaway paper as the smoke pupil, then the handshake page in a browser; enforcement %s\n' \
+          "seb" "${seb_enf:-unset}" ;;
+      1)
+        printf '   %-10s : MISSING — no SMOKE_MURID in %s, so the gate has no\n' \
+          "seb" "$SMOKE_CONF"
+        echo  "                pupil to open a paper as and reports \"could not"
+        echo  "                measure\" on every release. Add the demo pupil as"
+        echo  "                email:password (the smoke test already signs in as it)."
+        armed=0 ;;
+      *)
+        # Not this caller's question to answer, and answering it badly is what held
+        # a whole release: a conf it cannot read is present, not absent.
+        printf '   %-10s : present (%s is root-only, so SMOKE_MURID cannot be read\n' \
+          "seb" "$SMOKE_CONF"
+        echo  "                from here — the deploy preflight reads it as root and"
+        echo  "                refuses the run when the pupil is not in it)" ;;
+    esac
   fi
 
   # A browser is what the two DOM gates measure in — the touch gate's finger floor
