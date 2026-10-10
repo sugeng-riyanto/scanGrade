@@ -111,6 +111,9 @@ EXEMPT = {
     # ── auth.py: sign-in, activation and credentials ──
     "auth_bp /register": "a signup, not a year's marks",
     "auth_bp /activate": "activates an account with a code",
+    "auth_bp /sign-in": "a sign-in, not a year's marks",
+    "auth_bp /login":
+        "the sign-in page's older URL: a GET forwards, a POST is the same sign-in",
     "auth_bp /login-user": "a sign-in",
     "auth_bp /forgot-password": "starts a password reset",
     "auth_bp /verify-reset-code": "verifies a reset code",
@@ -298,9 +301,17 @@ EXEMPT = {
 }
 
 MUTATING = ("POST", "PUT", "PATCH", "DELETE")
+# The decorator block may hold a *comment* as well as decorators: `@_rate_limit` is
+# often explained above itself, and a regex that only allowed `@...` lines did not
+# merely miss the comment — it missed the whole route, which is how a POST route
+# stops being audited at all and its exemption becomes "stale". Two sign-in doors
+# were invisible to this sweep for exactly that reason — `/sign-in` and
+# `/login-user`, each carrying three comment lines above its limiter decorator —
+# and the reader that cannot see a route cannot ask whether it can change a closed
+# year. Measured over `app/routes/*.py` with both patterns: these two, no others.
 ROUTE_RE = re.compile(
     r'@(\w+)\.route\(\s*"([^"]+)"(?:[^)]*?methods=\[([^\]]*)\])?[^)]*\)\n'
-    r'((?:@[^\n]*\n)*)def (\w+)\(')
+    r'((?:(?:@[^\n]*|#[^\n]*)\n)*)def (\w+)\(')
 
 
 def _routes():
@@ -316,6 +327,12 @@ def _routes():
                   for n in tree.body if isinstance(n, ast.FunctionDef)}
         for match in ROUTE_RE.finditer(src):
             bp, rule, methods_raw, decos, name = match.groups()
+            # The block above may also carry the comment that explains a
+            # decorator, so only the `@`-lines are decorators here: a sentence
+            # naming `@open_year_required` must never excuse a route the way the
+            # decorator itself does.
+            decos = "".join(ln for ln in decos.splitlines(keepends=True)
+                            if ln.lstrip().startswith("@"))
             methods = {m.strip().strip('"') for m in (methods_raw or '"GET"').split(",")}
             out.append((bp, rule, methods, decos, name, bodies.get(name, "")))
     return out
