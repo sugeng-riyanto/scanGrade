@@ -42,6 +42,11 @@ from __future__ import annotations
 
 import html
 
+#: The sign-in page, from the one module that maps roles to doors. A body that
+#: spelled the URL itself would be a second copy of the address, and the copy that
+#: drifts is the one in a mail nobody re-reads.
+from app.utils.auth import LOGIN_URL, login_door_for
+
 BRAND_NAME = "ScanGrade"
 BRAND_URL = "https://scangrade.web.id"
 #: Where a reply is pointed. A reset code is a one-way message and the sending mailbox
@@ -290,7 +295,10 @@ automated message, replies are not read.
 def password_reset_by_admin(*, name, new_password) -> dict:
     """A temporary password set by an operator — the mail the school admin receives."""
     subject = _header_line("[ScanGrade] Kata Sandi Baru / New Password")
-    login_url = f"{BRAND_URL}/auth/login"
+    # This mail goes to a school admin (its only caller resets `admin_sekolah`
+    # accounts), so the door is that role's — not the admin alias, which forwards
+    # to the one page and drops the group the reader belongs on.
+    login_url = f"{BRAND_URL}{login_door_for('admin_sekolah')}"
     html_body = layout(
         title="Kata Sandi Baru",
         preheader="Kata sandi akun Anda telah diatur ulang oleh administrator.",
@@ -362,7 +370,7 @@ def payment_success(*, name, plan_name, starts, ends, login_url) -> dict:
                          f"<strong>{escape(plan_name)}</strong> Anda sudah kami terima dan "
                          "sekolah Anda kini aktif.")
             + details([("Paket", plan_name), ("Mulai", starts), ("Masa aktif hingga", ends)])
-            + button(login_url or f"{BRAND_URL}/auth/login", "Masuk ke Dashboard")
+            + button(login_url or f"{BRAND_URL}{LOGIN_URL}", "Masuk ke Dashboard")
             + _paragraph(f'<span style="color:{MUTED};font-size:13px;">Invoice resmi dapat '
                          "diunduh dari halaman langganan sekolah Anda.</span>")
         ),
@@ -372,7 +380,7 @@ def payment_success(*, name, plan_name, starts, ends, login_url) -> dict:
                          f"<strong>{escape(plan_name)}</strong> subscription and your school "
                          "is now active.")
             + details([("Plan", plan_name), ("Starts", starts), ("Active until", ends)])
-            + button(login_url or f"{BRAND_URL}/auth/login", "Go to Dashboard")
+            + button(login_url or f"{BRAND_URL}{LOGIN_URL}", "Go to Dashboard")
             + _paragraph(f'<span style="color:{MUTED};font-size:13px;">The official invoice '
                          "can be downloaded from your school's subscription page.</span>")
         ),
@@ -385,7 +393,7 @@ Anda kini aktif.
 Paket               : {plan_name}
 Mulai               : {starts}
 Masa aktif hingga   : {ends}
-Masuk               : {login_url or BRAND_URL + '/auth/login'}
+Masuk               : {login_url or BRAND_URL + LOGIN_URL}
 
 Invoice resmi dapat diunduh dari halaman langganan sekolah Anda.
 
@@ -400,7 +408,7 @@ school is now active.
 Plan          : {plan_name}
 Starts        : {starts}
 Active until  : {ends}
-Sign in       : {login_url or BRAND_URL + '/auth/login'}
+Sign in       : {login_url or BRAND_URL + LOGIN_URL}
 
 --
 {BRAND_NAME} · {BRAND_URL}

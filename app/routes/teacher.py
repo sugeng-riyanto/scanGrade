@@ -7,7 +7,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from flask import Blueprint, jsonify, render_template, request, redirect, url_for, flash, g, send_file, current_app
 from app.utils.auth import (teacher_or_admin_required, teacher_required, get_supabase,
-                            login_required, role_required, subscription_write_required)
+                            login_required, role_required, subscription_write_required,
+                            login_door_for)
 from app.utils.cache import cache_get, cache_set, cache_delete
 from app.utils import failure
 from app.utils.helpers import read_with_retry, row_or_none
@@ -2319,7 +2320,8 @@ def scan_page():
     supabase = get_supabase()
     res = supabase.table("exams").select("*").eq("teacher_id", g.user_id).execute()
     students = supabase.table("profiles").select("id,full_name,phone").eq("role", "murid").execute()
-    return render_template("teacher/scan.html", exams=res.data, students=students.data)
+    return render_template("teacher/scan.html", exams=res.data, students=students.data,
+                           login_door=login_door_for("guru", request.path))
 
 
 @teacher_bp.route("/retractions")
@@ -5612,7 +5614,7 @@ def invigilation_duties():
     """The teacher's invigilation tasks and the retake requests they may decide."""
     school_id = _teacher_school()
     if not school_id:
-        return redirect("/auth/login")
+        return redirect(login_door_for(g.get("user_role"), request.path))
     supabase = get_supabase()
     board = invigilation.teacher_board(supabase, school_id, g.user_id)
     # The pupil's recovery code, for the sittings this teacher holds — so an
@@ -5655,7 +5657,7 @@ def unlock_locked_sitting(exam_id: str, student_id: str):
     """
     school_id = _teacher_school()
     if not school_id:
-        return redirect("/auth/login")
+        return redirect(login_door_for(g.get("user_role"), request.path))
     supabase = get_supabase()
     held = _teacher_code_exam_ids(supabase, school_id, g.user_id)
     if str(exam_id) not in held:
@@ -5685,7 +5687,7 @@ def retake_request_decide(request_id: str):
     """
     school_id = _teacher_school()
     if not school_id:
-        return redirect("/auth/login")
+        return redirect(login_door_for(g.get("user_role"), request.path))
     supabase = get_supabase()
     out = invigilation.decide_retake(
         supabase, school_id, request_id,

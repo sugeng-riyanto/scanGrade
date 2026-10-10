@@ -33,7 +33,7 @@ import logging
 from flask import (Blueprint, flash, g, redirect, render_template, request,
                    send_file)
 
-from app.utils.auth import (get_supabase, principal_required,
+from app.utils.auth import (get_supabase, login_door_for, principal_required,
                             school_official_required, vice_principal_required)
 from app.utils.cache import cache_get, cache_set
 from app.services import (analysis_scope, assessment_periods, attempt_timeline,
@@ -113,13 +113,26 @@ def _count(supabase, table: str, school_id: str, **filters) -> int:
         return 0
 
 
+def _sign_in_again():
+    """The sign-in page, opened on the official's own group.
+
+    Every "this session has no school" guard below used to name the admin door
+    outright, which is the misdirection `login_door_for` exists to prevent: an
+    official whose school could not be resolved was sent to a page that opens on the
+    admin tab and explains nothing about them. The role is read from the URL being
+    opened, which is how the one mapping places a reader it has no session for, and
+    every route in this blueprint lives under `/principal` or `/vice-principal`.
+    """
+    return redirect(login_door_for(path=request.path))
+
+
 def _dashboard(role: str):
     """The page itself, whichever of the two officials is reading it."""
     school_id = g.get("user_school_id")
     if not school_id:
         # An official with no school has nothing to oversee, and every query below
         # would read every school. Refusing is the only safe answer.
-        return redirect("/auth/login")
+        return _sign_in_again()
 
     supabase = get_supabase()
     # The columns the schema actually has: `schools` carries no `level`, and naming
@@ -208,7 +221,7 @@ def _kpis(data) -> dict:
 def _analytics_html(role: str, *, print_mode: bool = False):
     """The page itself, whichever of the two officials is reading it."""
     if not _school_id():
-        return redirect("/auth/login")
+        return _sign_in_again()
     supabase = get_supabase()
     lang = analysis_scope.language(request.args.get("lang"))
     date_from = request.args.get("date_from") or None
@@ -227,7 +240,7 @@ def _analytics_html(role: str, *, print_mode: bool = False):
 def _analytics_file(role: str, kind: str):
     """The report as the document a head of school files or hands on."""
     if not _school_id():
-        return redirect("/auth/login")
+        return _sign_in_again()
     supabase = get_supabase()
     lang = analysis_scope.language(request.args.get("lang"))
     data = _scope_report(supabase, role, lang,
@@ -254,7 +267,7 @@ def _progress(role: str):
     """
     school_id = _school_id()
     if not school_id:
-        return redirect("/auth/login")
+        return _sign_in_again()
     supabase = get_supabase()
     tz_offset = g.get("tz_offset", 7)
     month = request.args.get("month") or ""
@@ -359,7 +372,7 @@ def _invigilation_page(role: str, *, base: str | None = None,
     """
     school_id = _school_id()
     if not school_id:
-        return redirect("/auth/login")
+        return _sign_in_again()
     supabase = get_supabase()
     base = base or _base(role)
     schedules = invigilation.list_schedules(supabase, school_id)
@@ -423,7 +436,7 @@ def vice_principal_invigilation_save():
     """Create or move one sitting. The school is the session's, never the form's."""
     school_id = _school_id()
     if not school_id:
-        return redirect("/auth/login")
+        return _sign_in_again()
     out = invigilation.save_schedule(
         get_supabase(), school_id,
         exam_id=request.form.get("exam_id", ""),
@@ -445,7 +458,7 @@ def vice_principal_invigilation_assign(schedule_id: str):
     """Put a teacher on a sitting, or make them its lead."""
     school_id = _school_id()
     if not school_id:
-        return redirect("/auth/login")
+        return _sign_in_again()
     out = invigilation.assign_invigilator(
         get_supabase(), school_id,
         schedule_id=schedule_id,
@@ -465,7 +478,7 @@ def vice_principal_invigilation_unassign(assignment_id: str):
     """Take a teacher off a sitting."""
     school_id = _school_id()
     if not school_id:
-        return redirect("/auth/login")
+        return _sign_in_again()
     _invigilation_refused(invigilation.remove_assignment(
         get_supabase(), school_id, assignment_id))
     return redirect("/vice-principal/invigilation")
@@ -487,7 +500,7 @@ def vice_principal_unlock_sitting(exam_id: str, student_id: str):
     """
     school_id = _school_id()
     if not school_id:
-        return redirect("/auth/login")
+        return _sign_in_again()
     out = sitting_unlock.unlock_sitting(
         get_supabase(), school_id, exam_id, student_id, g.get("user_id"))
     if out.get("action") == "finalize":
@@ -517,7 +530,7 @@ def _periods_page(role: str):
     """The calendar, its running period, and the four kinds the form offers."""
     school_id = _school_id()
     if not school_id:
-        return redirect("/auth/login")
+        return _sign_in_again()
     supabase = get_supabase()
     return render_template(
         "principal/assessment_periods.html",
@@ -555,7 +568,7 @@ def vice_principal_assessment_period_save():
     """Create or edit one period. The school is the session's, never the form's."""
     school_id = _school_id()
     if not school_id:
-        return redirect("/auth/login")
+        return _sign_in_again()
     out = assessment_periods.save_period(
         get_supabase(), school_id,
         period_id=request.form.get("period_id") or None,
@@ -578,7 +591,7 @@ def vice_principal_assessment_period_delete(period_id: str):
     """Remove one period, scoped to this school by the service's own filter."""
     school_id = _school_id()
     if not school_id:
-        return redirect("/auth/login")
+        return _sign_in_again()
     out = assessment_periods.delete_period(get_supabase(), school_id, period_id)
     flash(out["reason"] if not out.get("ok") else "period_deleted",
           "error" if not out.get("ok") else "success")
@@ -598,7 +611,7 @@ def vice_principal_retake_decide(request_id: str):
     """
     school_id = _school_id()
     if not school_id:
-        return redirect("/auth/login")
+        return _sign_in_again()
     out = invigilation.decide_retake(
         get_supabase(), school_id, request_id,
         decision=request.form.get("decision", ""),

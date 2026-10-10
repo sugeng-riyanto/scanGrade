@@ -1059,11 +1059,11 @@ document.getElementById('btn-save').addEventListener('click', async function() {
             }),
         });
         // Check if redirected to login page (session expired)
-        if (resp.url.includes('/auth/login')) {
+        if (resp.url.includes('/auth/sign-in')) {
             alert('Sesi habis. Hasil scan akan dipulihkan setelah login.');
             // Save state before redirect
             try { sessionStorage.setItem('sg_scan_result', JSON.stringify(window._lastScanData || {})); } catch(e) {}
-            window.location.href = '/auth/login?next=/teacher/scan';
+            window.location.href = '{{ login_door }}&next=/teacher/scan';
             return;
         }
         const data = await resp.json();
