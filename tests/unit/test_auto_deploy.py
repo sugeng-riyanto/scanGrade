@@ -668,31 +668,43 @@ def test_smoke_test_writes_to_exactly_two_documented_places():
     """It runs against production on every release, so what it may change is a
     list rather than a habit.
 
-    There are two writes, and both are deliberate. The login POST, once per role.
-    And the school-admin probe's create/delete pair — because every other check in
-    this file is a GET, and a school whose database role lost INSERT answers all of
-    them (see `tests/unit/test_smoke_admin_write.py`, which drives the probe itself).
+    Login is the first: the POST is how a password is checked, so it is a write in
+    the only sense that matters here — it changes state on the box (a session, an
+    audit row) and it runs once per role. Since the two doors became one page, there
+    are **two** login sites rather than one, because the published URLs have to be
+    proven to still *sign a reader in* and not merely forward: `/auth/login` and
+    `/auth/login-user` are on printed cards and in bookmarks, and a POST answered
+    with a redirect hands the reader an empty form. That check is what
+    `check_aliases` posts for.
 
-    So the count is pinned and the pair is pinned to the one function allowed to
-    make it: a third `session.post` anywhere else is a write nobody declared.
+    The other two are the school-admin probe's create/delete pair — because every
+    other check in this file is a GET, and a school whose database role lost INSERT
+    answers all of them (see `tests/unit/test_smoke_admin_write.py`, which drives the
+    probe itself).
+
+    So the count is pinned *and* each site is pinned to the one function allowed to
+    make it: a `session.post` anywhere else is a write nobody declared.
     """
     src = SMOKE_PY.read_text(encoding="utf-8")
 
     for verb in (".put(", ".patch(", ".delete("):
         assert verb not in src, (
             f"smoke test performs {verb.strip('.(')} — the writes it may make are "
-            "the login and the probe's own create/delete pair, nothing else")
-    assert src.count("session.post(") == 3, (
-        f"{src.count('session.post(')} POST call site(s): the login, and the probe's "
-        "create and delete. A fourth is a write nobody declared, and it would run "
-        "against a real school on every release.")
+            "the two logins and the probe's own create/delete pair, nothing else")
+    assert src.count("session.post(") == 4, (
+        f"{src.count('session.post(')} POST call site(s): the two logins (the page "
+        "every role signs in on, and the published alias that must still sign one in) "
+        "and the probe's create and delete. A fifth is a write nobody declared, and "
+        "it would run against a real school on every release.")
 
     # One helper per write, and the guard reads their bodies rather than trusting
-    # their names: a `session.post` anywhere else in the file is a third write the
-    # count above cannot name, and it would run against a real school.
-    for helper, path_constant in (("def _probe_create(", "SUBJECT_CREATE_PATH"),
+    # their names: a `session.post` anywhere else in the file is a write the count
+    # above cannot name, and it would run against a real school.
+    for helper, path_constant in (("def login(", "LOGIN_PATHS"),
+                                  ("def check_aliases(", "LOGIN_ALIASES[-1]"),
+                                  ("def _probe_create(", "SUBJECT_CREATE_PATH"),
                                   ("def _probe_delete(", "SUBJECT_DELETE_PATH")):
-        assert helper in src, f"the write probe lost {helper}"
+        assert helper in src, f"the smoke test lost {helper}"
         body = src.split(helper, 1)[1].split("\ndef ", 1)[0]
         assert body.count("session.post(") == 1, (
             f"{helper} no longer posts in exactly one place")

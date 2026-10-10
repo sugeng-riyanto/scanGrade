@@ -16,6 +16,7 @@ from __future__ import annotations
 import importlib.util
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -47,10 +48,22 @@ class TestTheRoster:
         for name in ("ROLE_PAGES", "ROLE_AREAS", "FORBIDDEN", "LOGIN_PATHS"):
             assert set(getattr(sm, name)) == set(SIX), f"{name} is missing roles"
 
-    def test_the_officials_sign_in_through_the_user_door(self):
-        paths = smoke().LOGIN_PATHS
-        assert paths["principal"] == "/auth/login-user"
-        assert paths["vice_principal"] == "/auth/login-user"
+    def test_every_role_signs_in_through_the_one_page_with_its_own_hint(self):
+        """The merge made the two doors aliases of one page.
+
+        This used to assert `/auth/login-user` for the two officials, which was the
+        door they belonged on while there were two. The page is one now, and a gate
+        that signs in through an alias proves the *alias* while the page every reader
+        uses goes unverified — so the roster names the merged URL with the `?role=`
+        hint the app's own `login_door_for` hands that role.
+        """
+        sm = smoke()
+
+        assert set(sm.LOGIN_PATHS.values()) == {
+            f"/auth/sign-in?role={role}" for role in SIX}
+        assert sm.LOGIN_ALIASES == ("/auth/login", "/auth/login-user"), (
+            "the published URLs are no longer walked by the gate, so a release could "
+            "break a link a school has already handed out and still report PASS")
 
     def test_the_officials_are_forbidden_from_higher_areas_only(self):
         forbidden = smoke().FORBIDDEN
@@ -69,7 +82,7 @@ def _run(monkeypatch, accounts, outcomes, *, check_credentials=False):
     monkeypatch.setattr(sm, "creds_from_env", lambda: (accounts, []))
     monkeypatch.setattr(sm, "login", lambda session, base, acct, res: _login(res, outcomes))
     for name in ("check_pages", "check_isolation", "check_exam_sitting",
-                 "check_admin_write"):
+                 "check_admin_write", "check_aliases"):
         monkeypatch.setattr(sm, name, lambda *a, **k: None)
     argv = ["smoke_test.py"] + (["--check-credentials"] if check_credentials else [])
     monkeypatch.setattr(sys, "argv", argv)
@@ -100,7 +113,7 @@ class TestAStaleCredentialFailsTheGate:
         monkeypatch.setattr(sm, "creds_from_env", lambda: (_accounts(SIX), []))
         monkeypatch.setattr(sm, "login", login)
         for name in ("check_pages", "check_isolation", "check_exam_sitting",
-                     "check_admin_write"):
+                     "check_admin_write", "check_aliases"):
             monkeypatch.setattr(sm, name, lambda *a, **k: None)
         monkeypatch.setattr(sys, "argv", ["smoke_test.py"])
         assert sm.main() == 1, (
@@ -115,10 +128,99 @@ class TestAStaleCredentialFailsTheGate:
         monkeypatch.setattr(sm, "creds_from_env", lambda: (_accounts(SIX), []))
         monkeypatch.setattr(sm, "login", login)
         for name in ("check_pages", "check_isolation", "check_exam_sitting",
-                     "check_admin_write"):
+                     "check_admin_write", "check_aliases"):
             monkeypatch.setattr(sm, name, lambda *a, **k: None)
         monkeypatch.setattr(sys, "argv", ["smoke_test.py"])
         assert sm.main() == 0
+
+
+class TestTheAliasContract:
+    """The two published URLs: a GET forwards, and a POST signs in.
+
+    Both halves are asserted because only one of them is obvious. A GET that 404s
+    breaks a bookmark or a link on a page the school already has — visible. A POST
+    answered with a forward is the quieter failure: the credentials are thrown away
+    and the reader is handed an empty form, which looks like a wrong password. So
+    this is driven through a fake HTTP layer that can answer a POST with a *form*.
+    """
+
+    BASE = "http://smoke.invalid"
+
+    def _drive(self, monkeypatch, answers):
+        """Run `check_aliases` against canned responses, keyed by (method, path)."""
+        sm = smoke()
+        base = self.BASE
+
+        class Response:
+            def __init__(self, status, location="", text=""):
+                self.status_code = status
+                self.headers = {"Location": location} if location else {}
+                self.text = text
+
+        class Boom(Exception):
+            pass
+
+        class Session:
+            def __init__(self):
+                self.headers = {}
+
+            def _answer(self, method, url):
+                answer = answers[(method, url[len(base):])]
+                return Response(*answer) if isinstance(answer, tuple) else answer
+
+            def get(self, url, **kwargs):
+                return self._answer("GET", url)
+
+            def post(self, url, **kwargs):
+                return self._answer("POST", url)
+
+        monkeypatch.setattr(sm, "requests", SimpleNamespace(
+            Session=Session, RequestException=Boom))
+
+        res = sm.Result()
+        sm.check_aliases(self.BASE, sm.Account("guru", "g@x", "pw"), res)
+        return res
+
+    FORM = 'name="csrf-token" content="tok"'
+
+    def _happy(self, overrides=None):
+        answers = {
+            ("GET", "/auth/login"): (302, "/auth/sign-in?role=guru"),
+            ("GET", "/auth/login-user"): (302, "/auth/sign-in"),
+            ("GET", "/auth/sign-in"): (200, "", self.FORM),
+            ("POST", "/auth/login-user"): (302, "/teacher/dashboard"),
+        }
+        answers.update(overrides or {})
+        return answers
+
+    def test_both_published_urls_forward_and_a_post_still_signs_in(self, monkeypatch):
+        res = self._drive(monkeypatch, self._happy())
+
+        assert not res.failures, res.failures
+        assert res.checked >= 3, "the alias contract was not actually walked"
+
+    def test_a_post_answered_with_the_form_is_a_failure(self, monkeypatch):
+        """The reader's credentials were dropped on the way."""
+        res = self._drive(monkeypatch, self._happy({
+            ("POST", "/auth/login-user"): (200, "", self.FORM)}))
+
+        assert any("POST" in msg for msg in res.failures), (
+            "a POST to a published URL that re-rendered the form instead of signing "
+            "the reader in was reported as a pass")
+
+    def test_an_alias_that_stops_forwarding_is_a_failure(self, monkeypatch):
+        res = self._drive(monkeypatch, self._happy({
+            ("GET", "/auth/login"): (404, "", "not found")}))
+
+        assert any("/auth/login" in msg for msg in res.failures), (
+            "a published URL that no longer forwards was reported as a pass")
+
+    def test_a_page_without_its_csrf_token_is_a_failure(self, monkeypatch):
+        res = self._drive(monkeypatch, self._happy({
+            ("GET", "/auth/sign-in"): (200, "", "<html></html>")}))
+
+        assert any("csrf" in msg for msg in res.failures), (
+            "the alias contract was checked without a token to post with")
 
 
 class TestArmingNeedsEveryRole:

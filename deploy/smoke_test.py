@@ -299,16 +299,23 @@ FORBIDDEN: dict[str, list[str]] = {
     "murid": ["super_admin", "admin_sekolah", "principal", "vice_principal",
               "guru"],
 }
-LOGIN_PATHS = {
-    "super_admin": "/auth/login",
-    "admin_sekolah": "/auth/login",
-    "principal": "/auth/login-user",
-    "vice_principal": "/auth/login-user",
-    "guru": "/auth/login-user",
-    "murid": "/auth/login-user",
-}
 ROLES = ("super_admin", "admin_sekolah", "principal", "vice_principal",
          "guru", "murid")
+
+#: The one page every reader signs in on. The app spells it once
+#: (`app/utils/auth.py`), and this gate has to walk the page a reader is *actually*
+#: sent to — signing in through an alias would prove the alias, not the merge.
+LOGIN_URL = "/auth/sign-in"
+
+#: The two URLs it replaced. They still answer, and that is a contract rather than a
+#: courtesy: a school's printed login card names one, bookmarks point at them, and
+#: `/tutorial/*` and the `/demo` cards link to them. `check_aliases` walks them.
+LOGIN_ALIASES = ("/auth/login", "/auth/login-user")
+
+#: role -> the page it signs in on, with its own `?role=` hint — the same hint the
+#: app's own `login_door_for` hands a reader who arrives at a door, so the gate
+#: exercises the page the way a teacher or a pupil really reaches it.
+LOGIN_PATHS = {role: f"{LOGIN_URL}?role={role}" for role in ROLES}
 
 
 @dataclass
@@ -453,6 +460,64 @@ def login(session: requests.Session, base: str, acct: Account, res: Result) -> s
     res.warn(f"{acct.role}: credentials refused for {acct.email} "
              f"(POST {path} -> {response.status_code})")
     return "rejected"
+
+
+def check_aliases(base: str, acct: Account, res: Result) -> None:
+    """The two published URLs still behave — a GET forwards, a POST signs in.
+
+    Both halves matter and only one is obvious. A GET that 404s breaks a bookmark or
+    a link on a page the school already has; a POST that *forwards* is worse, because
+    the redirect throws the credentials away and the reader is handed an empty form
+    with no idea why. So the alias contract is checked with a real sign-in through an
+    alias, not by reading a redirect.
+
+    The CSRF token comes from the merged page, which is where an alias forwards
+    anyway — a token is per session, not per URL, so this is the same request a
+    browser makes after following the forward.
+    """
+    session = requests.Session()
+    session.headers["User-Agent"] = "ScanGrade-SmokeTest/1"
+
+    for door in LOGIN_ALIASES:
+        try:
+            page = session.get(f"{base}{door}", timeout=REQUEST_TIMEOUT,
+                               allow_redirects=False)
+        except requests.RequestException as exc:
+            res.fail(f"alias: GET {door} failed — {type(exc).__name__}: {exc}")
+            continue
+        location = page.headers.get("Location", "")
+        if page.status_code in (301, 302, 303, 307, 308) and location.startswith(LOGIN_URL):
+            res.ok(f"alias: GET {door} forwards to {LOGIN_URL}")
+        else:
+            res.fail(f"alias: GET {door} -> {page.status_code} {location!r} "
+                     f"(published URL: expected a forward to {LOGIN_URL})")
+
+    try:
+        form = session.get(f"{base}{LOGIN_URL}", timeout=REQUEST_TIMEOUT)
+    except requests.RequestException as exc:
+        res.fail(f"alias: GET {LOGIN_URL} failed — {type(exc).__name__}: {exc}")
+        return
+    match = CSRF_RE.search(form.text)
+    if not match:
+        res.fail(f"alias: {LOGIN_URL} carries no csrf-token meta tag")
+        return
+
+    door = LOGIN_ALIASES[-1]
+    try:
+        response = session.post(
+            f"{base}{door}",
+            data={"_csrf_token": match.group(1), "email": acct.email,
+                  "password": acct.password},
+            timeout=REQUEST_TIMEOUT, allow_redirects=False)
+    except requests.RequestException as exc:
+        res.fail(f"alias: POST {door} failed — {type(exc).__name__}: {exc}")
+        return
+
+    if response.status_code in (301, 302, 303, 307, 308):
+        res.ok(f"alias: POST {door} signed {acct.role} in")
+    else:
+        res.fail(f"alias: POST {door} -> {response.status_code} (a redirect on this "
+                 f"POST used to mean the credentials were dropped)")
 
 
 def check_pages(session: requests.Session, base: str, acct: Account, res: Result) -> None:
@@ -891,6 +956,10 @@ def main() -> int:
         return 1
 
     if not check_credentials:
+        # The published URLs, once, with the account that signed in first: they are
+        # properties of the app rather than of a role, and a role that refused above
+        # has already failed the run.
+        check_aliases(base, signed_in[0], res)
         for acct in signed_in:
             session = sessions[acct.role]
             check_pages(session, base, acct, res)
