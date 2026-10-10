@@ -30,12 +30,41 @@ MEMBERSHIP_ROLES = ("guru", "principal", "vice_principal")
 #: put itself in a school it is not a member of. The key is per session token.
 ACTIVE_SCHOOL_KEY = "active_school:{token}"
 
+# ── the status vocabulary, and the one place it may be written ──────────────
+#
+# These four names are the whole of `teacher_school_membership.status`. The column
+# began with three (migration 044) and migration 063 added `closed` without
+# dropping any of them; the CHECK constraint is the database's copy of this tuple
+# and the two are pinned to each other in both directions by
+# `tests/unit/test_membership_single_writer.py` — a value the database refuses must
+# not exist in code, and a value the database accepts must not be invisible to the
+# service.
+#
+# **Why the names live here rather than at the call site.** A status spelled out at
+# a route is a status this module does not know it can produce: the next reader
+# greps the service for the vocabulary, finds three of the four, and a fourth is
+# written somewhere else with its own side effects — the closure stamps below being
+# the ones a route would most easily forget. So the *service is the only writer of
+# this column*, and that is a guard rather than a convention: no other module under
+# `app/` may name the table, the four statuses, or the closure columns.
+#
+# What each value means for access is not decided here, and deliberately needs no
+# second read path: `memberships_for` and `is_active_member` filter `active`, so
+# every other value — `invited`, `inactive`, `closed` — already answers "no access
+# to that school". Closing a membership therefore needs no new reader to be kept in
+# step; it only needs the canonical write to be the *only* write.
+STATUS_ACTIVE = "active"
+STATUS_INVITED = "invited"
+STATUS_INACTIVE = "inactive"
+STATUS_CLOSED = "closed"
+STATUSES = (STATUS_ACTIVE, STATUS_INVITED, STATUS_INACTIVE, STATUS_CLOSED)
+
 
 def is_cross_school_role(role) -> bool:
     return role in MEMBERSHIP_ROLES
 
 
-def memberships_for(supabase, user_id, status="active") -> list:
+def memberships_for(supabase, user_id, status=STATUS_ACTIVE) -> list:
     """The user's membership rows, active ones by default."""
     if not user_id:
         return []
@@ -76,7 +105,7 @@ def is_active_member(supabase, user_id, school_id) -> bool:
                 .select("id")
                 .eq("user_id", user_id)
                 .eq("school_id", school_id)
-                .eq("status", "active")
+                .eq("status", STATUS_ACTIVE)
                 .limit(1).execute().data or [])
     except Exception:
         return False
@@ -167,7 +196,7 @@ def invite(supabase, school_id, user_id, role="guru", invited_by=None) -> dict:
         "user_id": user_id,
         "school_id": school_id,
         "school_role": role,
-        "status": "invited",
+        "status": STATUS_INVITED,
         "invited_by": invited_by,
     }, on_conflict="user_id,school_id").execute())
     return (res.data or [{}])[0]
@@ -182,17 +211,84 @@ def accept_invite(supabase, user_id, school_id) -> dict:
     """
     from datetime import datetime, timezone
     res = (supabase.table("teacher_school_membership")
-           .update({"status": "active", "joined_at": datetime.now(timezone.utc).isoformat()})
+           .update({"status": STATUS_ACTIVE,
+                    "joined_at": datetime.now(timezone.utc).isoformat()})
            .eq("user_id", user_id)
            .eq("school_id", school_id)
-           .eq("status", "invited")
+           .eq("status", STATUS_INVITED)
            .execute())
     return (res.data or [{}])[0]
 
 
 def deactivate(supabase, school_id, user_id) -> None:
     (supabase.table("teacher_school_membership")
-     .update({"status": "inactive"})
+     .update({"status": STATUS_INACTIVE})
      .eq("school_id", school_id)
      .eq("user_id", user_id)
      .execute())
+
+
+# ── closing a membership, and opening it again ──────────────────────────────
+#
+# Migration 063 reserved these two states and their four stamps; this is the only
+# place they are written. The point of keeping them here rather than at the route
+# that will call them (Fase 9, not yet built) is that "closed" is not one column
+# change: it is a status *and* the two facts that make it accountable, and a route
+# that sets the status alone produces a row nobody can explain. If a later route
+# wrote `status='closed'` by hand — or wrote `inactive` and meant closed — it would
+# bypass this file, the closure stamps, and the vocabulary; the guards in
+# `tests/unit/test_membership_single_writer.py` refuse exactly that.
+#
+# Both writers are scoped to **one (school, user) pair** and guarded on the state
+# they expect to move from, so a double press (or two administrators racing)
+# changes the stamps of the second write and not the first: the payload therefore
+# carries a *transition*, never an assignment, which is the difference between
+# "close this membership" and "this membership is closed".
+#
+# Reopening deliberately does **not** clear `closed_by`/`closed_at`. The pair of
+# stamps is the record that a closure happened, and the migration's partial index
+# (`WHERE status = 'closed'`) already keeps a reopened row out of the closed list,
+# so the history costs no reader anything. Erasing it would make "was this teacher
+# ever removed from this school?" unanswerable from the row.
+
+def close(supabase, school_id, user_id, by=None) -> dict:
+    """Close a membership completely: status `closed`, and who/when.
+
+    Guarded with `neq` on the status it moves away from, so the second press is a
+    no-op the row can keep its own stamp across — which is why the actor and the
+    instant are written by the request that *changed* the row, not by the one that
+    repeated it.
+    """
+    from datetime import datetime, timezone
+    res = (supabase.table("teacher_school_membership")
+           .update({"status": STATUS_CLOSED,
+                    "closed_by": by,
+                    "closed_at": datetime.now(timezone.utc).isoformat()})
+           .eq("school_id", school_id)
+           .eq("user_id", user_id)
+           .neq("status", STATUS_CLOSED)
+           .execute())
+    return (res.data or [{}])[0]
+
+
+def reopen(supabase, school_id, user_id, by=None) -> dict:
+    """Turn a closed membership back on, and record who opened it.
+
+    Guarded on `closed` and not on "any non-active status", which is the same line
+    the database draws: a member who was **revoked** (`inactive`) is brought back by
+    the invite/accept flow, and reopening them here would silently grant access
+    through a door whose whole purpose is undoing a *closure*. The asymmetry — only
+    `admin_sekolah` may reopen, while any destination-school official may approve a
+    new request — is migration 063's product decision, enforced at the route (Fase 9)
+    and deliberately not re-decided in this module.
+    """
+    from datetime import datetime, timezone
+    res = (supabase.table("teacher_school_membership")
+           .update({"status": STATUS_ACTIVE,
+                    "reopened_by": by,
+                    "reopened_at": datetime.now(timezone.utc).isoformat()})
+           .eq("school_id", school_id)
+           .eq("user_id", user_id)
+           .eq("status", STATUS_CLOSED)
+           .execute())
+    return (res.data or [{}])[0]
