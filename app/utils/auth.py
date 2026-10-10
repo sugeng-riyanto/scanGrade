@@ -68,15 +68,72 @@ def _normalize_role(role: str) -> str:
     return ROLE_ALIASES.get(role, role)
 
 
-# ── The two login doors ──────────────────────────────────────────
-# The app has two, and which one a reader belongs on is a property of their role:
-# admins on one, teachers and students on the other. Every path that answers "you
-# are not signed in" has to name one, and naming the wrong one is a dead end —
-# a teacher whose session expired was dropped on a page headed "Masuk Admin" and
-# had to spot the small "Guru/Murid?" link to get anywhere.
+# ── The one sign-in page, and the doors that still point at it ────
+# There were two pages, and which one a reader belonged on was a property of their
+# role: admins on one, teachers and students on the other. Neither could sign the
+# other's reader in, and the refusal named the page — which is the reader's role,
+# so it was the one thing an error may not say. Every path that answers "you are
+# not signed in" had to name one of them as well, and naming the wrong one was a
+# dead end a teacher could only leave by spotting the small link to the other page.
+#
+# There is one page now — `LOGIN_URL` — and the two URLs below are *aliases* of it,
+# kept because they are published (a printed login card, a bookmark, the four
+# public tutorial/demo links), not because a role belongs on one of them.
 LOGIN_URL_ADMIN = "/auth/login"
 LOGIN_URL_USER = "/auth/login-user"
+
+#: The roles a school holds an account for: its teachers, its pupils and its two
+#: officials. What is left of `ALL_ROLES` is the platform pair — a different kind of
+#: account, one that administers schools rather than belonging to one. That
+#: distinction is what outlived the two doors (it is the admin tab's group), and
+#: keeping it derived from one list is what stops a seventh role being placed on
+#: neither side.
 USER_ROLES = ("guru", "murid", "principal", "vice_principal")
+
+#: The sign-in page itself. One page signs everyone in, and the two doors above
+#: are now *aliases* of it: a bookmark, a printed login card or a public tutorial
+#: link may still name either one, so both keep answering — a GET forwards the
+#: reader here, and a POST still signs them in (a redirect on a POST would drop
+#: the credentials).
+LOGIN_URL = "/auth/sign-in"
+
+#: Every role this app has, as one vocabulary. It is `DASHBOARD_FOR_ROLE`'s key
+#: set rather than a second list, because the two questions are the same question:
+#: a role that has a home has a door, and one that has neither is not a role. The
+#: sign-in page matches an identifier against all six — the role is what the account
+#: *is*, and no tab may narrow the search (a tab is a hint the reader chose, not a
+#: claim about them that the server could trust).
+ALL_ROLES = tuple(DASHBOARD_FOR_ROLE)
+
+#: The platform pair, derived so the two halves cannot overlap or leave a role out.
+ADMIN_ROLES = tuple(role for role in ALL_ROLES if role not in USER_ROLES)
+
+#: The sign-in page's tabs, in order: `(tab id, the roles that tab serves)`. The
+#: tab a reader lands on is a hint — it changes the placeholder, the input mode and
+#: the helper line, and nothing else. It is not a gate, and it is never sent to the
+#: server as a claim:
+#:
+#: * it is *derived* from the roles rather than written beside them, so the two
+#:   cannot disagree about who belongs where;
+#: * the four tabs cover `ALL_ROLES` exactly, which is asserted — so a seventh role
+#:   cannot be added without somebody deciding which tab explains it.
+SIGN_IN_TABS = (
+    ("admin", ADMIN_ROLES),
+    ("staff", OFFICIAL_ROLES),
+    ("guru", ("guru",)),
+    ("murid", ("murid",)),
+)
+SIGN_IN_TAB_FOR_ROLE = {role: tab for tab, roles in SIGN_IN_TABS for role in roles}
+
+
+def sign_in_tab(role=None) -> str:
+    """The tab ``role`` belongs on, or `""` when the role is not known.
+
+    An unknown role gets no tab rather than a guessed one: pre-selecting a group
+    for a reader we cannot place tells them, wrongly, which page they are on.
+    """
+    return SIGN_IN_TAB_FOR_ROLE.get(_normalize_role(role or ""), "")
+
 
 #: Where a user goes when their password is still the one a school printed on a card.
 CHANGE_PASSWORD_URL = "/auth/change-password"
@@ -84,20 +141,22 @@ CHANGE_PASSWORD_URL = "/auth/change-password"
 #: Paths that must stay reachable while the change is due.
 #:
 #: * the page itself, or the redirect loops;
-#: * both login doors and logout, because the way out of the page *is* a fresh
-#:   login — there is no other way to prove the new password works;
+#: * the sign-in page and both doors it answers on, plus logout, because the way
+#:   out of the page *is* a fresh login — there is no other way to prove the new
+#:   password works;
 #: * ``/static/`` for the page's own CSS and icons;
 #: * ``/api/``, and this one is a decision, not an oversight. A school reprints
 #:   login cards whenever it likes, including in the middle of a sitting. Blocking
 #:   writes there would fail a pupil's autosave mid-exam — a real loss of answered
 #:   work — for a rule whose whole purpose is what they see, not what they save. The
 #:   change is still demanded on the next page they load, which is every page.
-_CHANGE_PASSWORD_EXEMPT = (CHANGE_PASSWORD_URL, "/auth/logout", LOGIN_URL_ADMIN,
-                           LOGIN_URL_USER, "/static/", "/api/")
+_CHANGE_PASSWORD_EXEMPT = (CHANGE_PASSWORD_URL, "/auth/logout", LOGIN_URL,
+                           LOGIN_URL_ADMIN, LOGIN_URL_USER, "/static/", "/api/")
 
 # When the role is not known, the URL being opened decides. The space is already
-# partitioned by role, and this only chooses which page to *show*: both doors can
-# sign anyone in, so a misread costs a click rather than an authorization call.
+# partitioned by role, and this only chooses which *tab the page opens on*: the form
+# signs anyone in whatever it shows, so a misread costs a click rather than an
+# authorization call.
 _PATH_ROLES = (
     ("/student", "murid"),
     ("/teacher", "guru"),
@@ -111,10 +170,14 @@ _PATH_ROLES = (
 
 
 def login_door_for(role=None, path=None) -> str:
-    """The login page this reader belongs on — the single mapping.
+    """The sign-in URL this reader belongs on — the single mapping.
 
-    ``role`` when the role is known, else the role ``path`` belongs to, else the
-    admin door (the one every role can reach, since its page links to the other).
+    Every role answers the one page; what the role still decides is the ``?role=``
+    hint it carries, and that is the part of "their own door" that outlived the two
+    pages: it opens the form on the reader's own group instead of on none. The hint
+    is what ``sign_in_tab`` would answer, so an unrecognised role gets no hint
+    rather than a guessed one — and no hint is also the answer when neither the role
+    nor the path can place the reader.
     """
     role = _normalize_role(role) if role else None
     if not role and path:
@@ -122,7 +185,7 @@ def login_door_for(role=None, path=None) -> str:
             if path.startswith(prefix):
                 role = prefix_role
                 break
-    return LOGIN_URL_USER if role in USER_ROLES else LOGIN_URL_ADMIN
+    return f"{LOGIN_URL}?role={role}" if role in ALL_ROLES else LOGIN_URL
 
 
 def session_role(token):

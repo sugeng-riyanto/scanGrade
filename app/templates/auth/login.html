@@ -2,22 +2,67 @@
 {% from "auth/_chrome.html" import lang_button, alert_body %}
 {% block title %}Log in - ScanGrade{% endblock %}
 {% block head_extra %}
+{# ── One page, every role ───────────────────────────────────────────────────────
+   This page used to be the admin door, and there was a second page for teachers
+   and students. Which one you belonged on was decided by your role, so a reader
+   who arrived at the wrong one was turned away with a sentence naming the other
+   page — and every account that had to *find* its door was a support question.
+
+   Now both old URLs forward here and one form signs everyone in. The strip below
+   is a **hint**, not a gate: it changes the placeholder, the keyboard and the
+   helper line, and the server matches the identifier against every role either
+   way. That is why the tab is never submitted as a value — a tab the reader chose
+   is not evidence about the reader.
+
+   When nothing says who the reader is (a bookmarked `/auth/login`, a printed card
+   that only names the page) no tab is pre-selected and the helper line says so.
+   Guessing a group there would be telling a pupil, wrongly, which page they are
+   on. `?role=` — which the tutorial pages, the demo cards and the old doors all
+   carry — opens the page with the right tab already on, and `sign_in_tab()`
+   answers nothing for a value it does not recognise. #}
 <style>
 .auth-card { animation: slideUp 0.4s ease-out; }
 .input-icon { position: relative; }
-.input-icon i { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: #94a3b8; font-size: 14px; }
+.input-icon > i { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: var(--text-muted); font-size: 14px; pointer-events: none; }
 .input-icon input { padding-left: 38px; }
-.toggle-pw { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); background: none; border: none; color: #94a3b8; cursor: pointer; padding: 4px; font-size: 14px; }
-.toggle-pw:hover { color: #64748b; }
-.role-btn { transition: all 0.2s; cursor: pointer; }
-.role-btn:hover { border-color: #93c5fd; background: #eff6ff; transform: translateY(-1px); }
-.role-btn.active { border-color: #3b82f6; background: #eff6ff; box-shadow: 0 0 0 3px rgba(59,130,246,0.15); }
+.toggle-pw { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 4px; font-size: 14px; }
+.toggle-pw:hover { color: var(--text-dim); }
+/* ── the role strip ────────────────────────────────────────────────────────────
+   One row of four on a laptop, two columns on a phone, and every segment is a
+   full 44px tall because a thumb is the input here as often as a pointer. The
+   active segment is the accent, which is the same accent in both themes — the
+   fill stays saturated on purpose, so its label is `--on-accent` rather than a
+   white literal that would only be right in light mode. */
+.sg-tab { transition: all 0.2s; cursor: pointer; min-height: 44px; }
+.sg-tab:hover { border-color: var(--border-strong); background: var(--bg-hover); }
+.sg-tab-active { border-color: var(--primary-500, #3b82f6); background: var(--bg-hover); box-shadow: 0 0 0 3px rgba(59,130,246,0.15); }
 </style>
 {% endblock %}
 {% block content_noauth %}
+{# The tab strip's presentation. The *ids* come from `tabs` (`SIGN_IN_TABS` in
+   app/utils/auth.py), so a role added there appears here without this page
+   needing to be told — only its label and its placeholder are written down. #}
+{% set TAB_UI = {
+    'admin': {'icon': 'fa-user-shield',
+              'id': 'Admin', 'en': 'Admin',
+              'ph_id': 'admin@sekolah.id', 'ph_en': 'admin@school.id',
+              'hint_id': 'Super Admin &amp; Admin Sekolah', 'hint_en': 'Super Admin &amp; School Admin'},
+    'staff': {'icon': 'fa-user-tie',
+              'id': 'Staf Sekolah', 'en': 'School staff',
+              'ph_id': 'kepala@sekolah.id', 'ph_en': 'head@school.id',
+              'hint_id': 'Kepala Sekolah &amp; Wakil Kepala Sekolah', 'hint_en': 'Principal &amp; Vice Principal'},
+    'guru': {'icon': 'fa-chalkboard-teacher',
+             'id': 'Guru', 'en': 'Teacher',
+             'ph_id': 'guru@sekolah.id', 'ph_en': 'teacher@school.id',
+             'hint_id': 'Email atau NIP', 'hint_en': 'Email or employee ID'},
+    'murid': {'icon': 'fa-user-graduate',
+              'id': 'Murid', 'en': 'Student',
+              'ph_id': 'nisn@atau.email', 'ph_en': 'NISN or email',
+              'hint_id': 'Email atau NISN', 'hint_en': 'Email or NISN'},
+} %}
 {# <title> lives in <head>, outside any Alpine scope, so it is rendered in the
-   default language here and kept in step by an effect that reads `lang` — the
-   same arrangement the landing page uses. #}
+   default language and kept in step by an effect that reads `lang` — the same
+   arrangement the landing page uses. #}
 <div class="min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50 flex items-center justify-center p-4 lg:p-8 relative overflow-hidden"
      x-effect="document.title = t('Masuk - ScanGrade', 'Log in - ScanGrade')">
     <!-- Decorative -->
@@ -32,11 +77,29 @@
             <div class="w-16 h-16 mx-auto rounded-2xl bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center shadow-lg shadow-primary-500/30">
                 <i class="fas fa-graduation-cap text-2xl text-white"></i>
             </div>
-            <h1 class="mt-4 text-3xl font-extrabold text-surface-800" x-text="t('Masuk Admin','Admin Login')"></h1>
-            <p class="mt-1 text-surface-500 font-medium" x-text="t('Super Admin &amp; Admin Sekolah','Super Admin &amp; School Admin')"></p>
+            <h1 class="mt-4 text-3xl font-extrabold text-surface-800" x-text="t('Masuk ke ScanGrade','Log in to ScanGrade')"></h1>
+            {# The heading is the same for everyone now, so the line under it is where
+               the page says who it is for — and it follows the tab, so a reader who
+               arrived from `/tutorial/murid` reads "for pupils" rather than a
+               general welcome. With no tab chosen it says what the field takes. #}
+            <p class="mt-1 text-surface-500 font-medium" x-show="!role" x-cloak
+               x-text="t('Masukkan email, NISN, atau NIP — kami mengenali akun Anda','Enter your email, NISN or employee ID — we recognise the account')"></p>
+            {% for tab, _roles in tabs %}
+            <p class="mt-1 text-surface-500 font-medium" x-show="role === '{{ tab }}'" {% if tab != initial_tab %}x-cloak{% endif %}
+               x-text="t('{{ TAB_UI[tab].hint_id }}','{{ TAB_UI[tab].hint_en }}')"></p>
+            {% endfor %}
         </div>
 
-        <div x-data="{ loading: false, showPw: false, email: (typeof localStorage !== 'undefined' ? (localStorage.getItem('sg_login_email') || '') : '') }">
+        {# `| forceescape` is not decoration. `tojson` writes `"guru"` *with* its
+           quotes, and inside a double-quoted attribute the HTML parser ends the
+           attribute at the first of them — so Alpine was handed `{ showPw: false,
+           role: ` and raised `Unexpected token '}'`. The whole page scope died with
+           it: the tabs did nothing, the password reveal did nothing, and the
+           placeholder was empty. Force-escaping turns the quotes into entities,
+           which the parser decodes *after* it has found the end of the attribute. #}
+        <div x-data="{ showPw: false, loading: false, identifier: '', emailMode: false, role: {{ initial_tab | tojson | forceescape }},
+                       phId: { {% for tab, _roles in tabs %}'{{ tab }}': '{{ TAB_UI[tab].ph_id }}'{{ ',' if not loop.last }}{% endfor %} },
+                       phEn: { {% for tab, _roles in tabs %}'{{ tab }}': '{{ TAB_UI[tab].ph_en }}'{{ ',' if not loop.last }}{% endfor %} } }">
             {# Flash messages belong HERE. This page is the redirect target of
                login_required, so a session-expiry notice must be shown on it —
                otherwise it stays queued in the session and reappears on the next
@@ -53,12 +116,68 @@
             </div>
             {% endif %}
 
-            <div class="bg-white rounded-2xl shadow-xl shadow-surface-200/60 border border-surface-200 p-6 lg:p-8">
-                <form method="POST" action="{{ url_for('auth.login') }}" class="space-y-5" @submit="loading=true">
-                    <div class="input-icon">
-                        <i class="fas fa-envelope"></i>
-                        <input type="email" name="email" required autocomplete="email" :placeholder="t('admin@sekolah.id','admin@school.id')" x-model="email"
-                               class="w-full px-4 py-3 pl-10 border border-surface-200 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-primary-500 text-surface-700 font-medium placeholder:text-surface-300 transition">
+            <div class="bg-white rounded-2xl shadow-xl shadow-surface-200/60 border border-surface-200 p-5 sm:p-6 lg:p-8">
+                {# `role="tablist"` and `aria-selected` on each segment: the strip is
+                   how the page explains itself, and a screen reader has to hear which
+                   group it is speaking about. `data-selected` is written by the
+                   server from `?role=`, which is what makes the pre-selection
+                   testable without a browser — the click handler below is Alpine's
+                   and only exists for a reader who changes their mind. #}
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-5" role="tablist"
+                     x-bind:aria-label="t('Pilih kelompok','Choose a group')">
+                    {% for tab, roles in tabs %}
+                    <button type="button" role="tab" data-tab="{{ tab }}"
+                            data-selected="{{ 'true' if tab == initial_tab else 'false' }}"
+                            aria-selected="{{ 'true' if tab == initial_tab else 'false' }}"
+                            class="sg-tab border-2 rounded-xl px-2 py-2.5 text-center {{ 'sg-tab-active' if tab == initial_tab else 'border-surface-200' }}"
+                            :class="role === '{{ tab }}' ? 'sg-tab-active' : ''"
+                            :aria-selected="role === '{{ tab }}'"
+                            @click="role = '{{ tab }}'">
+                        <i class="fas {{ TAB_UI[tab].icon }} text-lg" :class="role === '{{ tab }}' ? 'text-primary-600' : 'text-surface-400'"></i>
+                        <p class="text-xs font-bold mt-1 truncate" :class="role === '{{ tab }}' ? 'text-primary-700' : 'text-surface-600'"
+                           x-text="t('{{ TAB_UI[tab].id }}','{{ TAB_UI[tab].en }}')"></p>
+                    </button>
+                    {% endfor %}
+                </div>
+
+                <form method="POST" action="{{ url_for('auth.sign_in') }}" class="space-y-4" @submit="loading = true">
+                    {# `next` is carried, not obeyed: where an account goes is decided
+                       by its role, and this page will not follow a path out of the
+                       form. It is kept so a link that mentions one is not silently
+                       dropped on the way through. #}
+                    {% if next_url %}<input type="hidden" name="next" value="{{ next_url }}">{% endif %}
+                    <div class="space-y-1">
+                        <div class="input-icon">
+                            <i class="fas fa-id-card"></i>
+                            {# The keyboard, per group, and it is the one thing a group is
+                               allowed to change about the form. A pupil's card carries a
+                               `NISN`, so their group opens on a digits keypad — that is what
+                               a phone's keyboard offers for the common case. It is not a
+                               trap: every login card this app prints carries an *email* too
+                               (`login_cards.COLUMNS`), and `_identifier_email` reads an
+                               address first, so the digits keypad would leave that pupil with
+                               no way to type what their own card says. The escape is the one
+                               tap below the field, and it is visible whenever the pupil
+                               group is selected. Teacher and admin groups keep the full
+                               keyboard (a `NIP` and an address both start with letters). #}
+                            <input type="text" name="email" required autocomplete="username"
+                                   :inputmode="role === 'murid' ? (emailMode ? 'text' : 'numeric') : (role === 'admin' ? 'email' : 'text')"
+                                   :placeholder="t(phId[role] || phId.guru, phEn[role] || phEn.guru)"
+                                   x-model="identifier"
+                                   class="w-full px-4 py-3 pl-10 border border-surface-200 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-primary-500 text-surface-700 font-medium placeholder:text-surface-300 transition">
+                        </div>
+                        <p class="text-xs text-surface-400">
+                            <span x-text="t('Guru: email / NIP · Murid: email / NISN','Teacher: email / employee ID · Student: email / NISN')"></span>
+                            {# The way out of the digits keypad, and the reason it may exist:
+                               a pupil whose identifier is the email on their card needs
+                               letters. Shown only for that group and only while its own
+                               keypad is up, so it never offers what is already in front of
+                               the reader. #}
+                            <button type="button" x-show="role === 'murid' && !emailMode" x-cloak
+                                    @click="emailMode = true"
+                                    class="text-xs text-primary-600 hover:text-primary-700 font-semibold"
+                                    x-text="t('Pakai email','Use an email')"></button>
+                        </p>
                     </div>
                     <div class="input-icon">
                         <i class="fas fa-lock"></i>
@@ -68,12 +187,13 @@
                             <i :class="showPw ? 'fas fa-eye-slash' : 'fas fa-eye'"></i>
                         </button>
                     </div>
-                    <div class="flex items-center justify-between text-sm">
+                    <div class="flex items-center justify-between gap-3 text-sm">
                         <label class="flex items-center gap-2 cursor-pointer select-none">
-                            <input type="checkbox" class="w-4 h-4 rounded border-surface-300 text-primary-600 focus:ring-primary-500" checked @change="if($el.checked) localStorage.setItem('sg_login_email', email); else localStorage.removeItem('sg_login_email')">
+                            <input type="checkbox" id="remember-email" class="w-4 h-4 rounded border-surface-300 text-primary-600 focus:ring-primary-500" checked
+                                   @change="if($el.checked) { try { localStorage.setItem('sg_login_email', identifier || '') } catch(e) {} } else { try { localStorage.removeItem('sg_login_email') } catch(e) {} }">
                             <span class="font-medium text-surface-600" x-text="t('Ingat email','Remember email')"></span>
                         </label>
-                        <a href="{{ url_for('auth.forgot_password') }}" class="text-primary-600 hover:text-primary-700 font-semibold" x-text="t('Lupa password?','Forgot password?')"></a>
+                        <a href="{{ url_for('auth.forgot_password') }}" class="text-primary-600 hover:text-primary-700 font-semibold whitespace-nowrap" x-text="t('Lupa password?','Forgot password?')"></a>
                     </div>
                     <button type="submit" :disabled="loading"
                             class="w-full bg-gradient-to-r from-primary-500 to-primary-600 hover:from-primary-600 hover:to-primary-700 text-white py-3 px-4 rounded-xl font-extrabold shadow-lg shadow-primary-500/25 hover:shadow-primary-500/40 transition-all disabled:opacity-50 flex items-center justify-center gap-2">
@@ -89,7 +209,7 @@
                     <span x-text="t('Belum punya akun?','No account yet?')"></span> <a href="{{ url_for('auth.register') }}" class="text-primary-600 hover:text-primary-700 font-bold" x-text="t('Daftar Sekolah','Register a School')"></a>
                 </p>
                 <p class="text-xs text-surface-400 font-medium">
-                    <span x-text="t('Guru/Murid?','Teacher/Student?')"></span> <a href="{{ url_for('auth.login_user') }}" class="text-primary-600 hover:text-primary-700 font-semibold" x-text="t('Masuk di sini','Log in here')"></a>
+                    <span x-text="t('Akun dibuat sekolah Anda.','Your account is created by your school.')"></span>
                 </p>
             </div>
             <div class="mt-6 pt-4 border-t border-surface-200 text-center space-x-4">
@@ -100,5 +220,18 @@
         </div>
     </div>
 </div>
-<script>document.addEventListener('DOMContentLoaded',()=>{const e=localStorage.getItem('sg_email');if(e){const i=document.querySelector('input[name=email]');if(i){i.value=e;const c=document.querySelector('input[type=checkbox]');if(c)c.checked=true}}})</script>
+{# The remembered address is filled in *before* Alpine starts, in the plainest way
+   that works: a reader whose browser blocks storage gets an empty field rather
+   than a page that never finishes hydrating. #}
+<script>
+try {
+    var sgSaved = localStorage.getItem('sg_login_email');
+    if (sgSaved) {
+        document.addEventListener('DOMContentLoaded', function () {
+            var input = document.querySelector('input[name="email"]');
+            if (input) { input.value = sgSaved; }
+        });
+    }
+} catch (e) {}
+</script>
 {% endblock %}

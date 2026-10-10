@@ -155,7 +155,7 @@ ARTIFACT = frozenset({
 #: the mount point those doors live under, so the trail has nothing to say about
 #: either half of the address.
 DOORS = frozenset({
-    "auth", "login", "login-user", "logout", "forgot-password", "register",
+    "auth", "sign-in", "login", "login-user", "logout", "forgot-password", "register",
     "activate", "verify-reset-code", "recover", "success", "failure",
     "reset-password",
     # `/auth/change-password` is reached from a session that is about to be

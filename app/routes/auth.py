@@ -7,7 +7,8 @@ from flask import Blueprint, request, jsonify, g, session, render_template, redi
 from app.utils.auth import (login_required, get_supabase, get_auth_client, get_auth_admin,
                             find_auth_user_by_email, invalidate_session, set_auth_cookie,
                             login_door_for, session_role, _extract_token,
-                            USER_ROLES, dashboard_for, password_change_record)
+                            USER_ROLES, ALL_ROLES, SIGN_IN_TABS, dashboard_for,
+                            sign_in_tab, password_change_record)
 from app.utils.helpers import row_or_none
 from app.services.audit_service import log_activity
 from app.utils.security import sanitize_input
@@ -412,58 +413,185 @@ def _sign_in_with_retry(supabase_auth, email, password):
             time.sleep(_LOGIN_RETRY_BASE * (0.5 + random.random()))
 
 
-# ─── LOGIN (Admin & Super Admin) ─────────────────────
+# ─── SIGN IN (one page, every role) ──────────────────
+#
+# There used to be two doors: one for admins, one for teachers, students and the
+# two school officials. Which door a reader belonged on was a property of their
+# role, so every path that answered "you are not signed in" had to name one — and
+# naming the wrong one was a dead end they could only escape by spotting the small
+# link to the other page. Now one page signs everyone in, and the role comes from
+# the account rather than from the page the reader chose.
+#
+# Both old URLs still answer, because they are published: `/tutorial/admin-sekolah`
+# and four cards on `/demo` link to them, schools have them bookmarked, and a
+# printed login card names one. A GET forwards here carrying whatever `?role=` and
+# `?next=` it was given; a POST is signed in by this same code, because a 302 on a
+# POST throws the credentials away and hands the reader an empty form.
 
-@auth_bp.route("/login", methods=["GET", "POST"])
-# Per-IP only as a flood backstop; brute force is bounded per ACCOUNT below,
-# because a school shares one NAT'd address and 30/min throttled whole classes.
-@_rate_limit("300 per minute")
-def login():
-    if request.method == "GET":
-        resp = make_response(render_template("auth/login.html"))
-        resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-        return resp
+#: Query arguments the old doors forward. Both stay *text*: they are carried for
+#: the reader's sake and are never turned into a redirect target, so neither can
+#: become an open redirect however it is spelled.
+_FORWARDED_ARGS = ("role", "next")
 
-    email = request.form.get("email", "").strip().lower()
+
+def _sign_in_page(**context):
+    """The one sign-in page, uncached.
+
+    `no-store` is not decoration: this page is where `login_required` sends an
+    expired session, and a browser that cached it would replay that notice on the
+    next visit, reading as that page's own error.
+
+    The page context is filled in here rather than left to the caller, because the
+    caller that forgets it is the *refusal* path: a failed password check rendering
+    the page without `initial_tab` took the whole request down with a 500 (the tab
+    strip is built from it, and `tojson` cannot serialise `Undefined`). A form that
+    answers a wrong password with an empty page is worse than one that says nothing,
+    and the fix is that no call site can omit it.
+    """
+    ctx = _sign_in_context()
+    ctx.update(context)
+    resp = make_response(render_template("auth/login.html", **ctx))
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    return resp
+
+
+def _forward_to_sign_in():
+    """A GET on an old door: hand the reader to the one page, keeping its hints."""
+    forwarded = {key: request.args[key] for key in _FORWARDED_ARGS if request.args.get(key)}
+    return redirect(url_for("auth.sign_in", **forwarded))
+
+
+def _sign_in_context():
+    """What the page needs to open on the right tab.
+
+    `role` is validated rather than echoed: `sign_in_tab` answers `""` for
+    anything it does not recognise, so `?role=<anything>` preselects nothing. The
+    tab is a hint for the reader — the placeholder and the helper line — and never
+    a claim the server acts on. `next` is kept only when it is a path on this site,
+    so a link from elsewhere cannot smuggle an absolute URL into the form.
+    """
+    role = request.args.get("role", "")
+    tab = sign_in_tab(role)
+    next_url = request.args.get("next", "")
+    return {
+        "role_hint": role if tab else "",
+        "initial_tab": tab,
+        "tabs": SIGN_IN_TABS,
+        "next_url": next_url if next_url.startswith("/") and not next_url.startswith("//") else "",
+    }
+
+
+def _role_and_status(supabase, res, login_input):
+    """`(role, status)` for the account, or `(None, "active")` if the row cannot be read.
+
+    `None` and `""` are deliberately different answers. An empty role is an account
+    this app has no home for — a refusal the reader must not be able to tell apart
+    from a wrong password. `None` is a profile row the server could not read *and*
+    no role in the account's own metadata: an infrastructure failure, which the
+    caller answers with the transient sentence rather than a credential one, and
+    which must not consume the account's attempt budget.
+    """
+    try:
+        profile = supabase.table("profiles") \
+            .select("role, status, school_id") \
+            .eq("id", res.user.id) \
+            .single() \
+            .execute()
+        pdata = profile.data or {}
+        role = pdata.get("role") or ""
+        if role:
+            return role, pdata.get("status", "active")
+    except Exception as e:
+        logger.warning("Sign-in profile lookup failed for %s: %s", login_input, e)
+
+    metadata_role = res.user.user_metadata.get("role") or ""
+    return (metadata_role or None), "active"
+
+
+def _identifier_email(supabase, login_input):
+    """The email behind an identifier: an address, a NISN, or an employee id.
+
+    A pupil's card carries a NISN and a teacher's carries a NIP, so the field takes
+    all three — the door a reader came through used to decide which of them was
+    even looked for, and now it does not. When nothing matches, the text is
+    returned unchanged and sign-in fails exactly as a wrong password does, which is
+    the point: being told "no such NISN" is being told which NISNs exist.
+    """
+    if "@" in login_input:
+        return login_input
+
+    email = login_input
+    found_id = None
+
+    # A pupil, by NISN. `profiles.nisn` is probed with a raw filter because the
+    # column is not guaranteed on every school's schema, and the account's own
+    # metadata is the fallback for the same reason.
+    try:
+        prof = supabase.table("profiles").select("id").filter("nisn", "eq", login_input).limit(1).execute()
+        if prof.data:
+            found_id = prof.data[0]["id"]
+    except Exception:
+        try:
+            for u in supabase.auth.admin.list_users():
+                if (getattr(u, "user_metadata", {}) or {}).get("nisn") == login_input:
+                    found_id = u.id
+                    break
+        except Exception:
+            pass
+
+    # A teacher or another member of staff, by employee id.
+    if not found_id:
+        try:
+            t = supabase.table("teachers").select("id").eq("employee_id", login_input).limit(1).execute()
+            if t.data:
+                found_id = t.data[0]["id"]
+        except Exception:
+            pass
+
+    if found_id:
+        try:
+            email = supabase.auth.admin.get_user_by_id(found_id).user.email
+        except Exception:
+            pass
+    return email
+
+
+def _sign_in():
+    """Match an identifier and a password, then send the account to its own home.
+
+    The role is matched against **every** role this app has, whatever tab the page
+    was showing — the tab is a placeholder the reader chose, and trusting it would
+    let a pupil's card be validated as a teacher's. There is no "wrong door" left
+    to refuse, so the two sentences that used to name the other page are gone: an
+    unknown identifier, a wrong password and an account whose role this app does not
+    have all produce the same one, and nothing in it says which of the three it was.
+    """
+    login_input = request.form.get("email", "").strip().lower()
     password = request.form.get("password", "")
 
-    if not email or not password:
-        return render_template("auth/login.html", error=auth_error("login_required_fields"))
+    if not login_input or not password:
+        return _sign_in_page(error=auth_error("login_required_fields"))
 
     supabase_auth = get_auth_client()
     supabase = get_supabase()
+    email = _identifier_email(supabase, login_input)
 
     try:
         res = _sign_in_with_retry(supabase_auth, email, password)
 
-        # Check profile status
-        try:
-            profile = supabase.table("profiles") \
-                .select("role, status, school_id") \
-                .eq("id", res.user.id) \
-                .single() \
-                .execute()
-            pdata = profile.data or {}
-            role = pdata.get("role", "admin_sekolah")
-            status = pdata.get("status", "active")
+        role, status = _role_and_status(supabase, res, login_input)
+        if role not in ALL_ROLES:
+            # `None` is a row nobody could read (the server's problem); `""` is an
+            # account with no role this app has (the reader's business, and the one
+            # the brief wants answered with the generic credential sentence).
+            return _sign_in_page(
+                error=auth_error("login_transient" if role is None else "login_bad_credentials"))
 
-            if status == "pending":
-                return redirect(f"/auth/activate?email={email}&pending=1")
+        if status == "pending":
+            return redirect(f"/auth/activate?email={email}&pending=1")
 
-            if role not in ("super_admin", "admin_sekolah"):
-                return render_template("auth/login.html", error=auth_error("login_wrong_page"))
-
-        except Exception:
-            role = res.user.user_metadata.get("role", "admin_sekolah")
-            status = "active"
-
-        redirect_map = {
-            "super_admin": "/super-admin/dashboard",
-            "admin_sekolah": "/admin-sekolah/dashboard",
-            "guru": "/teacher/dashboard",
-            "murid": "/student/dashboard",
-        }
-        redirect_url = dashboard_for(role, default=redirect_map["admin_sekolah"])
+        # Their own home, through the one mapping that owns that question.
+        redirect_url = dashboard_for(role)
         resp = make_response(redirect(redirect_url))
         # A flash left over from a session that has just ended describes a state
         # the user is no longer in. The login page is where it belongs, and it is
@@ -477,16 +605,19 @@ def login():
     except Exception as e:
         wrong_password, message = _classify_login_error(e)
         if wrong_password:
-            # Failed attempts are counted per ACCOUNT. Keying this on the IP
-            # would lock out every colleague behind the same school NAT.
-            allowed, retry = check_account_limit("login_failed", email, ip=request.remote_addr)
+            # Failed attempts are counted per ACCOUNT, keyed on what the reader
+            # typed rather than on the address it resolved to — a NISN and an
+            # email are the same account, and one of them is what they will try
+            # again. Keying this on the IP would lock out every colleague behind
+            # the same school NAT.
+            allowed, retry = check_account_limit("login_failed", login_input, ip=request.remote_addr)
             if not allowed:
-                return render_template("auth/login.html", error=rate_limit_error("login", retry))
+                return _sign_in_page(error=rate_limit_error("login", retry))
         else:
             # A transient failure must NOT consume the account's budget: doing so
             # let a rate-limit spike ban a school from logging in for 15 minutes.
-            logger.warning("Login transient failure for %s: %s", email, e)
-        return render_template("auth/login.html", error=message)
+            logger.warning("Login transient failure for %s: %s", login_input, e)
+        return _sign_in_page(error=message)
     # log_activity outside try/except so audit failures don't block login
     try:
         log_activity("login", "user", res.user.id, new_data={"role": role, "ip": request.remote_addr})
@@ -495,109 +626,47 @@ def login():
     return resp
 
 
-# ─── LOGIN USER (Guru & Murid) ───────────────────────
+@auth_bp.route("/sign-in", methods=["GET", "POST"])
+# The same per-IP flood backstop the admin door has always carried. It is a
+# backstop and not the brute-force defence — that is the per-ACCOUNT counter below,
+# because a school shares one NAT'd address and a per-IP attempt limit throttled
+# whole classes.
+@_rate_limit("300 per minute")
+def sign_in():
+    """The sign-in page, and the only place a password is checked."""
+    if request.method == "GET":
+        return _sign_in_page(**_sign_in_context())
+    return _sign_in()
+
+
+# ─── LOGIN (the admin door, now an alias) ────────────
+
+@auth_bp.route("/login", methods=["GET", "POST"])
+@_rate_limit("300 per minute")
+def login():
+    """The admin door, kept answering for the links and cards that still name it.
+
+    `/tutorial/admin-sekolah` and the super-admin and school-admin cards on `/demo`
+    link here, and a school's printed cards may too. Both methods are accepted: a
+    POST is signed in by the one handler, a GET is forwarded to the one page.
+    """
+    if request.method == "POST":
+        return _sign_in()
+    return _forward_to_sign_in()
+
+
+# ─── LOGIN USER (the teacher/student door, now an alias) ───
 
 @auth_bp.route("/login-user", methods=["GET", "POST"])
+# This door used to carry no per-IP limit at all, so a script could POST it as fast
+# as the network allowed while only the per-account counter — which needs a correct
+# identifier to key on — stood in the way. It has the same backstop as the other.
+@_rate_limit("300 per minute")
 def login_user():
-    if request.method == "GET":
-        role_hint = request.args.get("role", "")
-        resp = make_response(render_template("auth/login_user.html", role_hint=role_hint))
-        resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-        return resp
-
-    login_input = request.form.get("email", "").strip().lower()
-    password = request.form.get("password", "")
-
-    if not login_input or not password:
-        return render_template("auth/login_user.html", error=auth_error("login_user_required"))
-
-    supabase_auth = get_auth_client()
-    supabase = get_supabase()
-
-    # Support NISN login for students / NIP login for teachers
-    email = login_input
-    if "@" not in login_input:
-        found_id = None
-        # Try NISN (students) — use raw query since profiles.nisn may not exist as column
-        try:
-            prof = supabase.table("profiles").select("id").filter("nisn", "eq", login_input).limit(1).execute()
-            if prof.data:
-                found_id = prof.data[0]["id"]
-        except:
-            # Fallback: search auth user_metadata for NISN
-            try:
-                users = supabase.auth.admin.list_users()
-                for u in users:
-                    meta = getattr(u, 'user_metadata', {}) or {}
-                    if meta.get("nisn") == login_input:
-                        found_id = u.id
-                        break
-            except:
-                pass
-        # Try NIP (teachers)
-        if not found_id:
-            try:
-                t = supabase.table("teachers").select("id").eq("employee_id", login_input).limit(1).execute()
-                if t.data:
-                    found_id = t.data[0]["id"]
-            except:
-                pass
-        if found_id:
-            try:
-                user_info = supabase.auth.admin.get_user_by_id(found_id)
-                email = user_info.user.email
-            except:
-                pass
-
-    try:
-        res = _sign_in_with_retry(supabase_auth, email, password)
-
-        try:
-            profile = supabase.table("profiles") \
-                .select("role, status") \
-                .eq("id", res.user.id) \
-                .single() \
-                .execute()
-            pdata = profile.data or {}
-            role = pdata.get("role", "murid")
-            status = pdata.get("status", "active")
-
-            if status == "pending":
-                return redirect(f"/auth/activate?email={email}&pending=1")
-
-            if role not in USER_ROLES:
-                return render_template("auth/login_user.html",
-                                       error=auth_error("login_user_wrong_page"))
-
-        except Exception:
-            role = res.user.user_metadata.get("role", "murid")
-
-        # Their own home. `principal` and `vice_principal` come through this door
-        # like guru and murid (see USER_ROLES) and land on their own dashboard.
-        redirect_url = dashboard_for(role, default="/student/dashboard")
-        resp = make_response(redirect(redirect_url))
-        # A flash left over from a session that has just ended describes a state
-        # the user is no longer in. The login page is where it belongs, and it is
-        # rendered there; dropping it here keeps it from being replayed on the
-        # next page that renders flashes (e.g. "Silakan login terlebih dahulu"
-        # appearing on a page the user opens while fully logged in).
-        session.pop("_flashes", None)
-        set_auth_cookie(resp, "access_token", res.session.access_token, max_age=86400)
-        set_auth_cookie(resp, "refresh_token", res.session.refresh_token, max_age=86400 * 7)
-        set_auth_cookie(resp, "session_start", str(time.time()), max_age=86400 * 7)
-        log_activity("login", "user", res.user.id, new_data={"role": role, "ip": request.remote_addr})
-        return resp
-    except Exception as e:
-        # Same reasoning as /login: throttle the account, not the school's IP,
-        # and only for genuine credential failures.
-        wrong_password, message = _classify_login_error(e)
-        if wrong_password:
-            allowed, retry = check_account_limit("login_failed", login_input, ip=request.remote_addr)
-            if not allowed:
-                return render_template("auth/login_user.html", error=rate_limit_error("login", retry))
-        else:
-            logger.warning("Login transient failure for %s: %s", login_input, e)
-        return render_template("auth/login_user.html", error=message)
+    """The teacher/student door, kept answering — see `login`."""
+    if request.method == "POST":
+        return _sign_in()
+    return _forward_to_sign_in()
 
 
 # ─── FORGOT PASSWORD — 6-digit code flow ────────────
@@ -935,7 +1004,8 @@ def set_new_password():
         # the admin door, which is what `dashboard_for` answers with no match and
         # the same page `login_door_for` names when it has no role to go on.
         redirect_url = dashboard_for(role)
-        return render_template("auth/reset_success.html", redirect_url=redirect_url, role=role)
+        return render_template("auth/reset_success.html", redirect_url=redirect_url,
+                               login_door=login_door_for(role), role=role)
     except Exception as e:
         current_app.logger.error(f"Reset password error: {e}")
         return render_template("auth/set_new_password.html", email=email, error=auth_error("reset_failed"))
