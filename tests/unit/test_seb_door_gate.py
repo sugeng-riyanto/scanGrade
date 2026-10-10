@@ -41,7 +41,10 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import json
+import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -51,7 +54,11 @@ import pytest
 from tests.conftest import app_instance
 
 ROOT = Path(__file__).resolve().parents[2]
-GATE = ROOT / "deploy" / "seb_door_gate.py"
+#: Overridable so a mutation harness can run this file against a mutated *copy*: a
+#: harness that rewrites the gate in place can leave it mutated after a crash, and this
+#: file's own subject is that script. Same reason `ARM_SCRIPT` exists next door.
+GATE = Path(os.environ["SEB_GATE_SCRIPT"]) if os.environ.get("SEB_GATE_SCRIPT") \
+    else ROOT / "deploy" / "seb_door_gate.py"
 DEPLOY = ROOT / "deploy" / "scangrade-deploy.sh"
 INSTALL = ROOT / "deploy" / "install-auto-deploy.sh"
 SMOKE = ROOT / "deploy" / "smoke_test.py"
@@ -881,6 +888,24 @@ class TestTheClientHalfIsJudged:
         assert any("5 row(s) exist for this paper in total" in line for line in lines), (
             "the finding does not explain the rows the protocol lanes left")
 
+    def test_a_page_whose_script_never_ran_is_named_as_that(self):
+        """The reading the live box produced on the first run of this gate.
+
+        `state` absent, the refusal panel laid out, no Alpine scope anywhere — which
+        is a page whose script has not started, not a page that was refused. Reported
+        as "ended in state ''" it sends the next reader hunting for a state name; the
+        cause is named instead, and the symptoms are not printed beside it, because
+        one defect is one finding.
+        """
+        code, lines = gate.judge(_seen(client_initialized=False, client_state="",
+                                       client_refused_shown=True, client_reports=0,
+                                       client_reports_total=0, client_rows_marked=0))
+        assert code == gate.EXIT_NOT_ENFORCED, lines
+        assert any("never initialized" in line for line in lines), lines
+        assert not any("ended in state" in line for line in lines), (
+            "the symptom is reported beside its cause, which is two findings for one "
+            "defect")
+
     def test_a_visit_that_never_reports_at_all_is_the_finding(self):
         code, lines = gate.judge(_seen(client_reports_total=0))
         assert code == gate.EXIT_NOT_ENFORCED, lines
@@ -1063,3 +1088,143 @@ class TestTheClientHalfIsDrivenTheWayTheOtherGatesDrive:
         assert not offenders, (
             f"a call reads a name nothing binds: {offenders} — a NameError at run "
             f"time, which this gate reports as 'could not measure'")
+
+
+# ── the reading itself, run rather than read ─────────────────────────────────
+
+
+DRIVER = r"""
+const fs = require('fs');
+const expression = fs.readFileSync(process.argv[2], 'utf8');
+const scenario = process.argv[3];
+
+// Only the parts of the DOM the expression asks for. `querySelectorAll` answers both
+// of its questions — and answers the *page-wide* one with the shell's own panels
+// included, which is the point: `x-show="toast.type==='error'"` is in the app chrome
+// on every page, and a scan that believes it reads this page's error panel.
+const panel = (xShow, visible) => ({
+  getAttribute: (name) => (name === 'x-show' ? xShow : null),
+  display: visible ? 'block' : 'none',
+});
+const scopeEl = (state, cloaked, panels) => ({
+  _x_dataStack: state === null ? [] : [{ state }],
+  hasAttribute: (name) => name === 'x-cloak' && cloaked,
+  querySelectorAll: (sel) => (sel === '[x-show]' ? panels : []),
+});
+// The card, as the server renders it: all three panels are in the DOM, and before
+// Alpine runs none of them carries `display: none` — an unprocessed `x-show` *reads as
+// shown*, which is why the layout can never be the proof that the script ran.
+const card = (state, cloaked) => scopeEl(state, cloaked, [
+  panel("state === 'checking'", state === null || state === 'checking'),
+  panel("state === 'refused'", state === null || state === 'refused'),
+  panel("state === 'error'", state === null || state === 'error'),
+]);
+const shell = scopeEl(null, false, []);
+const toast = panel("toast.type==='error'", true);
+
+const layouts = {
+  'before-the-script-runs': { elements: [shell, card(null, true)], panels: [toast] },
+  'settled-refused': { elements: [shell, card('refused', false)], panels: [toast] },
+  'still-checking': { elements: [shell, card('checking', false)], panels: [toast] },
+};
+const layout = layouts[scenario];
+const all = layout.elements.concat(layout.panels);
+global.document = {
+  querySelectorAll: (sel) => (sel === '[x-data]' ? layout.elements : all),
+  querySelector: () => (layout.elements.some((el) => el.hasAttribute('x-cloak')) ? {} : null),
+};
+global.getComputedStyle = (el) => ({ display: el.display });
+global.location = { pathname: '/student/exams/one' + '/seb-claim' };
+global.window = {};
+console.log(JSON.stringify((0, eval)(expression)));
+"""
+
+NODE = shutil.which("node")
+needs_node = pytest.mark.skipif(NODE is None, reason="needs node to run the reading")
+
+
+def _read_page(tmp_path: Path, scenario: str) -> dict:
+    """Run the gate's own reading against a DOM shaped like the one it meets."""
+    driver = tmp_path / "driver.js"
+    driver.write_text(DRIVER, encoding="utf-8")
+    expression = tmp_path / "expression.js"
+    expression.write_text(gate.client_expression(), encoding="utf-8")
+    done = subprocess.run([NODE or "node", str(driver), str(expression), scenario],
+                          capture_output=True, text=True, timeout=60)
+    assert done.returncode == 0, done.stderr
+    return json.loads(done.stdout.strip().splitlines()[-1])
+
+
+class TestTheReadingCannotBeFooledByAPageThatHasNotRun:
+    """The first run of this gate against a served release failed a working page.
+
+    `panels.refused` was true half a second after the navigation, because an `x-show`
+    Alpine has not processed carries no `display: none` — and the gate broke its wait
+    on that reading, cut the window and navigated away before the page's script had
+    started (a cold `alpine.js` settled at 3.6s, and 4.0s on a second run, on the box). So the reading is *run* here, the
+    real expression against a DOM shaped like the real page, and the decision is driven
+    with its output: "the layout says refused" and "the page said refused" have to be
+    different answers, and the difference is what the verdict is written on.
+    """
+
+    def test_a_page_that_has_not_run_is_not_a_page_that_was_refused(self, tmp_path):
+        value = _read_page(tmp_path, "before-the-script-runs")
+        assert value["state"] is None, "an un-run page has no state to read"
+        assert value["initialized"] is False, (
+            "the card still carries `x-cloak`, so Alpine has not been through it")
+        assert value["cloaked"] is True
+        assert gate.settled(value, 0) is False, (
+            "a page that has not run a line of script reads as settled")
+
+    def test_the_refused_reading_is_taken_from_the_page_s_own_scope(self, tmp_path):
+        value = _read_page(tmp_path, "settled-refused")
+        assert value["state"] == "refused"
+        assert value["initialized"] is True
+        assert value["panels"] == {"checking": False, "refused": True, "error": False}
+
+    def test_the_shell_s_toast_is_not_the_page_s_error_panel(self, tmp_path):
+        """`x-show="toast.type==='error'"` is in the chrome on every page, and the old
+        read let the last match win — the toast's own visibility decided what the
+        handshake page's `error` panel looked like."""
+        value = _read_page(tmp_path, "settled-refused")
+        assert value["panels"]["error"] is False, (
+            "a visible toast was read as this page's error panel")
+
+    def test_the_wait_is_on_the_state_and_not_on_the_layout(self):
+        """The driver's own break, because that is where the defect lived.
+
+        The reading can be perfect and the wait still wrong: the loop broke on
+        `panels['refused']`, which an un-run page satisfies, and the window was cut
+        before the script had started. Both loads are asserted, because the paper
+        navigation hands this browser the handshake page a second time and that load's
+        report is compared against the rows the server holds.
+        """
+        code = _code(_source(GATE))
+        start = code.index('await c.send("Page.navigate", url=claim_url)')
+        first = code[start:code.index("first_load = len(events)", start)]
+        assert "settled(value, refusal_posts(events))" in first, (
+            "the first load is cut without waiting for the page's script or its report")
+        assert "panels" not in first, (
+            "the wait is still satisfied by a panel Alpine has not processed")
+        after = code[code.index('await c.send("Page.navigate", url=paper)'):]
+        assert "want = 2 if landed.endswith(CLAIM_SUFFIX) else 1" in after, (
+            "the second load's report is not waited for, so the count can race the "
+            "navigation and read as a lost write")
+        assert "refusal_posts(events) >= want" in after
+
+    def test_the_wait_needs_the_script_settled_and_its_report_on_the_wire(self, tmp_path):
+        """Both halves of the wait, each driven with the reading a real load produced.
+
+        `checking` is where the page starts and is not an answer; and a page that
+        settled without its report on the wire is not ready to be counted, because that
+        report is the whole reason this half of the gate exists.
+        """
+        checking = _read_page(tmp_path, "still-checking")
+        assert gate.settled(checking, 1) is False, "a page still asking reads as settled"
+        refused = _read_page(tmp_path, "settled-refused")
+        assert gate.settled(refused, 0) is False, (
+            "the window was cut before the page's report was on the wire")
+        assert gate.settled(refused, 1) is True
+        assert gate.settled({"state": "error"}, 1) is True, (
+            "a page that settled into its error state is settled, and the verdict is "
+            "what says which state it ended on")

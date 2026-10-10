@@ -373,6 +373,74 @@ halamannya melapor dari handler yang sama yang menetapkan keadaannya — jadi
 pembacaannya di-*poll* dengan batas waktu, bukan ditidurkan, dan pemuatan **pertama**
 adalah yang dibaca keadaan halamannya.
 
+### Kegagalan pertama gate ini adalah pembacanya, bukan halamannya
+
+Itu hanya terlihat karena gate-nya dijalankan terhadap rilis yang benar-benar
+melayani — dan jalannya sudah ada di laporan: `state=''`, panel penolakan "tertata",
+**0 POST** ke `seb-claim/refused`, tetapi server memegang **2 baris** berpenanda
+browser. Empat fakta itu tidak bisa dijelaskan oleh satu penyebab sampai waktunya
+diukur, jadi halaman handshake sungguhan dimuat di browser headless dengan pembacaan
+tiap 0,25 detik:
+
+```
+  t=+ 1.86s  alpine=False scope_state=None    scopes=0 cloaked=0 ready=loading  panels={}
+  t=+ 2.61s  alpine=False scope_state=None    scopes=1 cloaked=0 ready=loading  panels={}
+  t=+ 3.07s  alpine=False scope_state=None    scopes=2 cloaked=1 ready=loading
+             panels={"checking": true, "refused": true, "error": true}  posts=0
+  t=+ 3.96s  alpine=True  scope_state=refused scopes=2 cloaked=0 ready=interactive
+             panels={"checking": false, "refused": true, "error": false}  posts=1
+```
+
+(Dijalankan dua kali; yang kedua berakhir `refused` dengan satu laporan, hanya lebih
+cepat — 3,63s.)
+
+`x-show` adalah atribut sampai Alpine memprosesnya, dan atribut yang belum diproses
+**tidak** membawa `display: none` — jadi di t=+3,07s *ketiga* panel terbaca "tertata"
+oleh siapa pun yang menanyakan tata letaknya, sementara skripnya sama sekali belum
+berjalan (kartunya masih memegang `x-cloak`, dan `alpine.js` dari cache dingin di kotak
+1 vCPU baru selesai 0,9 detik kemudian). Gate-nya berhenti menunggu pada bacaan itu,
+memotong jendela, lalu menavigasi ke kertas — sebelum halamannya sempat mengirim apa
+pun — sehingga laporan pemuatan pertama tidak pernah dihitung, sedangkan barisnya
+terlanjur ditulis. Halaman yang bekerja dibaca sebagai halaman yang rusak.
+
+Tiga perbaikan, dan yang ketiga adalah alasan temuannya bisa dibaca:
+
+1. **Panel dibaca di dalam elemen yang memiliki `state`**, bukan di seluruh halaman.
+   Chrome aplikasi membawa `x-show="toast.type==='error'"`, dan karena pencocokan
+   lamanya hanya mencari kata `error` di atributnya, visibilitas toast itulah yang
+   menjadi panel `error` halaman ini.
+2. **Yang ditunggu adalah keadaan skripnya, bukan tata letaknya** — `state` harus sudah
+   berakhir (`refused`/`error`) **dan** laporannya sudah ada di kawat, karena laporan
+   itu keluar dari handler yang sama yang mengubah keadaan dan justru itulah yang
+   dihitung. Pemuatan kedua (kertas yang mengembalikan browser ke handshake) ditunggu
+   dengan aturan yang sama, sebab jumlahnya dibandingkan dengan baris yang dipegang
+   server: laporan yang masih di kawat saat soket ditutup terbaca sebagai tulisan yang
+   hilang.
+3. **"Skripnya tidak pernah jalan" adalah temuan yang bernama sendiri.** Kalau seluruh
+   anggaran waktu habis tanpa satu pun scope Alpine, itu yang dikatakan — bukan
+   `berakhir di keadaan ''`, yang mengirim pembaca berikutnya mencari nama keadaan
+   padahal persoalannya skrip yang tidak berjalan. Satu cacat, satu temuan.
+
+Keputusannya (`settled(value, posts)`) dijadikan fungsi murni supaya bisa dijalankan
+persis dengan bacaan yang dihasilkan kotak itu, dan pembacaannya dijalankan sungguhan:
+`tests/unit/test_seb_door_gate.py` mengeksekusi `client_expression()` di bawah `node`
+terhadap DOM tiruan yang dibentuk seperti halaman aslinya — kartu yang belum diproses,
+kartu yang sudah `refused`, dan halaman yang masih `checking` — lalu menyuapkan
+keluarannya ke keputusan yang asli, sehingga "tata letaknya bilang refused" dan
+"halamannya bilang refused" tidak bisa lagi jadi jawaban yang sama. Diperiksa lewat 8
+mutasi (`.freebuff/mutate_seb_c6_read.py`), **8/8 tertangkap**; harness itu sendiri
+melaporkan **0/8** di percobaan pertamanya karena salinan mutannya ditaruh di direktori
+sementara — gate-nya mengimpor `touch_gate` dari direktorinya sendiri dan aplikasi dari
+checkout dua tingkat di atas, jadi salinan di tempat lain **gagal dikoleksi**, dan suite
+yang gagal dikoleksi terbaca sebagai "mutasinya tertangkap" untuk kedelapan sekaligus.
+Sekarang mutannya ditulis di sebelah gate aslinya dan dihapus lagi.
+
+Dijalankan utuh terhadap rilis yang melayani (bukan hanya di suite):
+`state='refused' script ran=True refusal shown=True reports=1 of 2 ('no_client')
+claims=0 -> HTTP 200`, server memegang 2 baris berpenanda untuk 2 laporan, exit 0 —
+`seb door: OK — the SEB door is enforced on the served release` — dan setelah pengukuran
+nyata itu lulus, `SEB_ENFORCE="true"` di-arm di kotak.
+
 **Barisnya dipilah lewat penanda dan dibandingkan dengan jumlah laporan — dan versi
 pertama pemeriksaan ini salah di database hidup, dua kali.** Ia meminta *satu* baris
 untuk kertas itu, dan tidak satu pun paruhnya bertahan saat dijalankan sungguhan: tiga
