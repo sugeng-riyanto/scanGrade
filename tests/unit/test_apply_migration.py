@@ -20,11 +20,16 @@ import ast
 import hashlib
 import importlib.util
 import json
+import os
+import re
+import subprocess
 import sys
 from pathlib import Path
 
 import psycopg2
 import pytest
+
+from tests.unit.git_env import git_env
 
 ROOT = Path(__file__).resolve().parents[2]
 DEPLOY = ROOT / "deploy"
@@ -890,9 +895,13 @@ def test_the_cli_offers_adopt_with_the_file_it_records():
     assert 'add_argument("--prune-source"' in SOURCE
     assert "if args.adopt:" in SOURCE
     # One catalogue read, `storage` included: the app owns policies there, and a
-    # check that cannot see them calls a present file absent.
-    assert SOURCE.count('schema_snapshot(cur, extra_schemas=("storage",))') == 2, (
-        "adopt and verify must judge the same catalogue, storage policies included")
+    # check that cannot see them calls a present file absent. **Three** readers now
+    # — verify, adopt and reconcile — because a reconcile that judged a different
+    # catalogue from the report a person reads is how a record and a report come to
+    # disagree about one file.
+    assert SOURCE.count('schema_snapshot(cur, extra_schemas=("storage",))') == 3, (
+        "verify, adopt and reconcile must judge the same catalogue, storage "
+        "policies included")
 
 
 def test_the_status_report_says_where_the_recovery_point_is(tmp_path, capsys):
@@ -937,3 +946,263 @@ def test_a_recovery_point_that_is_gone_reads_as_missing(tmp_path, capsys):
     out = capsys.readouterr().out
 
     assert "recovery point: MISSING" in out
+
+
+# ── reconciling the ledger with the schema ───────────────────────────────────
+#
+# The two-ledger problem, and why it has to be settled from inside the box: a
+# migration applied from a workstation (which is how this repository's migrations
+# are applied — nothing can log into the VPS) leaves the box's `--status` saying
+# "no record", which means *unknown*, while the catalogue plainly carries the
+# objects. `--verify` answers that question from the schema; `--reconcile` writes
+# the answer down, on the box's own tick, because a box with no shell never gets
+# an operator to run `--adopt` by hand.
+#
+# Three properties make it honest rather than a way to write "applied" over
+# anything:
+#
+# * a record is written only for a file the **catalogue confirms** — one whose
+#   objects are missing is reported and left alone, which is the same finding
+#   `--verify` exits 6 with;
+# * the record says `adopted`, because this box did not watch the migration run;
+# * a recovery point is named only when an archive can be **proved to predate the
+#   migration** (an archive older than the commit that first added the file cannot
+#   contain it), so restoring that archive really does undo it. Every other case
+#   records the migration with no archive named and says why — a snapshot taken
+#   afterwards is not a recovery point for it.
+
+def _reconcile_setup(monkeypatch, tmp_path, *, live, files, archives=(),
+                     archives_in_place=False):
+    repo = tmp_path / "repo"
+    migrations = repo / "supabase" / "migrations"
+    migrations.mkdir(parents=True)
+    for name, sql in files.items():
+        (migrations / name).write_text(sql, encoding="utf-8")
+    out = tmp_path / "backups"
+    landing = out if archives_in_place else tmp_path / "incoming"
+    landing.mkdir(parents=True)
+    for name in archives:
+        (landing / name).write_bytes(b"archive-bytes")
+    ledger = tmp_path / "ledger"
+
+    monkeypatch.setattr(app_mig, "load_migration_url", lambda repo: "postgresql://x")
+    monkeypatch.setattr(app_mig, "check_target", lambda url, repo: REF)
+    monkeypatch.setattr(app_mig, "connect_readonly", lambda url: FakeConn())
+    monkeypatch.setattr(app_mig, "schema_snapshot",
+                        lambda cur, extra_schemas=(): live)
+    monkeypatch.setattr(sys, "argv", [
+        "apply_migration.py", "--reconcile", "--repo", str(repo),
+        "--out", str(out), "--ledger", str(ledger)])
+    return migrations, out, ledger
+
+
+def test_reconcile_records_what_the_schema_confirms(monkeypatch, tmp_path, capsys):
+    """The whole point: `no record` becomes a record, and `--status` then answers
+    the question instead of deferring it to a database."""
+    migrations, _out, ledger = _reconcile_setup(
+        monkeypatch, tmp_path, live={"table widget"},
+        files={"064_widget.sql": "CREATE TABLE widget (id uuid);\n"})
+
+    assert app_mig.main() == 0
+    printed = capsys.readouterr().out
+
+    payload = _entry(ledger, "064_widget")
+    assert payload["adopted"] is True, (
+        "a record written by this box for something it never watched says `adopted`")
+    assert payload["recovery_point"] is None, (
+        "it named a recovery point while holding no archive that can undo this")
+    assert "+ table widget" in payload["schema_changes"], (
+        "the record was not written from the catalogue it checked")
+    assert "reconciled: 1 record(s) written" in printed
+    assert "no archive on this box can undo this" in printed
+
+    assert app_mig.status(ledger, migrations) == 0
+    shown = capsys.readouterr().out
+    assert "0 of 1 have no record." in shown, "the file is still unrecorded"
+    assert re.search(r"adopted \d{4}-\d{2}-\d{2}", shown), (
+        "the ledger still reads 'no record' for a migration it has just recorded")
+    assert "recovery point: none recorded" in shown, (
+        "a record with no archive must say so rather than look complete")
+
+
+def test_the_recovery_point_is_the_archive_taken_for_that_migration(monkeypatch,
+                                                                    tmp_path):
+    """A `recovery_point` claims one thing — restoring this archive undoes that
+    migration — and the only proof of it is the archive's own name: the run that
+    applies a file takes a snapshot immediately before it and labels it with the
+    file's stem. So an archive taken for another file, or taken for a release, is
+    never named, however old or new it is."""
+    _migrations, out, ledger = _reconcile_setup(
+        monkeypatch, tmp_path, live={"table widget"},
+        files={"064_widget.sql": "CREATE TABLE widget (id uuid);\n"},
+        archives=["scangrade-db-20260928T000000Z-039_other_migration.tar.gz",
+                  "scangrade-db-20261009T235959Z-064_widget.tar.gz",
+                  "scangrade-db-20261010T040000Z-064_widget.tar.gz",
+                  "scangrade-db-20261010T050000Z-deadbeef.tar.gz",
+                  "copied-by-hand.tar.gz"],
+        archives_in_place=True)
+
+    assert app_mig.main() == 0
+
+    # The newest one taken *for this file*: a migration applied twice has two, and
+    # the later one is the state the second application started from.
+    chosen = "scangrade-db-20261010T040000Z-064_widget.tar.gz"
+    payload = _entry(ledger, "064_widget")
+    assert payload["recovery_point"].endswith(chosen), (
+        "the archive named was not the one taken for this migration — 039's archive, "
+        "a deploy's commit-labelled snapshot and a hand-copied file cannot undo it")
+    assert payload["recovery_point_basis"].startswith("its own name"), (
+        "the record must carry why this archive was chosen")
+    assert app_mig.db_snapshot.read_pins(out) == {chosen}, (
+        "the one archive that can undo the migration is rotation fodder again")
+
+
+def test_an_archive_taken_for_another_file_is_not_a_recovery_point(monkeypatch,
+                                                                   tmp_path, capsys):
+    """The refusal that makes the mode worth having, and the case a live run caught:
+    a box holding 062's and 063's snapshots but not 064's had one named for 064 under
+    a date rule, and restoring it would have left the migration exactly where it was."""
+    _migrations, out, ledger = _reconcile_setup(
+        monkeypatch, tmp_path, live={"table widget"},
+        files={"064_widget.sql": "CREATE TABLE widget (id uuid);\n"},
+        archives=["scangrade-db-20261010T034327Z-062_widget.tar.gz",
+                  "scangrade-db-20261010T054218Z-063_widget.tar.gz"],
+        archives_in_place=True)
+
+    assert app_mig.main() == 0
+    printed = capsys.readouterr().out
+
+    payload = _entry(ledger, "064_widget")
+    assert payload["adopted"] is True, "the migration itself must still be recorded"
+    assert payload["recovery_point"] is None
+    assert "-064_widget.tar.gz" in printed, (
+        "the output does not name the archive that would settle it")
+    assert "--adopt <archive>" in printed, (
+        "the operator is not told how to name the archive that lives elsewhere")
+    assert app_mig.db_snapshot.read_pins(out) == set(), (
+        "an archive taken for another migration was pinned as this one's recovery "
+        "point")
+
+
+def test_a_file_the_schema_contradicts_is_left_unrecorded(monkeypatch, tmp_path,
+                                                          capsys):
+    """A record saying "applied" over a schema that contradicts it is the one lie a
+    ledger must never tell — and this mode writes records nobody has read before
+    writing them.
+
+    The run still **succeeds**: ruling on whether the schema is behind the release's
+    code is `--verify`'s job (it exits 6, and the deploy's gate quarantines on that),
+    and a second, differently-worded verdict from here would either cry wolf on every
+    release or wave one through."""
+    _migrations, out, ledger = _reconcile_setup(
+        monkeypatch, tmp_path, live={},
+        files={"064_widget.sql": "CREATE TABLE widget (id uuid);\n"})
+
+    assert app_mig.main() == 0, (
+        "the reconcile reported the schema being behind the code as its own failure")
+    printed = capsys.readouterr().out
+
+    assert "not recorded: 064_widget.sql" in printed
+    assert "MISSING  table widget" in printed
+    assert "0 record(s) written" in printed
+    assert not (ledger / "064_widget.json").exists(), (
+        "it recorded a migration the database says is not there")
+    assert not out.exists() or not list(out.glob("*.tar.gz"))
+
+
+def test_a_record_that_already_exists_is_never_overwritten(monkeypatch, tmp_path,
+                                                           capsys):
+    """`APPLIED, THEN EDITED` is a fact somebody established about a file that has
+    changed since. Reconciling is for what is *unrecorded*, so it leaves that alone
+    — and leaves it byte for byte, rather than re-serialising it."""
+    _migrations, _out, ledger = _reconcile_setup(
+        monkeypatch, tmp_path, live={"table widget"},
+        files={"064_widget.sql": "CREATE TABLE widget (id uuid);\n"})
+    ledger.mkdir()
+    entry = ledger / "064_widget.json"
+    entry.write_text(json.dumps({"file": "064_widget.sql", "sha256": "0" * 64,
+                                 "applied_at": "2026-01-01T00:00:00+00:00",
+                                 "recovery_point": None}) + "\n", encoding="utf-8")
+    before = entry.read_bytes()
+
+    assert app_mig.main() == 0
+    printed = capsys.readouterr().out
+
+    assert "0 with no record" in printed
+    assert "Nothing to reconcile" in printed
+    assert entry.read_bytes() == before, "the reconcile overwrote somebody's record"
+
+
+def test_a_file_the_catalogue_cannot_settle_is_not_recorded_either(
+        monkeypatch, tmp_path, capsys):
+    """A data-only migration declares no object, so the catalogue cannot confirm it
+    either way — and a record reading `adopted` would be a claim that it can."""
+    _migrations, _out, ledger = _reconcile_setup(
+        monkeypatch, tmp_path, live={"table widget"},
+        files={"099_backfill.sql": "UPDATE widget SET id = id;\n"})
+
+    assert app_mig.main() == 0
+    printed = capsys.readouterr().out
+
+    assert not (ledger / "099_backfill.json").exists()
+    assert "unknown" in printed and "099_backfill.sql" in printed
+    assert "0 record(s) written" in printed
+
+
+def test_reconcile_only_reads_the_database(monkeypatch, tmp_path):
+    """It writes records, not DDL: the catalogue is read through the read-only
+    session `--verify` uses, and never through `connect()`."""
+    seen = []
+
+    def readonly(url):
+        seen.append(url)
+        return FakeConn()
+
+    _reconcile_setup(monkeypatch, tmp_path, live={"table widget"},
+                     files={"064_widget.sql": "CREATE TABLE widget (id uuid);\n"})
+    monkeypatch.setattr(app_mig, "connect_readonly", readonly)
+    monkeypatch.setattr(app_mig, "connect",
+                        lambda url: pytest.fail("reconcile opened a writable session"))
+
+    assert app_mig.main() == 0
+
+    assert seen == ["postgresql://x"]
+
+
+# ── which archive is the migration's own ────────────────────────────────────
+
+def test_the_archive_is_chosen_by_the_label_the_applying_run_wrote(tmp_path):
+    """The name is the proof, so only the file's own label counts — a deploy's
+    snapshot carries the commit it was taken for, and a hand-copied archive carries
+    nothing that can be checked."""
+    out = tmp_path / "backups"
+    out.mkdir()
+    for name in ("scangrade-db-20260928T000000Z-064_widget.tar.gz",
+                 "scangrade-db-20261010T040000Z-064_widget.tar.gz",
+                 "scangrade-db-20261010T050000Z-064_widget_extra.tar.gz",
+                 "scangrade-db-20261011T000000Z-deadbeef.tar.gz",
+                 "hand-copied.tar.gz"):
+        (out / name).write_bytes(b"x")
+    path = tmp_path / "064_widget.sql"
+    path.write_text("SELECT 1;\n", encoding="utf-8")
+
+    chosen = app_mig.own_archive(out, path)
+
+    assert chosen.name == "scangrade-db-20261010T040000Z-064_widget.tar.gz", (
+        "an archive taken for another file, or a longer label, was taken as this "
+        "file's recovery point")
+    assert app_mig.own_archive(tmp_path / "absent", path) is None, (
+        "a backup directory that is not there must not read as an archive")
+    other = tmp_path / "065_other.sql"
+    other.write_text("SELECT 1;\n", encoding="utf-8")
+    assert app_mig.own_archive(out, other) is None, (
+        "a stem that is a prefix of another migration's archive matched it")
+
+
+def test_the_cli_offers_reconcile_and_status_points_at_it():
+    assert 'add_argument("--reconcile"' in SOURCE
+    assert "if args.reconcile:" in SOURCE
+    assert "`--reconcile` records it from the" in SOURCE, (
+        "`--status` still tells the reader to adopt by hand and nothing else — on "
+        "the box that has no shell, that advice is a dead end")
+

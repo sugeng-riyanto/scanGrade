@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import os
 import pathlib
+import re
 import shlex
 import shutil
 import subprocess
@@ -634,6 +635,52 @@ def test_every_migration_is_tried_before_it_is_committed():
         "transaction, and it is the only rehearsal this box gets")
     assert "TRIAL FAILED" in source and "nothing was applied" in source, (
         "a failed trial must stop the run and say that nothing was applied")
+
+
+def test_the_lever_reconciles_the_ledger_before_it_applies_what_is_missing():
+    """A box that never reaches a release — because it is stuck, which is the only
+    reason this lever runs — still has the two-ledger problem: the schema carries
+    migrations its ledger has no record of, so `--status` reads *unknown* about a
+    database it can measure. The reconcile is what ends that, and it runs before
+    the loop below so the records it writes describe the state it measured.
+
+    Ruling on whether the schema is behind the code is not this mode's job — a file
+    the schema still lacks is left to the loop below, which is what applies it — so a
+    failure here is only bookkeeping, and bookkeeping never stops a recovery.
+    """
+    source = _text(RECOVER)
+
+    reconcile = source.index('"$PY" "$MIGRATE" --reconcile')
+    trial = source.index('"$PY" "$MIGRATE" "$file" --repo')
+    commit = source.index('"$PY" "$MIGRATE" "$file" --commit')
+    assert reconcile < trial < commit, (
+        "the reconcile moved after the apply loop, so it would be recording a state "
+        "the loop had already changed")
+    assert '--ledger "$LEDGER"' in source[reconcile:reconcile + 200], (
+        "the reconcile would write its records to the tool's default ledger while "
+        "`--verify` above and `--commit` below use this box's")
+    assert '--out "$BACKUP_DIR"' in source[reconcile:reconcile + 200]
+
+    block = source[reconcile:source.index("\nAPPLIED=0", reconcile)]
+    assert "could not reconcile the ledger" in block, (
+        "a reconcile that could not write says nothing about it")
+    # Read as *commands*, not as text: the failure line itself contains the word
+    # "exit" (`… (exit 1) — not fatal`), and a guard that fails on prose is a guard
+    # that gets deleted rather than fixed.
+    for line in block.splitlines():
+        stripped = line.strip()
+        assert not stripped.startswith("exit"), (
+            "the ledger's bookkeeping can end the run — a box whose app is down "
+            "would then stay down over a record")
+        assert not stripped.startswith("die "), (
+            "the ledger's bookkeeping can stop a recovery")
+
+    snapshot = ROOT / "deploy" / "db_snapshot.py"
+    default = re.search(r'^DEFAULT_OUT = "([^"]+)"', _text(snapshot), re.M)
+    assert default, "db_snapshot.py no longer declares DEFAULT_OUT"
+    assert f'BACKUP_DIR="${{SG_BACKUP_DIR:-{default.group(1)}}}"' in source, (
+        "the lever's recovery-point directory and the tool's default have drifted, "
+        "so an archive would be named in one place and pinned in another")
 
 
 def test_it_never_resets_a_branch_and_never_pushes():

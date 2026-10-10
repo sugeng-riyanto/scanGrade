@@ -2931,7 +2931,46 @@ SCHEMA_RC=$?
 case "$SCHEMA_RC" in
   0)
     log "$(printf '%s\n' "$SCHEMA_OUT" | grep -m1 'Every declared object is present' \
-        || echo 'schema gate: every declared object is present')" ;;
+        || echo 'schema gate: every declared object is present')"
+    # ── And the ledger, brought into agreement with the schema ───────────────
+    # The gate above proves the database carries what this release names. It does
+    # not prove the *ledger* knows it: a migration applied from a workstation
+    # (which is how migrations in this repository are applied — nothing can log
+    # into this box) leaves `/var/lib/scangrade-migrations` saying `no record`
+    # while the catalogue plainly holds the objects. `no record` reads as
+    # *unknown*, which is the one answer an operator cannot act on, and on a box
+    # with no shell it never becomes an answer at all — that is the two-ledger
+    # problem, and this is the only place that can end it.
+    #
+    # `--reconcile` writes it down: each file the catalogue confirms gets a record
+    # that says `adopted` (this box did not watch it run), and a recovery point is
+    # named only when this box holds the archive that was taken **for that
+    # migration** — the applying run labels it with the file's own stem, so the name
+    # is the proof. An archive that was not the one taken before the migration ran
+    # cannot undo it, so naming it would claim a restoration it cannot perform, and
+    # the record says that instead. Exit 0 means it wrote every record it could;
+    # exit 1 means a record could not be written, which it prints.
+    #
+    # It runs as root rather than through `as_owner`, because the two directories
+    # it writes are root's: the ledger, and `$BACKUP_DIR` where the snapshot above
+    # already put this release's recovery points. The service user may read
+    # neither, so running it as the owner would mean it never records anything.
+    #
+    # It fails **open**, deliberately. A release whose code and schema agree must
+    # not be refused over the bookkeeping of a record, so a failure is logged with
+    # the output that names its cause and the release carries on — the same
+    # decision, for the same reason, as the pin above it.
+    RECONCILE_OUT=$("$REPO/.venv/bin/python" "$REPO/deploy/apply_migration.py" \
+        --reconcile --repo "$REPO" --out "$BACKUP_DIR" 2>&1)
+    RECONCILE_RC=$?
+    if [ "$RECONCILE_RC" = "0" ]; then
+      log "$(printf '%s\n' "$RECONCILE_OUT" | grep -m1 '^reconciled: ' \
+          || echo 'migration ledger: every file has a record')"
+    else
+      log "WARNING: could not reconcile the migration ledger (exit $RECONCILE_RC)"
+      log "    this release is not affected; --status may go on saying 'no record'"
+      printf '%s\n' "$RECONCILE_OUT" | tail -n 6 | sed 's/^/    /'
+    fi ;;
   6)
     log "schema gate FAILED — this release names objects the database does not have:"
     printf '%s\n' "$SCHEMA_OUT" | grep -E '^    MISSING  ' | sed 's/^/    /'

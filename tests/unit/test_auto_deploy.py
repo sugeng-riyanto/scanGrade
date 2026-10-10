@@ -3533,19 +3533,30 @@ def _schema_block() -> str:
     return script[script.index(SCHEMA_START):script.index(SCHEMA_END) + len(SCHEMA_END)]
 
 
-def _schema_program(tmp_path: Path, rc: int, out: str) -> str:
+def _schema_program(tmp_path: Path, rc: int, out: str,
+                    reconcile_rc: int | None = None) -> str:
     """The schema gate lifted out, with the verifier replaced by a stub.
 
     The stub answers the way `apply_migration.py --verify` does — 0 all present,
     6 a gap, anything else "the box could not measure" — so what is asserted is
-    the runner's decision, not the verifier's arithmetic.
+    the runner's decision, not the verifier's arithmetic. `reconcile_rc` arms the
+    same stub for the reconcile invocation by its flag, because that one is a
+    different question about the same tool.
     """
     repo = tmp_path / "repo"
     (repo / "deploy").mkdir(parents=True, exist_ok=True)
     (repo / ".venv" / "bin").mkdir(parents=True, exist_ok=True)
     (repo / "deploy" / "apply_migration.py").write_text("# replaced by the stub\n")
+    reconcile_branch = ""
+    if reconcile_rc is not None:
+        reconcile_branch = ("for arg in \"$@\"; do\n"
+                            "  if [ \"$arg\" = \"--reconcile\" ]; then\n"
+                            "    echo 'reconciled: 1 record(s) written'\n"
+                            f"    exit {reconcile_rc}\n"
+                            "  fi\n"
+                            "done\n")
     stub = repo / ".venv" / "bin" / "python"
-    stub.write_text("#!/usr/bin/env bash\n"
+    stub.write_text("#!/usr/bin/env bash\n" + reconcile_branch +
                     f"cat <<'GATEOUT'\n{out}\nGATEOUT\n"
                     f"exit {rc}\n", encoding="utf-8")
     stub.chmod(0o755)
@@ -3656,6 +3667,49 @@ def test_the_gate_asks_the_verifier_to_verify_this_checkout():
         "the gate runs apply_migration.py without asking it to verify the schema")
     assert '--repo "$REPO"' in block, (
         "the verifier is pointed at a checkout that may not be the one serving")
+
+
+def test_the_schema_gate_reconciles_the_ledger_from_the_schema():
+    """The gate proves the *database* carries what this release names; it said
+    nothing about the ledger, which is how a box goes on reading `no record` —
+    *unknown* — for a migration applied from a workstation. The reconcile ends the
+    two-ledger problem, and the box is the only place it can: nothing can log in."""
+    block = _schema_block()
+    invocation = block[block.index("RECONCILE_OUT="):block.index("RECONCILE_RC=")]
+
+    assert "--reconcile" in invocation, (
+        "the schema gate passes without bringing the ledger into agreement with it")
+    assert '--repo "$REPO"' in invocation, (
+        "the reconcile is pointed at a checkout that may not be the one serving")
+    assert '--out "$BACKUP_DIR"' in invocation, (
+        "the reconcile would look for recovery points somewhere this box does not "
+        "keep them, so every record would name no archive")
+    assert "as_owner" not in invocation, (
+        "the ledger and $BACKUP_DIR are root's; run as the service user this "
+        "writes nothing at all, and says so only in a warning")
+    # In the pass branch, and not in the refusal below it: a release whose objects
+    # are missing is refused there, and reconciling on the way to a refusal would
+    # be writing records about a schema the release does not have.
+    passed = block.index('case "$SCHEMA_RC" in')
+    assert passed < block.index("RECONCILE_OUT=") < block.index("\n  6)"), (
+        "the reconcile moved out of the branch that measured a complete schema")
+
+
+@needs_a_bash
+def test_a_ledger_the_box_cannot_write_does_not_refuse_the_release(tmp_path):
+    """The reconcile is bookkeeping, so it fails open — the same call the snapshot
+    pin makes above it. A release whose code and schema agree must not be held
+    because a directory it wanted to write was not writable."""
+    run = subprocess.run(
+        [BASH, "-c", _schema_program(tmp_path, 0, OK_OUTPUT, reconcile_rc=7)],
+        capture_output=True, text=True)
+
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert "REACHED" in run.stdout, "a bookkeeping failure refused a good release"
+    assert "QUARANTINE" not in run.stdout
+    assert "could not reconcile the migration ledger" in run.stdout, (
+        "the failure is swallowed rather than reported, which is how a ledger stays "
+        "wrong for months with nobody knowing")
 
 
 def test_the_gate_is_marked_so_a_stale_copy_is_seen_to_lack_it():
