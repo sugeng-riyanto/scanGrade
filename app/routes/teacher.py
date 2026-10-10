@@ -38,6 +38,7 @@ from app.services import exam_codes
 from app.services import attempt_timeline
 from app.services import invigilation
 from app.services import session_review
+from app.services import seb_door_log
 from app.services import teacher_assignments as ta_service
 from app.services import grade_weighting
 from app.services import subject_kkm as kkm_service
@@ -2486,6 +2487,16 @@ def _exam_results(supabase, exam_id):
     # The rows themselves, in the same pass, so `scan_subs` and `online_subs` —
     # which hold these very dicts — carry the leaving summary too.
     _attach_leaving(supabase, exam_id, subs, stats)
+    # Who could not get *in*: the SEB door refusals, counted into the same header the
+    # late and leaving counts sit on. One query, and the tally is a headcount of
+    # pupils (`seb_door_log.refusal_summary`) — the sentence a room is run by. It is
+    # deliberately *not* attached to any row: a pupil turned away at the door has no
+    # submission, so no row of this list belongs to them.
+    #
+    # This runs with no request context in the printed sheet and the exports, which is
+    # why every log line in the reader goes through `get_logger` rather than
+    # `current_app.logger`.
+    seb_door_log.attach_refusals(supabase, exam_id, stats)
     return subs, scan_subs, online_subs, stats
 
 

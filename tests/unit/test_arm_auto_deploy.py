@@ -19,14 +19,20 @@ never rendered, and a *copy* of the deploy script — which deploys every releas
 while running no gate at all, the state this whole wrapper exists to make loud.
 
 Mutation-checked, **12/12 injected defects caught**
-(`.freebuff/mutate_arm_auto_deploy.py`): the copy state read as armed, the
+(`.freebuff/mutate_arm_auto_deploy.py`, the general set), plus **4/4** for the SEB
+door gate's own lines (`.freebuff/mutate_arm_seb_check.py`, which derives its anchors
+from the script rather than typing them a second time — three hand-typed anchors came
+out one character off, and an anchor that does not match is a catch never made): the
+copy state read as armed, the
 unrendered state read as armed, a missing snapshot a missing conf a missing roster
 and a missing `DIRECT_URL` each read as armed, the no-terminal refusal removed, the
 elevation loop guard removed, the roster validated only after the password prompt,
 the installer run without keeping its log, the roster counted by entries instead of
 by role, and the After report judged with the pre-pull copy of the checker — the
 last one the defect that made a box read ARMED in one breath and NOT ARMED in the
-next.
+next. The SEB set adds the newest gate's four: a missing gate file, a smoke conf with
+no pupil, a `seb` line that stopped saying what it measures, and the gate block
+dropped from the list of things a stale copy lacks.
 """
 import json
 import os
@@ -53,7 +59,7 @@ exec bash "$TARGET" "$@"
 """
 
 # What the 12 September install left behind: the deploy logic itself, copied, with
-# no theme, claims, performance or quarantine block inside it.
+# no theme, claims, performance, quarantine or SEB-door block inside it.
 COPY = """#!/usr/bin/env bash
 set -uo pipefail
 REPO="/opt/scangrade"
@@ -89,7 +95,7 @@ def _python_shim(repo: Path) -> Path:
 
 
 def scratch(tmp_path, *, runner=COPY, gates=True, snapshot=True, claims=True,
-            perf=True, smoke=True, roster=ROSTER, env=True, browser=True):
+            perf=True, smoke=True, roster=ROSTER, env=True, browser=True, seb=True):
     """A tree shaped like the box, with only the paths under test populated."""
     repo = tmp_path / "repo"
     (repo / "deploy").mkdir(parents=True, exist_ok=True)
@@ -124,7 +130,12 @@ def scratch(tmp_path, *, runner=COPY, gates=True, snapshot=True, claims=True,
     # the other two are: without it the deploy skips "every role still works" and
     # keeps the release, with a journal line as the only trace.
     if smoke:
-        (etc / "smoke.conf").write_text('SMOKE_ENFORCE="true"\n', encoding="utf-8")
+        # SMOKE_MURID is not decoration: the SEB door gate signs in as that pupil
+        # and opens a throwaway paper as them, so a conf without it arms the smoke
+        # test and leaves the door unmeasured.
+        (etc / "smoke.conf").write_text('SMOKE_ENFORCE="true"\n'
+                                        'SMOKE_MURID="siswa2_smp@scan-grade.app:demo123"\n',
+                                        encoding="utf-8")
     if claims:
         (etc / "claims.conf").write_text('CLAIMS_ENFORCE="true"\n', encoding="utf-8")
     if perf:
@@ -138,6 +149,14 @@ def scratch(tmp_path, *, runner=COPY, gates=True, snapshot=True, claims=True,
     # than restating it; the scratch tree carries the module for the same reason.
     (repo / "deploy" / "touch_gate.py").write_bytes(
         (ROOT / "deploy" / "touch_gate.py").read_bytes())
+
+    # The SEB door gate needs the gate itself and the smoke conf's pupil, and
+    # nothing else — no browser, no conf of its own. The real module is copied
+    # rather than stubbed, because the question `--check` answers about it is
+    # whether the gate that would run exists.
+    if seb:
+        (repo / "deploy" / "seb_door_gate.py").write_bytes(
+            (ROOT / "deploy" / "seb_door_gate.py").read_bytes())
 
     roster_src = tmp_path / "lt_roster.json"
     dst = repo / ".freebuff" / "lt_roster.json"
@@ -194,8 +213,8 @@ class TestItTellsTheThreeStatesApart:
         r = run(env, "--check")
         assert r.returncode == 1, r.stdout + r.stderr
         assert "a COPY of the deploy script" in r.stdout
-        assert "no theme_gate, no claims_gate, no perf_gate, no quarantine, no schema_gate" \
-            in r.stdout, \
+        assert "no theme_gate, no claims_gate, no perf_gate, no quarantine, " \
+               "no schema_gate, no seb_door_gate" in r.stdout, \
             "the copy's blind spots are not named, so nothing points at what it cannot see"
         assert "NOT ARMED" in r.stdout
 
@@ -228,6 +247,7 @@ class TestEveryMissingPieceIsNamed:
         ("roster", "cannot measure"),
         ("env", "schema     : MISSING"),
         ("browser", "browser    : MISSING"),
+        ("seb", "seb        : MISSING"),
     ])
     def test_one_missing_piece_is_enough_to_say_not_armed(self, tmp_path, broken, expected):
         kwargs = {"roster": None} if broken == "roster" else {broken: False}
@@ -235,6 +255,30 @@ class TestEveryMissingPieceIsNamed:
         r = run(env, "--check")
         assert r.returncode == 1, f"{broken} missing and --check still said armed"
         assert expected in r.stdout, r.stdout
+        assert "NOT ARMED" in r.stdout
+
+    def test_the_seb_line_names_what_makes_the_door_gate_measure(self, tmp_path):
+        """The line is the only place a box's SEB armament is visible: the gate has
+        no conf of its own, so "present" and "the door is measured on every release"
+        have to be the same claim."""
+        _, _, _, env = scratch(tmp_path, runner=LAUNCHER)
+        r = run(env, "--check")
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert "seb        : present" in r.stdout, r.stdout
+        assert "throwaway paper" in r.stdout, r.stdout
+
+    def test_a_smoke_conf_without_the_pupil_is_a_skip_the_report_names(self, tmp_path):
+        """The smoke test can pass on the five staff roles while the SEB door gate
+        measures nothing at all — it opens the paper *as the pupil*. So a conf with
+        no SMOKE_MURID is not armed for this gate, and the line says which account is
+        missing rather than leaving an operator to read it off the gate's source."""
+        _, _, _, env = scratch(tmp_path, runner=LAUNCHER)
+        Path(env["SG_SMOKE_CONF"]).write_text(
+            'SMOKE_ENFORCE="true"\nSMOKE_SUPER_ADMIN="a:b"\n', encoding="utf-8")
+        r = run(env, "--check")
+        assert r.returncode == 1, r.stdout + r.stderr
+        assert "seb        : MISSING" in r.stdout, r.stdout
+        assert "SMOKE_MURID" in r.stdout, r.stdout
         assert "NOT ARMED" in r.stdout
 
     def test_a_box_with_a_browser_says_the_dom_gates_can_lay_a_page_out(self, tmp_path):

@@ -33,6 +33,7 @@ Usage
     python deploy/apply_migration.py supabase/migrations/025_x.sql --commit
     python deploy/apply_migration.py --status
     python deploy/apply_migration.py --verify
+    python deploy/apply_migration.py supabase/migrations/062_x.sql --adopt <archive>
 
 Safety rails
 ------------
@@ -53,6 +54,15 @@ Safety rails
   cannot be taken, the migration is not applied.
 * **``--verify`` only reads.** It opens the session read-only, takes no snapshot
   and writes no ledger entry, so reporting on a migration cannot change one.
+* **``--adopt`` writes no DDL.** It records a migration that is *already* in the
+  live schema — applied by an older copy of this tool, by the SQL editor, or from
+  another machine whose ledger never reached this one — and it refuses when the
+  schema does not carry what the file declares. The record says `adopted`,
+  because who wrote the line and who watched the migration run are different
+  facts and only one of them has a witness. It also moves the recovery point out
+  of wherever it happens to live (a temp directory, a workstation) into the
+  directory the deploy and `--restore` already agree on, and pins it there, so
+  the one archive that could undo that migration is not rotation fodder.
 
 What the ledger cannot answer
 -----------------------------
@@ -66,13 +76,17 @@ operation.
 
 Exit codes
 ----------
-  0  dry run passed and was rolled back, or the migration is committed
-  1  the SQL failed, or the rollback could not be verified
+  0  dry run passed and was rolled back, the migration is committed, or one was
+     adopted
+  1  the SQL failed, or the rollback could not be verified, or the recovery point
+     could not be put where it will survive
   2  nothing to do — bad arguments, no file, no usable credential
   3  refused: the file manages its own transactions
   4  refused: the file needs statements that cannot run in a transaction
   5  refused: the recovery point could not be taken
-  6  ``--verify``: at least one file declares objects that are not in the schema
+  6  ``--verify``: at least one file declares objects that are not in the schema.
+     ``--adopt`` refuses with the same code, because a record saying "applied"
+     over a schema that contradicts it is the one lie a ledger must never tell
 """
 
 from __future__ import annotations
@@ -83,6 +97,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import socket
 import sys
 import textwrap
@@ -100,6 +115,10 @@ from psycopg2.extensions import TRANSACTION_STATUS_INTRANS  # noqa: E402
 DEFAULT_LEDGER = "/var/lib/scangrade-migrations"
 NOT_IN_A_TRANSACTION = "25001"          # cannot run inside a transaction block
 PLACEHOLDER = "[YOUR-PASSWORD]"
+#: The UTC stamp a snapshot's own filename carries — `scangrade-db-20261009T112233Z-
+#: 062_x.tar.gz`. It is the closest thing to a witnessed "when" for a recovery
+#: point, so an adopted record uses it rather than the day somebody filed the entry.
+STAMP_RE = re.compile(r"scangrade-db-(\d{8}T\d{6}Z)-")
 
 
 # ── credentials and target ───────────────────────────────────────────────────
@@ -427,7 +446,17 @@ def dry_run(url: str, sql: str, require_idempotent: bool) -> list[str]:
 
 
 def take_recovery_point(url: str, repo: Path, out_dir: Path, keep: int, label: str):
-    """Snapshot the data before applying, the same gate the deploy uses."""
+    """Snapshot the data before applying, the same gate the deploy uses.
+
+    The archive is **pinned** the moment it exists, because the two snapshots this
+    box takes have different lifetimes and only one of them is rotation fodder: a
+    deploy's snapshot guards a release that is either good or rolled back the same
+    evening, while this one guards a schema change that is applied once and stays.
+    `--keep 5` would otherwise delete it within days — and it is the only way back
+    from a bad `ALTER TABLE`, so `--restore` would name an archive that is gone.
+    Pinned archives sit outside the rotation budget (`db_snapshot.prune`), so this
+    does not cost a slot a deploy snapshot needs.
+    """
     supabase_url, key = db_snapshot.load_credentials(repo)
     if not supabase_url or not key:
         print("   REFUSING: no SUPABASE_URL / SUPABASE_SERVICE_KEY, so a recovery "
@@ -444,8 +473,29 @@ def take_recovery_point(url: str, repo: Path, out_dir: Path, keep: int, label: s
         print("   Nothing was applied. Pass --no-snapshot to apply without a "
               "recovery point.")
         raise SystemExit(5)
+    pin_recovery_point(archive)
     print(f"   recovery point: {archive}")
     return archive
+
+
+def pin_recovery_point(archive) -> bool:
+    """Keep `archive` out of rotation. Returns whether the pin could be written.
+
+    A failure here is reported and not raised: the migration is about to be applied
+    and the archive already exists, so refusing over its own bookkeeping would trade
+    a real recovery point for a missing line in a text file. It is printed loudly
+    because the thing it protects is the one that stops being there.
+    """
+    try:
+        db_snapshot.pin_archive(archive)
+    except OSError as exc:
+        print(f"   WARNING: could not pin {archive} ({exc}) — rotation may delete "
+              "this recovery point; pin it by hand in "
+              f"{db_snapshot.pins_path(Path(archive).parent)}")
+        return False
+    print(f"   pinned so rotation cannot delete it "
+          f"({db_snapshot.pins_path(Path(archive).parent)})")
+    return True
 
 
 def commit_run(url: str, path: Path, sql: str, repo: Path, out_dir: Path, keep: int,
@@ -507,25 +557,38 @@ def _current_user() -> str:
 
 
 def record(ledger: Path, path: Path, digest: str, delta: list[str],
-           archive: str | None) -> Path:
+           archive: str | None, adopted_from: str | None = None,
+           applied_at: str | None = None) -> Path:
     """Note what was applied, so "is migration X in?" stops being a guess.
 
     A JSON file per migration rather than a table: a ledger table would itself need
     a migration, and the first thing anyone asks about a migration system is which
     migrations it has run.
+
+    `adopted_from` marks a record written **after the fact** for a migration that
+    was applied without this tool — or with an older copy of it — watching. The
+    tool did not see it run, so the entry says so instead of reading like every
+    other one: `applied_at` is then the best answer to *when* (the operator's, or
+    the recovery point's own timestamp) and `adopted_at` is when the record was
+    written. The distinction is the whole value of the file — a ledger that cannot
+    tell a witnessed application from a reconstruction is a ledger that lies.
     """
     ledger.mkdir(parents=True, exist_ok=True)
     entry = {
         "file": path.name,
         "path": str(path),
         "sha256": digest,
-        "applied_at": datetime.now(timezone.utc).isoformat(),
+        "applied_at": applied_at or datetime.now(timezone.utc).isoformat(),
         # SUDO_USER first: on the VPS this runs as root, and "root" says nothing
         # about who actually decided to apply it.
         "by": f"{os.environ.get('SUDO_USER') or _current_user()}@{socket.gethostname()}",
         "schema_changes": delta,
         "recovery_point": archive,
     }
+    if adopted_from:
+        entry["adopted"] = True
+        entry["adopted_from"] = adopted_from
+        entry["adopted_at"] = datetime.now(timezone.utc).isoformat()
     target = ledger / f"{path.stem}.json"
     target.write_text(json.dumps(entry, indent=2) + "\n", encoding="utf-8")
     return target
@@ -536,6 +599,8 @@ def ledger_note(entry_path: Path, digest: str) -> str:
 
     "no record" is deliberately not "not applied": a migration pasted into the SQL
     editor was never recorded anywhere, so the ledger cannot speak for it at all.
+    An adopted record says *adopted*, because who wrote the line and who watched the
+    migration run are different facts and only one of them has a witness.
     """
     if not entry_path.exists():
         return "no record"
@@ -544,8 +609,35 @@ def ledger_note(entry_path: Path, digest: str) -> str:
     except (OSError, ValueError):
         return "record unreadable"
     if entry.get("sha256") == digest:
-        return f"applied {str(entry.get('applied_at', ''))[:10]}"
+        when = str(entry.get("applied_at", ""))[:10]
+        return f"adopted {when}" if entry.get("adopted") else f"applied {when}"
     return "APPLIED, THEN EDITED"
+
+
+def recovery_line(entry_path: Path) -> str | None:
+    """One line about the record's recovery point: is it still there, and can
+    rotation delete it?
+
+    Two states matter here and they are not the same: an archive that is *gone*
+    cannot restore anything, and an archive nobody pinned is *going* to be gone —
+    `--keep` rotation deletes it within days. Both are printed under their file
+    rather than folded into the record note, because a record reading "applied"
+    looks complete without them, and that is how a box ends up with a migration it
+    can no longer undo.
+    """
+    try:
+        entry = json.loads(entry_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    point = entry.get("recovery_point")
+    if not point:
+        return "recovery point: none recorded"
+    archive = Path(str(point))
+    if not archive.is_file():
+        return f"recovery point: MISSING — {archive}"
+    pinned = archive.name in db_snapshot.read_pins(archive.parent)
+    verdict = "pinned" if pinned else "NOT PINNED — rotation will delete it"
+    return f"recovery point: {archive} ({verdict})"
 
 
 def status(ledger: Path, migrations: Path) -> int:
@@ -559,16 +651,148 @@ def status(ledger: Path, migrations: Path) -> int:
     unrecorded = 0
     for path in files:
         digest = hashlib.sha256(path.read_bytes()).hexdigest()
-        note = ledger_note(ledger / f"{path.stem}.json", digest)
+        entry_path = ledger / f"{path.stem}.json"
+        note = ledger_note(entry_path, digest)
         if note == "no record":
             unrecorded += 1
         print(f"{path.name:<58} {note:<30} {digest[:12]}")
+        detail = recovery_line(entry_path)
+        if detail:
+            print(f"{'':<58} {detail}")
     print()
     print(f"{unrecorded} of {len(files)} have no record.")
     print("Run --verify to settle those against the schema instead.")
     print("No record does not mean 'not applied'. Migrations pasted into the SQL")
     print("editor before this tool existed were never recorded anywhere, so")
     print("`--status` cannot see them; only a schema check can settle those.")
+    print("For one that is applied and unrecorded, `--adopt <archive>` records it")
+    print("and puts its recovery point where rotation cannot delete it.")
+    return 0
+
+
+# ── recording one that is already applied ────────────────────────────────────
+#
+# `--commit` writes the record because it watched the migration run. A migration
+# applied by an older copy of this tool, by hand in the SQL editor, or from a
+# workstation whose ledger never reached the box has no such witness — so the box's
+# ledger says "no record" while the schema plainly has the objects. That is the
+# disagreement `--adopt` ends, and it is deliberately the *second* opinion: the
+# record is written from a live reading, not from the operator's memory.
+#
+# Two refusals carry the design. It refuses when the live schema does not carry what
+# the file declares (a record saying "applied" about a schema that contradicts it is
+# the one lie a ledger must never tell, and it is the state an operator is trying to
+# end). And it refuses when the box cannot be asked at all, because then it has
+# nothing to write a record *from*.
+
+def stamp_of(archive) -> str | None:
+    """The UTC instant in a snapshot's filename, ISO, or None if it has none."""
+    found = STAMP_RE.search(Path(archive).name)
+    if not found:
+        return None
+    try:
+        when = datetime.strptime(found.group(1), "%Y%m%dT%H%M%SZ")
+    except ValueError:
+        return None
+    return when.replace(tzinfo=timezone.utc).isoformat()
+
+
+def durable_copy(archive: Path, out_dir: Path, prune_source: bool = False):
+    """Put `archive` in the durable directory. Returns (there, where it came from).
+
+    The durable directory is the one the deploy and `--restore` already agree on, so
+    a recovery point that lives there is on a disk the operator's instructions have
+    always named — unlike the scratch directories a workstation run leaves an archive
+    in (a `.freebuff/snapshots` inside the checkout, or `/tmp`). The copy is checked
+    for size before the source is ever removed, and the source is only removed when
+    `--prune-source` asks: the default has to be the safe one, because the state this
+    mode starts from is "the only copy of the archive is somewhere odd".
+    """
+    archive = Path(archive)
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(out_dir, 0o700)
+    except OSError:
+        pass
+    dest = out_dir / archive.name
+    if archive.resolve() == dest.resolve():
+        return dest, None
+    expected = archive.stat().st_size
+    shutil.copy2(archive, dest)
+    actual = dest.stat().st_size
+    if actual != expected:
+        dest.unlink(missing_ok=True)
+        raise RuntimeError(f"copy is {actual} bytes, not {expected} — source kept")
+    os.chmod(dest, 0o600)
+    if prune_source:
+        archive.unlink()
+    return dest, str(archive)
+
+
+def adopt(ledger: Path, out_dir: Path, path: Path, archive: Path, live: dict[str, str],
+          applied_at: str | None = None, prune_source: bool = False) -> int:
+    """Record an already-applied migration from the recovery point taken then.
+
+    `live` is what the catalogue actually carries, so the record is written from a
+    measurement and not from an assertion. Everything is done in the order that
+    leaves nothing half-done: the live reading first (which can refuse), then the
+    durable copy, then the pin, then the entry.
+    """
+    sql, digest = describe_file(path)
+    masked, hidden = mask_do_bodies(strip_sql_comments(sql))
+    declared = declared_objects(masked)
+    present = [key for _, key, _ in declared if key in live]
+    missing = [key for _, key, _ in declared if key not in live]
+
+    print(f"   file:    {path}  ({len(sql)} chars, sha256 {digest[:12]})")
+    print(f"   checking against the live schema...")
+    if missing:
+        print()
+        print(f"   REFUSED: {len(missing)} object(s) this file declares are not in "
+              "the live schema:")
+        for key in missing:
+            print(f"      MISSING  {key}")
+        print("   A record saying this was applied would be a claim the database"
+              " contradicts.")
+        print("   Nothing was written and nothing was moved.")
+        return 6
+    if declared:
+        print(f"   the live schema has {present} of {len(declared)} declared "
+              "object(s)")
+    else:
+        print("   note: this file declares no object, so the catalogue cannot"
+              " confirm it —")
+        print("   the record will say the file is recorded and claim nothing more.")
+    if hidden:
+        print(f"   note: {hidden} DO body/bodies hide DDL this cannot read")
+
+    try:
+        durable, source = durable_copy(archive, out_dir, prune_source)
+    except (OSError, RuntimeError) as exc:
+        print(f"   FAILED: could not put the recovery point in {out_dir} "
+              f"({type(exc).__name__}: {exc})")
+        print("   Nothing was written — a record naming an archive that is not there"
+              " would be worse than no record.")
+        return 1
+    if source:
+        print(f"   recovery point copied into place: {durable}")
+        print(f"      from {source}"
+              + (" (removed)" if prune_source else " (kept; --prune-source removes it)"))
+    else:
+        print(f"   recovery point already in place: {durable}")
+    pin_recovery_point(durable)
+
+    when = applied_at or stamp_of(durable)
+    entry = record(ledger, path, digest, [f"+ {key}" for key in present], str(durable),
+                   adopted_from=source or str(archive), applied_at=when)
+    written = json.loads(entry.read_text(encoding="utf-8"))["applied_at"]
+    print(f"   recorded in {entry}")
+    print(f"      applied_at {written}"
+          + ("  (from the archive's own timestamp)" if when and not applied_at else ""))
+    print()
+    print("   This record was written after the fact — it says `adopted`, and the")
+    print("   migration it names is not re-run by this mode.")
     return 0
 
 
@@ -907,6 +1131,17 @@ def main() -> int:
                         help="report which migrations have a record")
     parser.add_argument("--verify", action="store_true",
                         help="report which migrations are actually in the schema")
+    parser.add_argument("--adopt", metavar="ARCHIVE",
+                        help="record an already-applied migration from the recovery"
+                             " point taken then, moving it out of wherever it lives"
+                             " into the durable directory and pinning it there"
+                             " (give the .sql file as well)")
+    parser.add_argument("--applied-at", metavar="WHEN",
+                        help="with --adopt: when the migration was applied, when the"
+                             " archive's own filename does not carry it")
+    parser.add_argument("--prune-source", action="store_true",
+                        help="with --adopt: remove the original archive once the"
+                             " durable copy has been verified; the default keeps it")
     args = parser.parse_args()
 
     repo = Path(args.repo)
@@ -932,6 +1167,41 @@ def main() -> int:
                 return verify(ledger, migrations, cur)
         finally:
             conn.close()
+
+    if args.adopt:
+        if not args.file:
+            parser.error("--adopt also needs the migration file it records, e.g. "
+                         "supabase/migrations/062_x.sql --adopt <archive>")
+        path = Path(args.file)
+        if not path.is_file():
+            print(f"no such file: {path}")
+            return 2
+        archive = Path(args.adopt)
+        if not archive.is_file():
+            print(f"no such archive: {archive}")
+            return 2
+        url = load_migration_url(repo)
+        ref = check_target(url, repo)
+        print("=" * 74)
+        print(f"ADOPTING  {path.name}")
+        print("=" * 74)
+        print(f"   from:    {archive}")
+        print(f"   into:    {Path(args.out)}")
+        print(f"   ledger:  {ledger}")
+        print(f"   target:  project {ref}")
+        print("   session: read-only — this mode applies no DDL, anywhere")
+        print()
+        # The record is written from the catalogue, not from the operator's
+        # memory: the same read `--verify` makes, because "it is applied" is
+        # exactly the claim this mode is here to stop taking on trust.
+        conn = connect_readonly(url)
+        try:
+            with conn.cursor() as cur:
+                live = schema_snapshot(cur, extra_schemas=("storage",))
+        finally:
+            conn.close()
+        return adopt(ledger, Path(args.out), path, archive, live,
+                     applied_at=args.applied_at, prune_source=args.prune_source)
 
     if not args.file:
         parser.error("give a .sql file, --status, or --verify")

@@ -704,3 +704,236 @@ def test_the_named_exception_does_not_leak_to_another_file(monkeypatch, tmp_path
     out = capsys.readouterr().out
     assert code == 6, out
     assert "MISSING  policy schools.schools_read_own" in out
+
+
+# ── adopting one that is already applied ─────────────────────────────────────
+#
+# `--commit` writes the record because it watched the migration run. A migration
+# applied by hand, by an older copy of this tool, or from a workstation whose
+# ledger never reached the box has no such witness: the ledger says "no record"
+# while the catalogue plainly carries the objects. `--adopt` ends that
+# disagreement, and three properties are what make it honest rather than a way to
+# write "applied" over anything:
+#
+# * the record is written from the **live schema**, never from the operator's
+#   memory — a record the database contradicts is the one lie a ledger must not
+#   tell, and it is the state somebody is trying to leave;
+# * the recovery point is **moved somewhere durable and pinned**, because a
+#   record naming an archive in a temp directory is a promise nobody can keep;
+# * the entry **says `adopted`**, because who wrote the line and who watched the
+#   migration run are different facts.
+
+def _adopt_setup(monkeypatch, tmp_path, *, live, sql="CREATE TABLE widget (id uuid);\n",
+                 name="062_widget.sql",
+                 archive_name="scangrade-db-20261009T094552Z-062_widget.tar.gz"):
+    repo = tmp_path / "repo"
+    migrations = repo / "supabase" / "migrations"
+    migrations.mkdir(parents=True)
+    (migrations / name).write_text(sql, encoding="utf-8")
+    incoming = tmp_path / "incoming"
+    incoming.mkdir()
+    archive = incoming / archive_name
+    archive.write_bytes(b"archive-bytes")
+    durable = tmp_path / "durable"
+    ledger = tmp_path / "ledger"
+
+    monkeypatch.setattr(app_mig, "load_migration_url", lambda repo: "postgresql://x")
+    monkeypatch.setattr(app_mig, "check_target", lambda url, repo: REF)
+    monkeypatch.setattr(app_mig, "connect_readonly", lambda url: FakeConn())
+    monkeypatch.setattr(app_mig, "schema_snapshot",
+                        lambda cur, extra_schemas=(): live)
+    monkeypatch.setattr(sys, "argv", [
+        "apply_migration.py", str(migrations / name), "--adopt", str(archive),
+        "--repo", str(repo), "--out", str(durable), "--ledger", str(ledger)])
+    return archive, durable, ledger
+
+
+def _entry(ledger, name="062_widget"):
+    return json.loads((ledger / f"{name}.json").read_text(encoding="utf-8"))
+
+
+def test_adopt_records_it_from_the_live_schema_and_moves_the_recovery_point(
+        monkeypatch, tmp_path, capsys):
+    archive, durable, ledger = _adopt_setup(monkeypatch, tmp_path,
+                                            live={"table widget"})
+
+    assert app_mig.main() == 0
+    out = capsys.readouterr().out
+
+    moved = durable / archive.name
+    assert moved.is_file() and moved.read_bytes() == b"archive-bytes"
+    assert archive.is_file(), "the default must keep the original, not move it away"
+    assert app_mig.db_snapshot.read_pins(durable) == {archive.name}, (
+        "the recovery point was moved but not pinned, so `--keep 5` will delete it")
+    assert "pinned so rotation cannot delete it" in out
+
+    payload = _entry(ledger)
+    assert payload["adopted"] is True, "an adopted record must say so"
+    assert payload["adopted_from"] == str(archive)
+    assert payload["recovery_point"] == str(moved), (
+        "the record names where the archive is, and it is not there")
+    assert payload["applied_at"].startswith("2026-10-09T09:45:52"), (
+        "the archive's own timestamp is the closest thing to a witnessed when")
+    assert "+ table widget" in payload["schema_changes"]
+    assert "adopted" in out and "not re-run by this mode" in out
+
+
+def test_adopt_refuses_when_the_live_schema_contradicts_the_file(
+        monkeypatch, tmp_path, capsys):
+    """The refusal that makes the mode worth having: it cannot be used to write
+    "applied" over a migration that never ran."""
+    archive, durable, ledger = _adopt_setup(monkeypatch, tmp_path, live={})
+
+    assert app_mig.main() == 6
+    out = capsys.readouterr().out
+
+    assert "REFUSED" in out and "MISSING  table widget" in out
+    assert not (ledger / "062_widget.json").exists(), "it recorded anyway"
+    assert not durable.exists(), "it moved the recovery point anyway"
+
+
+def test_adopt_only_reads_the_database(monkeypatch, tmp_path):
+    """The mode's whole claim is that it applies nothing, so it asks the catalogue
+    through the read-only session `--verify` uses — and never `connect()`."""
+    seen = []
+
+    def readonly(url):
+        seen.append(url)
+        return FakeConn()
+
+    _adopt_setup(monkeypatch, tmp_path, live={"table widget"})
+    monkeypatch.setattr(app_mig, "connect_readonly", readonly)
+    monkeypatch.setattr(app_mig, "connect",
+                        lambda url: pytest.fail("adopt opened a writable session"))
+
+    assert app_mig.main() == 0
+
+    assert seen == ["postgresql://x"]
+
+
+def test_the_original_is_removed_only_when_prune_source_asks(monkeypatch, tmp_path):
+    archive, durable, _ledger = _adopt_setup(monkeypatch, tmp_path, live={"table widget"})
+    sys.argv.append("--prune-source")
+
+    assert app_mig.main() == 0
+
+    assert not archive.exists(), "--prune-source left the original behind"
+    assert (durable / archive.name).is_file()
+
+
+def test_a_copy_that_does_not_match_is_refused_and_the_source_kept(
+        monkeypatch, tmp_path, capsys):
+    """The state this mode starts from is "the only copy of the archive is
+    somewhere odd", so a copy is verified before anything is recorded — and the
+    source is never removed on the strength of a copy that is short."""
+    archive, durable, ledger = _adopt_setup(monkeypatch, tmp_path,
+                                            live={"table widget"})
+    sys.argv.append("--prune-source")
+
+    def truncate(src, dst, *a, **k):
+        Path(dst).write_bytes(b"x")
+
+    monkeypatch.setattr(app_mig.shutil, "copy2", truncate)
+
+    assert app_mig.main() == 1
+    out = capsys.readouterr().out
+
+    assert "FAILED: could not put the recovery point" in out
+    assert "copy is 1 bytes" in out
+    assert archive.is_file(), "a failed copy removed the only copy of the archive"
+    assert not (durable / archive.name).exists(), "a half copy was left in place"
+    assert not (ledger / "062_widget.json").exists(), (
+        "a record naming an archive that is not there is worse than no record")
+
+
+def test_the_operators_applied_at_wins_over_the_filename(monkeypatch, tmp_path):
+    """Not every archive carries a stamp in its name, and the operator may know
+    better than the filename: an explicit date is taken as given."""
+    _archive, _durable, ledger = _adopt_setup(monkeypatch, tmp_path,
+                                              live={"table widget"},
+                                              archive_name="before-seb.tar.gz")
+    sys.argv += ["--applied-at", "2026-10-09T12:00:00+00:00"]
+
+    assert app_mig.main() == 0
+
+    assert _entry(ledger)["applied_at"] == "2026-10-09T12:00:00+00:00"
+
+
+def test_an_archive_with_no_stamp_is_recorded_without_a_guess(monkeypatch, tmp_path):
+    _archive, _durable, ledger = _adopt_setup(monkeypatch, tmp_path,
+                                              live={"table widget"},
+                                              archive_name="before-seb.tar.gz")
+
+    assert app_mig.main() == 0
+
+    payload = _entry(ledger)
+    assert payload["applied_at"] and not payload["applied_at"].startswith("before"), (
+        "an unreadable stamp must not be written as the date")
+
+
+def test_adopt_needs_the_file_it_records(monkeypatch, tmp_path):
+    """Recording an archive without saying which migration it was taken for would
+    put an entry in the ledger that names nothing."""
+    _adopt_setup(monkeypatch, tmp_path, live={"table widget"})
+    sys.argv = ["apply_migration.py", "--adopt", str(tmp_path / "incoming" /
+                "scangrade-db-20261009T094552Z-062_widget.tar.gz")]
+
+    with pytest.raises(SystemExit) as refused:
+        app_mig.main()
+
+    assert refused.value.code == 2
+
+
+def test_the_cli_offers_adopt_with_the_file_it_records():
+    assert 'add_argument("--adopt"' in SOURCE
+    assert 'add_argument("--applied-at"' in SOURCE
+    assert 'add_argument("--prune-source"' in SOURCE
+    assert "if args.adopt:" in SOURCE
+    # One catalogue read, `storage` included: the app owns policies there, and a
+    # check that cannot see them calls a present file absent.
+    assert SOURCE.count('schema_snapshot(cur, extra_schemas=("storage",))') == 2, (
+        "adopt and verify must judge the same catalogue, storage policies included")
+
+
+def test_the_status_report_says_where_the_recovery_point_is(tmp_path, capsys):
+    """A record reading "applied" looks complete on its own, which is how a box
+    ends up with a migration it can no longer undo. Where the archive is, and
+    whether rotation can delete it, are printed under the file."""
+    migrations = _write_migrations(tmp_path, {"026_widget.sql": "SELECT 1;\n"})
+    ledger = tmp_path / "ledger"
+    ledger.mkdir()
+    archive = tmp_path / "durable" / "scangrade-db-20260901T000000Z-026_widget.tar.gz"
+    archive.parent.mkdir()
+    archive.write_bytes(b"x")
+    digest = hashlib.sha256((migrations / "026_widget.sql").read_bytes()).hexdigest()
+    (ledger / "026_widget.json").write_text(json.dumps({
+        "sha256": digest, "applied_at": "2026-09-01T00:00:00+00:00",
+        "adopted": True, "recovery_point": str(archive)}), encoding="utf-8")
+
+    assert app_mig.status(ledger, migrations) == 0
+    out = capsys.readouterr().out
+
+    assert "adopted 2026-09-01" in out, "the record's own note lost `adopted`"
+    assert f"recovery point: {archive} (NOT PINNED" in out, (
+        "an archive rotation will delete has to be named as such")
+
+    app_mig.db_snapshot.pin_archive(archive)
+    assert app_mig.status(ledger, migrations) == 0
+    assert "(pinned)" in capsys.readouterr().out
+
+
+def test_a_recovery_point_that_is_gone_reads_as_missing(tmp_path, capsys):
+    """`--restore` cannot restore an archive that is not there, and a record that
+    does not say so is a recovery plan nobody has tested."""
+    migrations = _write_migrations(tmp_path, {"026_widget.sql": "SELECT 1;\n"})
+    ledger = tmp_path / "ledger"
+    ledger.mkdir()
+    digest = hashlib.sha256((migrations / "026_widget.sql").read_bytes()).hexdigest()
+    (ledger / "026_widget.json").write_text(json.dumps({
+        "sha256": digest, "applied_at": "2026-09-01T00:00:00+00:00",
+        "recovery_point": str(tmp_path / "gone.tar.gz")}), encoding="utf-8")
+
+    assert app_mig.status(ledger, migrations) == 0
+    out = capsys.readouterr().out
+
+    assert "recovery point: MISSING" in out

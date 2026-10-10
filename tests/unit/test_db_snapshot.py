@@ -24,7 +24,9 @@ below are load-bearing rather than cosmetic:
 """
 import importlib.util
 import json
+import os
 import re
+import subprocess
 import sys
 import tarfile
 from pathlib import Path
@@ -543,3 +545,204 @@ def test_the_migration_that_fixes_it_exists_and_is_idempotent():
         "unreachable on a second run, which is how half-applied migrations happen"
     )
     assert "teacher_assignments" in text
+
+
+# ── the recovery points rotation must not delete ─────────────────────────────
+#
+# The two snapshots this box takes have different lifetimes, and `--keep 5` was
+# written for one of them. A deploy's snapshot guards a release that is either good
+# or rolled back the same evening; a *migration's* recovery point is the only way
+# back from a schema change that is applied once and stays, while the snapshots
+# around it are taken many times — so within a handful of deploys the one archive
+# that could undo a bad `ALTER TABLE` was gone, and nothing said so.
+#
+# A pin therefore sits outside the rotation budget rather than inside it: a pinned
+# archive must not push a sibling out early (that would make the protection cost a
+# backup), and it must survive every prune. "Nothing protects it" is already
+# visible — `--status` prints `NOT PINNED — rotation will delete it` — so what these
+# guard is the other direction: that a pin actually bites.
+
+def _archives(tmp_path, names):
+    written = []
+    for i, name in enumerate(names):
+        archive = tmp_path / name
+        archive.write_bytes(b"x" * (i + 1))
+        os.utime(archive, (1_700_000_000 + i, 1_700_000_000 + i))
+        written.append(archive.name)
+    return written
+
+
+def test_a_pinned_archive_survives_every_prune(tmp_path):
+    names = _archives(tmp_path, [f"scangrade-db-2026090{i}T000000Z-label.tar.gz"
+                                 for i in range(1, 5)])
+
+    snap.pin_archive(tmp_path / names[0])
+    snap.prune(tmp_path, 1, quiet=True)
+
+    surviving = sorted(p.name for p in tmp_path.glob("*.tar.gz"))
+    assert names[0] in surviving, "rotation deleted the archive it was told to keep"
+    assert surviving == sorted([names[0], names[-1]]), (
+        "a pinned archive was kept but the newest was dropped with it"
+    )
+
+
+def test_a_pin_does_not_spend_a_sibling_s_slot(tmp_path):
+    """Two pinned archives and `--keep 1`: the newest *unpinned* one still stays.
+    Counting a pinned archive as one of the kept would make the protection cost a
+    backup, which is how a safety mechanism ends up disabled by the person who
+    needs it."""
+    names = _archives(tmp_path, [f"scangrade-db-2026090{i}T000000Z-label.tar.gz"
+                                 for i in range(1, 5)])
+
+    snap.pin_archive(tmp_path / names[0])
+    snap.pin_archive(tmp_path / names[1])
+    snap.prune(tmp_path, 1, quiet=True)
+
+    surviving = sorted(p.name for p in tmp_path.glob("*.tar.gz"))
+    assert surviving == sorted([names[0], names[1], names[-1]])
+
+
+def test_pinning_twice_is_one_entry(tmp_path):
+    archive = tmp_path / "scangrade-db-20260901T000000Z-x.tar.gz"
+    archive.write_bytes(b"x")
+
+    snap.pin_archive(archive)
+    snap.pin_archive(archive)
+
+    assert snap.read_pins(tmp_path) == {archive.name}
+
+
+def test_unpin_reports_whether_anything_changed(tmp_path):
+    archive = tmp_path / "scangrade-db-20260901T000000Z-x.tar.gz"
+    archive.write_bytes(b"x")
+
+    assert snap.unpin_archive(archive) is False, "it was never pinned"
+    snap.pin_archive(archive)
+    assert snap.unpin_archive(archive) is True
+    assert snap.read_pins(tmp_path) == set()
+
+
+def test_a_missing_pin_list_is_empty_and_not_a_refusal(tmp_path):
+    """A prune that refuses to run because a text file is absent is a disk that
+    fills up — the outage the prune exists to prevent."""
+    _archives(tmp_path, [f"scangrade-db-2026090{i}T000000Z-label.tar.gz"
+                         for i in range(1, 4)])
+
+    assert snap.read_pins(tmp_path) == set()
+    assert snap.prune(tmp_path, 1, quiet=True)
+
+
+def test_an_unreadable_pin_list_loses_the_protection_not_the_run(tmp_path, capsys,
+                                                                monkeypatch):
+    """The cost is stated rather than swallowed: a pin that quietly stopped
+    protecting is the failure this whole mechanism is about."""
+    names = _archives(tmp_path, [f"scangrade-db-2026090{i}T000000Z-label.tar.gz"
+                                 for i in range(1, 4)])
+    real = Path.read_text
+
+    def refuse(self, *a, **k):
+        if self.name == snap.PINS_FILE:
+            raise PermissionError(13, "Permission denied")
+        return real(self, *a, **k)
+
+    monkeypatch.setattr(Path, "read_text", refuse)
+
+    assert snap.read_pins(tmp_path) == set()
+    assert f"cannot read" in capsys.readouterr().out
+    assert snap.prune(tmp_path, 1, quiet=True), "the prune gave up over a text file"
+
+
+def test_the_pin_list_lives_beside_the_archives_it_protects(tmp_path):
+    """So a backup directory moved to a new disk arrives with its own pins, instead
+    of leaving them behind pointing at names that are no longer there."""
+    assert snap.pins_path(tmp_path) == tmp_path / snap.PINS_FILE
+
+    archive = tmp_path / "scangrade-db-20260901T000000Z-x.tar.gz"
+    archive.write_bytes(b"x")
+    snap.pin_archive(archive)
+
+    assert (tmp_path / snap.PINS_FILE).is_file()
+
+
+def test_a_half_written_pin_list_is_never_visible(tmp_path, monkeypatch):
+    """A truncated list protects nothing, and the moment it is most likely to be
+    truncated is the moment it is being written — so the body is staged beside the
+    list and moved into place, which is a rename on one filesystem and cannot be
+    observed half-done."""
+    moves = []
+    real_replace = os.replace
+
+    def record_replace(src, dst, *a, **k):
+        moves.append((Path(src), Path(dst)))
+        return real_replace(src, dst, *a, **k)
+
+    monkeypatch.setattr(snap.os, "replace", record_replace)
+
+    snap.write_pins(tmp_path, ["a.tar.gz", "b.tar.gz"])
+
+    assert moves == [(tmp_path / (snap.PINS_FILE + ".new"), tmp_path / snap.PINS_FILE)], (
+        "the list is written in place, so a reader can meet it half-written")
+    assert not (tmp_path / (snap.PINS_FILE + ".new")).exists(), (
+        "the staging file was left behind")
+    assert (tmp_path / snap.PINS_FILE).read_text(encoding="utf-8").splitlines() == [
+        "a.tar.gz", "b.tar.gz"]
+
+
+def test_the_pin_command_needs_no_credentials_at_all(tmp_path):
+    """It must work on a box whose service key has already been rotated away: a
+    recovery point is exactly what somebody reaches for when the environment is
+    broken, and a command that demands the credential it is recovering from is a
+    lever that only works when nothing is wrong."""
+    archive = tmp_path / "scangrade-db-20260901T000000Z-x.tar.gz"
+    archive.write_bytes(b"x")
+    env = {k: v for k, v in os.environ.items()
+           if not k.startswith(("SUPABASE_", "DIRECT_URL", "DATABASE_URL"))}
+
+    done = subprocess.run(
+        [sys.executable, str(DEPLOY / "db_snapshot.py"), "--pin", str(archive)],
+        capture_output=True, text=True, env=env)
+
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert snap.read_pins(tmp_path) == {archive.name}
+    assert "pinned" in done.stdout
+
+
+def test_the_pin_command_refuses_an_archive_that_is_not_there(tmp_path):
+    """A pin for a file nobody has is a promise the pin list cannot keep."""
+    env = {k: v for k, v in os.environ.items()
+           if not k.startswith(("SUPABASE_", "DIRECT_URL", "DATABASE_URL"))}
+
+    done = subprocess.run(
+        [sys.executable, str(DEPLOY / "db_snapshot.py"),
+         "--pin", str(tmp_path / "nope.tar.gz")],
+        capture_output=True, text=True, env=env)
+
+    assert done.returncode == 1
+    assert "no archive at" in done.stdout
+
+
+def test_the_deploy_pins_the_recovery_point_a_migration_release_takes():
+    """The pin has to be written by the thing that takes the snapshot, and while
+    nothing has been merged yet — after the merge the release is already applying
+    SQL whose way back is the archive that rotation is about to delete."""
+    script = _deploy_script()
+    block = script[script.index("Recovery point"):script.index("merge --ff-only")]
+
+    assert "$SNAPSHOT_CMD\" --pin" in block, (
+        "the recovery point a migration release takes is not pinned, so `--keep 5` "
+        "will rotate the only way back from it away within a few deploys"
+    )
+    assert "--pin" in block.split("SNAPSHOT FAILED")[0], (
+        "the pin runs only after the snapshot has already been declared a failure"
+    )
+    # It fails open — the archive exists and nothing is merged — but never quietly:
+    # the pin's own branch says so and carries the command that fixes it by hand,
+    # and it does not spend the release on its own bookkeeping.
+    pin_branch = block[block.index("if PIN_OUT="):]
+    pin_branch = pin_branch[:pin_branch.index("\n    else")]
+    assert "WARNING: could not pin" in pin_branch
+    assert "--pin $SNAPSHOT" in pin_branch, "no way to fix it by hand"
+    assert "exit " not in pin_branch, (
+        "a pin that cannot be written now refuses a release whose recovery point "
+        "already exists"
+    )

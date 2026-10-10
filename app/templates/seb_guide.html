@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% from "tutorial/_chrome.html" import header %}
+{% block title %}Safe Exam Browser - ScanGrade{% endblock %}
+
+{#
+  The public guide. No login, no token, and that is the feature: the URL itself is
+  what a school pastes into a WhatsApp group or prints as a QR code, so it has to
+  work for somebody who has no account yet.
+
+  The warning is FIRST and it is loud. Everything below it is a helpful guide; the
+  one thing a reader must not miss is that Safe Exam Browser has no Android or
+  ChromeOS build, so a pupil whose only device is a phone cannot sit a paper that
+  requires it. Learning that on the morning of the exam is the failure this page
+  exists to make impossible.
+
+  The downloads point at `safeexambrowser.org` and never at a copy of ours — a
+  stale mirror of a security tool is a worse problem than a link that moved — and
+  the platform list is passed in from the route so the page and the test that
+  checks those hosts read one list.
+#}
+
+{% block content_noauth %}
+<div class="min-h-screen bg-gradient-to-br from-slate-50 via-white to-primary-50 relative overflow-hidden">
+    <div class="absolute -top-40 -right-40 w-96 h-96 rounded-full bg-sky-100/40 blur-3xl"></div>
+
+    {{ header('from-primary-500 to-primary-600', 'text-primary-600', 'fa-laptop-code',
+              'Panduan SEB', 'SEB Guide', '/auth/sign-in-user',
+              'Masuk', 'Log in') }}
+
+    <main class="max-w-4xl mx-auto px-4 sm:px-6 py-8 sm:py-12 space-y-8">
+
+        {# ── the warning, before anything else ─────────────────────────────── #}
+        <div class="rounded-2xl bg-amber-50 border-2 border-amber-200 p-5 sm:p-6 flex items-start gap-4">
+            <i class="fas fa-triangle-exclamation text-amber-600 text-2xl mt-0.5"></i>
+            <div class="space-y-2">
+                <h2 class="text-lg font-extrabold text-amber-900"
+                    x-text="t('SEB tidak tersedia untuk Android dan Chromebook','SEB is not available for Android or Chromebooks')"></h2>
+                <p class="text-amber-800"
+                   x-text="t('Jika ujian Anda diwajibkan memakai SEB, gunakan laptop Windows/Mac atau iPad. Jika Anda hanya punya HP Android, hubungi guru atau sekolah Anda sebelum hari ujian.',
+                            'If your exam requires SEB, use a Windows/Mac laptop or an iPad. If you only have an Android phone, contact your teacher or school before exam day.')"></p>
+            </div>
+        </div>
+
+        <div class="text-center space-y-3">
+            <h1 class="text-3xl lg:text-4xl font-extrabold text-surface-900"
+                x-text="t('Apa itu Safe Exam Browser?','What is Safe Exam Browser?')"></h1>
+            <p class="text-lg text-surface-500 max-w-2xl mx-auto"
+               x-text="t('SEB adalah aplikasi gratis yang mengunci komputer atau iPad selama ujian berlangsung: tidak ada tab lain, tidak ada aplikasi lain, tidak ada jalan keluar tanpa izin pengawas. Sekolah memakainya untuk ujian berisiko tinggi.',
+                        'SEB is a free application that locks a computer or iPad for the length of an exam: no other tabs, no other applications, and no way out without the permission of a supervisor. Schools use it for high-stakes papers.')"></p>
+        </div>
+
+        {# ── the one promise a reader needs up front ───────────────────────── #}
+        <div class="rounded-2xl bg-white border border-surface-100 shadow-sm p-5 sm:p-6">
+            <h2 class="font-extrabold text-surface-800"
+                x-text="t('Anda tidak perlu tahu kata sandi apa pun','You never need to know a password')"></h2>
+            <p class="mt-2 text-surface-500 text-sm"
+               x-text="t('Buka saja berkas yang diberikan guru atau pengawas; ujian akan terbuka dan terkunci sendiri. Kalau ada masalah, panggil pengawas — merekalah yang memegang kata sandinya, bukan Anda.',
+                        'Just open the file your teacher or supervisor gives you; the exam opens and locks itself. If something goes wrong, call a supervisor — they hold the password, not you.')"></p>
+        </div>
+
+        {# ── the steps ─────────────────────────────────────────────────────── #}
+        <div class="space-y-4">
+            <h2 class="text-xl font-extrabold text-surface-800"
+                x-text="t('Langkah pemasangan','Setup steps')"></h2>
+
+            {% for step_id, step_en in [
+                ('Unduh SEB dari situs resmi di bawah, sesuai perangkat Anda (Windows, macOS, atau iPad).',
+                 'Download SEB from the official site below, choosing your device (Windows, macOS or iPad).'),
+                ('Pasang seperti aplikasi biasa, lalu buka sekali. Jika muncul peringatan keamanan sistem, ikuti petunjuk pemasangan resmi SEB.',
+                 'Install it like any application, then open it once. If your system shows a security prompt, follow the installation instructions published by SEB.'),
+                ('Unduh berkas uji di bawah, lalu buka berkas itu. SEB akan terbuka dan menampilkan halaman ScanGrade yang mengatakan pemasangan berhasil.',
+                 'Download the test file below and open it. SEB opens and shows a ScanGrade page confirming the installation works.'),
+                ('Jika halaman itu terbuka di browser biasa, pemasangan belum benar — ulangi langkah 1–3.',
+                 'If that page opens in an ordinary browser instead, the installation is not working yet — repeat steps 1–3.'),
+                ('Pada hari ujian, tunggu berkas .seb dari guru atau pengawas, lalu buka seperti berkas uji tadi.',
+                 'On exam day, wait for the .seb file from your teacher or supervisor, then open it exactly like the test file.')] %}
+            <div class="rounded-2xl bg-white border border-surface-100 shadow-sm p-4 flex items-start gap-4">
+                <span class="w-8 h-8 rounded-xl bg-primary-600 text-white font-extrabold flex items-center justify-center shrink-0">{{ loop.index }}</span>
+                <p class="text-surface-600 text-sm pt-1" x-text="t('{{ step_id }}','{{ step_en }}')"></p>
+            </div>
+            {% endfor %}
+        </div>
+
+        {# ── official downloads ────────────────────────────────────────────── #}
+        <div class="rounded-2xl bg-white border border-surface-100 shadow-sm p-5 sm:p-6 space-y-4">
+            <h2 class="text-xl font-extrabold text-surface-800"
+                x-text="t('Unduh resmi','Official downloads')"></h2>
+            <p class="text-sm text-surface-500"
+               x-text="t('ScanGrade tidak menyediakan pemasang SEB. Selalu unduh dari situs resmi Safe Exam Browser:',
+                        'ScanGrade does not host the SEB installer. Always download it from the official Safe Exam Browser site:')"></p>
+            <div class="grid sm:grid-cols-3 gap-3">
+                {% for platform, href in downloads %}
+                <a href="{{ href }}" target="_blank" rel="noopener noreferrer"
+                   class="h-12 px-4 rounded-xl bg-surface-50 border border-surface-200 hover:border-primary-300 hover:text-primary-700 transition text-sm font-bold text-surface-700 flex items-center justify-center gap-2">
+                    <i class="fas fa-download"></i>{{ platform }}
+                </a>
+                {% endfor %}
+            </div>
+            <p class="text-xs text-surface-400"
+               x-text="t('Android dan ChromeOS tidak ada dalam daftar karena SEB tidak mendukung keduanya.',
+                        'Android and ChromeOS are absent from that list because SEB supports neither.')"></p>
+        </div>
+
+        {# ── the installation test ─────────────────────────────────────────── #}
+        <div class="rounded-2xl bg-white border border-surface-100 shadow-sm p-5 sm:p-6 space-y-3">
+            <h2 class="text-xl font-extrabold text-surface-800"
+                x-text="t('Uji pemasangan Anda','Test your installation')"></h2>
+            <p class="text-sm text-surface-500"
+               x-text="t('Berkas uji ini tidak berisi soal apa pun. Fungsinya hanya membuktikan SEB sudah terpasang dengan benar sebelum hari ujian.',
+                        'This test file contains no exam. Its only job is to prove SEB is installed correctly before exam day.')"></p>
+            <a href="{{ url_for('seb.test_config') }}"
+               class="h-12 px-5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold inline-flex items-center gap-2">
+                <i class="fas fa-flask"></i>
+                <span x-text="t('Unduh berkas uji .seb','Download the .seb test file')"></span>
+            </a>
+            {# Where the test file lands, linked here on purpose: it is the page a
+               correct installation shows, and a reader who opens it in an ordinary
+               browser is told *that* — which is a step of the test, not an error.
+               Without this link the only entrance is opening the .seb file, so a
+               reader checking "did it work?" has nothing to open. #}
+            <p class="text-sm text-surface-500"
+               x-text="t('Setelah memasang, buka berkas uji itu. Kalau SEB bekerja, halaman yang muncul berbunyi pemasangan Anda sudah benar:',
+                        'Once installed, open that test file. If SEB works, the page that appears says your installation is correct:')"></p>
+            <a href="{{ url_for('seb.test_verified') }}"
+               class="text-sm font-bold text-primary-700 hover:text-primary-800 inline-flex items-center gap-2">
+                <i class="fas fa-circle-check"></i>
+                <span x-text="t('Lihat halaman hasil uji','See the test result page')"></span>
+            </a>
+        </div>
+
+        {# ── shareable, and worth saying so ────────────────────────────────── #}
+        <p class="text-center text-xs text-surface-400"
+           x-text="t('Halaman ini boleh dibagikan bebas lewat WhatsApp, email, atau QR code — tidak perlu masuk atau memakai tautan khusus.',
+                    'This page can be shared freely over WhatsApp, email or a QR code — no login and no special link needed.')"></p>
+    </main>
+</div>
+{% endblock %}

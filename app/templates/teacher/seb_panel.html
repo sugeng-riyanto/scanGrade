@@ -1,0 +1,353 @@
+{% extends "base.html" %}
+{% block title %}Safe Exam Browser - ScanGrade{% endblock %}
+
+{#
+  The SEB panel. Three things about it are deliberate and worth keeping:
+
+  * the warning and the confirmation checkbox are **beside the switch**, not in a
+    manual — the mistake this screen exists to prevent (turning SEB on for a paper
+    the class will sit on Android phones) is made at the moment the switch is
+    flipped, so that is where the sentence has to be;
+  * the passwords are **not on the page when it opens**. They are behind a
+    show/hide button, because a screen-share or a recording of a scrolling teacher
+    is how a secret leaks without anybody deciding to share it;
+  * every sentence is a `t()` pair, and the page carries no fixed `lang=`: it is
+    translated copy, so it follows the reader's own choice like every other page.
+#}
+
+{% block content %}
+<div x-data="{
+        shown: {},
+        busy: '',
+        password: '',
+        role: '',
+        async reveal(kind) {
+            if (this.shown[kind]) { this.shown[kind] = false; this.password = ''; return; }
+            this.busy = kind;
+            try {
+                const fd = new FormData();
+                fd.append('kind', kind);
+                fd.append('_csrf_token', document.querySelector('meta[name=csrf-token]').content);
+                const res = await fetch('{{ url_for('seb.reveal_password', exam_id=exam.id) }}', {
+                    method: 'POST', body: fd, headers: { 'X-Requested-With': 'fetch' } });
+                const data = await res.json();
+                if (data.ok) { this.password = data.password; this.role = data.role; this.shown[kind] = true; }
+                else { window.sgAlert(sgT('Kata sandi tidak dapat dibuka. Hubungi admin sekolah.',
+                                          'The password could not be opened. Contact your school admin.')); }
+            } catch (e) { window.sgAlert(sgT('Gagal menghubungi server.', 'Could not reach the server.')); }
+            this.busy = '';
+        }
+     }"
+     class="max-w-5xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6">
+
+    <div class="flex flex-wrap items-start justify-between gap-3">
+        <div>
+            <h1 class="text-2xl lg:text-3xl font-extrabold text-surface-900 flex items-center gap-2">
+                <i class="fas fa-laptop-code text-primary-600"></i>
+                <span x-text="t('Safe Exam Browser','Safe Exam Browser')"></span>
+            </h1>
+            <p class="mt-1 text-surface-500 text-sm" x-text="t('Pengaturan kunci masuk dan kunci keluar untuk ujian ini.','The entry key and exit keys for this exam.')"></p>
+        </div>
+        {# `teacher.my_exams`, not `teacher.exams`: the exams list endpoint is
+           `my_exams`, and a `url_for` for a name that does not exist is a
+           ``BuildError`` at render time — the whole page, for every teacher, not
+           just this link. Asserted for all four SEB pages in
+           `tests/unit/test_seb_pages.py`. #}
+        <a href="{{ url_for('teacher.my_exams') }}"
+           class="h-10 px-4 rounded-xl border border-surface-200 text-surface-600 hover:text-primary-600 hover:border-primary-200 transition text-sm font-semibold inline-flex items-center gap-2 shrink-0">
+            <i class="fas fa-arrow-left"></i>
+            <span x-text="t('Kembali','Back')"></span>
+        </a>
+    </div>
+
+    {% if exam.title %}
+    <div class="bg-white rounded-2xl border border-surface-100 shadow-sm p-4 sm:p-5">
+        <p class="text-xs font-bold text-surface-400 uppercase tracking-wide" x-text="t('Ujian','Exam')"></p>
+        <p class="mt-1 font-extrabold text-surface-800">{{ exam.title }}</p>
+    </div>
+    {% endif %}
+
+    {# ── state ─────────────────────────────────────────────────────────────── #}
+    <div class="bg-white rounded-2xl border border-surface-100 shadow-sm p-4 sm:p-5 space-y-4">
+        <div class="flex flex-wrap items-center gap-3">
+            {% if exam.require_seb %}
+            <span class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-100 text-emerald-700 text-xs font-bold">
+                <i class="fas fa-lock"></i>
+                <span x-text="t('Wajib SEB: AKTIF','SEB required: ON')"></span>
+            </span>
+            {% else %}
+            <span class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-100 text-surface-600 text-xs font-bold">
+                <i class="fas fa-lock-open"></i>
+                <span x-text="t('Wajib SEB: MATI','SEB required: OFF')"></span>
+            </span>
+            {% endif %}
+            {# Only where the matrix answered: before SEB is switched on there is no
+               access role yet, and "Your role: School staff" is a sentence about the
+               reader that is simply not true. The badge above already says which
+               state the paper is in. #}
+            {% if verdict.ok %}
+            <span class="text-xs text-surface-500" x-text="t('Peran Anda:','Your role:')"></span>
+            <span class="text-xs font-bold text-primary-600"
+                  x-text="role === 'invigilator' ? t('Pengawas bertugas','Invigilator on duty')
+                       : (role === 'owner_teacher' ? t('Guru pemilik ujian','Exam owner')
+                       : (role === 'murid' ? t('Murid','Student') : t('Staf sekolah','School staff')))"
+                  x-init="role = {{ verdict.role|tojson|forceescape }}"></span>
+            {% endif %}
+        </div>
+
+        {# Fase 6: the honest limit, said before the switch rather than after it. #}
+        <div class="rounded-xl bg-amber-50 border border-amber-100 p-4 flex items-start gap-3">
+            <i class="fas fa-triangle-exclamation text-amber-600 mt-0.5"></i>
+            <div class="text-sm text-amber-800 space-y-1">
+                <p class="font-bold" x-text="t('SEB tidak berfungsi di HP Android atau Chromebook.','SEB does not work on Android phones or Chromebooks.')"></p>
+                <p x-text="t('Hanya aktifkan untuk ujian yang dikerjakan di laptop Windows/Mac atau iPad. Jika sebagian murid hanya punya HP Android, ujian ini akan memblokir mereka sepenuhnya.',
+                            'Turn this on only for a paper sat on a Windows/Mac laptop or an iPad. If some pupils only have an Android phone, this exam will block them completely.')"></p>
+            </div>
+        </div>
+
+        {% if mobile_risk.android %}
+        {# A concrete number, from what the school has actually recorded — an estimate
+           here would be a number nobody can act on. #}
+        <div class="rounded-xl bg-rose-50 border border-rose-100 p-4 flex items-start gap-3">
+            <i class="fas fa-mobile-screen text-rose-600 mt-0.5"></i>
+            <p class="text-sm text-rose-700">
+                <span class="font-bold">{{ mobile_risk.android }}</span>
+                <span x-text="t('dari {{ mobile_risk.known }} murid peserta ujian ini terakhir masuk dari HP Android. Mereka tidak akan bisa membuka ujian ini jika SEB diwajibkan.',
+                                'of the {{ mobile_risk.known }} pupils in this exam last signed in from an Android phone. They will not be able to open this exam while SEB is required.')"></span>
+            </p>
+        </div>
+        {% elif mobile_risk.known %}
+        <p class="text-xs text-surface-500"
+           x-text="t('Riwayat perangkat: {{ mobile_risk.known }} murid terpantau, tidak ada yang terakhir masuk dari Android.',
+                    'Device history: {{ mobile_risk.known }} pupils seen, none last signed in from Android.')"></p>
+        {% endif %}
+
+        {% if has_credential and not file_is_current %}
+        {# The file is generated from the exam's own switches, so a switch changed
+           after the file was issued leaves the row and its stored Config Key out of
+           step — and the download refuses rather than hand over a file that cannot
+           open the paper. That refusal is invisible until somebody tries it, which
+           is why it is said here, next to the button that fixes it. What it must
+           not say is "every pupil is locked out": a file already distributed keeps
+           working until the re-issue, and that is the fact the school acts on. #}
+        <div class="rounded-xl bg-rose-50 border border-rose-100 p-4 flex items-start gap-3">
+            <i class="fas fa-file-circle-exclamation text-rose-600 mt-0.5"></i>
+            <div class="text-sm text-rose-700 space-y-1">
+                <p class="font-bold" x-text="t('Pengaturan ujian berubah setelah berkas .seb ini dibuat.',
+                                                'The exam settings changed after this .seb file was made.')"></p>
+                <p x-text="t('Terbitkan berkas baru lalu bagikan ulang ke murid: unduhan berikutnya akan ditolak sampai itu dilakukan. Berkas lama yang sudah beredar masih bisa dibuka sampai berkas baru diterbitkan.',
+                            'Issue a new file and hand it out again: the next download will be refused until you do. Files already shared keep working until a new one is issued.')"></p>
+            </div>
+        </div>
+        {% endif %}
+
+        {% if can_manage %}
+        <div class="pt-2 flex flex-wrap gap-3">
+            {% if exam.require_seb %}
+            <form method="POST" action="{{ url_for('seb.disable', exam_id=exam.id) }}">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                <button type="submit"
+                        class="h-11 px-4 rounded-xl bg-surface-100 text-surface-700 hover:bg-surface-200 transition text-sm font-bold">
+                    <i class="fas fa-lock-open mr-1"></i>
+                    <span x-text="t('Matikan Wajib SEB','Turn SEB off')"></span>
+                </button>
+            </form>
+            {% else %}
+            {# The checkbox is NOT decoration: `seb.enable` refuses a POST without it,
+               so this form cannot be sent by anything that merely looks like a click. #}
+            <form method="POST" action="{{ url_for('seb.enable', exam_id=exam.id) }}"
+                  x-data="{ agreed: false }" class="space-y-3">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                <label class="flex items-start gap-3 text-sm text-surface-700 cursor-pointer">
+                    <input type="checkbox" name="{{ confirm_field }}" value="1" x-model="agreed"
+                           class="mt-0.5 w-5 h-5 rounded border-surface-300 text-primary-600">
+                    <span x-text="t('Saya memahami ujian ini tidak dapat diakses dari HP Android/Chromebook.',
+                                    'I understand this exam cannot be accessed from an Android phone or a Chromebook.')"></span>
+                </label>
+                <button type="submit" :disabled="!agreed"
+                        class="h-11 px-4 rounded-xl bg-primary-600 text-white disabled:opacity-40 disabled:cursor-not-allowed hover:bg-primary-700 transition text-sm font-bold">
+                    <i class="fas fa-lock mr-1"></i>
+                    <span x-text="t('Wajibkan Safe Exam Browser','Require Safe Exam Browser')"></span>
+                </button>
+            </form>
+            {% endif %}
+
+            {% if has_credential %}
+            <form method="POST" action="{{ url_for('seb.reissue', exam_id=exam.id) }}">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                <button type="submit"
+                        class="h-11 px-4 rounded-xl border border-surface-200 text-surface-600 hover:text-primary-600 hover:border-primary-200 transition text-sm font-bold">
+                    <i class="fas fa-rotate mr-1"></i>
+                    <span x-text="t('Terbitkan ulang kata sandi','Re-issue passwords')"></span>
+                </button>
+            </form>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+
+    {# ── siapa yang tidak bisa masuk ───────────────────────────────────────── #}
+    {# The switch tells a teacher the door is closed; this tells them whether it is
+       closed on the wrong people. Shown whenever the paper is gated — *including*
+       when nobody was turned away — because "belum ada yang ditolak" is the
+       confirmation a teacher looks for after handing the file out, and an empty
+       card is the only place that fact can appear. It is not shown on a paper SEB
+       was never switched on for, where there is nothing the card could say. #}
+    {% set refused = refusals|default([], true) %}
+    {% set tally = refusal_tally|default({'refused_pupils': 0, 'refused_attempts': 0,
+                                          'refused_last_at': None}, true) %}
+    {% if exam.require_seb or refused %}
+    <div class="bg-white rounded-2xl border border-surface-100 shadow-sm p-4 sm:p-5 space-y-3"
+         data-seb-refusals>
+        <h2 class="font-extrabold text-surface-800">
+            <i class="fas fa-ban mr-1 text-amber-600"></i>
+            <span x-text="t('Murid yang ditolak masuk','Pupils turned away')"></span>
+        </h2>
+        {# The sentence that keeps this from being read as a punishment. Two facts are
+           promised on it and both are true by construction (migration 064): the row
+           is a record, and it never reaches the penalty ladder or the score. #}
+        <p class="text-sm text-surface-500"
+           x-text="t('Pintu SEB menolak murid yang membuka tautan ujian dari browser biasa, atau yang berkas .seb-nya tidak lagi cocok dengan pengaturan ujian ini. Penolakan hanya dicatat: tidak ada penalti, tidak ada pengurangan nilai, dan murid bisa mencoba lagi.',
+                    'The SEB door turns away a pupil who opened the exam link in an ordinary browser, or whose .seb file no longer matches the settings for this exam. A refusal is only recorded: no penalty, no reduction of the score, and the pupil can try again.')"></p>
+        {% if refused %}
+        {# Two numbers, because the question has two halves: five tries by one pupil
+           is a mistyped link, one try each by five pupils is a file that reached
+           nobody. The pupil count is over distinct pupils, taken in the route from
+           these same rows (`seb_door_log.refusal_summary`). #}
+        <p data-refusal-tally>
+            <span class="text-2xl font-extrabold text-surface-800"
+                  x-text="'{{ tally.refused_pupils }} ' + t('murid','pupils')"></span>
+            <span class="text-sm font-bold text-surface-500"
+                  x-text="'&middot; {{ tally.refused_attempts }} ' + t('percobaan','attempts')"></span>
+            {% if tally.refused_last_at %}
+            <span class="text-xs font-bold text-surface-400">{{ tally.refused_last_at|tz }}</span>
+            {% endif %}
+        </p>
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead>
+                    <tr class="text-left text-xs text-surface-400 uppercase">
+                        <th class="py-2" x-text="t('Waktu','Time')"></th>
+                        <th class="py-2" x-text="t('Nama','Name')"></th>
+                        <th class="py-2" x-text="t('Alasan','Reason')"></th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-surface-100">
+                    {% for row in refused %}
+                    <tr data-refusal-row>
+                        <td class="py-2 text-surface-500 whitespace-nowrap">{{ row.at|tz }}</td>
+                        <td class="py-2 text-surface-700">{{ row.name or row.student_id or '-' }}</td>
+                        {# The pair is interpolated into `t()` in the markup, the way
+                           `principal/progress.html` renders a pair the service owns:
+                           the label table lives in one place
+                           (`seb_door_log.REASON_LABELS`) and the *binding* lives
+                           here, which is what makes the toggle reach it. The halves
+                           are the reason's own sentences; a label containing an
+                           apostrophe would close this Alpine string, so a test
+                           refuses one. #}
+                        <td class="py-2 text-surface-500">
+                            <span x-text="t('{{ row.label[0] }}','{{ row.label[1] }}')"></span>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-sm text-surface-500" data-refusal-none
+           x-text="t('Belum ada murid yang ditolak masuk ujian ini.',
+                    'Nobody has been turned away from this exam yet.')"></p>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {% if has_credential %}
+    {# ── kunci keluar: the two secrets, behind a reveal button ─────────────── #}
+    <div class="bg-white rounded-2xl border border-surface-100 shadow-sm p-4 sm:p-5 space-y-4">
+        <div>
+            <h2 class="font-extrabold text-surface-800" x-text="t('Kunci keluar','Exit keys')"></h2>
+            <p class="text-sm text-surface-500 mt-1"
+               x-text="t('Gunakan hanya untuk keadaan darurat: murid perlu keluar sebelum ujian selesai. Murid tidak pernah melihat kata sandi ini.',
+                        'Use only in an emergency: a pupil needs to leave before the exam is over. Pupils never see these passwords.')"></p>
+        </div>
+
+        {% for kind, label_id, label_en in [('quit', 'Kata sandi keluar (untuk murid berhenti)', 'Quit password (lets a pupil stop)'),
+                                            ('admin', 'Kata sandi admin (untuk pengawas mengubah pengaturan)', 'Admin password (lets a supervisor open settings)')] %}
+        <div class="rounded-xl border border-surface-100 p-3 sm:p-4 space-y-2">
+            <p class="text-sm font-bold text-surface-700" x-text="t('{{ label_id }}','{{ label_en }}')"></p>
+            <div class="flex flex-wrap items-center gap-2">
+                <button type="button" @click="reveal('{{ kind }}')"
+                        class="h-10 px-3 rounded-lg bg-surface-100 text-surface-700 hover:bg-surface-200 transition text-xs font-bold">
+                    <template x-if="!shown['{{ kind }}']">
+                        <span><i class="fas fa-eye mr-1"></i><span x-text="t('Tampilkan','Show')"></span></span>
+                    </template>
+                    <template x-if="shown['{{ kind }}']">
+                        <span><i class="fas fa-eye-slash mr-1"></i><span x-text="t('Sembunyikan','Hide')"></span></span>
+                    </template>
+                </button>
+                <code x-show="shown['{{ kind }}']" x-text="password"
+                      class="px-3 py-2 rounded-lg bg-surface-800 text-white text-sm font-mono tracking-widest"></code>
+                <span x-show="shown['{{ kind }}'] && role !== 'owner_teacher' && role !== 'invigilator'"
+                      class="text-xs text-amber-700"
+                      x-text="t('Akses tercatat atas nama guru pengampu.','This access is recorded as covering for the teacher who owns this exam.')"></span>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    {# ── kunci masuk: the file ─────────────────────────────────────────────── #}
+    <div class="bg-white rounded-2xl border border-surface-100 shadow-sm p-4 sm:p-5 space-y-3">
+        <h2 class="font-extrabold text-surface-800" x-text="t('Kunci masuk (Config Key)','Entry key (Config Key)')"></h2>
+        <p class="text-sm text-surface-500"
+           x-text="t('Satu kunci berlaku untuk semua platform dan versi SEB, dihitung server dari pengaturan ujian ini. Tidak ada yang perlu diketik siapa pun.',
+                    'One key works on every platform and SEB version, computed by the server from the settings of this exam. Nobody types it.')"></p>
+        <code class="block px-3 py-2 rounded-lg bg-surface-50 border border-surface-100 text-xs font-mono text-surface-600 break-all">{{ exam.seb_config_key }}</code>
+        <div class="flex flex-wrap gap-3 pt-1">
+            <a href="{{ url_for('seb.download_file', exam_id=exam.id) }}"
+               class="h-11 px-4 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 transition text-sm font-bold inline-flex items-center gap-2">
+                <i class="fas fa-download"></i>
+                <span x-text="t('Unduh berkas .seb','Download the .seb file')"></span>
+            </a>
+            <span class="text-xs text-surface-500 self-center max-w-md"
+                  x-text="t('Berkas ini hanya memuat sidik kata sandi (hash), bukan kata sandinya. Murid boleh membuka berkas ini.',
+                           'The file carries only a fingerprint of each password (a hash), never the password itself. Pupils may open this file.')"></span>
+        </div>
+    </div>
+    {% endif %}
+
+    {# ── who read what ─────────────────────────────────────────────────────── #}
+    <div class="bg-white rounded-2xl border border-surface-100 shadow-sm p-4 sm:p-5 space-y-3">
+        <h2 class="font-extrabold text-surface-800" x-text="t('Riwayat akses','Access history')"></h2>
+        {% if access_log %}
+        <div class="overflow-x-auto">
+            <table class="w-full min-w-[640px] text-sm">
+                <thead>
+                    <tr class="text-left text-xs text-surface-400 uppercase">
+                        <th class="py-2" x-text="t('Waktu','Time')"></th>
+                        <th class="py-2" x-text="t('Nama','Name')"></th>
+                        <th class="py-2" x-text="t('Peran','Role')"></th>
+                        <th class="py-2" x-text="t('Jenis','Kind')"></th>
+                        <th class="py-2" x-text="t('Atas nama','On behalf of')"></th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-surface-100">
+                    {% for row in access_log %}
+                    <tr>
+                        <td class="py-2 text-surface-500 whitespace-nowrap">{{ row.created_at|tz }}</td>
+                        <td class="py-2 text-surface-700">{{ (row.profiles or {}).get('full_name') or row.user_id }}</td>
+                        <td class="py-2 text-surface-500">{{ row.role_at_access }}</td>
+                        <td class="py-2 text-surface-500">{{ row.access_type }}</td>
+                        <td class="py-2 text-surface-500">{{ row.on_behalf_of or '-' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-sm text-surface-500"
+           x-text="t('Belum ada yang membuka kata sandi atau mengunduh berkas untuk ujian ini.',
+                    'Nobody has opened a password or downloaded the file for this exam yet.')"></p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

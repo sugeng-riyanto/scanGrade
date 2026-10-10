@@ -19,6 +19,11 @@ from app.utils import lock_health
 from app.decorators.security import require_role, STAFF_ROLES
 from app.decorators.subscription import require_subscription
 from app.services.anti_cheat_service import validate_violation_log
+# The save paths *observe* the Config Key, never refuse on it: the refusal is the
+# page door's, because a client that cannot send the header (an iPad) must still be
+# able to finish its paper. See `seb_service.observe_save_key`.
+from app.services import seb_config_key
+from app.services import seb_service
 from app.services.question_types import (
     complete_weights, earned_points, grade_answer, is_objective, objective_result,
 )
@@ -1152,10 +1157,18 @@ def student_sync_draft():
     if g.get("user_role") == "murid":
         from app.utils.auth import get_supabase as _gs
         _sb = _gs()
+        # The two SEB columns ride along on a read this path already makes, so the
+        # observation below costs no round trip — and it happens *before* any
+        # decision on this request, which is what makes it evidence about the save
+        # rather than about a save that happened to be allowed anyway.
         _exam_check = row_or_none(
-            _sb.table("exams").select("school_id, class_ids, target_mode, is_published, status")
+            _sb.table("exams").select("school_id, class_ids, target_mode, is_published, status,"
+                                      " require_seb, seb_config_key")
             .eq("id", exam_id).maybe_single().execute()
         )
+        seb_service.observe_save_key(
+            _exam_check or {}, exam_id, request.url,
+            request.headers.get(seb_config_key.CONFIG_KEY_HEADER), "sync-draft")
         allowed, _why = exam_sitting_allowed(_sb, _exam_check or {}, exam_id, g.user_id)
         if not allowed:
             current_app.logger.warning("sync-draft denied: exam %s user %s", exam_id, g.user_id)

@@ -823,6 +823,120 @@ looking armed:
   its debug port. `--no-sandbox` is added only when the gate is root, so an
   ordinary deploy user keeps the sandbox.
 
+## The SEB door, measured on the release that is serving it
+
+Everything else in the Safe Exam Browser feature is a *reading*. The generator
+agrees with itself, the `.seb` file downloads, the panel renders, and
+`tests/unit/test_seb_door.py` drives the door through a fake client. Not one of
+them can answer the only question a school asks — **does the `require_seb` toggle
+actually stop a plain browser on the app this box is serving, against the live
+database** — and the failure they cannot see is the worst shape there is: the
+toggle reads ON, the file downloads, and a pupil opens the paper in Chrome by
+pasting the link.
+
+`deploy/seb_door_gate.py` answers it over HTTP against the served release, as the
+demo pupil, with a throwaway paper it creates on the live database and deletes
+before it exits. Eleven requests **and one headless browser**, in the two halves of
+one door — the header transport and the JavaScript handshake — and each one exists
+because the others can be explained away without it:
+
+| Step | Request | What it rules out |
+|---|---|---|
+| **C0** | the paper with `require_seb` **off** | the window, the class, the school, the attempt cap: without this control, a "refusal" proves nothing about SEB. The paper's own title has to come back, not just HTTP 200 |
+| **C1** | the same paper with it **on**, no header | enforcement: the answer must be a 302 to the paper's `seb-claim` page, not the paper |
+| **C1b** | the `seb-claim` page itself | the road clients that cannot send a header depend on (SEB on iOS is WKWebView); a door that redirects to a 500 has refused the pupil with a detour |
+| **C2** | a header hashed over the paper's own Config Key | the door admits an honest client: 200 **and** the paper in the body |
+| **C3** | a header hashed over a *different* key | the falsification: without it, C1 and C2 are equally explained by "any header passes", which is the exact failure the check exists to catch |
+| **C4a** | a JavaScript claim hashed over the **paper's** address | the binding, backwards: the client hashes the URL of the page its script ran on, which is the handshake page — that is why C1 sends a browser *there*. Accepting the paper's address means nothing about the binding is checked |
+| **C4b** | a JavaScript claim over **another key** | the falsification for this transport: without it, "a value is posted" and "the right value is posted" are indistinguishable |
+| **C4c** | a JavaScript claim that was honest **before the key was re-issued** | the stale file a pupil is still holding: the stored key is changed between computing the value and posting it, so accepting it means the door honours a value once it has been right rather than the key stored now |
+| **C4d** | the paper again, still with no header | none of the three refusals left the door ajar — the claim lives in the session, so "must be refused" has to mean the paper stays shut, not merely that the POST answered 403 |
+| **C5** | the honest JavaScript claim | the admission: 200 with `ok: true`. A handshake that refuses the exam's own value locks out every iPad and every modern macOS client, and nothing else on the box would say so |
+| **C5b** | the paper with **no header at all** | the whole point: a client that proved itself through the client's own API opens the paper. This is the only way a WKWebView client ever sits a gated paper |
+| **C6** | the handshake page itself, in a real headless browser with no `SafeExamBrowser` API | **the page half of C4–C5.** C4 composes its own POSTs, so a page whose own script never fires one is invisible to all of it — and that page is the entire population the refusal path exists for. The page's own state must end `refused` with the refusal panel laid out, its script must POST the refusal **once per page load** (reason `no_client`, carrying the CSRF token the route reads), the route must take it, the live database must hold **as many rows carrying this run's browser marker as the page made reports** — every marked row this pupil's, so a count of rows cannot be read as this page's evidence — and the paper must hand that same browser the handshake again |
+
+The three JavaScript refusals **run before the honest claim**, because a claim is
+kept in the signed session: posted first, it would open the paper for every later
+request and C4d would prove nothing. The stale one is made stale by the gate itself
+— the value is computed against the key that is stored, and the key is then
+re-issued — so the case is a real change of the stored value and not a request the
+door could not have matched either way.
+
+C6 is the one step that is not a request this file composes. Pointed at the handshake
+page with no browser API at all — the pupil who pasted the link into Chrome, and the
+client population the `no_client` refusal exists for — a headless browser is asked
+what the **page's own script** did: which panel it laid out, which state it settled
+on, and what it put on the wire. That is a different observation from C4 in exactly
+the place it matters, because C4's POSTs are written by the gate and would pass
+against a page whose `ask()` never runs. The four facts are read as one: the panel
+and the state (the pupil's own view), the report count (one per visit, no more), its
+reason and CSRF header (the route's own contract), the answer the route gave, and
+then the row the live database is holding — **exactly one, for this pupil, carrying
+the `User-Agent` marker this run alone sets**, so a row someone else's browser left
+cannot be read as this page having reported. It closes by sending that same browser
+back to the paper, which must hand it the handshake again: a report that opened
+anything is a finding.
+
+Both halves of a browser visit are on the wire at slightly different moments — the
+page reports from the same handler that sets the state — so the reading is polled
+with a deadline rather than slept through, and the *first* load is the one the page's
+own state is read from.
+
+**The rows are attributed by marker, and compared against reports — and the first
+version of this check was wrong on a live database, twice.** It asked for *one* row
+for the paper. Neither half of that survives contact with a real run: the three
+refused claims above leave rows of their own (the claim route records a mismatch, by
+design) for the same pupil, and the browser loads the handshake page **twice** — the
+paper refuses it and hands it back, and a new load is a new visit, so a locked-out
+visit reports twice. `exactly one` was therefore unreachable, and the reading is
+`reading.reports_total` (both loads) against the rows carrying this run's
+`User-Agent` marker, which catches a lost and a duplicated write alike. The run says
+so out loud: `5 total, 2 this browser's … for 2 report(s)`.
+
+A box with no browser to drive, a browser that turns out to report a SEB API (so the
+reading would be about a different client), or a database older than the refusal
+record (migration 064) is **exit 2, not a pass**: the header transport and the claim
+protocol were measured and the page's script was not, and "enforced" is a claim
+about both. The browser is located exactly as the DOM gates locate it — `SG_CHROME`
+first, then the usual names — so one conf key arms all three.
+
+The throwaway row is created for the run — cloned from the demo fixture the deploy
+refreshes immediately before the smoke test — and deleted in a `finally` that
+reads the rows back; a leftover is reported as `seb door: LEFTOVER` rather than
+passed over. Its title is a marker the *next* run sweeps, so a crash leaves
+something the gate deletes rather than something a school has to find.
+
+| Result | Outcome |
+|---|---|
+| the door holds every way (exit 0) | log one line |
+| a plain browser opened a gated paper, an honest client was refused on either transport, another key's value was admitted, a claim that must be refused was not — or was refused while still opening the paper — or the handshake road is missing (exit 3), `SEB_ENFORCE=true` | roll back, quoting the findings |
+| the same (exit 3), not armed | keep the release, but say so |
+| no credentials, no fixture to clone, the app unreachable, **a release that predates the door**, no browser to drive, or a database older than the refusal record (exit 2) | keep the release, and say loudly it was **not measured** |
+
+Exit 2 is not a verdict, and the distinction is deliberate in two places that
+matter. A release from before this feature simply opens a gated paper and has no
+`seb-claim` route at all — that is *predates the door*, not *stopped enforcing it*,
+and refusing it would roll back a release that never claimed the feature. The gate
+runs after the reload, like the DOM and claims gates, so what it measures is the
+code now answering. It reuses Gate 4's own base URL and `SMOKE_MURID`, so there is
+no second conf; it is armed with `SEB_ENFORCE=true` in
+`/etc/scangrade-smoke.conf`, and `arm-auto-deploy.sh --check` reports it as `seb`
+(see "An unarmed box deploys nothing" below for what that line judges). The installer
+arms it only after one real measurement on the box passes — the same discipline `SMOKE_ENFORCE`, `TOUCH_ENFORCE`
+and `RENDER_ENFORCE` use, because a gate armed against a broken measurement would
+refuse good releases.
+
+**The gate found a real defect before it ever ran.** `app/routes/seb.py`'s
+`EXAM_COLUMNS` selected `manual_unlock` — the *name of a function*
+(`resume_code.manual_unlock`), not a column, and one no migration has ever created.
+Against the live database that made every SEB route answer PostgREST **42703**,
+and no test could see it because the tests drive a fake client. `deploy/schema_contract.py`
+had never read the line either: the select is written as a module constant, and the
+reader understood only a literal. So the contract learned to read a select written
+as a name (and a concatenation of names, as `deadline_service` writes one), the
+column was removed, and `tests/unit/test_seb_door_gate.py` holds both the instance
+and the reader.
+
 ## An unarmed box deploys nothing
 
 Every gate below the preflight can be *skipped*, and each skip used to be a
@@ -848,8 +962,17 @@ because a quarantine is a record about a commit.
 That check now also counts the smoke test's conf, because `SMOKE_ENFORCE` and
 `/etc/scangrade-smoke.conf` are what make "every role still works" a gate rather than
 a log line, and the `DIRECT_URL` the schema gate reads the live catalogue with.
-`arm-auto-deploy.sh` itself is the definition of "armed" for all five gates; the
-deploy prints its report verbatim rather than keeping a second copy of the judgement.
+`arm-auto-deploy.sh` itself is the definition of "armed" for every gate; the deploy
+prints its report verbatim rather than keeping a second copy of the judgement.
+
+Every gate is named in that report by its own line, and the SEB door gate is the one
+it can only judge from its ingredients: it has no conf of its own, so what `--check`
+looks at is the gate in the checkout and the `SMOKE_MURID` in the smoke conf — the
+pupil whose paper it opens. A conf that signs in the five staff roles but carries no
+pupil is `seb : MISSING`, because the smoke test can pass on those five while the
+door is measured nowhere. The gate's name is also in the list of blocks a stale
+copy lacks (`no seb_door_gate`), which is the only symptom a box that predates this
+check ever shows.
 
 Two consequences worth stating, because both bit a real box:
 
@@ -879,6 +1002,47 @@ checker's own report and how long ago), a record it cannot read, or nothing refu
 The one directory both sides need is `/var/lib/scangrade-deploy`; the installer
 creates it `root:"$SERVICE_GROUP"` mode 0750 and the record itself `0644`, so the app
 can read a refusal and cannot write one away.
+
+### The same checker, read before it refuses
+
+The record above is written by a refusal, so a box that is *about to be* refused
+shows nothing on the page until the first tick turned it away — and "nothing has
+been refused" reads like an all-clear. So the page runs the same checker the deploy
+refuses on, `bash deploy/arm-auto-deploy.sh --check`, read-only, and prints **every
+reading by name**, in the checker's own spelling:
+
+```
+schema     : present — the schema gate can hold a release against the catalogue
+seb        : MISSING — /etc/scangrade-smoke.conf, so "SEB is enforced" would be
+             asserted on every release rather than measured
+roster     : 500 murid / 30 guru (/opt/scangrade/.freebuff/lt_roster.json)
+```
+
+Four properties make this a reading rather than a second opinion:
+
+* **The names come from the checker's output, not from a list in the app.** Add a
+gate to `arm-auto-deploy.sh` and it appears as its own row without the page being
+edited. `seb` is the row that motivated the card: the SEB door gate is the one gate
+the report can judge only from its ingredients, and a box that cannot measure the
+door appears nowhere else in the app. Since the gate grew its client half, the
+`browser` line is one of those ingredients too — that half drives the shipped
+handshake page, so a box with no Chrome/Chromium cannot measure it, and the browser
+line already refuses the box for it rather than letting the gate answer exit 2
+forever.
+* **A run that did not happen is never a verdict.** The page distinguishes a checker
+  that is not in the checkout, a box with no `bash`, a run that timed out, a run that
+  could not start, and output it could not parse — and only a run that actually
+  answered prints `ARMED` / `NOT ARMED` beside the exit code. "This box is not armed"
+  and "this page did not find out" are different sentences.
+* **It judges the repo the page is describing.** The child is given `SG_REPO`, so the
+  reading is about that checkout rather than the checker's default layout.
+* **It says which file it ran, and when.** The path and the moment travel with the
+  reading, next to the exit code and the milliseconds it took, because a cached
+  reading passed off as live is the failure this page exists to avoid.
+
+The quarantine card also names the SEB door gate now (`seb door gate (the SEB toggle
+is not enforced on the served release)` → `seb_door_gate`), so a release refused
+because the door was not enforced is not shown as an unnamed gate.
 
 ## The alert when the runner goes stale
 
@@ -1259,6 +1423,17 @@ release, `compileall`, app construction (including the app refusing to be deploy
 by an unarmed runner), the theme gate, and the post-reload verification (smoke test,
 claims gate, performance gate, and the app not answering `200`). The quarantine
 record names which one, so "why did nothing deploy" is answered by one `cat`.
+
+One of the theme gate's refusals is a **database** state rather than a theme: it runs
+`schema_contract.py --require-applied`, which fails when a migration this repository
+carries declares a table or a column the live schema does not have. That is the same
+question the schema gate below asks through `apply_migration.py --verify`, asked
+through `SUPABASE_URL` and the service key instead of `DIRECT_URL` — so a box that
+cannot open a Postgres session is still held against the live schema. A gap refuses
+the release through the theme gate's exit 1 (so the quarantine reason reads
+`theme gate (exit 1)`), and a box with no credentials to ask with is said loudly and
+**not** refused: `--require-applied` exits 2 there, and the gate deliberately does not
+turn that into its own exit 2, which this deploy reads as a release not to ship.
 
 One refusal deliberately writes **no** quarantine: the armament preflight, which
 refuses the *run* rather than a commit. Its record is
@@ -2340,6 +2515,90 @@ sudo bash /opt/scangrade/deploy/scangrade-db-snapshot.sh --label before-025
 
 It is root-only either way: the archives hold personal data, and `--restore`
 overwrites live data.
+
+### A recovery point, and the ledger that can lose one
+
+Three things put an archive in `/var/backups/scangrade`, and they do not have the
+same lifetime. A deploy's own snapshot guards a release that is either good or
+rolled back the same evening — `--keep 5` is written for exactly that. A
+*migration's* recovery point is the only way back from a schema change that is
+applied once and stays applied, while the snapshots around it are taken many
+times; within five deploys the one archive that could undo a bad `ALTER TABLE` was
+gone, and the ledger went on naming it.
+
+So rotation now honours a pin list, kept **beside the archives it protects**
+(`/var/backups/scangrade/pinned.txt`) so a backup directory moved to a new disk
+arrives with its own pins instead of leaving them behind pointing at names that
+are no longer there. A pinned archive survives every prune, and it does not spend
+one of the `--keep` slots — a protection that costs a backup is one that gets
+turned off. The pin list is optional: a missing one is an empty one, and an
+unreadable one is printed and the prune runs anyway, because a rotation that
+refuses to run over a text file is a disk that fills up.
+
+**The deploy pins what a migration release takes, and says so in the journal:**
+
+```
+snapshot: /var/backups/scangrade/scangrade-db-20261010T010203Z-<commit>.tar.gz
+recovery point pinned: a later release's rotation will keep it
+```
+
+It fails *open* — the archive exists and nothing has been merged yet, so refusing
+here would stop every deploy on the box over the pin's own bookkeeping — but it
+never fails quietly: a pin that could not be written is logged with the command
+that writes it by hand (`db_snapshot.py --pin <archive>`). A pin needs no
+credential at all, so it works on the box whose environment is the thing being
+recovered.
+
+`--status` prints the recovery point under each file, because a record reading
+`applied` looks complete without it:
+
+```
+062_seb_and_environment_signals.sql          adopted 2026-10-09              b83353ffd92c
+                                             recovery point: /var/backups/scangrade/scangrade-db-20261009T094552Z-062_seb_and_environment_signals.tar.gz (pinned)
+```
+
+The three answers it can give are `pinned`, `NOT PINNED — rotation will delete it`
+and `MISSING — <path>`. The second is a recovery point on a countdown and the
+third is not a recovery point at all.
+
+### Recording one that was applied without a witness
+
+`--commit` writes the ledger entry because it watched the migration run. A
+migration applied by hand in the SQL editor, by an older copy of the tool, or from
+**another machine whose ledger never reached this one** has no such witness — so
+the box's ledger says `no record` while the catalogue plainly carries the objects.
+That is the state `--adopt` ends:
+
+```bash
+python deploy/apply_migration.py supabase/migrations/062_x.sql \
+    --adopt <the archive taken at the time>
+```
+
+It runs on the box whose ledger is being corrected, and it does three things in
+the order that leaves nothing half-done:
+
+* **reads the live schema first, and refuses if it contradicts the file.** A
+  record saying "applied" over a schema that does not have the objects is the one
+  lie a ledger must never tell, and it is the state an operator is trying to
+  leave. Same exit code as `--verify`'s gap (**6**), so it cannot be mistaken for
+  a success by a script.
+* **moves the archive** out of wherever it happens to live — a temp directory, a
+  workstation, a scratch checkout — into `/var/backups/scangrade`, validating the
+  copy's size before anything is recorded, and **pins** it. The original is kept
+  unless `--prune-source` asks, because the state this mode starts from is *the
+  only copy is somewhere odd*.
+* **writes an entry that says `adopted`**, with `applied_from` naming where the
+  archive came from and `applied_at` taken from the archive's own filename stamp
+  (an archive with no stamp gets no guessed date; `--applied-at` supplies one).
+  Who wrote the line and who watched the migration run are different facts, and
+  the entry keeps them apart.
+
+Which ledger answers what, then, in one place: **`--status` reports what was
+recorded** (`/var/lib/scangrade-migrations` on the box; `--ledger` points it
+somewhere else, which is what a workstation run does), and **`--verify` reports
+what the schema actually has**. `no record` is *unknown* and never *not applied*,
+so a file the ledger has never heard of can still be `IN` — and `--adopt` is how
+that pair is made to agree, one migration at a time, without re-running anything.
 
 ### Putting the data back
 

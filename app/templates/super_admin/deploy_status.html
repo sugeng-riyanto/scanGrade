@@ -302,6 +302,143 @@
         </div>
     </div>
 
+    <!-- ── every reading the runner's own checker prints, by name ──────── -->
+    {#
+        The card above is a *record*: the runner writes it when it refuses, so before
+        the first refusal there is nothing on this page, and "no release refused for a
+        box-side reason" reads like an all-clear while the next tick is about to be
+        turned away. This is that same checker — the file and the flag the deploy's
+        `armament_preflight` runs — executed read-only here, so the answer exists
+        *before* the refusal it would cause.
+
+        The rows are the checker's own names, not a list kept anywhere: a gate added
+        there arrives here as a row of its own. `seb` is the newest of them and the
+        one with no conf of its own — it borrows the smoke conf's pupil — which is
+        exactly why a box that cannot measure the door is worth naming in the same
+        report as the gates it sits beside.
+
+        The chips are a Jinja map of *literal* class names, like every other colour on
+        this page; the two halves of each entry are the same strings `LEVEL` already
+        uses, so the compiled stylesheet already carries them.
+    #}
+    {% set a = status.armament %}
+    {% set ACHIP = {
+        'ok':     {'box': 'bg-emerald-50 border-emerald-200', 'text': 'text-emerald-700', 'icon': 'fa-circle-check'},
+        'absent': {'box': 'bg-rose-50 border-rose-200',       'text': 'text-rose-700',   'icon': 'fa-circle-xmark'},
+        'note':   {'box': 'bg-surface-100 border-surface-200', 'text': 'text-surface-600', 'icon': 'fa-circle-info'},
+    } %}
+    <div class="card p-5">
+        <div class="flex items-start gap-4">
+            <i class="fas fa-list-check text-surface-500 text-2xl mt-0.5"></i>
+            <div class="min-w-0 flex-1">
+                <h2 class="font-extrabold text-surface-800">
+                    <span x-text="t('Yang Diperiksa Runner — Diukur Sekarang','What the Runner Checks — Read Now')"></span>
+                </h2>
+                <p class="text-sm text-surface-600 mt-1 leading-relaxed">
+                    {% if a.key == 'read' %}
+                    <span x-text="t('Pemeriksa yang sama yang menolak rilis (arm-auto-deploy.sh --check) dijalankan di sini, hanya baca, jadi jawabannya ada sebelum penolakan pertamanya. Setiap baris adalah bacaan pemeriksa itu, apa adanya:','The same checker that refuses a release (arm-auto-deploy.sh --check) is run here, read-only, so the answer exists before the first refusal it would cause. Each row is that checker’s own reading, as it stands:')"></span>
+                    {% elif a.key == 'missing' %}
+                    <span x-text="t('Pemeriksa armament tidak ada di checkout ini, jadi halaman ini tidak bisa mengukur apa pun — dan runner tidak bisa menolak rilis atas dasar itu. Installer membawanya:','The armament checker is not in this checkout, so this page can measure nothing — and the runner cannot refuse a release on that basis either. The installer brings it:')"></span>
+                    {% elif a.key == 'no_bash' %}
+                    <span x-text="t('Pemeriksa itu ada tetapi bash tidak ditemukan di PATH, jadi halaman ini tidak bisa menjalankannya.','The checker is there but bash is not on PATH, so this page cannot run it.')"></span>
+                    {% elif a.key == 'timeout' %}
+                    <span x-text="t('Pemeriksa tidak menjawab dalam batas waktu, jadi ini bukan penilaian atas kotak ini — hanya bahwa halaman tidak menunggu lebih lama.','The checker did not answer within the timeout, so this is not a judgement about this box — only that the page did not wait longer.')"></span>
+                    {% elif a.key == 'unreadable' %}
+                    <span x-text="t('Pemeriksa berjalan tetapi tidak mencetak satu bacaan pun yang bisa dibaca halaman ini. Itu bukan berarti server ini siap.','The checker ran but printed no reading this page can read. That is not the same as this server being armed.')"></span>
+                    {% elif a.key == 'failed' %}
+                    <span x-text="t('Pemeriksa tidak bisa dijalankan dari halaman ini. Itu bukan berarti server ini tidak siap — halaman ini hanya tidak sempat bertanya.','The checker could not be run from this page. That is not the server being unready — this page simply did not get to ask.')"></span>
+                    {% else %}
+                    {# A key this page has never seen is printed as its own token rather than folded into a sentence it might not mean. #}
+                    <code class="font-mono text-xs text-surface-600">{{ a.key }}</code>
+                    {% endif %}
+                    {% if a.detail and a.key != 'read' %}<code class="block mt-2 whitespace-pre-wrap break-all font-mono text-xs text-rose-700">{{ a.detail }}</code>{% endif %}
+                    {% if a.reason %}<code class="block mt-2 font-mono text-xs text-rose-700 break-all">{{ a.reason }}</code>{% endif %}
+                </p>
+
+                {% if a.key == 'read' %}
+                <ul class="mt-4 space-y-2">
+                    {% for line in a.lines %}
+                    {% set C = ACHIP.get(line.state, ACHIP['note']) %}
+                    <li class="border {{ C.box }} rounded-xl px-3 py-2">
+                        <div class="flex items-start gap-3">
+                            <i class="fas {{ C.icon }} {{ C.text }} mt-0.5"></i>
+                            <div class="min-w-0 flex-1">
+                                <div class="flex flex-wrap items-center gap-x-2">
+                                    <span class="text-sm font-bold {{ C.text }}">
+                                        {% if line.name == 'schema' %}
+                                        <span x-text="t('Kontrak skema database','The database schema contract')"></span>
+                                        {% elif line.name == 'smoke' %}
+                                        <span x-text="t('Uji asap semua peran','The per-role smoke test')"></span>
+                                        {% elif line.name == 'claims' %}
+                                        <span x-text="t('Gerbang klaim kapasitas','The published-capacity claims gate')"></span>
+                                        {% elif line.name == 'perf' %}
+                                        <span x-text="t('Gerbang kinerja','The performance gate')"></span>
+                                        {% elif line.name == 'seb' %}
+                                        <span x-text="t('Gerbang pintu SEB','The SEB door gate')"></span>
+                                        {% elif line.name == 'browser' %}
+                                        <span x-text="t('Browser (gate DOM)','A browser (the DOM gates)')"></span>
+                                        {% elif line.name == 'roster' %}
+                                        <span x-text="t('Roster uji beban','The load-test roster')"></span>
+                                        {% elif line.name == 'snapshot' %}
+                                        <span x-text="t('Perintah snapshot database','The database snapshot command')"></span>
+                                        {% elif line.name == 'recover' %}
+                                        <span x-text="t('Tuas pemulihan','The recovery lever')"></span>
+                                        {% elif line.name == 'runner' %}
+                                        <span x-text="t('Runner deploy terpasang','The installed deploy runner')"></span>
+                                        {% elif line.name == 'installer' %}
+                                        <span x-text="t('Installer','The installer')"></span>
+                                        {% elif line.name == 'checkout' %}
+                                        <span x-text="t('Checkout','The checkout')"></span>
+                                        {% else %}
+                                        <code class="font-mono text-xs">{{ line.name }}</code>
+                                        {% endif %}
+                                    </span>
+                                    <span class="text-xs font-bold {{ C.text }}">
+                                        {% if line.state == 'ok' %}
+                                        <span x-text="t('Siap','Armed')"></span>
+                                        {% elif line.state == 'absent' %}
+                                        <span x-text="t('Tidak ada','Missing')"></span>
+                                        {% elif line.state == 'note' %}
+                                        <span x-text="t('Catatan','A reading, not a gate')"></span>
+                                        {% else %}
+                                        {# A state this page has never seen is printed as the checker's own token rather than forced into one of the three it knows. #}
+                                        <code class="font-mono text-xs">{{ line.state }}</code>
+                                        {% endif %}
+                                    </span>
+                                    <code class="font-mono text-[11px] text-surface-400">{{ line.name }}</code>
+                                </div>
+                                {% if line.detail %}<code class="block font-mono text-xs text-surface-600 break-all mt-0.5">{{ line.detail }}</code>{% endif %}
+                            </div>
+                        </div>
+                    </li>
+                    {% endfor %}
+                </ul>
+                <div class="mt-4 space-y-3 text-sm">
+                    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                        <span class="text-surface-500" x-text="t('Kode keluar pemeriksa','The checker’s exit code')"></span>
+                        <span class="text-surface-700">
+                            <code class="font-mono text-xs">{{ a.exit if a.exit is not none else '—' }}</code>
+                            {% if a.armed %}<span class="ml-2 text-xs text-emerald-700 font-bold"><span x-text="t('ARMED','ARMED')"></span></span>
+                            {% else %}<span class="ml-2 text-xs text-rose-700 font-bold"><span x-text="t('TIDAK ARMED','NOT ARMED')"></span></span>{% endif %}
+                        </span>
+                    </div>
+                    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                        <span class="text-surface-500" x-text="t('Dibaca','Read at')"></span>
+                        <span class="text-surface-700">
+                            <code class="font-mono text-xs">{{ a.at or '—' }}</code>
+                            {% if a.duration_ms is not none %}<span class="ml-2 text-xs text-surface-500"><strong>{{ a.duration_ms }}</strong> <span x-text="t('ms','ms')"></span></span>{% endif %}
+                        </span>
+                    </div>
+                    <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1">
+                        <span class="text-surface-500 shrink-0" x-text="t('Pemeriksa','Checker')"></span>
+                        <code class="font-mono text-xs text-surface-700 break-all text-right">{{ a.path }}</code>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
     <!-- ── the refusal that happens before the release moves ────────────── -->
     {#
         The third and last place "why is nothing deploying?" can live, and the one
@@ -753,6 +890,7 @@
                                 {% elif q.gate_key == 'touch_gate' %}<span x-text="t('gerbang sentuh','the touch gate')"></span>
                                 {% elif q.gate_key == 'exam_render_gate' %}<span x-text="t('gerbang render halaman ujian','the exam page render gate')"></span>
                                 {% elif q.gate_key == 'schema_gate' %}<span x-text="t('gerbang skema basis data','the database schema gate')"></span>
+                                {% elif q.gate_key == 'seb_door_gate' %}<span x-text="t('gerbang pintu SEB — kertas wajib dibuka lewat Safe Exam Browser','the SEB door gate — the paper must be opened through Safe Exam Browser')"></span>
                                 {% else %}<span x-text="t('tidak diketahui','unknown')"></span>
                                 {% endif %}
                             </span>

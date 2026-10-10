@@ -229,9 +229,22 @@ else
 # are the demo accounts manage.py seeds.
 SMOKE_BASE_URL="$BASE_DEFAULT"
 
+# SMOKE_INSECURE=true skips TLS verification in every gate that dials
+# SMOKE_BASE_URL. Leave it false on a box with a real certificate; it exists for
+# a deployment served behind a self-signed one, where the gates would otherwise
+# all report "could not measure".
+SMOKE_INSECURE="false"
+
 # SMOKE_ENFORCE=true makes a failed smoke test roll the release back.
 # install-auto-deploy.sh sets it once the logins below are proven to work.
 SMOKE_ENFORCE="false"
+
+# SEB_ENFORCE=true makes the SEB door gate roll the release back when the pupil's
+# paper is not actually gated by the Safe Exam Browser toggle the panel writes.
+# A reading cannot answer that; the gate opens one throwaway paper on the live
+# database and tries it four ways. Armed only after one real measurement here
+# passes, the same discipline SMOKE_ENFORCE above uses.
+SEB_ENFORCE="false"
 
 # Every role the smoke test signs in as, because the gate can only fail on a
 # role it was given a credential for. Measured on a live box 2026-10-02: the
@@ -277,7 +290,8 @@ fi
 #       same discipline the smoke credentials above use, because a gate armed against
 #       a broken measurement would reject good releases.
 say "The browser gates (finger floor, pupil exam render)"
-for pair in 'SG_CHROME=""' 'TOUCH_ENFORCE="false"' 'RENDER_ENFORCE="false"'; do
+for pair in 'SG_CHROME=""' 'TOUCH_ENFORCE="false"' 'RENDER_ENFORCE="false"' \
+            'SEB_ENFORCE="false"'; do
   key=${pair%%=*}
   grep -q "^$key=" "$SMOKE_CONF" || printf '%s\n' "$pair" >> "$SMOKE_CONF"
 done
@@ -333,6 +347,51 @@ else
     *)
       echo "   the pupil exam did NOT render (exit $RENDER_RC) -> RENDER_ENFORCE stays false."
       echo "   Fix the page, then re-run this installer to arm the gate." ;;
+  esac
+fi
+
+# ── 3ac. The SEB door: is the toggle the panel writes actually enforced?
+#       Every other SEB check in this tree is a reading or a self-consistency
+#       test, and none of them can tell whether `require_seb` stops a plain
+#       browser on the release this box serves. The gate answers that the only
+#       way it can be answered: it creates one throwaway paper on the live
+#       database, opens it as the demo pupil with the toggle off, with the toggle
+#       on and no header, with a header hashed over the paper's own Config Key,
+#       and with a header hashed over a different key — then deletes the row. It
+#       is armed only after exit 0 here, exactly like the two DOM gates above,
+#       because a gate armed against a broken measurement would refuse good
+#       releases. Exit 2 is never a verdict, and it is the honest answer for a box
+#       whose demo paper has not been written yet (`manage.py demo-exam`).
+say "The SEB door (the toggle is enforced, measured on the live database)"
+if [ -f "$SMOKE_CONF" ]; then
+  set -a
+  # shellcheck disable=SC1090
+  . "$SMOKE_CONF"
+  set +a
+
+  SEB_ARGS=(--base "${SMOKE_BASE_URL:-}" --student "${SMOKE_MURID:-}" --repo "$REPO")
+  [ "${SMOKE_INSECURE:-}" = "true" ] && SEB_ARGS+=(--insecure)
+
+  set +e
+  SEB_OUT=$(as_owner "$REPO/.venv/bin/python" "$REPO/deploy/seb_door_gate.py" \
+      "${SEB_ARGS[@]}" 2>&1)
+  SEB_RC=$?
+  set -e
+  echo "$SEB_OUT" | tail -4 | sed 's/^/   /'
+
+  case "$SEB_RC" in
+    0)
+      sed -i 's/^SEB_ENFORCE=.*/SEB_ENFORCE="true"/' "$SMOKE_CONF"
+      echo "   the SEB door is enforced on this deployment -> SEB_ENFORCE=true" ;;
+    2)
+      echo "   the SEB door could not be measured (exit 2) -> SEB_ENFORCE stays false."
+      echo "   Nothing about the door was judged. The likeliest cause is the demo"
+      echo "   paper this gate clones: write it with 'manage.py demo-exam', then"
+      echo "   re-run this installer to arm the gate." ;;
+    *)
+      echo "   the SEB door did NOT hold (exit $SEB_RC) -> SEB_ENFORCE stays false."
+      echo "   A gated paper opens in a plain browser, an honest client is refused,"
+      echo "   or another key's header is admitted: fix the door, then re-run." ;;
   esac
 fi
 

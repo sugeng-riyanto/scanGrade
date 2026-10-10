@@ -72,6 +72,21 @@ DEFAULT_KEEP = 5
 REQUEST_TIMEOUT = 120
 ARCHIVE_PREFIX = "scangrade-db-"
 
+#: Archives that rotation must never delete, one filename per line, kept *beside*
+#: the archives they protect so the list and what it names cannot be separated.
+#: The deploy gates read it as `$BACKUP_DIR/pinned.txt`; keeping it inside the backup
+#: directory means a snapshot moved to a new disk arrives with its own pins instead
+#: of leaving them behind pointing at names that are no longer there.
+#:
+#: A pin exists because the two snapshots this box takes have different lifetimes. A
+#: deploy's snapshot is disposable — the release either works or is rolled back the
+#: same evening — and it is exactly what `--keep 5` is for. A migration's recovery
+#: point is the only way back from a schema change, and the migration is applied once
+#: while the snapshots that rotate are taken many times, so within ten days the one
+#: archive that could undo a bad `ALTER TABLE` is gone. A migration's snapshot is
+#: therefore pinned by name; a deploy's is not, and rotation stays what it was.
+PINS_FILE = "pinned.txt"
+
 # `<fk table='profiles' column='id'/>` — how PostgREST documents a foreign key in
 # its OpenAPI spec. It is the only description of the relationship graph
 # reachable without a database connection, and restore order depends on it.
@@ -479,8 +494,77 @@ def make_snapshot(base: str, key: str, out_dir: Path, label: str, keep: int,
     return archive
 
 
+def pins_path(out_dir) -> Path:
+    """Where the pin list lives, given the archive directory."""
+    return Path(out_dir) / PINS_FILE
+
+
+def read_pins(out_dir) -> set[str]:
+    """The archive names rotation must not delete.
+
+    A missing or unreadable file is an empty set *and* a warning, never an
+    exception: a prune that refuses to run because a text file is odd is a disk
+    that fills up, which is the outage the prune exists to prevent. The cost is
+    stated — an unreadable pin list loses the protection, not the run — and it is
+    printed rather than swallowed, because a pin that quietly stopped protecting
+    is the failure this whole mechanism is about.
+    """
+    path = pins_path(out_dir)
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return set()
+    except OSError as exc:
+        print(f"   !! cannot read {path}: {exc} — pins ignored for this prune")
+        return set()
+    return {line.strip() for line in text.splitlines()
+            if line.strip() and not line.lstrip().startswith("#")}
+
+
+def write_pins(out_dir, names) -> Path:
+    """Replace the pin list. Staged beside it and moved into place so no reader
+    ever sees a half-written list (a truncated one protects nothing)."""
+    path = pins_path(out_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    body = "".join(f"{name}\n" for name in sorted(names))
+    staged = path.with_name(path.name + ".new")
+    staged.write_text(body, encoding="utf-8")
+    os.replace(staged, path)
+    return path
+
+
+def pin_archive(archive) -> Path:
+    """Add one archive to the pin list and return where the pin was recorded.
+
+    Idempotent: pinning twice is one entry. Both halves live in the same directory,
+    so this is a no-op when the directory is read-only — the caller decides whether
+    that is worth reporting, because a migration that already succeeded must not
+    fail over its own bookkeeping.
+    """
+    archive = Path(archive)
+    pins = read_pins(archive.parent)
+    pins.add(archive.name)
+    return write_pins(archive.parent, pins)
+
+
+def unpin_archive(archive) -> bool:
+    """Drop an archive from the pin list. Returns whether anything changed."""
+    archive = Path(archive)
+    pins = read_pins(archive.parent)
+    if archive.name not in pins:
+        return False
+    pins.discard(archive.name)
+    write_pins(archive.parent, pins)
+    return True
+
+
 def prune(out_dir: Path, keep: int, keep_name: str = "", quiet: bool = False) -> list[Path]:
-    """Keep the newest `keep` archives. A backup that fills the disk is its own outage.
+    """Keep the newest `keep` *unpinned* archives, plus every pinned one.
+
+    A backup that fills the disk is its own outage, so the newest few stay; a
+    recovery point is not a backup like that, so it counts outside `keep` and its
+    presence never pushes a sibling out early. That is the whole difference: the
+    rotation budget is spent on archives nobody is depending on.
 
     Sorted by write time *and then by name*: two snapshots taken inside the same
     second — which is what a failed deploy followed by a manual retry looks like —
@@ -489,8 +573,11 @@ def prune(out_dir: Path, keep: int, keep_name: str = "", quiet: bool = False) ->
     """
     if keep <= 0:
         return []
-    archives = sorted(out_dir.glob(f"{ARCHIVE_PREFIX}*.tar.gz"),
-                      key=lambda p: (p.stat().st_mtime, p.name), reverse=True)
+    pins = read_pins(out_dir)
+    archives = [p for p in sorted(out_dir.glob(f"{ARCHIVE_PREFIX}*.tar.gz"),
+                                  key=lambda p: (p.stat().st_mtime, p.name),
+                                  reverse=True)
+                if p.name not in pins]
     removed = []
     for stale in archives[keep:]:
         if stale.name == keep_name:
@@ -502,6 +589,8 @@ def prune(out_dir: Path, keep: int, keep_name: str = "", quiet: bool = False) ->
             pass
     if removed and not quiet:
         print(f"   rotated out {len(removed)} old snapshot(s)")
+    if pins and not quiet:
+        print(f"   kept {len(pins)} pinned archive(s)")
     return removed
 
 
@@ -818,6 +907,11 @@ def main() -> int:
                         help=f"snapshots to retain (default: {DEFAULT_KEEP}, 0 = all)")
     parser.add_argument("--label", default="manual",
                         help="what this snapshot belongs to, e.g. the commit")
+    parser.add_argument("--pin", metavar="ARCHIVE", action="append", default=[],
+                        help="never rotate this archive away (repeatable). A migration's"
+                             " recovery point uses this; a deploy's snapshot does not")
+    parser.add_argument("--unpin", metavar="ARCHIVE", action="append", default=[],
+                        help="allow this archive to rotate again (repeatable)")
     parser.add_argument("--restore", metavar="ARCHIVE",
                         help="restore an archive instead of taking one")
     parser.add_argument("--dry-run", action="store_true",
@@ -826,6 +920,25 @@ def main() -> int:
                         help="with --restore: skip capturing the current state first")
     parser.add_argument("--quiet", action="store_true")
     args = parser.parse_args()
+
+    # Pinning touches no database and must work on a box whose service key has
+    # already been rotated away, so it is answered before the credentials are
+    # demanded. It is also the only branch that runs without them.
+    if args.pin or args.unpin:
+        try:
+            for name in args.pin:
+                target = Path(name)
+                if not target.is_file():
+                    print(f"FAILED: no archive at {target}")
+                    return 1
+                print(f"   pinned {pin_archive(target)}")
+            for name in args.unpin:
+                changed = unpin_archive(Path(name))
+                print(f"   unpinned {name}" if changed else f"   was not pinned: {name}")
+            return 0
+        except OSError as exc:
+            print(f"FAILED: {type(exc).__name__}: {exc}")
+            return 1
 
     repo = Path(args.repo)
     base, key = load_credentials(repo)

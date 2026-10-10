@@ -50,10 +50,13 @@ import tempfile
 import time
 import urllib.parse
 
-# The gate reuses the touch gate's browser locator, sign-in and port helper — the
-# same box, the same account shape, the same CDP plumbing, so there is one copy.
+# The gate reuses the touch gate's browser locator, sign-in, port helper and CDP
+# client — the same box, the same account shape, the same socket plumbing, so there
+# is one copy. The CDP client keeps the *events* (`send` used to drop everything but
+# its own reply), which is what makes a page error visible here at all.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from touch_gate import (  # noqa: E402
+    _CDP,
     _free_port,
     browser_launch,
     locate_browser,
@@ -112,48 +115,6 @@ def render_expression() -> str:
         "  };"
         "})()"
     )
-
-
-class _CDP:
-    """A CDP client that keeps the events `send` would otherwise drop.
-
-    Page errors arrive as `Runtime.exceptionThrown` *while* the navigation is in
-    flight, so they cannot be read after the fact with a bare `send` loop that
-    discards everything but its own reply.
-    """
-
-    def __init__(self, ws, events):
-        self.ws = ws
-        self.n = 0
-        self.events = events
-
-    async def send(self, method, **params):
-        self.n += 1
-        ident = self.n
-        await self.ws.send(
-            json.dumps({"id": ident, "method": method, "params": params})
-        )
-        while True:
-            msg = json.loads(await self.ws.recv())
-            if msg.get("method"):
-                self.events.append(msg)
-            elif msg.get("id") == ident:
-                if "error" in msg:
-                    raise RuntimeError(f"{method}: {msg['error']}")
-                return msg.get("result", {})
-
-    async def pump(self, seconds):
-        deadline = time.time() + seconds
-        while True:
-            left = deadline - time.time()
-            if left <= 0:
-                return
-            try:
-                msg = json.loads(await asyncio.wait_for(self.ws.recv(), timeout=left))
-            except asyncio.TimeoutError:
-                return
-            if msg.get("method"):
-                self.events.append(msg)
 
 
 def _exceptions(events):

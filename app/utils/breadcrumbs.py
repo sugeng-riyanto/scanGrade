@@ -148,6 +148,14 @@ ARTIFACT = frozenset({
     # workbook) are not — and neither names a place. A download is a file; the
     # crumb is the import page the workbook is built for.
     "pejabat", "semua",
+    # Safe Exam Browser, three files under one feature. `/panduan/seb/uji.seb` is
+    # the installation-test config a school opens to prove SEB works — spelled
+    # whole, like `learners.zip` below, because `seb` on its own *is* a page (the
+    # teacher's panel) and putting the extension in `ARTIFACT_SUFFIXES` would
+    # silently drop that page's own crumb too. `file` and `seb-file` are the two
+    # doors that stream a `.seb` file to a teacher and to a pupil: a download is a
+    # file, and the crumb is the page the download was offered from.
+    "uji.seb", "file", "seb-file",
 })
 
 #: A *login door*. `/auth/login` and its siblings render a different chrome
@@ -193,6 +201,12 @@ NO_CHROME = frozenset({
     # phone's bottom nav), the trail with it, so there is no crumb to name — and
     # the teacher's way back is the preview page that opened it.
     "paper",
+    # The public Safe Exam Browser guide and the installation check behind it
+    # (`/panduan/seb` and `/panduan/seb/berhasil`). Both render the `content_noauth`
+    # branch — no sidebar, no top bar, and therefore no trail — because they are
+    # read by somebody who has no account yet: a pupil, or a parent, arriving from a
+    # link in a WhatsApp group. There is no crumb to name and nobody to show it to.
+    "panduan", "berhasil",
 })
 
 #: (why, which segments). The prose is the guard's documentation *and* the reason a

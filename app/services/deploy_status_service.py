@@ -88,6 +88,7 @@ import re
 import shutil
 import stat
 import subprocess
+import time
 
 #: Names, not secrets. Each is overridable so the checks can be pointed at a
 #: temporary tree in a test, and at a different layout on a box that has one.
@@ -303,6 +304,13 @@ GATE_KEYS = frozenset({
     #: loaded, that every other gate would pass.
     "exam_render_gate",
     "schema_gate",
+    #: The pupil's paper was opened without the Safe Exam Browser the exam was set
+    #: to require — measured by `deploy/seb_door_gate.py` opening one throwaway
+    #: paper as the smoke conf's `murid`. It is a gate of its own rather than part
+    #: of `smoke_test` because the smoke test can pass on the other five roles
+    #: while the door was never once tried, and "SEB is enforced" would then be
+    #: asserted on the page and measured nowhere.
+    "seb_door_gate",
 })
 
 #: Why the quarantine record itself could not be read. `held` carries no key of
@@ -747,6 +755,161 @@ def unarmed_state(path: pathlib.Path, *, now: _dt.datetime) -> dict:
     # A record with nothing after the timestamp is still a refusal on record; the
     # gap is the checker's silence, not this page's licence to say "absent".
     state["detail"] = report or None
+    return state
+
+
+# ── the checker itself, run from the page ────────────────────────────────────
+#
+# The card above is a *record*: the runner writes it when it refuses, so a box that
+# would be refused has nothing on this page until the first tick that refused it —
+# and that is the moment an operator most wants the answer. Worse, the "no release
+# refused" state reads like an all-clear while the next tick is about to be turned
+# away, because "nothing has been refused yet" and "nothing will be refused" are
+# different sentences that shared one card.
+#
+# So this runs the checker the deploy itself refuses on — `arm-auto-deploy.sh
+# --check`, read-only by contract, the same file and the same flag the runner's
+# `armament_preflight` uses — and reports every reading **by name**, the way the
+# checker spells it. `seb` is here with the rest: the SEB door gate is the newest,
+# it has no conf of its own, and a box that cannot measure the door shows up nowhere
+# else.
+#
+# The names are the checker's, not a list kept here. A gate added to the checker
+# arrives on this page as its own row without this module being edited, which is the
+# property that makes the page a reading of the box rather than a second opinion
+# about it.
+ARMAMENT_READ = "read"
+ARMAMENT_MISSING = "missing"
+ARMAMENT_NO_BASH = "no_bash"
+ARMAMENT_TIMEOUT = "timeout"
+ARMAMENT_FAILED = "failed"
+ARMAMENT_UNREADABLE = "unreadable"
+ARMAMENT_KEYS = frozenset({ARMAMENT_READ, ARMAMENT_MISSING, ARMAMENT_NO_BASH,
+                           ARMAMENT_TIMEOUT, ARMAMENT_FAILED, ARMAMENT_UNREADABLE})
+
+#: One row's verdict. Three states because three are what the checker can say, and
+#: inventing a fourth for a line that carries none is the failure this whole page
+#: exists to avoid: `note` is its inventory lines ("deploy/scangrade-deploy.sh has 6
+#: gate block(s)"), which are a fact and not a readiness.
+ARMAMENT_OK = "ok"
+ARMAMENT_ABSENT = "absent"
+ARMAMENT_NOTE = "note"
+ARMAMENT_STATES = frozenset({ARMAMENT_OK, ARMAMENT_ABSENT, ARMAMENT_NOTE})
+
+#: The checker aligns its readings in a column — `printf '   %-10s : …'` — so a
+#: name is three spaces, a token and a colon, and everything after the colon is kept
+#: as written. Parsing its *sentences* instead would make this module the second
+#: place that knows what the checker means.
+ARMAMENT_LINE_RE = re.compile(r"^ {3}([^\s:]+)\s*:\s*(.*)$")
+#: A page render must not be at the mercy of a checker that prints a novel per line.
+ARMAMENT_LINE_LIMIT = 40
+#: Long enough for a slow box (the checker imports a Python module to locate a
+#: browser and stats a dozen paths) and short enough that a hung one does not hold a
+#: web worker: the route caches this report for 30 s, and the deploy tick is every 2.
+DEFAULT_ARMAMENT_TIMEOUT = 25
+
+
+def _checker_output(bash: str, checker: pathlib.Path, repo: pathlib.Path,
+                    timeout: int) -> tuple[int | None, str, str | None, str | None]:
+    """(exit code, output, the key it could not be run under, the reason).
+
+    `_run` cannot answer this. It folds every failure into the exception's own text
+    and returns it as though the command had spoken, and a *timeout* has to stay
+    apart from a verdict: "the checker could not be run" is a fact about the box,
+    "the checker said not armed" is a judgement, and a judgement that timed out is
+    neither of them.
+
+    The child gets `SG_REPO`, which the checker reads — so the repo this page is
+    describing is the repo it judges, instead of the checker silently judging the
+    default layout wherever `SCANGRADE_REPO` points this module. On the box the two
+    are the same string; in a test they are not. `--check` is read-only by contract
+    and this passes no shell, no redirection and nothing to interpolate.
+    """
+    env = {**os.environ, "SG_REPO": str(repo)}
+    try:
+        done = subprocess.run([bash, str(checker), "--check"], capture_output=True,
+                              text=True, timeout=timeout, env=env)
+    except subprocess.TimeoutExpired as exc:
+        partial = exc.stdout
+        if isinstance(partial, bytes):
+            partial = partial.decode("utf-8", "replace")
+        return None, (partial or ""), ARMAMENT_TIMEOUT, f"no answer within {timeout}s"
+    except OSError as exc:
+        return None, "", ARMAMENT_FAILED, f"{type(exc).__name__}: {exc}"
+    return done.returncode, (done.stdout or "") + (done.stderr or ""), None, None
+
+
+def _armament_lines(text: str) -> list[dict]:
+    """Every reading the checker printed, by name, in the order it printed them."""
+    lines: list[dict] = []
+    for raw in text.splitlines():
+        found = ARMAMENT_LINE_RE.match(raw)
+        if not found:
+            continue
+        detail = found.group(2).strip()
+        head = detail[:7].lower()
+        state = ARMAMENT_OK if head == "present" else (
+            ARMAMENT_ABSENT if head == "missing" else ARMAMENT_NOTE)
+        lines.append({"name": found.group(1), "state": state, "detail": detail})
+        if len(lines) >= ARMAMENT_LINE_LIMIT:
+            break
+    return lines
+
+
+def armament_state(repo: pathlib.Path, *, now: _dt.datetime,
+                   checker: pathlib.Path | None = None,
+                   timeout: int = DEFAULT_ARMAMENT_TIMEOUT,
+                   bash: str | None = None) -> dict:
+    """The checker's own answer, run now, one row per reading it prints.
+
+    Never raises and never guesses: a checker that is not in the checkout, a box
+    with no `bash`, and a run that timed out are three keys with three remedies, and
+    `armed` is `None` — not `False` — whenever the run did not happen, because
+    "this box is not armed" and "this page did not find out" must not render the
+    same.
+    """
+    path = pathlib.Path(checker) if checker is not None \
+        else pathlib.Path(repo) / "deploy" / "arm-auto-deploy.sh"
+    state: dict = {
+        "path": str(path), "repo": str(repo), "key": ARMAMENT_MISSING,
+        "armed": None, "exit": None, "lines": [], "detail": None, "reason": None,
+        "at": None, "duration_ms": None, "timeout_seconds": timeout,
+    }
+    try:
+        present = path.is_file()
+    except OSError as exc:
+        state["key"] = ARMAMENT_FAILED
+        state["reason"] = f"{type(exc).__name__}: {exc}"
+        return state
+    if not present:
+        return state
+
+    found = bash or shutil.which("bash")
+    if not found:
+        state["key"] = ARMAMENT_NO_BASH
+        state["reason"] = "bash is not on PATH, so the checker cannot be run here"
+        return state
+
+    started = time.monotonic()
+    code, text, key, reason = _checker_output(found, path, pathlib.Path(repo), timeout)
+    state["duration_ms"] = int((time.monotonic() - started) * 1000)
+    state["at"] = now.isoformat(timespec="seconds")
+    if key is not None:
+        # A run that did not finish is not a verdict — but its partial output is
+        # still worth showing, because it says how far the checker got.
+        state["key"] = key
+        state["reason"] = reason
+        state["detail"] = text.strip() or None
+        return state
+
+    state["exit"] = code
+    state["armed"] = code == 0
+    state["lines"] = _armament_lines(text)
+    state["detail"] = text.rstrip() or None
+    # Ran, exit code and all, but printed nothing this page can read: a checker that
+    # was replaced by something else, or one whose output changed shape. Saying "not
+    # armed" here would be this module's opinion; saying `unreadable` is the reading.
+    state["key"] = ARMAMENT_READ if state["lines"] else ARMAMENT_UNREADABLE
     return state
 
 
@@ -2757,7 +2920,8 @@ REASON_KEYS = frozenset({
 
 
 def report(*, repo=None, runner=None, snapshot_runner=None, pause_file=None,
-           quarantine_file=None, unarmed_file=None, preflight_file=None,
+           quarantine_file=None, unarmed_file=None, armament_checker=None,
+           preflight_file=None,
            preflight_diff_file=None,
            last_stop_file=None, situation_file=None, request_dir=None,
            release_request=None,
@@ -2790,6 +2954,14 @@ def report(*, repo=None, runner=None, snapshot_runner=None, pause_file=None,
         unarmed_file or os.environ.get("SCANGRADE_UNARMED_FILE")
         or DEFAULT_UNARMED_FILE)
     unarmed = unarmed_state(unarmed_file, now=now)
+    # The checker itself, run now — the per-gate readiness the deploy refuses on,
+    # including the SEB door. It is measured *before* the unarmed record has anything
+    # in it, which is the state the record cannot describe: an operator arming a box
+    # for the first time, or a box that has just lost a gate and has not ticked yet.
+    armament_checker = pathlib.Path(
+        armament_checker or os.environ.get("SCANGRADE_ARMAMENT_CHECKER")
+        or str(repo / "deploy" / "arm-auto-deploy.sh"))
+    armament = armament_state(repo, now=now, checker=armament_checker)
     preflight_file = pathlib.Path(
         preflight_file or os.environ.get("SCANGRADE_PREFLIGHT_FILE")
         or DEFAULT_PREFLIGHT_FILE)
@@ -2878,6 +3050,12 @@ def report(*, repo=None, runner=None, snapshot_runner=None, pause_file=None,
         "refusals_dir": str(refusals_dir),
         "unarmed": unarmed,
         "unarmed_file": str(unarmed_file),
+        # The same checker's answer read *live* rather than from the record it writes
+        # only when it refuses something, so "nothing has been refused" and "nothing
+        # will be" cannot be the same card.
+        "armament": armament,
+        "armament_file": str(armament_checker),
+        "armament_states": ARMAMENT_STATES,
         "preflight": preflight,
         "preflight_file": str(preflight_file),
         # The box's own version of anything a release had to write over, kept where

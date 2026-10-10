@@ -2624,6 +2624,30 @@ if echo "$CHANGED" | grep -qE '^supabase/migrations/[^/]+\.sql$'; then
     SNAPSHOT=$(ls -1t "$BACKUP_DIR"/scangrade-db-*.tar.gz 2>/dev/null | head -1)
     if [ -n "$SNAPSHOT" ]; then
       log "snapshot: $SNAPSHOT"
+      # ── And pinned, in the same breath ─────────────────────────────────────
+      # The two snapshots this box takes have different lifetimes. A deploy's own
+      # snapshot guards a release that is either good or rolled back the same
+      # evening, so `--keep 5` is exactly right for it. This one is a *migration's*
+      # recovery point: the migration is applied once and stays applied, while the
+      # snapshots that rotate are taken many times — so within five deploys the one
+      # archive that could undo a bad `ALTER TABLE` was gone, and the ledger would
+      # have gone on naming it. `pinned.txt` sits beside the archives it protects
+      # and `prune` counts pinned archives outside the budget.
+      #
+      # It fails *open*, and that is deliberate rather than convenient: the archive
+      # has already been taken and nothing has been merged yet, so refusing here
+      # would stop every deploy on this box over the pin's own bookkeeping while the
+      # recovery point it protects still exists. What it must never do is fail
+      # quietly — a pin that stopped protecting is the failure this block is about —
+      # so it is logged with the command that fixes it by hand.
+      if PIN_OUT=$("$REPO/.venv/bin/python" "$SNAPSHOT_CMD" --pin "$SNAPSHOT" 2>&1); then
+        log "recovery point pinned: a later release's rotation will keep it"
+      else
+        log "WARNING: could not pin $SNAPSHOT — rotation may delete it:"
+        [ -n "$PIN_OUT" ] && printf '%s\n' "$PIN_OUT" | sed 's/^/    /'
+        log "    pin it by hand:"
+        log "        $REPO/.venv/bin/python $SNAPSHOT_CMD --pin $SNAPSHOT"
+      fi
     else
       log "snapshot command succeeded but left no archive — refusing to deploy"
       PREFLIGHT_GATE=snapshot_refused PREFLIGHT_EXIT=12 \
@@ -3446,6 +3470,78 @@ if [ "$HEALTHY" = "1" ] && [ -f "$SMOKE_CONF" ]; then
         log "exam render gate FAILED but RENDER_ENFORCE is not 'true' — keeping the release:"
         printf '%s\n' "$RENDER_OUT" | grep -E '^exam render gate|^    - ' | head -8 | sed 's/^/    /'
         log "    to enforce it: RENDER_ENFORCE=\"true\" in $SMOKE_CONF"
+      fi ;;
+  esac
+fi
+
+# ── Gate 4c: is the SEB door *enforced* on the release being served? ────────
+# Every other check of the Safe Exam Browser feature is a reading or a
+# self-consistency test: the generator agrees with itself, the file downloads, the
+# panel renders, the unit tests drive a fake client. None of them can tell whether
+# the toggle is enforced by the app that is answering right now, against the live
+# database — and the failure this closes is the worst shape there is: `require_seb`
+# reads ON, the .seb file downloads, and **a plain browser opens the paper
+# anyway**, with nothing on the box saying so. It was asserted in prose. It is
+# measured here.
+#
+# `deploy/seb_door_gate.py` drives the release that just reloaded as the demo pupil,
+# with a throwaway paper it creates and deletes: the control (require_seb off, the
+# paper opens), a plain browser (302 to the handshake page, which itself answers 200),
+# a header hashed over the exam's own Config Key (200, paper in the body), a header
+# hashed over a *different* key (refused), the three JavaScript claims that must be
+# refused and the honest one that must open the paper with no header at all — and
+# then a **headless browser**, pointed at that handshake page with no SafeExamBrowser
+# API, whose own script has to report the refusal once (the reason the route
+# validates, with the CSRF header), leave one row the server records for that pupil,
+# and be handed the handshake again when it asks for the paper. Each falsification is
+# what makes the observation before it mean anything: without the foreign key "a
+# header passes" and "the right header passes" look identical, and without the
+# browser the page half every WKWebView client depends on is measured only inside a
+# checkout.
+#
+# It runs after the reload, like Gates 4b, 5 and 6, because the door being measured
+# has to be the door the box is answering with — the served-commit gate has already
+# established *which* release that is. It reuses Gate 4's own credentials and base
+# URL, so there is no second conf to keep in step.
+#
+# Exit 3 is the finding — a plain browser opened a gated paper, an honest client
+# was refused, a foreign key was admitted, the handshake road is missing, the shipped
+# page's own script did not report its refusal (or reported it twice, or left no row)
+# — and it rolls back only when the box is armed for it (SEB_ENFORCE), the way the
+# touch and render gates are: a gate that has never been measured on a box must not
+# be able to take the site down on its first run. Exit 2 is "could not measure" (no
+# credentials, no fixture to clone, the app unreachable, a release that predates the
+# SEB door at all, or a client half that could not be taken — no browser on the box,
+# or a database older than the refusal record): never a rollback, said loudly rather
+# than passed off as a pass, and the arms below are what make the difference visible
+# in the journal. Exit 0 now means both halves were measured and both hold.
+if [ "$HEALTHY" = "1" ] && [ -f "$SMOKE_CONF" ]; then
+  SEB_ARGS=(--base "${SMOKE_BASE_URL:-}" --student "${SMOKE_MURID:-}" --repo "$REPO")
+  [ "${SMOKE_INSECURE:-}" = "true" ] && SEB_ARGS+=(--insecure)
+
+  SEB_OUT=$(as_owner "$REPO/.venv/bin/python" "$REPO/deploy/seb_door_gate.py" \
+      "${SEB_ARGS[@]}" 2>&1)
+  SEB_RC=$?
+
+  case "$SEB_RC" in
+    0)
+      log "$(printf '%s\n' "$SEB_OUT" | grep -m1 '^seb door: OK' || echo 'seb door: OK')" ;;
+    2)
+      log "SEB door gate could not measure (exit 2) — this release's SEB door was"
+      log "    NOT measured, and an unmeasured door is not an enforced one:"
+      printf '%s\n' "$SEB_OUT" | grep -E '^seb door: NOT MEASURED' | head -2 | sed 's/^/  /' ;;
+    *)
+      if [ "${SEB_ENFORCE:-false}" = "true" ]; then
+        log "SEB door gate FAILED — the toggle is stored and not enforced on the"
+        log "    release being served:"
+        printf '%s\n' "$SEB_OUT" | grep -E '^seb door' | head -8 | sed 's/^/    /'
+        HEALTHY=0
+        FAIL_REASON="seb door gate (the SEB toggle is not enforced on the served release)"
+        FAIL_DETAIL=$(printf '%s\n' "$SEB_OUT" | grep -E '^seb door: FAILED')
+      else
+        log "SEB door gate FAILED but SEB_ENFORCE is not 'true' — keeping the release:"
+        printf '%s\n' "$SEB_OUT" | grep -E '^seb door' | head -8 | sed 's/^/    /'
+        log "    to enforce it: SEB_ENFORCE=\"true\" in $SMOKE_CONF"
       fi ;;
   esac
 fi

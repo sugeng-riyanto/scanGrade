@@ -2,7 +2,7 @@ import io
 import json
 import os
 from datetime import datetime, timezone
-from flask import Blueprint, render_template, request, redirect, g, jsonify, current_app, make_response, flash
+from flask import Blueprint, render_template, request, redirect, g, jsonify, current_app, make_response, flash, session, url_for
 from app.utils.auth import login_required, get_supabase
 from app.utils.cache import cache_get, cache_set
 from app.utils.helpers import read_with_retry, row_or_none
@@ -19,6 +19,11 @@ from app.services.question_types import (
 from app.services.submission_service import finish_sitting, open_sitting
 from app.services import exam_media
 from app.services import exam_targets
+# Safe Exam Browser: the door a gated paper opens through (`verify`), and the
+# header name the client proves itself with — imported, not spelled, so the door
+# and the client contract cannot drift.
+from app.services import seb_config_key
+from app.services import seb_service
 from app.services import grade_weighting
 from app.services import invigilation
 from app.services import enrollment
@@ -587,6 +592,42 @@ def take_exam(exam_id):
         flash(reason, "error")
         return redirect("/student/exams")
 
+    # ── Safe Exam Browser ────────────────────────────────────────────────────
+    # A gated paper opens only in a client running *this* exam's config. SEB sends
+    # `X-SafeExamBrowser-ConfigKeyHash` = SHA256(absolute URL + Config Key), and the
+    # server recomputes both halves from the stored key — so the check is here, at
+    # the door, rather than in JavaScript on the page: a refusal a page decides is a
+    # refusal a page can be told to skip.
+    #
+    # The URL hashed is `seb_service.start_url`, the *same* function that built the
+    # `startURL` in the downloaded file, and not `request.url` — the latter carries
+    # whatever query string a pupil arrived with, and a hash over that string would
+    # refuse every honest client whose link was forwarded with a parameter on it.
+    #
+    # A plain browser is redirected rather than shown a blank 403: the most likely
+    # reader is a pupil who holds the file and opened the link in the wrong thing,
+    # and the message tells them what to open instead and where the guide is.
+    if seb_service.gated(exam):
+        proven = seb_service.verify(
+            exam, seb_service.start_url(exam_id),
+            request.headers.get(seb_config_key.CONFIG_KEY_HEADER))
+        # A client that arrived without a match is **not refused site unseen**, and
+        # that is the whole point of this fallback: SEB for macOS/iOS runs on
+        # WKWebView, which cannot attach the Config Key to any request, so refusing
+        # on a missing header would make every iPad and every modern macOS client
+        # unable to sit *any* gated paper. It is sent to the handshake page, which
+        # asks the client's own JavaScript API; the claim that comes back is stored
+        # in the signed session and this same check finds it on the next load.
+        #
+        # The claim cannot widen access: it is only ever honoured for the exam it
+        # names, only for a few minutes, and only for a pupil this page already
+        # admitted — `exam_sitting_allowed` above has run by here.
+        if not proven and not seb_service.claim_valid(
+                session.get(seb_service.JS_CLAIM_SESSION_KEY), exam_id):
+            current_app.logger.info(
+                "SEB refused: exam %s without a matching Config Key or claim", exam_id)
+            return redirect(url_for("seb.js_claim", exam_id=exam_id))
+
     # Check if student already reached max attempts (exclude draft + retracted)
     max_attempts = exam.get("max_attempts", 1)
     try:
@@ -1038,10 +1079,29 @@ def submit_exam(exam_id):
         "id,is_published,status,class_ids,target_mode,max_attempts,publish_mode,"
         "total_questions,answer_key,question_types,question_weights,question_pages,"
         "question_scoring,"
-        "start_at,end_at,auto_submit_on_window_end,duration_minutes"
+        "start_at,end_at,auto_submit_on_window_end,duration_minutes,"
+        # Two more columns on a read this route already makes, so the observation
+        # below costs no round trip.
+        "require_seb,seb_config_key"
     ).eq("id", exam_id).single().execute().data
     if not exam:
         return jsonify({"error": "Exam not found"}), 404
+    # ── The Config Key, on the request that *saves* the paper ────────────────
+    # Recorded, never refused, and the reason is the iPad: SEB for macOS/iOS runs
+    # on WKWebView, which cannot attach the header to any request, so a submit that
+    # ended a sitting over a missing header would throw away a completed paper for
+    # every pupil on that platform — with their answers already in the row. The
+    # refusal is the page door's (`take_exam`), which hands such a client to the
+    # JavaScript handshake instead.
+    #
+    # It sits before the first decision on this request on purpose: what the header
+    # showed must not be a fact about a submit that was going to be allowed anyway.
+    # The URL is the client's own (`request.url`), because a client hashes the
+    # address it is fetching — measured against a real SEB 3.10.2 client, see
+    # `docs/features/SEB_PHASE11.md`.
+    seb_service.observe_save_key(
+        exam, exam_id, request.url,
+        request.headers.get(seb_config_key.CONFIG_KEY_HEADER), "submit")
     if not exam.get("is_published") or exam.get("status") != "active":
         return jsonify({"error": "Exam is not available for submission"}), 403
 

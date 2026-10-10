@@ -604,6 +604,26 @@ TRANSLATED = [
     # a pair, including the banner that has to explain, in the reader's own
     # language, that the clock on screen is a simulation and not a fault.
     "teacher/exam_preview.html",
+    # ── Safe Exam Browser (Fase 6-10 of the SEB work) ────────────────────────
+    # The teacher's SEB panel: the switch, the two exit passwords and the file.
+    # Every sentence on it is a pair, and one of them is a warning that has to be
+    # readable *in the reader's own language* — a teacher who turns SEB on without
+    # understanding it locks a class out of its own exam, so the sentence that says
+    # so cannot be copy for one reader.
+    "teacher/seb_panel.html",
+    # The public guide and the installation check. Both render the no-navbar
+    # branch, so their own copy is all a visitor gets: they carry their own
+    # language control (the tutorial chrome) and every string is a pair. A pupil
+    # whose only language is Indonesian meets these pages *first*, which is
+    # exactly why they are not pinned to it.
+    "seb_guide.html",
+    "seb_verified.html",
+    # The handshake page: where a client that cannot send the Config Key header is
+    # sent so the SEB JavaScript API can prove it (WKWebView on macOS/iOS cannot
+    # send the header at all). Its copy is all pairs, and its *script* deliberately
+    # carries none — it only sets a state word, so every sentence a pupil reads
+    # follows the toggle instead of being frozen in the language it was built in.
+    "student/seb_claim.html",
 ]
 # Partials are deliberately *not* on this list, and the assertion below says why:
 # an entry has to extend base.html, because it is the page's own scope that owns
@@ -948,8 +968,28 @@ def test_the_translated_list_only_grows_with_intent():
     the sweep then has nothing to check, so nothing fails, and nobody notices until
     a reader in the other language does. Bumping this number is the deliberate act
     that says "this page is translated now".
+
+    58, not 54: Safe Exam Browser added four pages.
+
+    Three were written as pairs from the start rather than converted later, so none
+    of them ever appeared in a leftover count — the teacher's panel (whose warning
+    that a class can be locked out of its own exam has to be readable *in the
+    reader's own language*) and the two public ones, `seb_guide.html` and
+    `seb_verified.html`, which render the no-navbar branch so their own copy is all
+    a visitor gets.
+
+    The fourth is the handshake page, `student/seb_claim.html`: the one an iPad lands
+    on, and the one transport by which a client that cannot send the Config Key in a
+    header (WKWebView, macOS/iOS 3.0+) can still prove itself. Its copy has to follow
+    the toggle for the same reason the panel's does — a pupil meets it at the door,
+    and a sentence they cannot read there is a pupil asking an invigilator what the
+    screen says — which is also why its *script* carries no sentence at all: it sets
+    a state word, and every word a pupil reads comes from the template as a pair.
+
+    The bump is still the deliberate act: it is what turns the sweep on for each of
+    them.
     """
-    assert len(TRANSLATED) == 54, (
+    assert len(TRANSLATED) == 58, (
         f"{len(TRANSLATED)} pages are on the translated list. Bump this number when "
         f"you translate another one — and if you *removed* a page, put it back, "
         f"because dropping it turns the sweep off for that page: {TRANSLATED}")

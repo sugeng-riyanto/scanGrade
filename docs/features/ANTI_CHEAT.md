@@ -191,3 +191,69 @@ tetapi absen yang melewati jendela tetap ditagih di platform yang seharusnya.
 - Peringatan pertama hanya teguran (tanpa penalti)
 - Guru bisa membatalkan penalti dengan override score manual
 - Siswa bisa mengajukan retraction (penarikan pengumpulan)
+
+## Sinyal Lingkungan Virtual (Laptop/PC virtual, remote desktop) — KONTEKS, BUKAN PELANGGARAN
+
+### Apa yang dikumpulkan
+
+Sekali per attempt, saat murid mulai mengerjakan, halaman ujian mengirim **empat
+pengukuran mentah** ke server. Tidak ada satu pun yang dikirim sebagai vonis:
+
+| Jenis sinyal | Nilai mentah dari klien |
+|---|---|
+| `webgl_renderer` | string renderer WebGL apa adanya |
+| `timer_precision` | langkah resolusi `performance.now()` dalam milidetik |
+| `pixel_ratio` | `window.devicePixelRatio` |
+| `hardware_vs_performance` | jumlah core + frame per detik yang terukur |
+
+**Penilaian hanya di server** (`app/services/environment_signals.py`). Klien tidak
+punya cara memberi skor; kalau klien mengirim `score` atau `level`, nilai itu
+**tidak dibaca sama sekali**.
+
+### Kenapa ini TIDAK PERNAH memicu penalti
+
+Ciri-ciri di atas adalah ciri yang **juga** dimiliki perangkat yang sepenuhnya
+wajar, dan itu bukan catatan kaki — ini alasan utama desainnya:
+
+- Laboratorium komputer sekolah **memang sering berupa VM**; itu cara sekolah
+  dengan tiga puluh workstation mengelolanya.
+- `llvmpipe` / `OffScreen` adalah nasib laptop dengan driver grafis rusak atau
+  browser yang dibatasi kebijakan.
+- Timer yang kasar bisa berarti browser itu sendiri sedang melindungi privasi,
+  atau ada ekstensi privasi yang aktif.
+- `devicePixelRatio` yang tidak lazim bisa berarti murid memperbesar halaman.
+
+Karena itu, **tidak ada satu pun jalur** di sini yang memanggil tangga penalti,
+penguncian (`locked_pending_resume`), atau pengurangan skor. Jaminan itu ditegakkan
+secara struktural, bukan dijanjikan di dokumen ini:
+
+- modulnya **tidak meng-import** `anti_cheat_service`, `resume_code`,
+  `grading_service`, maupun `attempt_status`;
+- tidak ada trigger, kolom, atau policy di `environment_signal` yang melakukan apa
+  pun saat insert;
+- **tidak ada tingkat "tinggi"**. Yang bisa dikatakan paling kuat hanyalah
+  `sedang`, dan halaman menyebutnya "perlu ditinjau", bukan "curang".
+- **Ambang dan bobotnya tinggal di server dan tidak pernah dikirim ke halaman.**
+  Halaman menerima *tingkat* + kunci alasan, bukan angkanya, sehingga halaman tidak
+  bisa membocorkan ambang yang tidak pernah ia terima.
+
+Dijaga oleh `tests/unit/test_environment_signals.py`, yang membaca daftar modul
+terlarang itu dari sumbernya sendiri — sehingga release berikutnya yang menyambung
+sinyal ini ke tangga penalti akan gagal sebelum sampai ke sekolah.
+
+### Cara membacanya saat meninjau
+
+Setiap alasan selalu tampil **berdampingan dengan penjelasan wajar alternatifnya**,
+dan kalimat pembukanya menyatakan bahwa ciri ini lazim di perangkat lab maupun
+perangkat lama. Yang dicari guru bukan satu murid yang punya ciri itu, melainkan
+**pola** — misalnya beberapa murid sekamar yang sama-sama melaporkan renderer
+perangkat lunak pada jam yang sama.
+
+### Batas yang masih ada (jujur)
+
+- Sinyal ini **tidak** menyimpan riwayat perangkat sebelumnya, jadi "tidak ada
+  sinyal" berarti "tidak terpantau", bukan "tidak memakai VM".
+- Pengumpul ini berjalan sekali di awal attempt; VM yang dinyalakan di tengah ujian
+  tidak terlihat.
+- Teknik anti-deteksi (mis. spoofing renderer) tetap bisa mengelabui sinyal ini —
+  ini konteks, bukan kontrol.

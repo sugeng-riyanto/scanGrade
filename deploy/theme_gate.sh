@@ -228,6 +228,54 @@ if [ "$SCHEMA_RC" -eq 1 ]; then
   exit 1
 fi
 
+# ── The same question through the other door: has this repository's SQL been ─
+# ── applied to the database it names? ───────────────────────────────────────
+# The check above reads the *files*, and it is happy either way. This one asks the
+# live schema, and it is the only thing in this repository that can see a migration
+# it **carries** and the database never got — written, reviewed, merged, never pasted
+# into the SQL Editor. That state is silent from every other direction: the offline
+# half reads only the files, the app imports and starts, and the first query that
+# names the missing object is refused (PGRST205 for a table, 42703 for a column) into
+# an empty page instead of an error. `--require-applied` exits 1 exactly then.
+#
+# Exit 2 (no SQL to read, no credentials, an API that will not answer) is a property
+# of THIS BOX, and it must not wear this gate's exit 2: the deploy reads exit 2 as
+# "this is not a release to ship" and rolls it back and quarantines it, so a laptop
+# with no .env — or one Supabase call that timed out — would take a good release down.
+# It is said loudly and the release carries on, which is the rule every gate here
+# follows about "could not measure".
+# applied_check:start
+# What the success line may claim, decided by whether the question was answered at
+# all. A gate that says "every object this repository declares is in the live schema"
+# on a box with no credentials is claiming a measurement nobody took — the same
+# defect as a page that reports a number it never read.
+APPLIED_CLAIM=""
+APPLIED_OUT=$("$PY" "$REPO/deploy/schema_contract.py" --require-applied 2>&1)
+APPLIED_RC=$?
+if [ "$APPLIED_RC" -eq 1 ]; then
+  echo >&2
+  echo "theme gate: FAILED — this repository declares a table or a column the live" >&2
+  echo "            database does not have, so a migration it carries was never applied." >&2
+  echo "            Nothing is broken yet and every page still answers 200: the query that" >&2
+  echo "            names it is refused (PGRST205 / 42703) and renders empty. Apply the" >&2
+  echo "            migration, then commit this again:" >&2
+  echo "                .venv/bin/python deploy/apply_migration.py <file>.sql --commit" >&2
+  echo "            If it was applied moments ago, PostgREST may not have reloaded its" >&2
+  echo "            schema cache yet — re-run this before looking anywhere else." >&2
+  echo "$APPLIED_OUT" | sed 's/^/    /' >&2
+  exit 1
+fi
+if [ "$APPLIED_RC" -eq 2 ]; then
+  echo "theme gate: the live schema was NOT asked whether this release's SQL has been" >&2
+  echo "            applied — no credentials here, or the API could not answer. That is a" >&2
+  echo "            property of this box, not of the release, so nothing is refused." >&2
+  echo "$APPLIED_OUT" | sed 's/^/    /' >&2
+fi
+if [ "$APPLIED_RC" -eq 0 ]; then
+  APPLIED_CLAIM=", and every table and column this repository declares is one the live database already has"
+fi
+# applied_check:end
+
 if [ "$RC" -ne 0 ] && [ "$RC" -ne 5 ] && [ "$CSS_RC" -eq 0 ]; then
   echo "$CSS_OUT"   # the stylesheet half is fine; say so before the failure
 fi
@@ -255,7 +303,7 @@ if [ "$RC" -eq 0 ]; then
   if [ "$CSS_RC" -eq 0 ]; then
     echo "$SCHEMA_OUT"
     echo "$CSS_OUT"
-    echo "theme gate: OK — readable in both themes, every named utility is compiled, the committed stylesheet is the one the templates produce, the app's own stylesheet stays a cached file, every file under /static/ is one the app asks for and in a commit, every page declares the language of its own copy, no template translates less than it did, no tracked file carries a service-role key or a hard-coded Flask secret, and every table, column and policy the code names is one this repository declares, with every role it compares against one the database holds, and every facility the landing page advertises one this repository can show"
+    echo "theme gate: OK — readable in both themes, every named utility is compiled, the committed stylesheet is the one the templates produce, the app's own stylesheet stays a cached file, every file under /static/ is one the app asks for and in a commit, every page declares the language of its own copy, no template translates less than it did, no tracked file carries a service-role key or a hard-coded Flask secret, and every table, column and policy the code names is one this repository declares, with every role it compares against one the database holds${APPLIED_CLAIM}, and every facility the landing page advertises one this repository can show"
     exit 0
   fi
   echo >&2

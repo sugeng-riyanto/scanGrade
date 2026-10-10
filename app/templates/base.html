@@ -536,7 +536,28 @@ window.sgSavePrefs = function (patch) {
                    the module. A test holds the two together: every page segment the
                    app serves as a GET route is named below (or is a machine
                    endpoint/artifact listed in the module), so a new page cannot
-                   quietly arrive without a name. #}
+                   quietly arrive without a name.
+
+                   `seb` is named because `/teacher/exams/<id>/seb` is a real page
+                   that renders this chrome. The *same word* also appears on
+                   `/panduan/seb`, which renders no trail at all — that one is
+                   dropped in the module's `NO_CHROME`, and the two do not conflict:
+                   a segment only needs a name, and naming it costs the public page
+                   nothing.
+
+                   `seb-claim` is named for the same reason and is *not* dropped:
+                   `/student/exams/<id>/seb-claim` renders this chrome, and it is a
+                   real page rather than a machine endpoint — the one an iPad lands
+                   on, where the client's own JavaScript API answers with the Config
+                   Key the server then checks. A pupil who is stuck there (a `.seb`
+                   file opened in an ordinary browser, say) needs the trail back
+                   more than any other reader, so its crumb says what it is
+                   instead of title-casing the slug.
+
+                   Note for the next editor: this is a Jinja `{% set %}` expression,
+                   so a `#` comment cannot go inside it — Jinja has no comment
+                   syntax inside an expression, and one would break the parse of
+                   the whole chrome. #}
                 {% set _crumb_areas = {
                     'admin_sekolah': ('Admin Sekolah', 'School Admin'),
                     'principal': ('Kepala Sekolah', 'Principal'),
@@ -584,6 +605,8 @@ window.sgSavePrefs = function (patch) {
                     'grading-queue': ('Antrean Koreksi', 'Grading Queue'),
                     'guide': ('Panduan', 'Guide'),
                     'import': ('Impor', 'Import'),
+                    'seb': ('Safe Exam Browser', 'Safe Exam Browser'),
+                    'seb-claim': ('Buka dengan SEB', 'Open with SEB'),
                     'invigilation': ('Pengawasan Ujian', 'Invigilation'),
                     'invoices': ('Tagihan', 'Invoices'),
                     'logs': ('Log Audit', 'Audit Log'),

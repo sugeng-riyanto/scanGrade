@@ -102,6 +102,19 @@ def _check_types(value, path: str = "") -> None:
             _check_types(item, f"{path}[{index}]")
 
 
+def check_types(settings) -> None:
+    """Refuse a float (or anything else JSON cannot carry) — the public door.
+
+    Exposed so the generator can refuse **at the moment it builds a value**, where
+    the error can name the setting, instead of leaving the refusal to the hashing
+    step: a paper that cannot be keyed is a paper a school cannot sit, and "the
+    hashing step threw somewhere in that dict" is not a diagnosis. There is one
+    implementation behind it, deliberately — a second float check here would be a
+    second rule, and the two would drift.
+    """
+    _check_types(settings)
+
+
 def _prune(value):
     """Apply rules 1 and 5, recursively: no originator, and no empty dictionary."""
     if isinstance(value, dict):
@@ -246,6 +259,6 @@ def header_matches(request_url: str, header_value: str, key: str) -> bool:
 
 __all__ = [
     "CONFIG_KEY_HEADER", "ORIGINATOR_KEY", "ConfigKeyError",
-    "absolute_url_without_fragment", "config_key", "header_matches",
+    "absolute_url_without_fragment", "check_types", "config_key", "header_matches",
     "request_hash", "seb_json",
 ]

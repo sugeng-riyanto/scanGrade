@@ -10,8 +10,9 @@
 # *before touching anything* — and in a screenful of output that reads as done.
 # That is the shape of the attempt that was reported as complete while the box
 # was still running a copy of the deploy script installed on 12 September: a file
-# that knows no gate at all (no theme, claims, performance or quarantine block),
-# with no /etc/scangrade-claims.conf, no /etc/scangrade-perf.conf and no roster.
+# that knows no gate at all (no theme, claims, performance, quarantine or SEB-door
+# block), with no /etc/scangrade-claims.conf, no /etc/scangrade-perf.conf and no
+# roster.
 #
 # So this wrapper refuses to be ambiguous. It prints what the box is running
 # before and after, elevates once when it has to ask for a password, places the
@@ -60,7 +61,10 @@ UNRENDERED='^[[:space:]]*REPO="@REPO@"'
 # The blocks a deploy script written after this one carries. A copy that predates
 # them runs every release without checking any of them, which is the thing worth
 # saying out loud; the names match the fail reasons the status page reports.
-GATE_BLOCKS="theme_gate claims_gate perf_gate quarantine schema_gate"
+# `seb_door_gate` is the newest of them, and it is the one whose absence is easiest
+# to live with: a copy without it deploys every release having never opened a gated
+# paper, so "SEB is enforced" would be asserted on that box and measured on none.
+GATE_BLOCKS="theme_gate claims_gate perf_gate quarantine schema_gate seb_door_gate"
 
 CHECK=0
 for arg in "$@"; do
@@ -188,10 +192,50 @@ report_state() {
     fi
   done
 
+  # The SEB door gate is the one gate whose verdict cannot be read anywhere else in
+  # this report. The panel can render, the file can download and the toggle can be
+  # stored while a plain browser opens the paper — the claim that gate exists to
+  # measure instead of assert. It needs two things the box already has a place for:
+  # the gate itself, and the smoke conf's `murid` account, because the pupil whose
+  # paper it opens is the one the smoke test signs in as. A conf without
+  # SMOKE_MURID is a skip, not a pass — and it is named on its own line because the
+  # smoke test can pass on the other five roles while the SEB gate measures nothing
+  # at all. Nothing else is needed: it brings its own throwaway paper, and the browser
+  # its client half drives the handshake page in is the same one the two DOM gates
+  # require below — a box with no browser already refuses there, so a browser is not
+  # counted twice. That half's arrival is why this line no longer says the SEB gate
+  # measures in no browser: it did, until the page's own script was measured too.
+  local seb_enf
+  seb_enf=$(sed -n 's/^SEB_ENFORCE=//p' "$SMOKE_CONF" 2>/dev/null | tr -d '"' | head -1)
+  if [ ! -f "$REPO/deploy/seb_door_gate.py" ]; then
+    printf '   %-10s : MISSING — %s/deploy/seb_door_gate.py, so "SEB is\n' \
+      "seb" "$REPO"
+    echo  '                enforced" would be asserted on every release rather than'
+    echo  '                measured. Pull the checkout, or re-run the installer.'
+    armed=0
+  elif [ ! -f "$SMOKE_CONF" ]; then
+    printf '   %-10s : MISSING (%s) — the gate signs in as its SMOKE_MURID\n' \
+      "seb" "$SMOKE_CONF"
+    armed=0
+  elif ! grep -qE '^SMOKE_MURID=' "$SMOKE_CONF" 2>/dev/null; then
+    printf '   %-10s : MISSING — no SMOKE_MURID in %s, so the gate has no\n' \
+      "seb" "$SMOKE_CONF"
+    echo  "                pupil to open a paper as and reports \"could not"
+    echo  "                measure\" on every release. Add the demo pupil as"
+    echo  "                email:password (the smoke test already signs in as it)."
+    armed=0
+  else
+    printf '   %-10s : present — one throwaway paper as the smoke pupil, then the handshake page in a browser; enforcement %s\n' \
+      "seb" "${seb_enf:-unset}"
+  fi
+
   # A browser is what the two DOM gates measure in — the touch gate's finger floor
-  # and the render gate's blank-exam check. Both answer "could not measure" and keep
-  # the release without one, so a box with no browser ships every release having laid
-  # out no page, exactly the silent skip the confs above are counted for. The gates'
+  # and the render gate's blank-exam check — and, since the SEB door gate grew its
+  # client half, the one the shipped handshake page is driven in as well. All three
+  # answer "could not measure" and keep the release without one, so a box with no
+  # browser ships every release having laid out no page and with nobody having
+  # measured what that page's own script does, exactly the silent skip the confs
+  # above are counted for. The gates'
   # own `locate_browser` is imported rather than restated, so a box this check calls
   # armed is armed by their own definition — `SG_CHROME` authoritative, then the
   # usual names and install paths.
@@ -209,7 +253,8 @@ print(locate_browser() or "")' "$REPO/deploy" 2>/dev/null)
   else
     printf '   %-10s : MISSING — no Chrome/Chromium, so the finger-floor and exam\n' \
       "browser"
-    echo "                render gates skip every release without laying out a page."
+    echo "                render gates skip every release without laying out a page,"
+    echo "                and the SEB door gate's client half goes unmeasured."
     echo "                install one, or set SG_CHROME"
     armed=0
   fi
@@ -362,7 +407,10 @@ elif [ "$state" != "0" ]; then
   echo "INSTALLER OK, BUT THE BOX IS NOT FULLY ARMED — read the lines above."
   echo "A gate that says 'cannot measure' printed its own reason in $LOG."
 else
-  echo "ARMED — the runner renders from the checkout and all five gates have what"
-  echo "they need. Prove it bites with the drill in docs/AUTO_DEPLOY.md."
+  # "Every gate above", not a count: the number has been wrong twice (four, then
+  # five) and a sentence that has to be re-typed for each new gate is one that will
+  # describe the box wrongly on the release that adds it.
+  echo "ARMED — the runner renders from the checkout and every gate above has what"
+  echo "it needs. Prove it bites with the drill in docs/AUTO_DEPLOY.md."
 fi
 exit "$rc"

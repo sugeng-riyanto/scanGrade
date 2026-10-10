@@ -263,11 +263,32 @@ def sign_in(base_url, teacher, insecure, session=None):
 
 
 class _CDP:
-    """A minimal Chrome DevTools Protocol client over one websocket."""
+    """The one Chrome DevTools Protocol client in this tree, over one websocket.
 
-    def __init__(self, ws):
+    Three gates drive a headless browser — this one, `exam_render_gate.py` and the
+    client half of `seb_door_gate.py` — and they need two different things from the
+    same socket: the reply to a call, and the **events** the browser emits while a
+    page loads. A page error and a request the page's own script made both arrive
+    *while* a navigation is in flight, so they cannot be read afterwards: a `send`
+    whose reply has already landed would be waiting for the next message instead.
+    `send` therefore keeps every message that is not its own reply, and `pump`
+    waits without asking for anything.
+
+    The copies this replaces had drifted into two classes — one that kept events
+    and one that dropped them — which is how one gate ends up blind to the event
+    the other one watches for. `events` is optional so a caller that only issues
+    commands does not have to keep a list.
+    """
+
+    def __init__(self, ws, events=None):
         self.ws = ws
         self.n = 0
+        self.events = events if events is not None else []
+
+    def _keep(self, msg):
+        """An event, kept. Anything with a `method` is one; a reply is not."""
+        if msg.get("method"):
+            self.events.append(msg)
 
     async def send(self, method, **params):
         self.n += 1
@@ -281,6 +302,7 @@ class _CDP:
                 if "error" in msg:
                     raise RuntimeError(f"{method}: {msg['error']}")
                 return msg.get("result", {})
+            self._keep(msg)
 
     async def wait_event(self, name, timeout=45):
         deadline = time.time() + timeout
@@ -291,6 +313,24 @@ class _CDP:
             msg = json.loads(await asyncio.wait_for(self.ws.recv(), timeout=left))
             if msg.get("method") == name:
                 return msg
+            self._keep(msg)
+
+    async def pump(self, seconds):
+        """Read whatever the browser emits for `seconds`, asking for nothing.
+
+        A timeout is the normal end of this call, not a failure: it means the
+        browser had nothing else to say within the window.
+        """
+        deadline = time.time() + seconds
+        while True:
+            left = deadline - time.time()
+            if left <= 0:
+                return
+            try:
+                msg = json.loads(await asyncio.wait_for(self.ws.recv(), timeout=left))
+            except asyncio.TimeoutError:
+                return
+            self._keep(msg)
 
 
 def _free_port():

@@ -82,6 +82,36 @@ EXEMPT = {
         "authorises a fresh sitting at a new year's door; a closed year's own rows "
         "are not touched",
 
+    # ── seb.py: Safe Exam Browser's mutating doors ──
+    # The feature writes two columns on the *exam row* (`require_seb`,
+    # `seb_config_key`), a credential row, its own access log, one pupil's
+    # device observations and one refusal row. None of those is a mark, an
+    # answer or a year's row.
+    "seb_bp /teacher/exams/<exam_id>/seb/enable":
+        "switches a paper's SEB requirement on — two columns on the exam row, "
+        "touching no sitting and no mark",
+    "seb_bp /teacher/exams/<exam_id>/seb/disable":
+        "switches that same requirement off; the credential is kept, not deleted",
+    "seb_bp /teacher/exams/<exam_id>/seb/reissue":
+        "mints a new .seb file and two new exit passwords for a paper; the papers "
+        "already marked are untouched, and an exam being sat is not re-marked",
+    "seb_bp /teacher/exams/<exam_id>/seb/password":
+        "reads one stored password out to an authorised reader — a POST so it "
+        "cannot be reached by a link or a prefetch; the only row it writes is its "
+        "own audit entry",
+    "seb_bp /api/seb/environment":
+        "records a pupil's own device observations against the sitting they are "
+        "in; a closed year has no sitting to attach one to, and the endpoint "
+        "refuses with 409 rather than inventing one",
+    "seb_bp /student/exams/<exam_id>/seb-claim":
+        "writes nothing at all: the claim it stores is a fact about this visit "
+        "(which paper, when, by which transport) in the signed session cookie, "
+        "and no row is written, updated or read for writing",
+    "seb_bp /student/exams/<exam_id>/seb-claim/refused":
+        "records one refusal in its own table (`seb_door_refusal`): a pupil who "
+        "could not get in, when, and why. It is deliberately NOT a penalty — no "
+        "mark, no ladder, no lockout — so there is no year's data here to protect",
+
     # ── exam.py: the API doors for a paper ──
     "exam_bp /": "creates a NEW paper; nothing to date yet",
 

@@ -2477,3 +2477,177 @@ class TestTheRebaselineRequest:
             request_file=str(requests / "rebaseline"), quarantine_file=str(record))
         assert result["key"] == status.REBASELINE_NOT_WRITABLE
         assert result["written"] is False and result["detail"]
+
+
+# ── the checker the deploy itself refuses on ─────────────────────────────────
+#
+# The card above is the armament *record*: the runner writes it when it refuses a
+# whole run, so before the first refusal it is blank, and "nothing refused yet"
+# and "nothing will be refused" are different sentences that used to share one
+# card. The readings here come from running the same checker, read-only, now.
+#
+# So these tests drive the real `armament_state` against fake checkers and the
+# real template, and the property that matters is the one the docstring claims:
+# the rows are the checker's own names — including `seb`, the newest gate and the
+# one with no conf of its own — and not a list this module keeps.
+
+ARMAMENT_ROWS = """\
+echo '   started as : test'
+echo '   schema     : present — the schema gate can hold a release against the catalogue'
+echo '   seb        : MISSING — no SMOKE_MURID in /etc/scangrade-smoke.conf, so the gate has no'
+echo '                pupil to open a paper as'
+echo '   in the repo: deploy/scangrade-deploy.sh has 6 gate block(s)'
+"""
+
+
+def arm_checker(tmp_path: Path, body: str) -> Path:
+    """A checker at the path `armament_state` looks in, so the file is the fixture."""
+    path = tmp_path / "deploy" / "arm-auto-deploy.sh"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("#!/usr/bin/env bash\n" + body, encoding="utf-8")
+    return path
+
+
+def arm_state(tmp_path: Path, body: str, *, timeout: int = 25, bash=None):
+    return status.armament_state(
+        tmp_path, now=status._dt.datetime.now(status._dt.timezone.utc),
+        checker=arm_checker(tmp_path, body), timeout=timeout, bash=bash)
+
+
+def arm_rows(html: str) -> list[str]:
+    """The checker names the card printed, in the order it printed them.
+
+    The markup carries the name twice on purpose — once as the reader's label and
+    once as the checker spelling in mono — so this reads the mono half, which is
+    the one that has to be the checker's own token.
+    """
+    return re.findall(r'text-\[11px\] text-surface-400">([^<]+)<', html)
+
+
+class TestTheCheckerItRefusesOn:
+    def test_a_missing_checker_is_not_a_verdict(self, tmp_path):
+        state = status.armament_state(
+            tmp_path, now=status._dt.datetime.now(status._dt.timezone.utc))
+        assert state["key"] == status.ARMAMENT_MISSING
+        assert state["armed"] is None, '"not armed" and "did not find out" are different'
+        assert state["lines"] == [] and state["exit"] is None
+        assert state["path"].endswith("arm-auto-deploy.sh"), (
+            "the card tells the operator which file it looked for")
+
+    def test_no_bash_is_its_own_key(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(status.shutil, "which", lambda _name: None)
+        state = arm_state(tmp_path, ARMAMENT_ROWS)
+        assert state["key"] == status.ARMAMENT_NO_BASH
+        assert state["armed"] is None and state["reason"]
+
+    def test_each_row_carries_the_state_the_checker_printed(self, tmp_path):
+        state = arm_state(tmp_path, ARMAMENT_ROWS + "exit 1\n")
+        assert state["key"] == status.ARMAMENT_READ
+        assert state["armed"] is False, "exit 1 is the checker saying NOT ARMED"
+        assert state["exit"] == 1
+        by_name = {row["name"]: row for row in state["lines"]}
+        assert by_name["schema"]["state"] == status.ARMAMENT_OK
+        assert by_name["seb"]["state"] == status.ARMAMENT_ABSENT
+
+    def test_the_seb_gate_arrives_with_the_others(self, tmp_path):
+        """The claim the card rests on: a gate added to the checker is a row here."""
+        state = arm_state(tmp_path, ARMAMENT_ROWS + "exit 1\n")
+        assert "seb" in [row["name"] for row in state["lines"]], (
+            "the SEB door is the one gate a box could be missing with nothing else "
+            "on this page to say so")
+
+    def test_a_name_this_module_has_never_seen_is_still_a_row(self, tmp_path):
+        state = arm_state(tmp_path, "echo '   wombat     : MISSING (x)'\nexit 1\n")
+        assert [row["name"] for row in state["lines"]] == ["wombat"], (
+            "the names are the checker's, not a list kept in Python")
+        assert state["lines"][0]["state"] == status.ARMAMENT_ABSENT
+
+    def test_it_runs_the_checker_against_the_repo_it_describes(self, tmp_path):
+        state = arm_state(tmp_path, 'echo "   args: $* (SG_REPO=$SG_REPO)"\n')
+        assert "--check" in state["detail"], (
+            "the page must run the read-only flag the deploy's preflight runs")
+        assert as_path(str(tmp_path)) in as_path(state["detail"]), (
+            "the child needs SG_REPO, or it judges the default layout instead")
+
+    def test_a_run_that_prints_nothing_readable_is_not_not_armed(self, tmp_path):
+        state = arm_state(tmp_path, "echo 'nothing like a reading'\nexit 1\n")
+        assert state["key"] == status.ARMAMENT_UNREADABLE
+        assert state["armed"] is False, "it ran and answered; only its shape is unknown"
+
+    def test_a_timeout_is_not_a_verdict(self, tmp_path):
+        state = arm_state(tmp_path, "sleep 5\n", timeout=1)
+        assert state["key"] == status.ARMAMENT_TIMEOUT
+        assert state["armed"] is None and "1s" in state["reason"]
+
+    def test_a_checker_that_cannot_be_run_is_a_key_and_not_an_exception(self, tmp_path):
+        state = arm_state(tmp_path, ARMAMENT_ROWS,
+                          bash=str(tmp_path / "not-a-shell"))
+        assert state["key"] == status.ARMAMENT_FAILED
+        assert state["armed"] is None and state["reason"]
+
+    def test_the_report_carries_the_reading(self, tmp_path):
+        report = status.report(repo=tmp_path, runner="/nonexistent",
+                               snapshot_runner="/nonexistent",
+                               pause_file="/nonexistent",
+                               armament_checker=arm_checker(tmp_path, ARMAMENT_ROWS))
+        assert report["armament"]["key"] == status.ARMAMENT_READ
+        assert report["armament"]["armed"] is True, "no exit line means exit 0"
+
+    def test_every_key_this_can_reach_has_a_sentence_in_the_template(self):
+        text = TEMPLATE.read_text(encoding="utf-8")
+        found = set(re.findall(r"a\.key == '([a-z_]+)'", text))
+        assert found == status.ARMAMENT_KEYS, (
+            f"sayable but never reached: {sorted(found - status.ARMAMENT_KEYS)}; "
+            f"reached but unsayable: {sorted(status.ARMAMENT_KEYS - found)}")
+
+    def test_every_row_state_has_a_sentence(self):
+        text = TEMPLATE.read_text(encoding="utf-8")
+        found = set(re.findall(r"line\.state == '([a-z]+)'", text))
+        assert found == status.ARMAMENT_STATES, (
+            f"service-only: {sorted(status.ARMAMENT_STATES - found)}; "
+            f"template-only: {sorted(found - status.ARMAMENT_STATES)}")
+
+
+class TestTheArmamentCardOnThePage:
+    def rendered(self, app, tmp_path, armament):
+        report = status.report(repo=tmp_path, runner="/nonexistent",
+                               snapshot_runner="/nonexistent",
+                               pause_file="/nonexistent")
+        return render_status(app, {**report, "armament": armament})
+
+    def test_it_shows_every_reading_by_name(self, app, tmp_path):
+        armament = arm_state(tmp_path, ARMAMENT_ROWS + "exit 1\n")
+        html = self.rendered(app, tmp_path, armament)
+        assert arm_rows(html) == ["schema", "seb"], (
+            "the checker's own names are what the reader matches against the console")
+        assert "The database schema contract" in html
+        assert "The SEB door gate" in html, (
+            "the newest gate is the one a box can be missing in silence")
+        assert "no SMOKE_MURID" in html, "the checker's words travel as data"
+
+    def test_a_missing_row_reads_as_missing_and_a_present_one_does_not(self, app, tmp_path):
+        html = self.rendered(app, tmp_path,
+                             arm_state(tmp_path, ARMAMENT_ROWS + "exit 1\n"))
+        assert "Missing" in html and "Armed" in html
+        assert "NOT ARMED" in html, "the exit code is not left for the reader to infer"
+
+    def test_it_says_which_file_it_ran_and_when(self, app, tmp_path):
+        # Scoped to this card: the report carries timestamps and paths of its own,
+        # so a whole-page search would be satisfied by another card's clock.
+        armament = arm_state(tmp_path, ARMAMENT_ROWS)
+        html = self.rendered(app, tmp_path, armament)
+        start = html.index("The checker\u2019s exit code")
+        card = html[start:start + 6000]
+        assert armament["path"] in card, "the file that was read is named"
+        assert armament["at"] in card, "a reading passed off as live is the defect"
+        assert "ms" in card
+
+    def test_a_checker_it_could_not_run_says_so_rather_than_not_armed(self, app, tmp_path):
+        armament = status.armament_state(
+            tmp_path, now=status._dt.datetime.now(status._dt.timezone.utc))
+        html = self.rendered(app, tmp_path, armament)
+        assert "The armament checker is not in this checkout" in html
+        assert arm_rows(html) == []
+        assert "NOT ARMED" not in html, (
+            "a page that did not find out must not render a verdict")
+

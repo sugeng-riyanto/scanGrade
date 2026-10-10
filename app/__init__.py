@@ -750,6 +750,7 @@ def _register_blueprints(app):
     from app.routes.guide import guide_bp
     from app.routes.students import student_bp as students_bp
     from app.routes.media import media_bp
+    from app.routes.seb import seb_bp
 
     app.register_blueprint(super_bp)
     app.register_blueprint(public_bp)
@@ -773,6 +774,12 @@ def _register_blueprints(app):
     # same URL is handed to a pupil sitting the paper and to the teacher previewing
     # it, and the token — not the path — says who may fetch it.
     app.register_blueprint(media_bp)
+    # Safe Exam Browser mounts with no prefix: it is one feature with three
+    # audiences — a teacher panel, a pupil's file and a page that must work
+    # without a login — so each route carries the path its reader expects
+    # (`/teacher/…`, `/student/…`, `/panduan/…`) rather than a prefix that would
+    # have to lie about one of them.
+    app.register_blueprint(seb_bp)
 
     # Whiteboard blueprints (registered but heavy imports deferred)
     try:
