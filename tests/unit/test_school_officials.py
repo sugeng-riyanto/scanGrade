@@ -9,8 +9,8 @@ jalur yang membuat peran itu nyata:
 * **namanya sah** — `profiles_role_check` (migrasi 038) menerimanya, sebab CHECK
   lama menolak baris `principal` dan meninggalkan akun setengah jadi yang bisa
   login tanpa punya peran;
-* **pintunya benar** — ia masuk lewat `/auth/login-user`, seperti guru dan murid,
-  bukan lewat pintu admin;
+* **pintunya benar** — ia masuk lewat satu halaman login yang sama dengan guru dan
+  murid, dengan tab kelompok staf terbuka otomatis — bukan lewat pintu admin;
 * **rumahnya ada** — login yang mendarat di 404 adalah login yang gagal;
 * **ia tidak mendapat wewenang tulis** — dekorator `admin_sekolah_required`
   harus menolaknya;
@@ -77,13 +77,17 @@ class TestTheMigrationAdmitsThem:
 # ── 2. peta peran: satu definisi, dibaca semua pintu ─────────────────────────
 
 class TestTheRoleVocabulary:
-    def test_the_user_door_is_the_one_that_serves_them(self):
+    def test_they_sign_in_with_the_rest_of_the_school(self):
         from app.utils.auth import USER_ROLES, login_door_for
 
         for role in OFFICIAL_ROLES:
             assert role in USER_ROLES, (
-                f"{role} must sign in through the user door, like guru and murid")
-            assert login_door_for(role) == "/auth/login-user"
+                f"{role} must sign in with guru and murid, not as an account that "
+                f"administers schools")
+            # One page, opened on their group: the hint is what is left of "their own
+            # door", and an official dropped from the placement would arrive on a form
+            # that explains nothing about them.
+            assert login_door_for(role) == f"/auth/sign-in?role={role}"
 
     def test_each_role_has_one_home(self):
         from app.utils.auth import dashboard_for
@@ -97,13 +101,19 @@ class TestTheRoleVocabulary:
         assert dashboard_for("admin_sekolah") == "/admin-sekolah/dashboard"
         assert dashboard_for("super_admin") == "/super-admin/dashboard"
 
-    def test_the_path_they_are_opening_names_their_own_door(self):
-        """An expired session on /principal/... must offer the user door."""
-        from app.utils.auth import login_door_for
+    def test_the_path_they_are_opening_names_their_own_group(self):
+        """An expired session on /principal/... must open on the staff tab."""
+        from app.utils.auth import login_door_for, sign_in_tab
 
-        assert login_door_for(None, "/principal/dashboard") == "/auth/login-user"
-        assert login_door_for(None, "/vice-principal/dashboard") == "/auth/login-user"
-        assert login_door_for(None, "/admin-sekolah/dashboard") == "/auth/login"
+        assert login_door_for(None, "/principal/dashboard") == "/auth/sign-in?role=principal"
+        assert login_door_for(None, "/vice-principal/dashboard") == \
+            "/auth/sign-in?role=vice_principal"
+        assert login_door_for(None, "/admin-sekolah/dashboard") == \
+            "/auth/sign-in?role=admin_sekolah"
+        # And the two of them share one tab rather than getting one each, which is the
+        # grouping the page shows — asserted here because a hint that resolves to no
+        # tab is a hint the page silently discards.
+        assert sign_in_tab("principal") == sign_in_tab("vice_principal") == "staff"
 
     def test_they_have_a_session_timeout_of_their_own(self):
         from app.utils.auth import SESSION_TIMEOUTS
@@ -127,13 +137,29 @@ class TestTheRoleVocabulary:
 # ── 3. pintu login dan rumah setelah masuk ───────────────────────────────────
 
 class TestTheLoginDoor:
-    def test_the_user_door_reads_the_shared_vocabulary(self):
-        """A second hard-coded tuple is how the two doors drift apart."""
-        body = LOGIN_ROUTE.split("def login_user", 1)[1]
+    def test_the_one_page_admits_every_role_it_shows_a_tab_for(self):
+        """A hand-written list is how a group's reader is shown a tab and then refused.
+
+        This read the *user door* for `USER_ROLES` while there were two doors, because
+        each had to admit exactly its own half. One page admits everyone, so the
+        property worth keeping is the pair of halves that made the old one live: an
+        account's role is matched against the shared vocabulary, and that vocabulary
+        is exactly the tabs — so nobody can be offered a group and then turned away
+        for belonging to it.
+        """
+        body = LOGIN_ROUTE.split("def _sign_in():", 1)[1]
         assert 'role not in ("guru", "murid")' not in body, (
-            "login_user hard-codes the roles instead of reading USER_ROLES")
-        assert "USER_ROLES" in body, (
-            "the door must admit exactly the roles that belong on it")
+            "the handler hard-codes the roles instead of reading the shared list")
+        assert "role not in ALL_ROLES" in body, (
+            "the handler no longer checks the account's role against the one vocabulary")
+
+        from app.utils.auth import ALL_ROLES, SIGN_IN_TABS
+        shown = [role for _tab, roles in SIGN_IN_TABS for role in roles]
+        assert sorted(shown) == sorted(ALL_ROLES), (
+            "a role has a home but no tab, or a tab for a role this app does not have: "
+            f"tabs={sorted(shown)} roles={sorted(ALL_ROLES)}")
+        for role in OFFICIAL_ROLES:
+            assert role in shown, f"{role} would arrive on a page with no group to open"
 
     def test_both_new_roles_have_a_route(self, app):
         rules = {str(rule) for rule in app.url_map.iter_rules()}
@@ -141,13 +167,17 @@ class TestTheLoginDoor:
         assert "/vice-principal/dashboard" in rules
 
     def test_the_dashboard_asks_for_a_session(self, app):
-        """Signed out, it must send the reader to their own door, not a 404."""
+        """Signed out, it must send the reader to the page — on their own group."""
+        from app.utils.auth import login_door_for
+
         client = app.test_client()
-        for path in ("/principal/dashboard", "/vice-principal/dashboard"):
+        for path, role in (("/principal/dashboard", "principal"),
+                           ("/vice-principal/dashboard", "vice_principal")):
             got = client.get(path, follow_redirects=False)
             assert got.status_code in (301, 302, 303, 308), (
                 f"{path} answered {got.status_code} instead of a door")
-            assert "/auth/login" in got.headers.get("Location", "")
+            assert got.headers.get("Location") == login_door_for(role), (
+                f"a signed-out {role} was sent to {got.headers.get('Location')}")
 
     def _render(self, app, role: str, **context) -> str:
         """The whole page, the way the route renders it.
@@ -251,10 +281,11 @@ class TestTheDemo:
             assert f"'{key}'" in DEMO_TEMPLATE, (
                 f"{key} is a demo item but /demo has no branch for it")
 
-    def test_the_card_offers_the_user_door(self):
+    def test_the_card_offers_the_page_opened_on_that_roles_tab(self):
+        """The card's promise is which group the form will be opened on."""
         for role in OFFICIAL_ROLES:
-            assert f"/auth/login-user?role={role}" in DEMO_TEMPLATE, (
-                f"the {role} card does not offer the door that role belongs on")
+            assert f"/auth/sign-in?role={role}" in DEMO_TEMPLATE, (
+                f"the {role} card does not open the sign-in page on that role's group")
 
     def test_the_demo_page_says_who_makes_and_revokes_them(self):
         """A card for an account nobody can create is a demo of a dead end.

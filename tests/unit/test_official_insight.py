@@ -473,12 +473,21 @@ class TestTheOfficialBlueprint:
         """`/principal/*` is read-only by construction — the head of school oversees.
 
         The delegated write authorities this blueprint carries — the invigilation
-        schedule, the retake decisions it authorises, and the assessment calendar —
-        all live entirely under `/vice-principal/*`, so the separation is a property
-        of the *addresses* rather than a flag inside a template. That is why this
-        assertion is about the prefix and not about the blueprint: `for spec in
-        self.ROUTES` used to forbid every write here, which made a delegated authority
-        impossible to express anywhere except by breaking this guard.
+        schedule, the retake decisions it authorises, the assessment calendar, and
+        the reopening of one locked sitting — all live entirely under
+        `/vice-principal/*`, so the separation is a property of the *addresses*
+        rather than a flag inside a template. That is why this assertion is about
+        the prefix and not about the blueprint: `for spec in self.ROUTES` used to
+        forbid every write here, which made a delegated authority impossible to
+        express anywhere except by breaking this guard.
+
+        The fourth authority was added here **on purpose**, which is what the
+        enumeration is for: `/vice-principal/locked/<exam_id>/<student_id>/unlock`
+        is the deputy's counterpart to the teacher's own unlock door — it reopens
+        one sitting at the sitting's request, refuses at or past the deadline, and
+        is written to the activity log — and a new write domain reaching the page
+        without somebody deciding it should is exactly the failure this list
+        exists to catch.
         """
         writing = [spec for spec in self.ROUTES
                    if re.search(r"(POST|PUT|PATCH|DELETE)", spec)]
@@ -587,7 +596,12 @@ class TestTheAnalyticsDoor:
         with _signed_in(app, role=role, path=path, school=None):
             response = view.__wrapped__()
 
-        assert response.status_code == 302 and response.headers["Location"] == "/auth/login"
+        from app.utils.auth import login_door_for
+
+        assert response.status_code == 302 and \
+            response.headers["Location"] == login_door_for(role), (
+                "an official with no school was sent somewhere other than the page "
+                "opened on their own group")
         assert not render, "an official with no school must not reach the database at all"
 
 

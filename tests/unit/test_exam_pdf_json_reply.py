@@ -59,11 +59,13 @@ def test_the_same_dead_session_without_the_header_still_redirects(app):
     """The *other* half of `_wants_json`: an ordinary browser navigation to the same
     route must keep getting the login page, not a JSON body it would render raw. This
     is what makes the header the fix rather than a change to the guard."""
+    from app.utils.auth import LOGIN_URL
+
     client = _csrf_client(app)
     resp = client.post("/teacher/exams/parse-pdf")
 
     assert resp.status_code == 302, resp.status_code
-    assert "/auth/login" in resp.headers["Location"]
+    assert resp.headers["Location"].split("?")[0] == LOGIN_URL
 
 
 # ── the template half ───────────────────────────────────────────────────────

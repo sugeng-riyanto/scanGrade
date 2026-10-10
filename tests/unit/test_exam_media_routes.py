@@ -128,10 +128,12 @@ def _login(monkeypatch, client, user_id: str, role: str = "guru",
 # ── 1. the media route ──────────────────────────────────────────────────────
 
 def test_media_without_a_session_is_a_login_redirect(app):
+    from app.utils.auth import LOGIN_URL
+
     client = app.test_client()
     resp = client.get(f"/media/{'x' * 20}")
     assert resp.status_code == 302
-    assert "/auth/login" in resp.headers["Location"]
+    assert resp.headers["Location"].split("?")[0] == LOGIN_URL
 
 
 def test_a_token_cannot_be_used_by_another_sitting(app, monkeypatch):

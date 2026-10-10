@@ -529,7 +529,6 @@ TRANSLATED = [
     # one carries its own control from `auth/_chrome.html`, the same convention the
     # landing page and /capacity use.
     "auth/login.html",
-    "auth/login_user.html",
     "auth/register.html",
     "auth/forgot_password.html",
     "auth/verify_code.html",
@@ -949,7 +948,12 @@ def test_the_translated_list_only_grows_with_intent():
     a reader in the other language does. Bumping this number is the deliberate act
     that says "this page is translated now".
     """
-    assert len(TRANSLATED) == 54, (
+    # 53, not 54: this merge *removed* `auth/login_user.html` (the two sign-in pages
+    # are one) and Fase 4 added `teacher/exam_preview.html`, so the total is unchanged.
+    # The guard's rule — "bumping this number is the deliberate act" — still holds for
+    # a page that is *added*; a page that no longer exists has to leave the list, or the
+    # existence check above fails on a file that is not there.
+    assert len(TRANSLATED) == 53, (
         f"{len(TRANSLATED)} pages are on the translated list. Bump this number when "
         f"you translate another one — and if you *removed* a page, put it back, "
         f"because dropping it turns the sweep off for that page: {TRANSLATED}")

@@ -801,10 +801,14 @@ def render_status(app, report, alerts=None, testalert=None, released=None) -> st
 
 class TestThePage:
     def test_it_is_super_admin_only(self, app):
+        from app.utils.auth import LOGIN_URL
+
         client = app.test_client()
         response = client.get("/super-admin/deploy-status")
         assert response.status_code in (301, 302), response.status_code
-        assert "/auth/login" in response.headers.get("Location", "")
+        # The sign-in page itself, not one of the two URLs that now forward to it:
+        # an alias also "answers", one hop later, which is what this rules out.
+        assert response.headers.get("Location", "").split("?")[0] == LOGIN_URL
 
     def test_it_is_reachable_from_the_navigation(self):
         nav = (ROOT / "app" / "templates" / "base.html").read_text(encoding="utf-8")
