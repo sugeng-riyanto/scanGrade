@@ -1,4 +1,9 @@
-# Pilihan Ganda Kompleks (PGK) — Cara Kerja
+# Tabel Pernyataan AKM (PGK) — Cara Kerja
+
+> Nama di pemilih tipe: **Tabel Pernyataan (AKM)** / *Statement grid (AKM)*. Tipe yang
+> tersimpan tetap `complex_multiple_choice`. Nama lamanya, "Pilihan Ganda Kompleks",
+> dipakai juga dalam bahasa sehari-hari untuk *banyak jawaban benar* — dan itu tipe
+> yang berbeda di aplikasi ini (lihat kotak di bawah).
 
 ## Apa itu PGK?
 
@@ -13,6 +18,21 @@ Nama tipe yang tersimpan: `complex_multiple_choice` — ditulis di
 
 PGK **objektif**: dinilai otomatis saat submission masuk, tanpa koreksi guru — sama
 seperti Pilihan Ganda dan Benar/Salah.
+
+> **PGK bukan "pilihan ganda banyak jawaban".** Dua hal berbeda sering disebut dengan
+> nama yang sama, dan di aplikasi ini keduanya ada sebagai tipe yang terpisah:
+>
+> * **PGK** (`complex_multiple_choice`) — kisi pernyataan × kategori di halaman ini.
+>   Murid menilai tiap pernyataan; jawabannya bukan daftar huruf.
+> * **Soal pilihan ganda dengan lebih dari satu jawaban benar** — tetap bertipe
+>   **Pilihan Ganda** (`mcq`) dengan toggle *Izinkan pengecualian: lebih dari satu
+>   jawaban benar untuk soal ini* menyala; yang tersimpan saat itu adalah `mcq_multi`.
+>   Murid melihat baris huruf A–E sebagai **kotak centang**, dan nilainya benar hanya
+>   bila ticksnya tepat sama dengan kunci (`docs/features/EXAM_BUILDER.md`).
+>
+> Menyimpan pengecualian huruf itu sebagai `pgk` akan menampilkan kisi pernyataan
+> kepada murid dan menyerahkan kunci berbentuk huruf ke penilai PGK yang tidak bisa
+> membacanya. Karena itu keduanya punya nama sendiri di pemilih tipe.
 
 ## Bentuk data
 

@@ -108,21 +108,27 @@ function build(opts) {
     const sends = [];
     const adopted = [];
     const replies = (opts.replies || []).slice();
+    let wakeOnline = null;
     const wired = M.wire({
         form: form,
         indicator: indicator,
         read: function () { return M.collect(form); },
         send: function (state) {
             sends.push(state);
-            return Promise.resolve(replies.shift() || { ok: true });
+            const next = replies.length ? replies.shift() : { ok: true };
+            if (next === 'reject') return Promise.reject(new Error('offline'));
+            return Promise.resolve(next);
         },
         adopt: function (examId) { adopted.push(examId); id = examId; },
         label: function (state) { states.push(state); return state; },
         setTimer: c.setTimer,
-        clearTimer: c.clearTimer
+        clearTimer: c.clearTimer,
+        listenOnline: function (fn) { wakeOnline = fn; }
     });
     return { c: c, form: form, indicator: indicator, states: states, sends: sends,
-             adopted: adopted, wired: wired, elements: elements };
+             adopted: adopted, wired: wired, elements: elements,
+             wake: function () { if (wakeOnline) wakeOnline(); },
+             hasWake: function () { return !!wakeOnline; } };
 }
 
 /* Typing: the value moves *and* the event fires, because an unchanged form is
@@ -182,6 +188,50 @@ function type(f, value) {
     e.c.run(); await flush();
     record('the next change offers the body again', e.sends.length, 2);
     record('and a save that works says so', e.indicator.dataset.sgAutosave, 'saved');
+
+    // ── a save that never arrived is waiting, not failed ─────────────────────
+    let q = build({ replies: [{ queued: true }] });
+    record('the page hands the module a way to hear the link return', q.hasWake(), true);
+    type(q, 'Ulangan 1');
+    q.c.run(); await flush();
+    record('a request that never arrived is not painted as failed',
+           q.indicator.dataset.sgAutosave, 'waiting');
+    record('the states a dropped save paints', q.states.join('>'), 'saving>waiting');
+    record('a queued draft waits before offering itself again', q.c.waits()[0], M.RETRY_MS);
+    q.wake();
+    record('the link returning pulls the wait forward', q.c.waits()[0], 0);
+    q.c.run(); await flush();
+    record('and the draft is then written', q.sends.length, 2);
+    record('and the teacher is told it is safe', q.indicator.dataset.sgAutosave, 'saved');
+    record('the retry carries the whole body', q.sends[1].body[0][1], 'Ulangan 1');
+
+    // a transport rejection is the same queue
+    let s = build({ replies: ['reject', { ok: true }] });
+    type(s, 'C'); s.c.run(); await flush();
+    record('a rejected request is queued, not failed', s.indicator.dataset.sgAutosave, 'waiting');
+    s.wake(); s.c.run(); await flush();
+    record('and written when the link is back', s.sends.length, 2);
+    record('a dropped save never paints the failure state', s.states.indexOf('error'), -1);
+
+    // typing while queued replaces the backstop with a normal save
+    let r = build({ replies: [{ queued: true }, { ok: true }] });
+    type(r, 'A'); r.c.run(); await flush();
+    type(r, 'B'); r.c.run(); await flush();
+    record('the second offer carries the newer text', r.sends[1].body[0][1], 'B');
+    record('and a save that then works says so', r.indicator.dataset.sgAutosave, 'saved');
+
+    // a reconnect with nothing waiting writes nothing
+    let t = build({});
+    type(t, 'D'); t.c.run(); await flush();
+    const beforeWake = t.sends.length;
+    t.wake();
+    record('a reconnect with nothing waiting offers nothing', t.sends.length, beforeWake);
+
+    // a refusal is still not queued and arms no retry
+    let u = build({ replies: [{ ok: false, error: 'nope' }] });
+    type(u, 'E'); u.c.run(); await flush();
+    record('a refusal stays a refusal', u.indicator.dataset.sgAutosave, 'error');
+    record('and a refusal arms no retry', u.c.size(), 0);
 
     // ── the id it is handed back ─────────────────────────────────────────────
     let f = build({ replies: [{ ok: true, exam_id: 'E1' }, { ok: true, exam_id: 'E1' }] });
@@ -310,6 +360,51 @@ def test_a_refusal_is_shown_and_waits_for_the_teacher(driven):
     assert driven["got"]["a refusal is not retried on its own"] == 1
     assert driven["got"]["the next change offers the body again"] == 2
     assert driven["got"]["and a save that works says so"] == "saved"
+
+
+@needs_node
+def test_a_dropped_connection_is_waiting_and_written_when_the_link_returns(driven):
+    """The save that never arrived is the one a school connection eats. It is not
+    a failure — the body is still in the form — so it is queued, and the two ways
+    out (the browser's `online` event, and the backstop timer) both write it."""
+    assert driven["got"]["the page hands the module a way to hear the link return"] is True
+    assert driven["got"]["a request that never arrived is not painted as failed"] == "waiting"
+    assert driven["got"]["the states a dropped save paints"] == "saving>waiting"
+    assert driven["got"]["a queued draft waits before offering itself again"] == driven["want"][
+        "a queued draft waits before offering itself again"]
+    assert driven["got"]["the link returning pulls the wait forward"] == 0
+    assert driven["got"]["and the draft is then written"] == 2
+    assert driven["got"]["and the teacher is told it is safe"] == "saved"
+    assert driven["got"]["the retry carries the whole body"] == "Ulangan 1"
+
+
+@needs_node
+def test_a_rejected_request_queues_and_never_paints_the_failure_state(driven):
+    """`fetch` rejecting is a connection that fell over, not a verdict on the
+    draft; painting it as "Not saved" is what sends a teacher reloading."""
+    assert driven["got"]["a rejected request is queued, not failed"] == "waiting"
+    assert driven["got"]["and written when the link is back"] == 2
+    assert driven["got"]["a dropped save never paints the failure state"] == -1
+
+
+@needs_node
+def test_typing_while_queued_writes_the_newer_body(driven):
+    assert driven["got"]["the second offer carries the newer text"] == "B"
+    assert driven["got"]["and a save that then works says so"] == "saved"
+
+
+@needs_node
+def test_a_reconnect_with_nothing_waiting_writes_nothing(driven):
+    """An idle page that merely regained a link has nothing to offer."""
+    assert driven["got"]["a reconnect with nothing waiting offers nothing"] == 1
+
+
+@needs_node
+def test_a_refusal_is_still_never_queued_and_arms_no_retry(driven):
+    """The queue must not swallow the refusal rule: a body the server keeps
+    refusing is the teacher's to fix, not something to offer every 15 seconds."""
+    assert driven["got"]["a refusal stays a refusal"] == "error"
+    assert driven["got"]["and a refusal arms no retry"] == 0
 
 
 @needs_node
@@ -535,3 +630,27 @@ def test_the_status_words_are_bilingual_pairs():
                  "sgT('Tersimpan otomatis', 'Saved automatically')",
                  "sgT('Gagal menyimpan', 'Not saved')"):
         assert pair in tail, f"the status {pair!r} is not a bilingual pair"
+
+
+def test_the_waiting_words_say_waiting_and_say_it_in_both_languages():
+    """The whole point of the state: a teacher reading "Not saved" reloads the
+    page to chase a draft they never lost. Waiting says where the paper is."""
+    form = _form()
+    tail = form[form.index("SGExamAutosave.wire("):]
+    assert "if (state === 'waiting')" in tail, "no state for a save that is queued"
+    assert "Menunggu koneksi" in tail and "Waiting for connection" in tail, (
+        "the waiting words are not a bilingual pair")
+
+
+def test_the_send_queues_a_request_that_never_reached_the_server():
+    """A dropped link, a 5xx and an unreadable body are all the same thing from the
+    teacher's side or the draft's: the server never judged it, so it waits rather
+    than being painted as failed. A 4xx is left to the refusal path."""
+    form = _form()
+    tail = form[form.index("SGExamAutosave.wire("):]
+    assert "if (reply.status >= 500) return { queued: true };" in tail, (
+        "a server that could not answer is not a verdict on the draft")
+    assert "if (data === null) return { queued: true };" in tail, (
+        "a body we could not read must not be reported as saved")
+    assert ".catch(function () { return { queued: true }; })" in tail, (
+        "a fetch that rejects (offline, DNS, reset) must queue, not fail the draft")

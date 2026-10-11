@@ -158,7 +158,8 @@ class TestTheCheck:
         school_integrity.cross_school_findings(db)
         tables = {t for _op, t, _f, _c in db.log}
         for table in ("classes", "subjects", "class_subjects",
-                      "teacher_assignments", "profiles"):
+                      "teacher_assignments", "profiles", "exams", "submissions",
+                      "student_subject_levels"):
             assert table in tables, f"the sweep never reads `{table}`"
 
     def test_it_writes_nothing(self):
@@ -233,6 +234,153 @@ class TestAClassAndItsPupils:
 
 def found_kinds(out, needle):
     return sorted({f["kind"] for f in out["findings"] if needle in f["kind"]})
+
+
+def _find(out, kind):
+    return [f for f in out["findings"] if f["kind"] == kind]
+
+
+# ── an exam, and the class it points at ───────────────────────────────────
+
+class TestAnExamAndItsClass:
+    def test_an_exam_naming_another_schools_class_is_flagged(self):
+        from app.services import school_integrity
+        db = _clean()
+        db.tables["exams"] = [{"id": "e1", "title": "Math", "class_id": "c1",
+                               "school_id": SCH_B}]
+        out = school_integrity.cross_school_findings(db)
+        assert "exam_school_mismatch" in _kinds(out), (
+            "an exam in one school points at another school's class")
+
+    def test_the_exam_finding_names_the_exam_and_both_schools(self):
+        from app.services import school_integrity
+        db = _clean()
+        db.tables["exams"] = [{"id": "e1", "title": "Math", "class_id": "c1",
+                               "school_id": SCH_B}]
+        f = _find(school_integrity.cross_school_findings(db), "exam_school_mismatch")[0]
+        assert f["exam_id"] == "e1"
+        assert str(f["exam_school_id"]) == SCH_B
+        assert str(f["class_school_id"]) == SCH_A
+        assert f["class_id"] == "c1"
+
+    def test_an_exam_in_its_classs_school_is_not_flagged(self):
+        from app.services import school_integrity
+        db = _clean()
+        db.tables["exams"] = [{"id": "e1", "title": "Math", "class_id": "c1",
+                               "school_id": SCH_A}]
+        assert _find(school_integrity.cross_school_findings(db),
+                     "exam_school_mismatch") == []
+
+    def test_an_exam_with_no_class_is_not_a_mismatch(self):
+        """A paper not tied to a class cannot contradict a class — NULL is unknown."""
+        from app.services import school_integrity
+        db = _clean()
+        db.tables["exams"] = [{"id": "e1", "title": "Math", "class_id": None,
+                               "school_id": SCH_B}]
+        assert school_integrity.cross_school_findings(db)["findings"] == []
+
+
+# ── a submission joins an exam and a pupil ────────────────────────────────
+
+class TestASubmissionAcrossSchools:
+    def _db(self):
+        db = _clean()
+        db.tables["exams"] = [{"id": "e1", "title": "Math", "class_id": "c1",
+                               "school_id": SCH_A}]
+        db.tables["submissions"] = [{"id": "sub1", "exam_id": "e1",
+                                     "student_id": "u1"}]
+        return db
+
+    def test_a_submission_for_another_schools_exam_is_flagged(self):
+        from app.services import school_integrity
+        db = self._db()
+        db.tables["profiles"] = [{"id": "u1", "class_id": "c1", "school_id": SCH_B}]
+        out = school_integrity.cross_school_findings(db)
+        assert "submission_school_mismatch" in _kinds(out), (
+            "a pupil in one school sat another school's paper")
+
+    def test_the_finding_pairs_the_exams_school_with_the_pupils(self):
+        from app.services import school_integrity
+        db = self._db()
+        db.tables["profiles"] = [{"id": "u1", "class_id": "c1", "school_id": SCH_B}]
+        f = _find(school_integrity.cross_school_findings(db),
+                  "submission_school_mismatch")[0]
+        assert f["submission_id"] == "sub1"
+        assert str(f["exam_school_id"]) == SCH_A
+        assert str(f["pupil_school_id"]) == SCH_B
+
+    def test_a_submission_inside_one_school_is_not_flagged(self):
+        from app.services import school_integrity
+        db = self._db()
+        out = school_integrity.cross_school_findings(db)
+        assert _find(out, "submission_school_mismatch") == []
+
+    def test_a_submission_whose_pupil_school_is_unknown_is_not_flagged(self):
+        from app.services import school_integrity
+        db = self._db()
+        db.tables["profiles"] = [{"id": "u1", "class_id": "c1", "school_id": None}]
+        assert _find(school_integrity.cross_school_findings(db),
+                     "submission_school_mismatch") == []
+
+
+# ── a pupil's subject level, and the pupil and class it names ─────────────
+
+class TestASubjectLevelAcrossSchools:
+    def test_a_level_naming_another_schools_pupil_is_flagged(self):
+        from app.services import school_integrity
+        db = _clean()
+        db.tables["profiles"] = [{"id": "u1", "class_id": "c1", "school_id": SCH_B}]
+        db.tables["student_subject_levels"] = [
+            {"id": "lv1", "student_id": "u1", "subject_id": "s1",
+             "class_id": "c1", "school_id": SCH_A}]
+        out = school_integrity.cross_school_findings(db)
+        field = [f for f in _find(out, "subject_level_school_mismatch")
+                 if f["field"] == "pupil"]
+        assert field, "a level in one school names another school's pupil"
+
+    def test_a_level_naming_another_schools_class_is_flagged(self):
+        from app.services import school_integrity
+        db = _clean()
+        db.tables["classes"] = [{"id": "c1", "name": "7A", "school_id": SCH_B}]
+        db.tables["student_subject_levels"] = [
+            {"id": "lv1", "student_id": None, "subject_id": "s1",
+             "class_id": "c1", "school_id": SCH_A}]
+        out = school_integrity.cross_school_findings(db)
+        field = [f for f in _find(out, "subject_level_school_mismatch")
+                 if f["field"] == "class"]
+        assert field, "a level in one school names another school's class"
+
+    def test_the_level_finding_names_the_level_and_the_schools(self):
+        from app.services import school_integrity
+        db = _clean()
+        db.tables["profiles"] = [{"id": "u1", "class_id": "c1", "school_id": SCH_B}]
+        db.tables["student_subject_levels"] = [
+            {"id": "lv1", "student_id": "u1", "subject_id": "s1",
+             "class_id": "c1", "school_id": SCH_A}]
+        f = [x for x in _find(school_integrity.cross_school_findings(db),
+                              "subject_level_school_mismatch")
+             if x["field"] == "pupil"][0]
+        assert f["level_id"] == "lv1"
+        assert str(f["level_school_id"]) == SCH_A
+        assert str(f["pupil_school_id"]) == SCH_B
+
+    def test_a_level_inside_one_school_is_not_flagged(self):
+        from app.services import school_integrity
+        db = _clean()
+        db.tables["student_subject_levels"] = [
+            {"id": "lv1", "student_id": "u1", "subject_id": "s1",
+             "class_id": "c1", "school_id": SCH_A}]
+        assert _find(school_integrity.cross_school_findings(db),
+                     "subject_level_school_mismatch") == []
+
+    def test_a_level_with_no_pupil_and_no_class_is_not_flagged(self):
+        from app.services import school_integrity
+        db = _clean()
+        db.tables["student_subject_levels"] = [
+            {"id": "lv1", "student_id": None, "subject_id": "s1",
+             "class_id": None, "school_id": SCH_B}]
+        assert _find(school_integrity.cross_school_findings(db),
+                     "subject_level_school_mismatch") == []
 
 
 # ── a subject offered to, or assigned across, two schools ──────────────────

@@ -211,12 +211,24 @@ class TestBothDoorsEnforceTheCalendar:
             "POST /teacher/exams/<id> accepts a window outside the running period")
 
     def test_the_refusal_is_a_flash_then_a_redirect(self):
-        """The shape its neighbour (the end<=start check) already uses."""
+        """The shape its neighbour (the end<=start check) already uses.
+
+        Asked in two parts, because both doors now hand their refusals to one
+        helper: the helper answers a browser post with the flash-and-redirect it
+        always gave, and JSON to the builder's background save, which must never
+        navigate. The door has to reach for it, and the helper has to keep the
+        browser answer — otherwise a refusal would stop telling the teacher why.
+        """
+        src = TEACHER.read_text(encoding="utf-8")
         for name in ("exam_form", "exam_detail"):
-            call = _call(TEACHER.read_text(encoding="utf-8"), name)
+            call = _call(src, name)
             guard = call.split("window_outside_running_period(")[1][:400]
-            assert "flash(" in guard, f"{name} refuses without saying why"
-            assert "redirect(" in guard, f"{name} refuses without sending a page"
+            assert "_exam_save_refused(" in guard or "flash(" in guard, (
+                f"{name} refuses without saying why")
+        helper = _call(src, "_exam_save_refused")
+        assert "flash(" in helper, "a refused browser post is told nothing"
+        assert "redirect(" in helper, "a refused browser post is sent nowhere"
+        assert "jsonify(" in helper, "the background save is left to navigate on a 400"
 
 
 # ── driving the create door: a refusal touches no exam ───────────────────────

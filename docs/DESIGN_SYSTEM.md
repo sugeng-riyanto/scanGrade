@@ -20,6 +20,10 @@ from those tokens, never typed as a literal:
 | `--text-dim` | `#5d6a7d` | `#a8b0c8` |
 | `--text-muted` | `#606c80` | `#949db5` |
 | `--border` | `#e2e8f0` | `#2f3448` |
+| `--paper` | `#ffffff` | `#e8ecf2` |
+| `--paper-ink` | `#111827` | `#111827` |
+| `--on-accent` | `#ffffff` | `#ffffff` |
+| `--on-chrome` | `#f1f5f9` | `#f1f5f9` |
 
 Two rules follow from the table, and both are load-bearing:
 
@@ -27,7 +31,11 @@ Two rules follow from the table, and both are load-bearing:
   ladder of greys (`#0f1117` → `#191c2b` → `#202436` → `#262b41`), not black with
   white on it; light mode is off-white, not a glare. This is the Material / HIG
   convention and it is also the a11y answer — a pure pair is the worst case for
-  halation and for anyone with astigmatism.
+  halation and for anyone with astigmatism. The one deliberate exception is a
+  *sheet*: `--paper` is the answer canvas, it stays light in both themes because
+  the ink drawn on it is dark, and it steps down the ladder in dark mode all the
+  same — so the exception is a token, named once, rather than `#fff` typed into the
+  five pages that draw a paper.
 * **The two themes declare the same tokens, value for value.** A token only one
   theme declares moves when the theme changes.
 
@@ -36,8 +44,33 @@ remapped onto the tokens rather than rewritten: `theme.css` carries
 `:where(.dark) :is(.bg-white)` and siblings for each family. New work should still
 reach for the token.
 
+### The four role tokens
+
+The last four rows are *roles* rather than surfaces, and they are what let the exam
+and correction pages stop spelling colours by hand. A page-local `<style>` block is
+not reached by the utility remap, so a rule in it that says `background: #fff` is a
+decision nobody recorded — and in dark mode an unreadable one, because the label on
+a white box inherits the theme's own light `--text`. Naming the colours is what
+makes them auditable, and it is why one declaration now serves both themes: the
+exam page's `.dark` block is down to the two border colours the themes genuinely do
+not share, and the correction pages need none at all.
+
+* **`--paper` / `--paper-ink`** — the sheet an answer is drawn on, and the pen and
+type on it. The one surface that is light in *both* themes, because the ink on it is
+dark and a sheet that followed the theme into black would hide the answer (the same
+reasoning that keeps the OMR mockup light). The ink is a tiered near-black rather
+than `#000`, and it is what the boxes on the sheet read instead of inheriting
+`--text` — without that pin a `<textarea>` on paper painted white on white.
+* **`--on-accent` / `--on-chrome`** — a label on a saturated accent fill, and on the
+chrome that is dark in both themes (the canvas tool dots). `--on-accent` is white
+because that is what `text-white` already means on every `bg-<hue>-600` button, and
+it is held to that convention rather than to 4.5:1 — the same bar the saturated
+fills themselves are held to.
+
 **Enforced by:** `tests/unit/test_dark_theme_contrast.py` (both themes declare the
-same tokens; measured contrast ratios) and `tests/unit/test_exam_tablet_dark.py`.
+same tokens; measured contrast ratios), `tests/unit/test_theme_literals.py` (the
+pages that draw a paper carry no pure white or black, and the four roles are
+measured in both themes) and `tests/unit/test_exam_tablet_dark.py`.
 Tokens are applied as CSS custom properties, never as a hard-coded hex in a
 template.
 

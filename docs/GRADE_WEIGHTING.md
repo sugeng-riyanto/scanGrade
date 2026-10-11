@@ -90,6 +90,24 @@ A scored paper whose component is unset (or set to a component the subject does
 in `untagged`, and the roster shows a small warning badge so the teacher can see
 that a paper is not being counted and categorise it.
 
+### A drifted paper warns at save time, and stays warned
+
+The realistic path into `untagged` is not the picker — it only ever offers
+components the subject weights — it is *drift*: the admin later drops a component
+from a subject's weights while papers are already filed under it. Saving such a
+paper is not silent. `grade_weighting.paper_weight_gap()` names the gap, and both
+save doors (`exam_form` and `exam_detail`) flash a warning naming the component
+the paper is filed under **and** the components that do count, so the teacher is
+told how to fix it, not just that something is wrong. Reopening the paper shows
+the same warning as a durable banner on the builder (`data-component-gap`), since
+the save-time flash is momentary.
+
+The read is deliberately quiet in the three states that are **not** a gap: an
+uncategorised paper (`None`), a subject with no weight policy at all (the simple
+mean counts every paper), and a component the school does not own. A component
+that was *deactivated* is still named — switching one off is the commonest drift
+of all.
+
 ## The fallback contract
 
 A school that has configured no weights for a subject gets the **simple mean**
@@ -141,12 +159,27 @@ so the preview can be seeded from one pupil:
    returns this school's **active** pupils only, never another school's and never
    an alumni row;
 2. click a result, and the sample fields are filled with **that pupil's own
-   component means** for the subject selected in the preview, read through this
-   school's exams for that subject and the running year;
+   component means**, read through this school's exams for the running year;
 3. the badge names the pupil while the sample is exactly their record. Editing any
-   field drops the badge — an edited sample is no longer that pupil's marks;
+   field keeps the name and changes the badge to *(diedit)/(edited)* — an edited
+   sample started from that pupil's marks and is no longer exactly them;
 4. changing the preview's subject re-reads the same pupil for the new subject
    rather than leaving another subject's marks under this subject's weights.
+
+Which subject the marks are read from depends on what is being previewed:
+
+* **a subject on the preview's own select** — that subject, via
+  `/admin-sekolah/grade-weights/pupil-marks`;
+* **the school default**, which has no subject of its own — the learner's own
+  **spread** across their subjects decides, and the badge then says which subject
+  the sample came from (*dari Fisika*), so the numbers can be attributed to
+  something the admin can check. The subject covering the most components the
+  weights on screen actually name wins, because a subject whose marks share none of
+  them would preview a mark built entirely from the *missing component is zero*
+  policy rather than from anything the learner sat; a tie keeps the server's name
+  order, so the choice is reproducible rather than incidental. The rows come from
+  the same single read the comparison table below already makes, so seeding the
+  default costs no second request.
 
 A component the pupil has **no** mark in is left blank rather than filled with 0,
 so the preview shows the same gap the roster will: the module's *missing component
@@ -154,10 +187,9 @@ is zero* policy, applied where the admin can see it. Marks are read from every
 graded paper, released or not, because this is the teacher's roster arithmetic —
 the pupil's own dashboard is the view that shows released papers only.
 
-The school default has no subject to read from, so seeding asks for a subject
-first instead of guessing one. The doors are `admin_sekolah` only, take the school
-from the session rather than from the URL, verify the pupil and the subject belong
-to it, and are **reads** — a preview never saves.
+The doors are `admin_sekolah` only, take the school from the session rather than
+from the URL, verify the pupil and the subject belong to it, and are **reads** — a
+preview never saves.
 
 ### Comparing one pupil across their subjects
 
@@ -239,6 +271,46 @@ to read as current. That read pages past PostgREST's own 1000-row window and **s
 so** when it hits its row cap rather than presenting a truncated cohort as a
 complete one. Like the preview's other readbacks it is a **GET**: it computes and
 stores nothing.
+
+### The pass line: a released mark that would fall below the KKM
+
+A movement is not the same question as a **fail**. A pupil published at 76 whose
+mark would be recomputed to 74 has lost two points; a pupil whose KKM is 75 has
+just been turned from pass to fail on a number their parents already saw. The
+second is the one a distribution must not do silently, so the same card carries a
+red warning that **names the pupils**, with the KKM each one is measured against
+and where that KKM came from.
+
+A row appears there only when **all three** hold:
+
+- the mark is **released** — an unreleased mark is work in progress, and warning
+  about it would train the admin to click past the warning;
+- it reads as **passing today** (`saved >= KKM`);
+- it would read as **failing after the save** (`live < KKM`).
+
+A mark already below the line is therefore *not* listed: a further fall is a
+movement, not a new fail. The crossing is tested **before** the movement threshold,
+so a caller's `min_delta` can never hide a small pass-to-fail.
+
+The line comes from **`subject_kkm`**, not from `exams.passing_score`: the paper's
+own mark belongs to the paper, and the school's pass standard is a fact about the
+subject, the grade and the year. It resolves the same way `subject_kkm.effective`
+does — an override for the pupil's grade, else the subject's general mark, else the
+app default of **70** — and the payload carries the **source** of each mark, so the
+page can say *KKM bawaan aplikasi* rather than present a default as a standard the
+school chose. Rows are read once for the school and the year, and paged, and the
+resolver is the module's own function rather than a second copy of the order.
+
+**Before a save.** The two buttons that write a distribution — **Simpan Default**
+and the per-subject save — ask for the figures of the policy they are **about to
+write** (the default for the default, that row for a row), reusing the figures
+already on screen when they answer for it. If any already-reported pupil would cross
+the line, the save stops and confirms, naming the pupils and where their marks land.
+A read that fails does **not** block the save: a preview that could not load must not
+become a lock on the page. The actions that *remove* a distribution — **Pakai
+default sekolah untuk mapel ini** and **Reset ke default** — are not gated this way:
+they already confirm, and they return subjects to the school's own default rather
+than writing a distribution the admin typed.
 
 ## Where the number appears
 

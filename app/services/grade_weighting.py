@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import logging
 
+from app.services import subject_kkm as kkm_service
 from app.utils.exam_access import result_released
 
 logger = logging.getLogger(__name__)
@@ -181,6 +182,49 @@ def component_ids(supabase, school_id: str) -> set[str]:
     """Every component id this school owns, active or not — the write guard."""
     return {str(r["id"]) for r in list_components(supabase, school_id, active_only=False)
             if r.get("id")}
+
+
+def paper_weight_gap(supabase, school_id: str, subject_id: str, component_id,
+                     year_id: str | None) -> dict | None:
+    """Why a paper's component does not reach the final mark, or ``None``.
+
+    :func:`compute` counts a scored paper in ``untagged`` when its component is not
+    one the subject weights, so the paper contributes **nothing** to the final
+    mark. The realistic path into that state is not the picker — it only ever
+    offers weighted components — it is the *drift* after the fact: the admin drops
+    a component from a subject's weights while papers are already filed under it.
+
+    Returns ``{"component_id", "name", "weighted": [names]}`` — the component the
+    paper is filed under and the components that *would* count — or ``None`` when
+    there is no gap. It is deliberately quiet in the three states that are not a
+    gap:
+
+    * an uncategorised paper (``component_id`` is ``None``) — a separate,
+      deliberate state the roster already reports in ``untagged``;
+    * a subject with no weight policy at all — :func:`effective_config` answers
+      ``{}`` and the simple mean counts every paper, so nothing is lost;
+    * a component the school does not own — not this school's policy to warn about.
+
+    A component that was **deactivated** is still named: switching a component off
+    is the commonest drift of all, and a deactivated component is exactly one the
+    subject's active weights no longer carry.
+    """
+    cid = str(component_id) if component_id else ""
+    if not cid or not school_id or not subject_id:
+        return None
+    weights = effective_config(supabase, school_id, subject_id, year_id)
+    if not weights or cid in weights:
+        return None
+    components = {str(c["id"]): c
+                  for c in list_components(supabase, school_id, active_only=False)
+                  if c.get("id")}
+    if cid not in components:
+        return None
+    return {
+        "component_id": cid,
+        "name": components[cid].get("name") or "?",
+        "weighted": [(components.get(w) or {}).get("name") or "?" for w in weights],
+    }
 
 
 def _clean_name(name) -> str:
@@ -810,6 +854,9 @@ def class_impact(supabase, school_id: str, subjects: list[dict], year_id: str | 
           "counts":  {pairs, moved, up, down, reported, pupils_marked,
                       pupils_moved, max_up, max_down},
           "subjects":[ {subject_id, name, evaluated, moved, up, down, reported}, … ],
+          "kkm":     {pupils: [ {student_id, subject_id, name, class_name,
+                                 subject_name, kkm, source, saved, live, delta}, … ],
+                      count, shown, checked},   # worst fall below the line first
           "shown":   int,        # rows in "pupils" (the cap is per read, not per pupil)
           "capped":  bool,       # the read hit its row cap: counts may be short
           "typed_total": int,    # the weights as typed, so a caller can say "not 100%"
@@ -830,11 +877,24 @@ def class_impact(supabase, school_id: str, subjects: list[dict], year_id: str | 
     * a name that cannot be read is ``"?"`` — the counts and the deltas do not
       depend on it, and a pupil is never dropped for being unprintable.
 
+    ``kkm`` is the same question asked against the school's **pass line**: a
+    **released** mark that reads as passing today and would read as failing after
+    the save. It is listed separately from ``pupils`` and tested on the unrounded
+    finals, so it is exact at the line rather than one display rounding away from
+    it; ``checked`` is how many released pairs were tested, so an empty list is
+    "nothing crosses" rather than "nothing was looked at". ``source`` says which
+    KKM applied (``"grade"``, ``"subject"`` or ``None`` for the app default of
+    :data:`subject_kkm.DEFAULT_KKM`), because a default is not a standard the
+    school chose. The KKM is resolved from ``subject_kkm``, once per read, and
+    never from ``exams.passing_score``: the paper's own mark belongs to the paper.
+
     Reads: the affected subjects' papers, their graded rows (paged), the saved
-    policy, and the names of the pupils actually shown. It writes nothing.
+    policy, the KKM rows, and the pupils (name, class and level) who have a mark.
+    It writes nothing.
     """
     empty = {"pupils": [], "shown": 0, "capped": False, "typed_total": 0,
-             "subjects": [],
+             "subjects": [], "kkm": {"pupils": [], "count": 0, "shown": 0,
+                                     "checked": 0},
              "counts": {"pairs": 0, "moved": 0, "up": 0, "down": 0,
                         "reported": 0, "pupils_marked": 0, "pupils_moved": 0,
                         "max_up": None, "max_down": None}}
@@ -892,6 +952,33 @@ def class_impact(supabase, school_id: str, subjects: list[dict], year_id: str | 
         if result_released(sub):
             released[key] = True
 
+    # The pupils (name, class and — for the KKM — their grade level) are read
+    # **before** the marks are weighed, once and paged: a crossing of the pass line
+    # can only be judged against the level the pupil is in, and every released pair
+    # needs it, so looking it up per pair would be a query per pupil. The KKM rows
+    # are read once for the same reason. Both are bounded by the school, and the
+    # KKM by the year, so neither can be answered from another school's file.
+    names: dict[str, str] = {}
+    classes: dict[str, str] = {}
+    levels: dict[str, object] = {}
+    if rows_by:
+        people, people_capped = _paged_rows(
+            lambda: supabase.table("students")
+            .select("id, profiles!inner(full_name), classes(name, grade_level)")
+            .in_("id", sorted({student for (student, _subject) in rows_by}))
+            .eq("school_id", school_id))
+        capped = capped or people_capped
+        for person in people:
+            if not person.get("id"):
+                continue
+            key = str(person["id"])
+            names[key] = ((person.get("profiles") or {}).get("full_name") or "?")
+            klass = person.get("classes") or {}
+            classes[key] = klass.get("name") or ""
+            levels[key] = klass.get("grade_level")
+    kkm_rows = (kkm_service.list_kkm(supabase, school_id, year_id=year_id)
+                if rows_by else [])
+
     custom = configs_for_school(supabase, school_id, year_id)
     default = default_config(supabase, school_id)
     name_of_subject = {str(s["subject_id"]): (s.get("name") or "?") for s in subjects}
@@ -901,6 +988,8 @@ def class_impact(supabase, school_id: str, subjects: list[dict], year_id: str | 
 
     marked: set[str] = set()
     moved: list[dict] = []
+    crossings: list[dict] = []
+    released_pairs = 0
     for (student, subject), rows in rows_by.items():
         saved = compute(rows, custom.get(subject) or default)
         live = compute(rows, typed)
@@ -909,37 +998,49 @@ def class_impact(supabase, school_id: str, subjects: list[dict], year_id: str | 
         entry = per_subject[subject]
         entry["evaluated"] += 1
         marked.add(student)
+        was_released = bool(released.get((student, subject)))
+        # The pass line, tested on the **released** marks only: a mark the pupil
+        # cannot open yet is work in progress, and warning about it would train the
+        # admin to click past the warning. A crossing is a mark that reads as
+        # passing to the child and would read as failing after the save — the one
+        # change a distribution must not make silently — and it is tested before
+        # ``min_delta``, so a caller's movement threshold can never hide it.
+        if was_released:
+            released_pairs += 1
+            kkm, source = kkm_service.resolve_with_source(
+                kkm_rows, subject, levels.get(student))
+            if saved["final"] >= kkm > live["final"]:
+                crossings.append({
+                    "student_id": student, "subject_id": subject,
+                    "name": names.get(student, "?"),
+                    "class_name": classes.get(student, ""),
+                    "subject_name": entry["name"], "kkm": kkm, "source": source,
+                    "saved": saved["final"], "live": live["final"],
+                    "delta": round(live["final"] - saved["final"], 1)})
         delta = round(live["final"] - saved["final"], 1)
         if abs(delta) < min_delta:
             continue                      # unchanged is the common answer, and not a finding
         entry["moved"] += 1
         entry["up" if delta > 0 else "down"] += 1
-        was_released = bool(released.get((student, subject)))
         if was_released:
             entry["reported"] += 1
-        moved.append({"student_id": student, "subject_id": subject, "name": "?",
-                      "class_name": "", "subject_name": entry["name"],
+        moved.append({"student_id": student, "subject_id": subject,
+                      "name": names.get(student, "?"),
+                      "class_name": classes.get(student, ""),
+                      "subject_name": entry["name"],
                       "saved": saved["final"], "live": live["final"],
                       "delta": delta, "released": was_released})
 
     moved.sort(key=lambda r: (-abs(r["delta"]), r["subject_id"], r["student_id"]))
+    # Worst fall below the line first, so a capped list still shows the pupils an
+    # admin most needs to see; the pupil is the tie-break, so the order is stable.
+    crossings.sort(key=lambda r: (r["live"] - r["kkm"], r["subject_id"],
+                                  r["student_id"]))
     try:
         size = max(1, int(limit))
     except (TypeError, ValueError):
         size = 25
     top = moved[:size]
-    if top:
-        wanted = sorted({r["student_id"] for r in top})
-        people = _rows(supabase.table("students")
-                       .select("id, profiles!inner(full_name), classes(name)")
-                       .in_("id", wanted).eq("school_id", school_id))
-        names = {str(p["id"]): ((p.get("profiles") or {}).get("full_name") or "?")
-                 for p in people if p.get("id")}
-        classes = {str(p["id"]): ((p.get("classes") or {}).get("name") or "")
-                   for p in people if p.get("id")}
-        for row in top:
-            row["name"] = names.get(row["student_id"], "?")
-            row["class_name"] = classes.get(row["student_id"], "")
 
     ups = [r["delta"] for r in moved if r["delta"] > 0]
     downs = [r["delta"] for r in moved if r["delta"] < 0]
@@ -949,6 +1050,8 @@ def class_impact(supabase, school_id: str, subjects: list[dict], year_id: str | 
         "capped": capped,
         "typed_total": sum(typed.values()),
         "subjects": [per_subject[sid] for sid in ids],
+        "kkm": {"pupils": crossings[:size], "count": len(crossings),
+                "shown": len(crossings[:size]), "checked": released_pairs},
         "counts": {
             "pairs": sum(e["evaluated"] for e in per_subject.values()),
             "moved": len(moved),

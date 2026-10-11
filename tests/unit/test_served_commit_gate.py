@@ -62,6 +62,9 @@ GATE_PY = ROOT / "deploy" / "served_commit_gate.py"
 RUNNER = ROOT / "deploy" / "scangrade-deploy.sh"
 APP_INIT = ROOT / "app" / "__init__.py"
 BUILD_INFO = ROOT / "app" / "utils" / "build_info.py"
+#: `build_info` resolves its own path through this module, so a scratch checkout
+#: that copies only the former cannot import it at all.
+IMPORT_SAFETY = ROOT / "app" / "utils" / "import_safety.py"
 GIT = shutil.which("git")
 SERVICE = ROOT / "app" / "services" / "deploy_status_service.py"
 TEMPLATE = ROOT / "app" / "templates" / "super_admin" / "deploy_status.html"
@@ -193,16 +196,23 @@ def test_the_health_route_is_wired_to_the_published_reading():
 # content is in memory.
 
 def _checkout_with_the_module(tmp_path: Path) -> Path:
-    """A real checkout holding a copy of `build_info`, alone.
+    """A real checkout holding a copy of `build_info` and what it imports.
 
     Neither the rest of the app nor this repository is needed: the module reads a
     `.git` and nothing else, and copying it is what lets a test move the checkout
     *after* the import — which is the whole point.
+
+    The *whole* import chain travels, not just `build_info`. It imports
+    `app.utils.import_safety` (a module body resolves its own path through it), and
+    a scratch checkout missing one link of the chain fails with an ImportError
+    rather than with anything this file is about — which is exactly how this
+    fixture broke once already, silently, when the import was added.
     """
     repo = tmp_path / "repo"
     (repo / "app" / "utils").mkdir(parents=True)
     (repo / "app" / "__init__.py").write_text("", encoding="utf-8")
     shutil.copy(BUILD_INFO, repo / "app" / "utils" / "build_info.py")
+    shutil.copy(IMPORT_SAFETY, repo / "app" / "utils" / "import_safety.py")
     subprocess.run([GIT, "init", "-q", str(repo)], check=True, capture_output=True,
                    env=git_env())
     for key, value in (("user.email", "t@example.com"), ("user.name", "t")):

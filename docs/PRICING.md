@@ -8,6 +8,25 @@ Setiap sekolah baru mendapatkan trial gratis (bawaan **14 hari**, diatur di
 - 100 siswa
 - Tanpa AI grading
 
+### Catatan terpisah: label "AI Grading" di `/tutorial/admin-sekolah`
+
+Halaman tutorial admin-sekolah memasang label **"AI Grading"** (dengan ikon robot)
+sebagai salah satu badge pada **Langkah 4 — "Langganan, Invoice dan Aktivasi"**
+(`app/templates/tutorial_admin_sekolah.html`, di dalam daftar badge bersama
+"Langganan", "Kode Aktivasi", dan "Invoice PDF"). Langkah itu berbicara tentang
+langganan dan invoice, bukan tentang penilaian, jadi labelnya dua kali salah: ia
+menjanjikan kemampuan yang — sesuai bagian "Tanpa AI grading" di atas — bukan
+bagian dari paket yang diiklankan halaman ini, dan ia menempelkannya pada langkah
+yang tidak membahasnya.
+
+**Tidak diperbaiki di pekerjaan login terpadu**, dan sengaja dilaporkan terpisah:
+ini masalah kejujuran status fitur yang sama seperti yang sudah ditangani di
+halaman harga, jadi halaman tutorial sebaiknya diaudit dengan prinsip yang sama
+(bandingkan setiap badge dengan apa yang benar-benar dikerjakan aplikasi) di
+pekerjaan tersendiri — bukan disunting sebagian di sini, karena satu badge yang
+diperbaiki tanpa audit menyeluruh menghasilkan halaman yang tetap menjanjikan hal
+lain di tempat lain.
+
 ### Satu tempat yang menentukan panjangnya
 
 Panjang trial dibaca lewat `app/services/trial_settings.py` — `get_trial_days()` —

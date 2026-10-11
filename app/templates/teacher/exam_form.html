@@ -35,6 +35,20 @@
         </a>
     </div>
 
+    {% if component_gap %}
+    {# A paper filed under a component the subject does not weight contributes
+       nothing to the weighted final mark. The save-time flash is momentary; this
+       banner keeps the loss visible every time the paper is opened, and names a
+       component that *would* count so the teacher can fix it. #}
+    <div data-component-gap
+         class="mb-5 flex items-start gap-3 rounded-2xl border-2 border-amber-200 bg-amber-50 px-4 py-3">
+        <i class="fas fa-triangle-exclamation text-amber-500 mt-0.5"></i>
+        <p class="text-xs font-semibold text-amber-800 leading-relaxed"
+           x-text="t('Ujian ini terdaftar di komponen “{{ component_gap.name }}” yang tidak diberi bobot mapel ini — tidak dihitung di Nilai Akhir. Komponen yang dihitung: {{ component_gap.weighted|join(', ') }}.',
+                    'This paper is filed under “{{ component_gap.name }}”, which this subject does not weight — it is NOT counted in the Final Mark. Components that count: {{ component_gap.weighted|join(', ') }}.')"></p>
+    </div>
+    {% endif %}
+
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div class="lg:col-span-3">
             <div x-data="{
@@ -1105,6 +1119,68 @@
                                         </button>
                                     </div>
                                 </div>
+                                <!-- The exception, under the type picker. Unchecked by default
+                                     and worded as the exception it is: the type the teacher
+                                     picked is a single-answer question, and this says that
+                                     this one question is not. Its title never changes with
+                                     the toggle — a teacher reads one name per type. -->
+                                <div x-show="offersMulti(q)" x-cloak class="mb-2 rounded-xl bg-slate-50 border border-slate-200 px-3 py-2">
+                                    <label class="flex items-start gap-2 cursor-pointer select-none">
+                                        <input type="checkbox" class="tap-44 w-4 h-4 mt-0.5 text-primary-600 border-slate-300 rounded shrink-0"
+                                               :data-multi-toggle="i"
+                                               :checked="isMulti(q)"
+                                               @change="setMulti(i, $event.target.checked)">
+                                        <span class="min-w-0">
+                                            <span class="block text-xs font-extrabold text-slate-600"
+                                                  x-text="t('Izinkan pengecualian: lebih dari satu jawaban benar untuk soal ini','Allow an exception: more than one correct answer for this question')"></span>
+                                            <span class="block text-[11px] font-semibold text-slate-400 mt-0.5 leading-relaxed"
+                                                  x-text="t('Aktifkan hanya jika soal ini memang memiliki lebih dari satu jawaban yang benar. Murid akan melihat kotak centang (bukan pilihan tunggal) khusus untuk soal ini.','Switch this on only if this question really has more than one correct answer. The pupil will see checkboxes (not a single choice) for this question alone.')"></span>
+                                        </span>
+                                    </label>
+                                </div>
+                                <!-- Turning the exception off cannot keep several correct letters:
+                                     one question, one stored type, one shape of key. Say which
+                                     letters went, rather than leaving a key that shrank. -->
+                                <div x-show="multiTrimmed[i]" x-cloak
+                                     class="mb-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 flex items-start gap-2"
+                                     :data-multi-trimmed="i" role="status">
+                                    <i class="fas fa-triangle-exclamation mt-0.5"></i>
+                                    <span class="flex-1"
+                                          x-text="t('Pengecualian dimatikan, jadi soal','With the exception off, question') + ' ' + (i + 1) + ' ' + t('kini hanya menerima satu jawaban benar. Kunci disisakan pada huruf pertama; periksa kembali bila perlu.','now accepts one correct answer. The key kept its first letter; check it again if you need to.')"></span>
+                                    <button type="button" @click="dismissMultiTrimmed(i)"
+                                            class="tap-44 shrink-0 text-amber-700 hover:text-amber-900"
+                                            :title="t('Tutup','Dismiss')"><i class="fas fa-times"></i></button>
+                                </div>
+                                <!-- The mirror of the notice above, for a question that
+                                     already exists: switching the exception *on* cannot
+                                     invent the other correct letters, so the key still
+                                     names one option while the pupil is about to be shown
+                                     checkboxes. The key needs no repairing — one letter is
+                                     a valid set of one — so this is a notice, not a change. -->
+                                <div x-show="multiWidened[i]" x-cloak
+                                     class="mb-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 flex items-start gap-2"
+                                     :data-multi-widened="i" role="status">
+                                    <i class="fas fa-triangle-exclamation mt-0.5"></i>
+                                    <span class="flex-1"
+                                          x-text="t('Pengecualian dinyalakan, jadi soal','With the exception on, question') + ' ' + (i + 1) + ' ' + t('boleh punya lebih dari satu jawaban benar — tetapi kuncinya masih menyebut satu huruf. Tandai opsi lain yang benar.','may have more than one correct answer — but its key still names one letter. Mark the other correct options.')"></span>
+                                    <button type="button" @click="dismissMultiWidened(i)"
+                                            class="tap-44 shrink-0 text-amber-700 hover:text-amber-900"
+                                            :title="t('Tutup','Dismiss')"><i class="fas fa-times"></i></button>
+                                </div>
+                                <!-- A type change drops the key the question carried for its
+                                     old shape (`q.answers = []` and the like). Say so,
+                                     naming the question, and let the teacher dismiss it —
+                                     rather than silently discarding a key they set. -->
+                                <div x-show="keyWarnings[i]" x-cloak
+                                     class="mb-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 flex items-start gap-2"
+                                     :data-key-warning="i" role="status">
+                                    <i class="fas fa-triangle-exclamation mt-0.5"></i>
+                                    <span class="flex-1"
+                                          x-text="t('Perubahan tipe soal','Changing the type of question') + ' ' + (i + 1) + ' ' + t('dapat memengaruhi kunci jawaban yang sudah diisi. Periksa kembali kuncinya.','may affect the answer key you have already filled. Check the key again.')"></span>
+                                    <button type="button" @click="dismissKeyWarning(i)"
+                                            class="tap-44 shrink-0 text-amber-700 hover:text-amber-900"
+                                            :title="t('Tutup','Dismiss')"><i class="fas fa-times"></i></button>
+                                </div>
                                 <!-- Page Range. Not required, and that is the point:
                                      the number is a convenience for the student — it
                                      decides which page the paper turns to when they
@@ -1248,15 +1324,32 @@
 
                                 <div x-show="kindOf(q) === 'choice'" class="mcq-options space-y-2">
                                     <div class="flex items-center justify-between">
-                                        <label class="text-xs font-extrabold text-slate-500" x-text="t('Kunci Jawaban:','Answer key:')"></label>
-                                        <label class="flex items-center gap-1.5 cursor-pointer">
+                                        <label class="text-xs font-extrabold text-slate-500"
+                                               x-text="isMulti(q) ? t('Kunci Jawaban (boleh lebih dari satu):','Answer key (more than one is allowed):') : t('Kunci Jawaban:','Answer key:')"></label>
+                                        <!-- Bonus means "anything written counts", which says
+                                             nothing about how many options are right — it and
+                                             the exception cannot both be true, so it steps
+                                             aside while the exception is on. -->
+                                        <label x-show="!isMulti(q)" class="flex items-center gap-1.5 cursor-pointer">
                                             <input type="checkbox" x-model="q.bonus" @change="onBonusToggle(i)" class="w-4 h-4 text-purple-600 border-slate-300 rounded">
                                             <span class="text-xs font-extrabold" :class="q.bonus ? 'text-purple-700' : 'text-slate-400'">Bonus</span>
                                         </label>
                                     </div>
+                                    <!-- The control follows the toggle, live: one answer (the
+                                         button replaces the last) or several (each button
+                                         adds or removes). The teacher sees the effect of
+                                         the exception while writing the question, which is
+                                         the only moment it can still be decided. -->
+                                    <p class="text-[11px] font-semibold"
+                                       :class="isMulti(q) ? 'text-teal-600' : 'text-slate-400'"
+                                       x-text="isMulti(q) ? t('Tandai semua opsi yang benar — murid akan mencentang lebih dari satu.','Mark every correct option — the pupil will tick more than one.')"
+                                                        : t('Tandai satu opsi yang benar — murid memilih satu.','Mark the one correct option — the pupil picks one.')"></p>
                                     <div class="flex gap-2 flex-wrap">
-                                        <template x-for="opt in ['A','B','C','D','E']">
+                                        <template x-for="opt in optionLetters">
                                             <button type="button" @click="toggleAnswer(i, opt)"
+                                                    :role="isMulti(q) ? 'checkbox' : 'radio'"
+                                                    :aria-checked="q.answers && q.answers.includes(opt) ? 'true' : 'false'"
+                                                    :data-key-mode="isMulti(q) ? 'checkbox' : 'radio'"
                                                     class="tap-44 text-sm font-extrabold px-3 py-1.5 rounded-xl border-2 transition"
                                                     :class="q.bonus ? 'bg-purple-50 border-purple-300 text-purple-700' : (q.answers && q.answers.includes(opt) ? 'bg-primary-50 border-primary-300 text-primary-700' : 'bg-white border-slate-200 text-slate-600')">
                                                 <span x-text="opt"></span>
@@ -1502,10 +1595,13 @@
                     <input type="hidden" name="question_cognitive" id="question-cognitive-input" :value="getLevelsJson()">
                 </div>
 
-                <input type="hidden" name="anti_cheat_enabled" value="true">
-
+                {# No `anti_cheat_enabled` field is posted. The switch is the school's,
+                   so the route *preserves* the row's value rather than this form
+                   deciding it — the hidden `value="true"` that used to sit here is
+                   what silently re-armed a paper the school had switched off, on a
+                   page whose own card read "Always on" while it did. #}
                 <div class="card p-5 space-y-4" x-data="antiCheatSettings({
-                    enabled: true,
+                    enabled: {{ 'true' if (exam.get('anti_cheat_enabled') if exam else True) else 'false' }},
                     penalty_per_violation: {{ exam.get('penalty_per_violation', 5) if exam else 5 }},
                     max_violations: {{ exam.get('max_violations', 5) if exam else 5 }},
                     fullscreen_required: {{ 'true' if (exam.get('fullscreen_required') if exam else True) else 'false' }},
@@ -1525,7 +1621,16 @@
                         <h2 class="text-lg font-extrabold text-slate-800 flex items-center gap-2">
                             <i class="fas fa-shield-alt text-primary-600"></i>Anti-Cheat
                         </h2>
-                        <span class="text-xs font-extrabold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200" x-text="t('Selalu Aktif','Always on')"></span>
+                        <span x-show="enabled" class="text-xs font-extrabold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200" x-text="t('Selalu Aktif','Always on')"></span>
+                        <span x-show="!enabled" x-cloak class="text-xs font-extrabold text-rose-700 bg-rose-50 px-2.5 py-1 rounded-full border border-rose-200" x-text="t('Nonaktif','Off')"></span>
+                    </div>
+                    {# The one thing worth knowing about a paper the school switched off,
+                       and the one thing this card never said: nothing is being recorded.
+                       It is shown to the teacher who owns the row as well as to an
+                       admin reading it, because "this sitting is unmonitored" is a
+                       fact about the assessment, not about the reader. #}
+                    <div x-show="!enabled" x-cloak class="text-xs font-bold text-rose-700 bg-rose-50 border border-rose-200 rounded-xl px-3 py-2">
+                        <i class="fas fa-eye-slash mr-1"></i><span x-text="t('Anti-cheat dimatikan untuk kertas ini: tidak ada pelanggaran yang dicatat, tidak ada penalti, dan kertas tidak dikunci.','Anti-cheat is off for this paper: no violations are recorded, nothing is charged, and the sitting is never locked.')"></span>
                     </div>
                     <div class="flex flex-col sm:flex-row items-start sm:items-center gap-2 mb-3 text-xs sm:text-sm">
                         <label class="flex items-center gap-2">
@@ -1623,8 +1728,9 @@
                 {# The autosave status. Quiet on purpose: the shared top bar in
                    app/static/js/sg-ux.js already carries the *network* signal for a
                    slow save, and its own delay keeps a quick one invisible, so this
-                   only says which of the three things is true — writing, written, or
-                   refused. `role="status"` announces it without stealing focus; the
+                   only says which of the four things is true — writing, written,
+                   waiting for the connection, or refused. `role="status"` announces it
+                   without stealing focus; the
                    text is written by the module in the reader's language (see the
                    `label` wiring at the bottom). It sits on its own line above the
                    button so that neither has to share a row the button already
@@ -1833,8 +1939,22 @@ const SG_MARK_STEP = 0.1;
 const SG_MARK_DEFAULTS = {mcq: 1, true_false: 1, complex_multiple_choice: 3, match: 3,
                           drag_drop: 3, order: 3,
                           essay_canvas: 10, essay_text: 10, essay: 10};
-function sgMarksDefault(type) {
+// The *bucket* a stored type is priced and totalled in, named rather than inferred.
+// A question with the multi-answer exception is still one multiple choice question
+// with one mark, so it shares the `mcq` row: a row of its own would put the
+// exception on the paper's face, which is the one thing it must never be — and
+// leaving it to the `sgSchemeType` fallback would bucket it by accident rather than
+// by decision. `SG_SCHEME_ORDER` stays the list of *rows*.
+const SG_SCHEME_OF = {};
+SG_SCHEME_OF[SG_QT.multi] = SG_QT.default;
+function sgSchemeType(type) {
     var t = type || SG_QT.default;
+    if (SG_SCHEME_OF[t]) return SG_SCHEME_OF[t];
+    if (SG_SCHEME_ORDER.indexOf(t) > -1) return t;
+    return SG_QT.essay.indexOf(t) > -1 ? 'essay_canvas' : SG_QT.default;
+}
+function sgMarksDefault(type) {
+    var t = sgSchemeType(type);
     return SG_MARK_DEFAULTS[t] != null ? SG_MARK_DEFAULTS[t] : SG_MARK_DEFAULTS[SG_QT.default];
 }
 // Largest-remainder, in whole steps of 0.1 — the same function as the Python one, so
@@ -1899,6 +2019,12 @@ function questionManager() {
                     // the question *type* would fabricate the very thing the framework
                     // is asked to measure.
                     var q = {_id: 'q' + i, type: t, pages: ppages[i] || '',
+                             // A question that came from storage, rather than one just
+                             // added: the difference is what tells the exception
+                             // toggle whether a key was already set by the teacher
+                             // (`multiWidened`), so a fresh question's default `['A']`
+                             // does not raise a notice nobody asked for.
+                             _stored: true,
                              level: plevel[i] || '',
                              audio: m.audio || '', youtube: m.youtube || '', _showMedia: false,
                              // The play allowance travels with the question's media; a paper
@@ -1912,6 +2038,14 @@ function questionManager() {
                              kind: m.kind || 'audio', fileKind: m.kind || 'audio',
                              _uploading: false, _uploadError: ''};
                     var kind = SG_QT.kinds[t] || SG_QT.kinds[SG_QT.default];
+                    q._kind = kind;   // the shape a later type change would leave
+                    // The stored exception name is not a picker value: the page shows
+                    // one "Pilihan Ganda" entry and the toggle, so a question
+                    // that carries the exception is shown as the choice question it
+                    // is, with the toggle standing where the exception is. The name
+                    // itself is written back on save by `typeFor`.
+                    if (t === SG_QT.multi) { q.type = SG_QT.default; q.multi = true; }
+                    else if (kind === 'choice') { q.multi = false; }
                     if (kind === 'choice') {
                         q.bonus = k === 'bonus';
                         q.answers = Array.isArray(k) ? k : (k && k !== 'essay' ? [k] : ['A']);
@@ -1958,7 +2092,27 @@ function questionManager() {
         // page and the grader stop meaning the same thing. `q_vocabulary()` is
         // app/services/question_types.py's own answer, handed to the page.
         kindOf(q) { return SG_QT.kinds[(q && q.type) || SG_QT.default] || SG_QT.kinds[SG_QT.default]; },
+        // ── the exception, and the name it is stored under ───────────────────
+        // The toggle is what a teacher sees; the stored type is *derived* from it,
+        // in one place. Two places deciding this is how a question gets saved as one
+        // type and drawn as another — a multi-answer question reopened as a plain
+        // one, with its extra ticks silently dropped by the radio rule.
+        typeFor(q) {
+            if (!q) return SG_QT.default;
+            if (q.type === SG_QT.multi) return SG_QT.multi;
+            return (q.multi && q.type === SG_QT.default) ? SG_QT.multi : (q.type || SG_QT.default);
+        },
+        isMulti(q) { return this.typeFor(q) === SG_QT.multi; },
+        // Does this question *allow* the exception? Only the single-answer choice
+        // question does: the names of the other types are their own question, and an
+        // exception toggle on a matching question would be a button that changes
+        // nothing.
+        offersMulti(q) { return this.kindOf(q) === 'choice' && q.type !== SG_QT.multi; },
         isObjectiveType(type) { return SG_QT.objective.indexOf(type || SG_QT.default) > -1; },
+        // The letters a choice question offers, from the same server answer the
+        // answer-key page and the grader read. A hand-written array here is how the
+        // builder starts offering a button the printed sheet has no bubble for.
+        optionLetters: SG_QT.options || ['A','B','C','D','E'],
         // What the teacher may add. The *values* come from the server
         // (`SG_QT.picker`) — a second hand-written list of type names here is how
         // a page goes on offering a name the grader no longer answers to. The
@@ -1967,9 +2121,9 @@ function questionManager() {
         // holds them equal to `SG_QT.labels`, so they cannot drift either.
         typeChoices: (function() {
             const look = {
-                choice:    {id:'Pilihan Ganda', en:'Multiple choice', icon:'fa-check-square',      btn:'bg-amber-50 hover:bg-amber-100 text-amber-700 border-amber-200'},
+                choice:    {id:'Pilihan Ganda', en:'Multiple choice', icon:'fa-check-square', btn:'bg-amber-50 hover:bg-amber-100 text-amber-700 border-amber-200'},
                 truefalse: {id:'Benar / Salah', en:'True / False',    icon:'fa-toggle-on',         btn:'bg-primary-50 hover:bg-primary-100 text-primary-700 border-primary-200'},
-                pgk:       {id:'Pilihan Ganda Kompleks', en:'Complex multiple choice', icon:'fa-list-check', btn:'bg-teal-50 hover:bg-teal-100 text-teal-700 border-teal-200'},
+                pgk:       {id:'Tabel Pernyataan (AKM)', en:'Statement grid (AKM)', icon:'fa-list-check', btn:'bg-teal-50 hover:bg-teal-100 text-teal-700 border-teal-200'},
                 match:     {id:'Menjodohkan',   en:'Matching',        icon:'fa-arrows-left-right', btn:'bg-violet-50 hover:bg-violet-100 text-violet-700 border-violet-200'},
                 dragdrop:  {id:'Tarik & Letakkan', en:'Drag & drop',   icon:'fa-hand-pointer',      btn:'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200'},
                 ordering:  {id:'Mengurutkan',   en:'Ordering',        icon:'fa-arrow-down-1-9',    btn:'bg-sky-50 hover:bg-sky-100 text-sky-700 border-sky-200'},
@@ -2137,6 +2291,21 @@ function questionManager() {
         })(),
         dragFrom: null,
         dragOver: null,
+        // Question indexes whose key is filled for a shape this question is being
+        // moved away from. The type change below drops that key (`q.answers = []`),
+        // and a structural edit that quietly discards a key somebody set is the
+        // failure this warns about rather than performs.
+        keyWarnings: {},
+        // Set when turning the exception *off* dropped the extra correct letters: the
+        // teacher chose to keep one answer, and the page says which letters went
+        // rather than leaving a key that quietly shrank.
+        multiTrimmed: {},
+        // The mirror of `multiTrimmed`, for a question that already exists: the
+        // exception was switched *on*. It is a notice rather than a repair — one
+        // letter is a valid set of one — and it is only raised for a question the
+        // page loaded from storage, because a brand-new question carries the
+        // default `['A']` and a notice on every fresh question is wallpaper.
+        multiWidened: {},
         // Exposed to the template's own expressions (the min/max counters and the
         // preset row read them by name), so they are defined once in the script.
         PGK_MIN: PGK_MIN,
@@ -2154,7 +2323,8 @@ function questionManager() {
                        file: '', url: '', name: '', kind: 'audio', fileKind: 'audio',
                        _uploading: false, _uploadError: ''};
             const kind = this.kindOf(q);
-            if (kind === 'choice') { q.answers = ['A']; q.bonus = false; }
+            q._kind = kind;
+            if (kind === 'choice') { q.answers = ['A']; q.bonus = false; q.multi = false; }
             if (kind === 'truefalse') { q.tf = 'true'; }
             if (kind === 'match') { q.pairs = [this.newPair(1)]; q.extra = []; q._extraInput = ''; }
             if (kind === 'dragdrop' || kind === 'ordering') { q.order = ['']; q.extra = []; q._extraInput = ''; }
@@ -2186,14 +2356,60 @@ function questionManager() {
         addMcq() { this.addQuestionOf('mcq'); },
         addEssay() { this.addQuestionOf('essay_canvas'); },
         removeQuestion(i) { this.questions.splice(i, 1); },
+        // Marking an option correct. Which of the two rules applies is the toggle's
+        // business, and it is read here rather than remembered: the teacher sees the
+        // control change the moment the toggle moves, which is what makes the effect
+        // of the exception visible while the question is being written.
+        //
+        //   toggle off -> a click *replaces* the key (one letter, like the printed
+        //                 sheet's one bubble, so a second click cannot leave two
+        //                 letters "correct" on a question the pupil answers once);
+        //   toggle on  -> a click adds or removes, and the last one cannot be
+        //                 removed: a question with no key is not an exception, it is
+        //                 an unfinished question.
         toggleAnswer(i, opt) {
             const q = this.questions[i];
             if (this.kindOf(q) !== 'choice') return;
-            if (!q.answers) q.answers = [];
-            const idx = q.answers.indexOf(opt);
-            if (idx > -1) q.answers.splice(idx, 1); else q.answers.push(opt);
-            if (q.answers.length === 0) q.answers.push(opt);
+            const was = (q.answers || []).slice();
+            if (!this.isMulti(q)) {
+                // Clicking the letter already set keeps it: a question must never be
+                // saved with no key at all because its key was un-clicked.
+                q.answers = [opt];
+                return;
+            }
+            const list = was.slice();
+            const idx = list.indexOf(opt);
+            if (idx > -1) list.splice(idx, 1); else list.push(opt);
+            q.answers = list.length ? list : [opt];
         },
+        // The exception toggle. Turning it *off* on a question that marked several
+        // letters correct cannot keep them: the stored type would say one answer and
+        // the key would say three. The first letter is kept — the same one the
+        // grader would accept — and the teacher is told, rather than losing the
+        // extra letters quietly.
+        setMulti(i, on) {
+            const q = this.questions[i];
+            if (!this.offersMulti(q) && on) return;
+            q.multi = !!on;
+            if (on) {
+                // Bonus means "anything written counts", which says nothing about
+                // how many options are right — the two cannot both be true.
+                q.bonus = false;
+                if (!q.answers || !q.answers.length) q.answers = [this.optionLetters[0]];
+                // A key that was set while the question was a single-answer one names
+                // one letter, and it stays valid: the pupil is now shown checkboxes
+                // for a question whose key is a set of one. Naming it is the whole
+                // point — the teacher is the only one who can add the others.
+                if (q._stored && (q.answers || []).length === 1) this.multiWidened[i] = true;
+            } else if ((q.answers || []).length > 1) {
+                q.answers = [q.answers[0]];
+                this.multiTrimmed[i] = true;
+            } else if (!q.answers || !q.answers.length) {
+                q.answers = [this.optionLetters[0]];
+            }
+        },
+        dismissMultiTrimmed(i) { delete this.multiTrimmed[i]; },
+        dismissMultiWidened(i) { delete this.multiWidened[i]; },
         addPair(i) {
             const q = this.questions[i];
             q.pairs.push(this.newPair((q.pairs || []).length + 1));
@@ -2378,9 +2594,40 @@ function questionManager() {
         },
         // A question that changes type must not keep an answer from its old one —
         // an MCQ letter left in a matching question is a key nobody can read.
+        // Whether a question carries a key the given shape can read — the page's
+        // own reading of `question_types.key_has_answer`, per kind. Used only to
+        // decide whether a type change would drop something worth naming.
+        keyFilledFor(q, kind) {
+            if (kind === 'choice') return !!q.bonus || !!(q.answers || []).length;
+            if (kind === 'truefalse') return q.tf === 'true' || q.tf === 'false';
+            if (kind === 'match') return (q.pairs || []).some(function(p) {
+                return String((p && p.l) || '').trim() && String((p && p.r) || '').trim();
+            });
+            if (kind === 'dragdrop' || kind === 'ordering') return (q.order || []).some(function(w) {
+                return String(w || '').trim();
+            });
+            if (kind === 'pgk') return !!((q.pgkStatements || []).length) &&
+                (q.pgkKey || []).length === (q.pgkStatements || []).length;
+            return false;                    // an essay has no key to lose
+        },
+        dismissKeyWarning(i) { delete this.keyWarnings[i]; },
         onTypeChange(i) {
             const q = this.questions[i];
             const kind = this.kindOf(q);
+            // `@change` fires after the model moved, so the shape being left is the
+            // one this question was seeded with — kept on `q._kind` and updated here.
+            const wasKind = q._kind || kind;
+            if (wasKind !== kind && this.keyFilledFor(q, wasKind)) {
+                this.keyWarnings[i] = true;
+            } else if (wasKind !== kind) {
+                delete this.keyWarnings[i];
+            }
+            q._kind = kind;
+            // The exception belongs to one type. Leaving the question as a matching
+            // one with `multi` still standing would re-apply the exception the moment
+            // it came back to being a choice question — silently, and long after the
+            // teacher forgot they had ever set it.
+            if (kind !== 'choice') q.multi = false;
             q.bonus = kind === 'choice' ? !!q.bonus : false;
             if (kind === 'choice' && (!q.answers || !q.answers.length)) q.answers = ['A'];
             if (kind === 'truefalse' && !q.tf) q.tf = 'true';
@@ -2399,7 +2646,11 @@ function questionManager() {
             else { this._objectivePct = 0; this._essayPct = 100; }
         },
         getTypesJson() {
-            return JSON.stringify(Object.fromEntries(this.questions.map((q,i) => [i, q.type])));
+            // `typeFor`, not `q.type`: the exception is stored under its own name so a
+            // page that ignores the toggle (the pupil's, the grader's, the scan task's)
+            // still reads the question as one that allows more than one answer.
+            var self = this;
+            return JSON.stringify(Object.fromEntries(this.questions.map((q,i) => [i, self.typeFor(q)])));
         },
         // What the answer key holds, per kind. The shape of each is the one
         // app/services/question_types.py reads back, so the key this page writes
@@ -2407,8 +2658,14 @@ function questionManager() {
         keyFor(q) {
             const kind = this.kindOf(q);
             if (kind === 'choice') {
-                return q.bonus ? 'bonus'
-                    : (q.answers && q.answers.length === 1 ? q.answers[0] : (q.answers || ['A']));
+                if (q.bonus) return 'bonus';
+                const answers = (q.answers && q.answers.length) ? q.answers : [this.optionLetters[0]];
+                // One letter for a single-answer question (the shape it has always
+                // stored) and the *set* for the exception: the stored key says how
+                // many answers the question allows, so a report or a hand-written
+                // reader cannot mistake one for the other.
+                if (this.isMulti(q)) return answers.slice();
+                return answers.length === 1 ? answers[0] : answers;
             }
             if (kind === 'truefalse') return q.tf || 'true';
             if (kind === 'match') {
@@ -2697,13 +2954,25 @@ function deleteExam(id) {
                    a redirect, so a refusal can land beside the field. */
                 headers: { 'Accept': 'application/json' }
             }).then(function (reply) {
-                return reply.json().catch(function () { return {}; })
+                /* A 5xx is the server saying it could not answer, not a verdict on
+                   the draft — so it takes the same road as a request that never
+                   arrived (the queue), rather than the road a 4xx refusal takes. */
+                if (reply.status >= 500) return { queued: true };
+                return reply.json().catch(function () { return null; })
                     .then(function (data) {
+                        /* A body that could not be read is an unknown, not a
+                           "saved": re-offering the same draft is idempotent, and
+                           claiming it was written when we cannot read the answer
+                           is exactly the lie this whole change is against. */
+                        if (data === null) return { queued: true };
                         return { ok: reply.ok && data.ok !== false,
                                  exam_id: data.exam_id,
                                  error: data.error };
                     });
-            });
+            })
+            /* Offline, DNS gone, connection reset mid-flight: `fetch` rejects and
+               no verdict exists. The draft is queued, not marked as failed. */
+            .catch(function () { return { queued: true }; });
         },
         adopt: function (examId) {
             /* The draft exists now, so every later save and the explicit Publish
@@ -2716,6 +2985,12 @@ function deleteExam(id) {
         label: function (state, detail) {
             if (state === 'saving') return sgT('Menyimpan…', 'Saving…');
             if (state === 'saved') return sgT('Tersimpan otomatis', 'Saved automatically');
+            /* Waiting, not failed: the draft is still here and will be written the
+               moment the connection is back. Saying "not saved" would send the
+               teacher reloading to chase a save they never lost. */
+            if (state === 'waiting') return sgT(
+                'Menunggu koneksi — draf akan tersimpan saat koneksi kembali',
+                'Waiting for connection — this draft will save when you are back online');
             if (state === 'error') return sgT('Gagal menyimpan', 'Not saved')
                 + (detail ? ': ' + detail : '');
             return '';

@@ -91,10 +91,11 @@ def effective(supabase, school_id: str, subject_id: str, *,
               grade_level=None, year_id: str | None = None) -> int:
     """The mark that applies to this subject, grade and year.
 
-    One read, filtered by school, subject and year, then chosen in code: the
-    override for this grade if there is one, else the subject's general mark, else
-    :data:`DEFAULT_KKM`. Read in one query rather than three so a page that shows
-    forty subjects does not pay a hundred and twenty round-trips.
+    One read, filtered by school, subject and year, then :func:`resolve` chooses
+    in code: the override for this grade if there is one, else the subject's
+    general mark, else :data:`DEFAULT_KKM`. Read in one query rather than three so
+    a page that shows forty subjects does not pay a hundred and twenty
+    round-trips.
     """
     if not school_id or not subject_id:
         return DEFAULT_KKM
@@ -102,16 +103,47 @@ def effective(supabase, school_id: str, subject_id: str, *,
         .eq("school_id", school_id).eq("subject_id", subject_id)
     if year_id:
         query = query.eq("school_year_id", year_id)
-    rows = _rows(query)
-    wanted = _text(grade_level)
+    # The rows are already filtered to this subject, so no subject is passed in:
+    # `resolve` only filters by subject when the rows it is given carry one.
+    return resolve(_rows(query), "", grade_level)
+
+
+def resolve_with_source(rows, subject_id: str,
+                        grade_level=None) -> tuple[int, str | None]:
+    """``(mark, source)`` from ``subject_kkm`` rows already read.
+
+    The one resolution order — an override for this grade, else the subject's
+    general mark, else :data:`DEFAULT_KKM` — as a pure function over rows, so a
+    caller that must weigh a whole **class** reads ``subject_kkm`` once and still
+    gets, per pupil, the answer :func:`effective` would give one query at a time.
+
+    ``source`` travels with the number: ``"grade"`` when the level's own override
+    decided it, ``"subject"`` when the subject's general mark did, and ``None``
+    when nothing is on file and :data:`DEFAULT_KKM` applies. A page needs that to
+    say whether the school chose the standard or the app supplied it — a default
+    presented as the school's own choice is a standard the school never set.
+    """
+    wanted_subject = str(subject_id or "")
+    wanted_level = _text(grade_level)
     general = None
-    for row in rows:
+    for row in rows or []:
+        # An empty ``subject_id`` means the rows were already read for one
+        # subject, so there is nothing left to filter on.
+        if wanted_subject and str(row.get("subject_id") or "") != wanted_subject:
+            continue
         level = _text(row.get("grade_level"))
-        if wanted is not None and level == wanted:
-            return _value(row.get("kkm"))
+        if wanted_level is not None and level == wanted_level:
+            return _value(row.get("kkm")), "grade"
         if level is None:
             general = row.get("kkm")
-    return _value(general) if general is not None else DEFAULT_KKM
+    if general is None:
+        return DEFAULT_KKM, None
+    return _value(general), "subject"
+
+
+def resolve(rows, subject_id: str, grade_level=None) -> int:
+    """The mark alone — :func:`resolve_with_source` without the provenance."""
+    return resolve_with_source(rows, subject_id, grade_level)[0]
 
 
 def _value(raw) -> int:

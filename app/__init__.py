@@ -107,9 +107,19 @@ def create_app(env=None):
     # exactly how the box stayed stuck for hours. Only measured evidence refuses;
     # see `app/utils/checkout_integrity.py` for why a hand edit, an untracked file
     # and a box with no git do not take the site down.
+    #
+    # The exception is the scan *cap* — the one refusal that is the absence of a
+    # measurement rather than a measurement — and it is granted by
+    # `dev_allowance`, which needs the variable **and** a config that is neither
+    # `IS_PRODUCTION` nor the probe. Without it a checkout with more files in flight
+    # than `SCAN_LIMIT` cannot construct the app, so the suite that would prove the
+    # change green cannot run in place and the workaround is a linked worktree.
+    # The waiver prints `ALLOWED_MARKER`, so a permitted run never reads as a clean
+    # one, and a `ProductionConfig` app can never be the one that is permitted.
     from app.utils import checkout_integrity
 
-    _unreproducible = checkout_integrity.unreproducible_reason()
+    _unreproducible = checkout_integrity.unreproducible_reason(
+        allow_unmeasured=checkout_integrity.dev_allowance(app.config))
     if _unreproducible:
         message = (
             f"{checkout_integrity.MARKER}: refusing to serve a checkout its own "

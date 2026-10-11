@@ -48,6 +48,16 @@
                class="inline-flex items-center justify-center gap-2 border-2 border-purple-200 text-purple-700 hover:bg-purple-50 px-4 py-2.5 rounded-xl font-bold text-sm transition">
                 <i class="fas fa-copy"></i><span x-text="lang==='en'?'Exam templates':'Template Ujian'"></span>
             </a>
+            {# Only when there is something to review: the panel is about old data, and
+               a permanent button for a state a teacher will probably never be in is
+               noise on the page they use every day. #}
+            {% if ambiguous_ids %}
+            <a href="/teacher/answer-key-review"
+               class="inline-flex items-center justify-center gap-2 border-2 border-rose-200 text-rose-700 hover:bg-rose-50 px-4 py-2.5 rounded-xl font-bold text-sm transition">
+                <i class="fas fa-circle-question"></i><span x-text="lang==='en'?'Review duplicate keys':'Tinjau Kunci Ganda'"></span>
+                <span class="bg-rose-600 text-white text-xs font-bold px-2 py-0.5 rounded-full">{{ ambiguous_ids|length }}</span>
+            </a>
+            {% endif %}
             <a href="/teacher/exams/new"
                class="inline-flex items-center gap-2 bg-brand-600 hover:bg-brand-700 text-white px-5 py-2.5 rounded-xl font-bold text-sm shadow-lg shadow-brand-600/20 transition">
                 <i class="fas fa-plus"></i><span x-text="lang==='en'?'Create Exam':'Buat Ujian'"></span>
@@ -103,6 +113,14 @@
                            badge follows the toggle — WCAG 3.1.2, same as the count in the header. #}
                         <span class="badge bg-rose-50 text-rose-700" :lang="lang"><i class="fas fa-user-slash mr-0.5"></i><span x-text="t('Tanpa kelas','No class')"></span></span>
                         {% endif %}
+                        {# A paper the school switched off records nothing, charges
+                           nothing and never locks — and the card used to look exactly
+                           like a monitored one, so "which sittings are unmonitored?"
+                           could only be answered from the database. Read as `== false`
+                           for the server's own reason: absent is not off. #}
+                        {% if exam.get('anti_cheat_enabled') == false %}
+                        <span class="badge bg-rose-50 text-rose-700" :lang="lang"><i class="fas fa-eye-slash mr-0.5"></i><span x-text="t('Anti-cheat mati','Anti-cheat off')"></span></span>
+                        {% endif %}
                     </div>
                 </div>
 
@@ -114,7 +132,11 @@
                     <span><i class="fas fa-clock mr-1"></i>{{ exam.duration_minutes }} min</span>
                     <span><i class="fas fa-users mr-1"></i>{{ exam.submission_count or 0 }}</span>
                     {% if exam.start_at %}
-                    <span><i class="fas fa-calendar-alt mr-1"></i>{{ exam.start_at[:16] }}</span>
+                    {# Through the `tz` filter, not sliced raw: `start_at` is stored in
+                       UTC, so `[:16]` showed a WIB teacher 00:50 for a 07:50 sitting.
+                       The filter reads the reader's own offset (`g.tz_offset`), the
+                       same one the builder form already formats its two clocks with. #}
+                    <span><i class="fas fa-calendar-alt mr-1"></i>{{ exam.start_at | tz('%Y-%m-%d %H:%M') }}</span>
                     {% endif %}
                 </div>
 

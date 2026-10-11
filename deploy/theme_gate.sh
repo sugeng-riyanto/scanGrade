@@ -128,9 +128,14 @@
 #   0  the release is readable, compiled, translated and matches its own SQL.
 #   1  a real finding in the release. The deploy rolls back.
 #   2  **this box** cannot answer the question — no node, no node_modules, no
-#      SQL to read, a build that failed. Nothing is wrong with the release, and
-#      a checker that breaks must not be able to take the site down, so the
-#      deploy says so loudly and continues WITHOUT rolling back.
+#      SQL to read, a build that failed, or a checkout the app will not construct
+#      in because it holds more modified tracked files than its own scan bound.
+#      Nothing is wrong with *the release*, and nothing about it was read either,
+#      which is the difference from exit 1: the deploy says which of the two it
+#      was and, like the other refusals, rolls back — carrying on would ship a
+#      commit nobody read, which is the same as having no gate at all (the
+#      preflight refuses the run outright when this box cannot run the gate, so
+#      reaching here with exit 2 means the box changed between the two).
 #   3  the release **removed the check** — one of the files below is gone, or the
 #      named tests collected nothing. That is a property of the release, not of
 #      the box, and it is refused like any other finding: a gate someone can
@@ -143,6 +148,16 @@ set -uo pipefail
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # Word-split on purpose: pytest takes them as separate paths.
 TESTS="tests/unit/test_dark_theme_contrast.py tests/unit/test_tailwind_class_names.py tests/unit/test_theme_stylesheet.py tests/unit/test_language_toggle.py tests/unit/test_i18n_coverage.py tests/unit/test_css_freshness.py tests/unit/test_landing_facilities.py tests/unit/test_static_tree.py tests/unit/test_no_committed_secrets.py"
+
+# The app's own refusal markers, and the reason they are named here rather than
+# spelled out in the block that reads them: they are literals in
+# `app/utils/checkout_integrity.py`, so a rename there would leave this gate
+# matching a string nothing prints — it would fall through to "this release ships
+# an unreadable element" and blame a release for a checkout. The two assignments
+# are compared against the module's own constants by
+# `tests/unit/test_checkout_integrity.py`.
+CONSTRUCT_MARKER="SCANGRADE-UNREPRODUCIBLE"
+ALLOW_DIRTY_VAR="SCANGRADE_ALLOW_DIRTY_CHECKOUT"
 
 # ── Armament ─────────────────────────────────────────────────────────────────
 # Everything that makes this a gate: the checks themselves, and the three tools
@@ -188,6 +203,60 @@ cd "$REPO" || exit 2
 OUTPUT=$("$PY" -m pytest $TESTS -q -p no:cacheprovider --no-header 2>&1)
 RC=$?
 
+# ── The one refusal that is about the checkout and not the release ───────────
+#
+# `app/utils/checkout_integrity.py` is asked at construction, and one of its
+# refusals is reachable here: a checkout with more modified tracked paths than its
+# scan bound is one the app will not construct in, so every check above comes back
+# "error at setup" — once per test, in a wall of `E   SystemExit: 1`. Read as a
+# release defect that is a false entry in the ledger, and it is the state a laptop
+# mid-feature is permanently in: the checks never ran, so there is nothing to
+# blame on the release and nothing to pass either.
+#
+# Hence exit 2, and the refusal's own remedy printed with it. The cap is the one
+# refusal a development run may answer for itself (`SCANGRADE_ALLOW_DIRTY_CHECKOUT`,
+# which the refusal itself names), and a box that serves and the deploy's probe
+# refuse that permission, so the workaround is never the answer for a release.
+# A *measured* blob — a path whose stored bytes no checkout of HEAD can reproduce
+# — is not this case: it is a property of the release, so it stays a finding.
+# checkout_refusal:start
+case "$OUTPUT" in
+  *"$CONSTRUCT_MARKER"*)
+    case "$OUTPUT" in
+      *"$ALLOW_DIRTY_VAR"*)
+        echo >&2
+        echo "theme gate: NOT CHECKED — this checkout has more modified tracked files" >&2
+        echo "            than the app's own scan bound, so the app refused to construct" >&2
+        echo "            and not one check in this gate ran. Nothing here is a finding" >&2
+        echo "            about the release; and nothing here is a pass either, which is" >&2
+        echo "            why this is exit 2 rather than exit 1." >&2
+        echo >&2
+        echo "            A development checkout answers the question for itself, which" >&2
+        echo "            is the refusal's own remedy — it is refused on a box that" >&2
+        echo "            serves and in the deploy's probe, so it can never answer it" >&2
+        echo "            for a release:" >&2
+        echo "                $ALLOW_DIRTY_VAR=1 bash deploy/theme_gate.sh" >&2
+        exit 2
+        ;;
+      *)
+        echo >&2
+        echo "theme gate: FAILED — a path in this checkout stores bytes no checkout of" >&2
+        echo "            HEAD can reproduce, so the app will not construct in it and not" >&2
+        echo "            one check in this gate ran. That is a property of the release:" >&2
+        echo "            it can neither be merged nor explained while it serves, and the" >&2
+        echo "            remedy is not a restore (the path's own filter writes through" >&2
+        echo "            it) — HEAD's bytes go in verbatim and git is told to read that" >&2
+        echo "            path without the filter. The deploy's own heal does exactly that" >&2
+        echo "            before this gate runs, so reaching here means it did not happen:" >&2
+        echo >&2
+        printf '%s\n' "$OUTPUT" | grep -E '^SCANGRADE-UNREPRODUCIBLE|^ +[^ ]' | head -12 >&2
+        exit 1
+        ;;
+    esac
+    ;;
+esac
+# checkout_refusal:end
+
 # The coverage table is printed, not just checked: the gate is where a release is
 # looked at, and "54.0% across 115 templates" is the number that says whether the
 # translation half of this app moved. Its exit codes are its own (0 pass, 1 a
@@ -228,6 +297,54 @@ if [ "$SCHEMA_RC" -eq 1 ]; then
   exit 1
 fi
 
+# ── The same question through the other door: has this repository's SQL been ─
+# ── applied to the database it names? ───────────────────────────────────────
+# The check above reads the *files*, and it is happy either way. This one asks the
+# live schema, and it is the only thing in this repository that can see a migration
+# it **carries** and the database never got — written, reviewed, merged, never pasted
+# into the SQL Editor. That state is silent from every other direction: the offline
+# half reads only the files, the app imports and starts, and the first query that
+# names the missing object is refused (PGRST205 for a table, 42703 for a column) into
+# an empty page instead of an error. `--require-applied` exits 1 exactly then.
+#
+# Exit 2 (no SQL to read, no credentials, an API that will not answer) is a property
+# of THIS BOX, and it must not wear this gate's exit 2: the deploy reads exit 2 as
+# "this is not a release to ship" and rolls it back and quarantines it, so a laptop
+# with no .env — or one Supabase call that timed out — would take a good release down.
+# It is said loudly and the release carries on, which is the rule every gate here
+# follows about "could not measure".
+# applied_check:start
+# What the success line may claim, decided by whether the question was answered at
+# all. A gate that says "every object this repository declares is in the live schema"
+# on a box with no credentials is claiming a measurement nobody took — the same
+# defect as a page that reports a number it never read.
+APPLIED_CLAIM=""
+APPLIED_OUT=$("$PY" "$REPO/deploy/schema_contract.py" --require-applied 2>&1)
+APPLIED_RC=$?
+if [ "$APPLIED_RC" -eq 1 ]; then
+  echo >&2
+  echo "theme gate: FAILED — this repository declares a table or a column the live" >&2
+  echo "            database does not have, so a migration it carries was never applied." >&2
+  echo "            Nothing is broken yet and every page still answers 200: the query that" >&2
+  echo "            names it is refused (PGRST205 / 42703) and renders empty. Apply the" >&2
+  echo "            migration, then commit this again:" >&2
+  echo "                .venv/bin/python deploy/apply_migration.py <file>.sql --commit" >&2
+  echo "            If it was applied moments ago, PostgREST may not have reloaded its" >&2
+  echo "            schema cache yet — re-run this before looking anywhere else." >&2
+  echo "$APPLIED_OUT" | sed 's/^/    /' >&2
+  exit 1
+fi
+if [ "$APPLIED_RC" -eq 2 ]; then
+  echo "theme gate: the live schema was NOT asked whether this release's SQL has been" >&2
+  echo "            applied — no credentials here, or the API could not answer. That is a" >&2
+  echo "            property of this box, not of the release, so nothing is refused." >&2
+  echo "$APPLIED_OUT" | sed 's/^/    /' >&2
+fi
+if [ "$APPLIED_RC" -eq 0 ]; then
+  APPLIED_CLAIM=", and every table and column this repository declares is one the live database already has"
+fi
+# applied_check:end
+
 if [ "$RC" -ne 0 ] && [ "$RC" -ne 5 ] && [ "$CSS_RC" -eq 0 ]; then
   echo "$CSS_OUT"   # the stylesheet half is fine; say so before the failure
 fi
@@ -255,7 +372,7 @@ if [ "$RC" -eq 0 ]; then
   if [ "$CSS_RC" -eq 0 ]; then
     echo "$SCHEMA_OUT"
     echo "$CSS_OUT"
-    echo "theme gate: OK — readable in both themes, every named utility is compiled, the committed stylesheet is the one the templates produce, the app's own stylesheet stays a cached file, every file under /static/ is one the app asks for and in a commit, every page declares the language of its own copy, no template translates less than it did, no tracked file carries a service-role key or a hard-coded Flask secret, and every table, column and policy the code names is one this repository declares, with every role it compares against one the database holds, and every facility the landing page advertises one this repository can show"
+    echo "theme gate: OK — readable in both themes, every named utility is compiled, the committed stylesheet is the one the templates produce, the app's own stylesheet stays a cached file, every file under /static/ is one the app asks for and in a commit, every page declares the language of its own copy, no template translates less than it did, no tracked file carries a service-role key or a hard-coded Flask secret, and every table, column and policy the code names is one this repository declares, with every role it compares against one the database holds${APPLIED_CLAIM}, and every facility the landing page advertises one this repository can show"
     exit 0
   fi
   echo >&2

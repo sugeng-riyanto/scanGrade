@@ -5,11 +5,16 @@ two different pages:
 
 * the **schedule** (`/admin-sekolah/invigilation`, also `/vice-principal/invigilation`)
   says *when a class sits a paper*, and attaches one or more teachers to that sitting.
-  This is what a teacher's *My duty* page reads back.
 * the **matrix** (`/admin-sekolah/invigilation/matrix`) says *who stands in this room,
   in this slot, on this day*. It is a grid — rows are teachers, columns are rooms, and
   a cell is a tick for one teacher in one room — and it is the page a school uses when
   a room holds candidates from several classes at once.
+
+A teacher's *My duty* page (`/teacher/invigilation`) shows **both** kinds: the
+sittings that carry their name from the schedule, and the room slots that carry their
+name from the matrix. They are two lists, not one, because they answer two different
+questions — *"I invigilate this exam in this class"* and *"I stand in this room
+during this slot"* — and a teacher needs to see each fact plainly.
 
 Both are written by the same people: **`admin_sekolah`** always, and
 **`vice_principal`** on their own prefix. A school that never made a deputy can still
@@ -110,6 +115,15 @@ The uploaded workbook is read into memory, parsed, and dropped when the request 
 It is **not** written to disk and **not** put in Storage — no file holding teacher
 names and addresses survives the upload. What is kept is the structured duties and one
 audit line naming who uploaded and how many rows were valid and invalid.
+
+### What a teacher sees
+
+`/teacher/invigilation` is read-only for the matrix: the teacher's own room duties
+(`invigilation_matrix.duties_for_teacher`) sit in a *My room duties* table beside the
+schedule-based list, each row naming the date, session, room and whether it came from
+a click or an Excel upload. No teacher can edit the grid — building it is the admin's
+and the deputy's job — and the read is scoped to the caller's school and their own
+`teacher_id`, so a room slot from another school or another teacher cannot appear.
 
 ## For a reviewer
 

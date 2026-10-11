@@ -58,7 +58,7 @@ input — `x-model`-bound, overwritten by typing — never an answer.
 
 | type | statements / columns | key |
 |---|---|---|
-| Complex multiple choice | `Statement 1`, `Statement 2`, `Statement 3` (the AKM minimum) | the first category, which is the affirmative one in all three presets: **True**, **Yes**, **Matches** |
+| Statement grid (AKM) — `complex_multiple_choice` | `Statement 1`, `Statement 2`, `Statement 3` (the AKM minimum) | the first category, which is the affirmative one in all three presets: **True**, **Yes**, **Matches** |
 | Matching | left `Statement n`, right `Matches n` | that pair |
 | True / False | — (the statement is printed on the paper; the builder stores only the key) | **True** |
 
@@ -157,6 +157,15 @@ A refusal is shown and *not* retried on its own: a body the server keeps refusin
 assessment period) must not become a request every few seconds. The teacher's next
 change tries again.
 
+A save that never **arrived** is a different thing from a save the server refused,
+and the loop treats it that way. A school connection that drops mid-sentence (or a
+5xx, or a body that could not be read back) leaves the draft unjudged rather than
+rejected, so it is **queued**: the status line says *waiting*, never *not saved* —
+"Gagal menyimpan" is what sends a teacher reloading to chase a paper they still have
+— and the body is offered again the moment the browser says the link is back, with a
+15-second backstop for the server that restarts without the link ever dropping. Only
+a save the server actually ruled on is a failure; only a queued one retries.
+
 The loop is `app/static/js/exam-autosave.js`, driven in node by
 `tests/unit/test_exam_autosave.py`. The page supplies the three things only it can
 know — how to read the form, how to post it, and where to put the id it is handed
@@ -164,7 +173,138 @@ back — and the status words as `sgT` pairs, so the language toggle reaches the
 
 The shared top bar in `app/static/js/sg-ux.js` still carries the *network* signal for
 a slow save (its own delay keeps a quick one invisible); this status line only adds
-which of the three states is true.
+which of the four states is true.
+
+## The answer-key page reads the builder's paper
+
+`/teacher/exams/<id>/answer-keys` edits the choice keys for the paper the builder
+wrote. Two things it must not do, and both are now guarded:
+
+* **It draws the option letters from the server.** `question_types.CHOICE_OPTIONS`
+is the one definition of what an option is; `vocabulary()["options"]` serves it, the
+builder reads it as `optionLetters`, and this page receives it as `option_letters`.
+A hand-written `['A','B','C','D','E']` on either page is how one of them starts
+offering a button the printed sheet has no bubble for. `item_analysis.CHOICE_OPTIONS`
+aliases the same tuple rather than listing it again.
+* **It knows whether a stored key is still a key.** `question_types.key_state(qtype,
+key)` reports `set` (the app can mark the question from it), `empty` (nothing stored,
+or this question's own blank shape), or `stale` — something *is* stored that the
+question can no longer read. That last one is what a structural edit leaves behind:
+the `"B"` a question kept from when it was multiple choice, on the question that has
+since become a matching one. The page warns (naming the old value), seeds the editor
+empty for that question, and **does not delete the old key** — a page load must never
+destroy a mark somebody set on purpose.
+
+A save posts **only the questions the teacher actually touched** (`getJson()` skips
+anything not in `dirty`), and the route writes only when the merged key differs from
+what is stored. Opening this page and pressing Save is therefore a read, not a
+rewrite-and-re-grade of every submission — the load a 1 vCPU box feels most during a
+run of papers. `tests/unit/test_answer_key_source.py` pins all of it.
+
+### One answer, or several — and the keys that were written before the choice existed
+
+A question the builder offers as **Pilihan Ganda** is one question, and the name says
+only that: whether *one* letter or several are right is a small toggle beneath the type
+picker (*Izinkan pengecualian: lebih dari satu jawaban benar untuk soal ini*, off by
+default), not a second type a teacher chooses up front. Behind the scenes the toggle
+decides whether the question is stored as `mcq` (off) or `mcq_multi` (on) — a detail
+neither the teacher nor the pupil has to know.
+
+The picker carries **one** entry per kind, and the exception is deliberately not a
+second one: it has no entry of its own in `PICKER_TYPES`, and `mcq_multi` is not a
+picker value at all. The type the teacher *picks* therefore never changes with the
+toggle, which is what keeps a paper readable — and it is why the entry is named
+"Pilihan Ganda" rather than after the single-answer rule the toggle decides.
+
+**The rule the exception must not be confused with.** The PGK type the picker calls
+**Tabel Pernyataan (AKM)** (`complex_multiple_choice`) is a different question
+entirely: the AKM statement-and-category grid, with its own editor, its own grader and
+its own key shape (see `PGK_QUESTION_TYPE.md`). Storing the letters exception as a
+`complex_multiple_choice` would show the pupil a grid and hand an unreadable key to
+that grader. The two are separate types with separate names in the picker for exactly
+that reason — and the entry was renamed off "Pilihan Ganda Kompleks" because that
+phrase is also what "more than one correct answer" is called in ordinary use, which
+made a second kind of ordinary multiple choice appear to sit beside the real one.
+
+**What the pupil is shown follows the stored type too, and that is a control rather
+than a label.** An `mcq` question is a row of bubbles where a tap replaces the last
+one; an `mcq_multi` question is the same row drawn as ticks, where a tap adds or removes
+a letter and the ticks are stored in the paper's own option order. The page asks the
+question's type (`SG_QT.multi`) rather than keeping a flag of its own, because a second
+source of truth fails *silently* here: the pupil gets the wrong control and simply
+cannot record the answer the question asks for, while the grader — comparing the set of
+ticks against the key — marks it wrong. `tests/unit/test_multi_answer_control.py` runs
+the page's own `toggleOption` / `isTicked` / `markAnswered` in node and grades what they
+record with the app's own grader, so both shapes are observed rather than described.
+
+**Which mark-scheme row the exception is priced in** is decided once, in
+`mark_scheme.SCHEME_OF`: it is a multiple-choice question the app marks, so it shares
+the `mcq` row — the builder's own table draws it there (`SG_SCHEME_OF`) and the stored
+scheme folds it the same way. It is deliberately not a row of its own (that would put
+the exception on the paper's face), and it is deliberately not left unfolded either:
+the fallback bucket in `type_counts` is the *legacy essay* one, so an unfolded
+exception was counted as a written question and priced at the type's *default* marks
+rather than the marks the teacher set for multiple choice.
+
+**An answer that arrives in the other shape is read, not refused.**
+`question_types.normalize_answer_map` is applied at both doors that store an answer —
+`/api/student/sync-draft` on every autosave, and the submit route before anything is
+graded or stored — so a page loaded before the teacher flipped the toggle (or a
+hand-made request) cannot put a list on a single-answer question, or a bare letter on
+the exception. A pupil must not lose a sitting over a control they cannot reach from
+their side.
+
+What the exception means for scoring is the part that matters when a key is changed,
+and the two types are not interchangeable on the same key:
+
+| stored type | a list key reads as | a pupil ticking one of two |
+|---|---|---|
+| `mcq` | *any of these* (`value in key`) | **right** |
+| `mcq_multi` | *exactly these* (set equality) | **wrong** |
+
+So switching a question to the exception is not a no-op on marks already recorded.
+That is why nothing here changes a type or a key silently.
+
+**The answer-key page asks the type, not the stored value.** Its control is a radio
+for a `mcq` question and a set of checkboxes for `mcq_multi` (`choice_mode(qtype)`),
+and it says which in words above the buttons. It used to be a set of toggles for any
+choice question, so clicking `B` after `A` wrote `["A","B"]` — on a question whose
+name is *single answer*. That is precisely how the ambiguous keys in the database got
+there, and a page that keeps offering it keeps making more. A save now **refuses** a
+multi-letter key on a single-answer question, names the question in the flash, and
+points at the two honest ways out rather than trimming a letter the teacher did not
+ask to drop. The page also warns when a stored key disagrees with its own question,
+in both directions: `lost` (a single-answer question whose key marks several, which
+cannot be read as the one answer the question now asks for) and `narrow` (the
+exception was switched on after a single letter was set, so more may be correct).
+
+**`/teacher/answer-key-review` is where the old data is settled.** It lists the
+teacher's own papers (the school's, for an `admin_sekolah`) that hold a `mcq`
+question whose key names more than one letter — selected by
+`question_types.ambiguous_choice_keys`, the same function the teacher dashboard's
+card counts with, so a paper cannot be flagged on one page and invisible on the
+other. Neither resolution is taken automatically: the stored key does not say whether
+the paper meant *all of these* or *one of them*, and only the owner knows.
+
+For each question the panel prices every resolution **before** it is offered, with
+`exam_scoring.key_change_impact` — the same arithmetic the recalculation writes with,
+so the number the teacher agrees to is the number the pupil gets:
+
+| resolution | what it writes | what it means |
+|---|---|---|
+| **Jadikan pengecualian** | `question_types[n] = mcq_multi`, key kept | every stored letter stays correct; a pupil who ticked only some of them now loses the question |
+| **Jadikan kunci tunggal** | `answer_key[n] = <one letter>` | one letter stays correct; pupils who ticked another lose it |
+
+Each row shows how many sittings would go **up**, **down**, and **stay**, plus the
+largest single move, and the panel states how many already-marked sittings are in
+play. Applying a resolution writes the type or the key **and nothing else**:
+rewriting marks is a separate tick (*Hitung ulang skor murid*), offered only when
+marks would actually move, never taken on the teacher's behalf. Both acts are audit
+logged (`resolve_ambiguous_key`, and `recompute` when it is taken), and the route
+refuses to apply a resolution to a question another tab has already resolved.
+
+`tests/unit/test_multi_answer_review.py` pins the control, the refusal, the selection
+and the two-decisions rule.
 
 ## Reading size on the pupil's page
 
@@ -224,8 +364,6 @@ asserted against what happened, not what the source looks like.
   (`exam_preview`, `exam_preview_paper`).
 * `app/templates/teacher/exam_preview.html` — the frames and the device/orientation
   switches.
-* `tests/unit/test_exam_preview.py` — the preview creates nothing, arms nothing, and
-  the frames are the sizes they claim.
 * `app/templates/teacher/exam_form.html` — the whole page. The PDF uploader
   (`pdfUpload()`), the question list (`questionManager()`), the defaults
   (`sgStatementLabel` / `sgMatchLabel` / `seedPgk` / `newPair`), and the scope walk
@@ -237,5 +375,11 @@ asserted against what happened, not what the source looks like.
   `tests/unit/test_exam_autosave.py`.
 * `app/static/js/exam-view.js` — the pupil page's reading size and lightbox, run in
   node by `tests/unit/test_exam_view_zoom.py`.
+* `app/services/question_types.py` — `CHOICE_OPTIONS`, `vocabulary()` and `key_state()`,
+  the one source the builder and the answer-key page share.
 * `tests/unit/test_exam_builder_tablet.py` — the guards, and the measurements they
   encode.
+* `tests/unit/test_answer_key_source.py` — one option definition, `key_state`, and the
+  write-nothing save.
+* `tests/unit/test_exam_preview.py` — the preview creates nothing, arms nothing, and
+  the frames are the sizes they claim.

@@ -56,9 +56,10 @@ the union over all of them, so an `ALTER TABLE` in a migration still adds to a
 `CREATE TABLE` in the base file.
 
 Modes:
-    python deploy/schema_contract.py            # code, policies and roles (offline)
-    python deploy/schema_contract.py --live     # also ask the database and the API
-    python deploy/schema_contract.py --anon     # ask the API what it serves with no session
+    python deploy/schema_contract.py                    # code, policies, roles (offline)
+    python deploy/schema_contract.py --live             # also ask the database and the API
+    python deploy/schema_contract.py --require-applied  # FAIL if the live schema is behind
+    python deploy/schema_contract.py --anon             # ask the API with no session
     python deploy/schema_contract.py --json out.json
 
 `--anon` is the other direction and the one that found the answer keys: it points the
@@ -75,9 +76,29 @@ reports that as a failure and a migration not yet pasted as *pending*, because t
 are opposite facts: one is a database ahead of the repository, the other is the
 repository ahead of the database.
 
+`--require-applied` is that same measurement with a different job: it is a **check**,
+and it fails when a file here declares a table or a column the live schema does not
+have. That state has no other symptom. The offline half reads only the files and is
+perfectly happy; the app imports and starts; and the first query naming the missing
+object is refused by PostgREST (`PGRST205` / `42703`) while a `try/except` renders an
+empty page instead of an error — the same silent failure this whole tool exists for. A
+migration that was written, reviewed, merged and never pasted into the SQL Editor sat
+in these very lines while nothing failed: `--live` *displayed* it, and a line in a
+report nobody reads a gate as is how an unapplied migration goes unnoticed.
+
+It asks the **API** and not a Postgres session on purpose. `SUPABASE_URL` and the
+service key are the two things a box running this app cannot lack, while
+`apply_migration.py --verify` needs `DIRECT_URL` and answers "could not measure"
+without it — so on a box that has no `DIRECT_URL` the live schema was asked by nothing
+at all. Exit 2 here is therefore never a gap: a box that cannot ask is a property of
+the box, and refusing a release over a missing credential would take a working site
+down for it.
+
 Exit codes, like the other gates: 0 pass · 1 a real disagreement (a name nothing
-creates, a policy open to PUBLIC, a role the constraint cannot hold, or an object the
-API serves that no file declares) · 2 could not measure (no SQL found, unreadable).
+creates, a policy open to PUBLIC, a role the constraint cannot hold, an object the API
+serves that no file declares, or — under `--require-applied` — an object this
+repository declares that the live schema does not have) · 2 could not measure (no SQL
+found, unreadable, or no credentials to ask the live schema).
 """
 from __future__ import annotations
 
@@ -634,6 +655,40 @@ def live_differences(schema: dict[str, set[str]], live: dict[str, set[str]]) -> 
     return pending, undeclared
 
 
+def applied_gap(pending: list[str]) -> tuple[list[str], list[str]]:
+    """Split a `live_differences` pending list into (a gap, absent by design).
+
+    One home for the filter, so the *report* and the *check* cannot disagree about
+    which absent objects count: a table a guarded `ALTER TABLE` says may not exist
+    (`optional_tables`) would otherwise be pending for ever, and a check that fails on
+    it is a check somebody turns off.
+
+    The first list is the one `--require-applied` fails on: a table or column a file in
+    this repository declares, that the running database does not have — a migration
+    written, merged and never applied. The second is printed, not judged.
+    """
+    optional = optional_tables()
+    by_design = [n for n in pending if n.startswith("table ") and n[6:] in optional]
+    return [n for n in pending if n not in by_design], by_design
+
+
+def applied_note(undeclared: list[str]) -> None:
+    """Say what the live schema has and this repository does not, without judging it.
+
+    The other direction is real — `--live` fails on it, and a database rebuilt from
+    this repository would not have those objects — but it is not this mode's question,
+    and a release must not be refused because the database is *ahead* of it. Named all
+    the same: whoever is reading a gap wants both lists in front of them.
+    """
+    if not undeclared:
+        return
+    print(f"the live schema has {len(undeclared)} object(s) no file here declares "
+          "(the other direction — `--live` reports it as a failure; this mode asks "
+          "only whether the SQL this repository carries has been applied):")
+    for name in undeclared:
+        print(f"  + {name}")
+
+
 #: Objects a caller with no session is *meant* to read. Empty on purpose: every page
 #: in this app is rendered server-side with the service key, so nothing in the API
 #: needs to be readable with the public key. Adding a name here is a deliberate
@@ -808,17 +863,58 @@ def main(argv: list[str]) -> int:
         print("schema contract: OK - no object answers without a session")
         return 0
 
+    if "--require-applied" in argv:
+        # The check. Everything above answers "is this repository self-consistent, and
+        # does it agree with the database in the direction the files can see" — and
+        # none of it can see a migration that was written, reviewed, merged and never
+        # pasted into the SQL Editor. That one is a failure with no other symptom: the
+        # app starts, the offline half is happy, and the first query that names the
+        # missing object is refused (PGRST205 / 42703) into an empty page.
+        #
+        # It is asked of the API rather than of a Postgres session, and that is the
+        # point: `SUPABASE_URL` and the service key are what a box running this app
+        # cannot lack, while `apply_migration.py --verify` needs `DIRECT_URL` and its
+        # exit 1 means "could not measure" — a state a release can sit in for a long
+        # time with nothing looking at the database. Exit 2 stays "could not measure"
+        # here for the same reason: a missing credential is a property of the box, and
+        # failing a release over it would take a working site down for it.
+        live = live_schema()
+        if live is None:
+            print("schema contract: cannot measure  -  set SUPABASE_URL and "
+                  "SUPABASE_SERVICE_KEY (or put them in .env) to ask the live schema "
+                  "which objects it has. Nothing was judged.")
+            return 2
+        declared_pending, undeclared = live_differences(schema, live)
+        pending, optional_pending = applied_gap(declared_pending)
+        for name in optional_pending:
+            print(f"  ~ {name[6:]}  (absent by design)")
+        if pending:
+            print(f"declared here but not in the live schema (unapplied migrations): "
+                  f"{len(pending)}")
+            for name in pending:
+                print(f"  - {name}")
+            print("\nschema contract: FAILED  -  this repository declares objects the live "
+                  "schema does not have. A migration was written and merged but never "
+                  "applied to the database the app runs against, so the first query "
+                  "naming one of them is refused (PGRST205 / 42703) and a `try/except` "
+                  "renders an empty page. Apply it, then release this exact commit:\n"
+                  "    .venv/bin/python deploy/apply_migration.py <file>.sql --commit")
+            print()
+            applied_note(undeclared)
+            return 1
+        applied_note(undeclared)
+        print(f"schema contract: OK  -  every table and column this repository declares "
+              f"is in the live schema ({len(live)} object(s) served)")
+        return 0
+
     if "--live" in argv:
         live = live_schema()
         if live is None:
             print("schema contract: OK (offline)  -  set SUPABASE_URL and "
                   "SUPABASE_SERVICE_KEY to also ask the database")
             return 0
-        pending, undeclared = live_differences(schema, live)
-        optional = optional_tables()
-        optional_pending = [n for n in pending
-                            if n.startswith("table ") and n[6:] in optional]
-        pending = [n for n in pending if n not in optional_pending]
+        declared_pending, undeclared = live_differences(schema, live)
+        pending, optional_pending = applied_gap(declared_pending)
         print(f"the API serves {len(live)} object(s)")
         if pending:
             print(f"declared but not in the API yet (pending migrations): {len(pending)}")

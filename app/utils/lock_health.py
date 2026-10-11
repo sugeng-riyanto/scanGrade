@@ -41,10 +41,11 @@ from __future__ import annotations
 import json
 import os
 import pathlib
-import tempfile
 import threading
 import time
 from datetime import datetime, timezone
+
+from app.utils import import_safety
 
 # ── the keys the page headlines ──────────────────────────────────────────────
 
@@ -63,10 +64,27 @@ UNREACHABLE = "unreachable"
 RECORDED = "recorded"
 #: The store could not be asked at all. Never rendered as healthy.
 UNKNOWN = "unknown"
+#: The *marker's* key when there is no path to look in — no usable temp directory,
+#: see `TEMP_DIR_ERROR`. Deliberately not a headline key: the card's headline is the
+#: store, and a store that answers and is shared really is shared. This rides on the
+#: marker's own line, which would otherwise claim "none".
+MARKER_UNAVAILABLE = "unavailable"
 
 #: Where the marker lives when `SCANGRADE_LOCK_STATE_FILE` does not say otherwise.
-#: The system temp directory, not the checkout: see the module docstring.
-DEFAULT_STATE_FILE = os.path.join(tempfile.gettempdir(), "scangrade-lock-fallback.json")
+#: The system temp directory, not the checkout: see the module docstring. Read at
+#: import through `import_safety`, because `tempfile.gettempdir()` *opens files* to
+#: prove a directory is writable and raises when none of them is — a full disk, a
+#: read-only `/tmp`, a `TMPDIR` that has since been removed — and at module scope that
+#: is an import-time death for the app, the worker and `manage.py` at once, which is
+#: the one outcome this module must never have. `""` means there is nowhere to keep
+#: the marker, which `state_file()` turns into `None`.
+DEFAULT_STATE_FILE = import_safety.default_state_file("scangrade-lock-fallback.json")
+
+#: Why the marker has no default path, or ``""``. Published so a page, a probe or a
+#: test can tell "nothing recorded" from "nowhere to record it". The card's headline
+#: is the *store*, so this does not become a key of its own there — it is the marker's
+#: own line, which reads `unavailable` and says why.
+TEMP_DIR_ERROR = import_safety.TEMP_DIR_ERROR
 
 #: How long a healthy worker waits between checks that a marker still needs
 #: deleting. It is what heals a marker written by a worker that has since been
@@ -102,11 +120,20 @@ def _iso(stamp: float | None) -> str | None:
     return datetime.fromtimestamp(stamp, tz=timezone.utc).isoformat(timespec="seconds")
 
 
-def state_file(path=None) -> pathlib.Path:
-    """The marker's path: the argument, else the env var, else the temp directory."""
+def state_file(path=None) -> pathlib.Path | None:
+    """The marker's path, or None when this box has nowhere to keep one.
+
+    The argument and the environment variable always win. Otherwise the temp
+    directory decides, and `""` from `DEFAULT_STATE_FILE` becomes None rather than
+    `Path("")` — which is `.`, a *directory*, and would have been written to (and then
+    read back as unreadable) instead of reported. None is a reading the callers
+    render: `_read_marker` answers `unavailable` with the reason, `_write_marker`
+    writes nothing, and the counters still count.
+    """
     if path is not None:
         return pathlib.Path(path)
-    return pathlib.Path(os.environ.get("SCANGRADE_LOCK_STATE_FILE") or DEFAULT_STATE_FILE)
+    chosen = os.environ.get("SCANGRADE_LOCK_STATE_FILE") or DEFAULT_STATE_FILE
+    return pathlib.Path(chosen) if chosen else None
 
 
 def reset() -> None:
@@ -167,13 +194,16 @@ def record_fallback(reason) -> None:
         _write_marker(state_file(), now, reason)
 
 
-def _write_marker(path: pathlib.Path, now: float, reason) -> None:
+def _write_marker(path: pathlib.Path | None, now: float, reason) -> None:
     """Leave the outage on record, or fail silently trying.
 
     Exclusive create, so a marker another worker wrote first survives; the flag is
     set either way, because retrying on every lock of an outage is exactly the I/O
-    this avoids.
+    this avoids. `None` is "nowhere to keep one" (`TEMP_DIR_ERROR`): the count is
+    already in this process, and there is nothing on disk to write it to.
     """
+    if path is None:
+        return
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "x", encoding="utf-8") as handle:
@@ -184,8 +214,10 @@ def _write_marker(path: pathlib.Path, now: float, reason) -> None:
         pass
 
 
-def _remove_marker(path: pathlib.Path) -> bool:
-    """Delete the marker. True when one was actually there."""
+def _remove_marker(path: pathlib.Path | None) -> bool:
+    """Delete the marker. True when one was actually there — and never for None."""
+    if path is None:
+        return False
     try:
         path.unlink()
         return True
@@ -193,10 +225,17 @@ def _remove_marker(path: pathlib.Path) -> bool:
         return False
 
 
-def _read_marker(path: pathlib.Path, now: float) -> dict:
-    """The marker as a reading, with `absent` never standing in for unreadable."""
+def _read_marker(path: pathlib.Path | None, now: float) -> dict:
+    """The marker as a reading, with `absent` never standing in for unreadable.
+
+    Three states, not two: `absent` is a file that is not there, `unreadable` is one
+    that is there and cannot be read, and `unavailable` is no path at all — `None`,
+    because the box has no temp directory to look in. None of the three is health.
+    """
     out = {"present": False, "key": "absent", "at": None, "reason": None,
            "worker": None, "age_seconds": None}
+    if path is None:
+        return dict(out, key=MARKER_UNAVAILABLE, reason=_trim(TEMP_DIR_ERROR) or None)
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
     except FileNotFoundError:
@@ -291,7 +330,7 @@ def state(probe=None, now: float | None = None, path=None) -> dict:
         "probe_error": error,
         "recorded": recorded,
         "worker": str(os.getpid()),
-        "state_file": str(path),
+        "state_file": str(path) if path is not None else "",
         "marker": marker,
         **reading,
     }

@@ -76,11 +76,17 @@
         'class_pupil_mismatch': ['Murid di kelas sekolah lain', 'Pupil in another school class'],
         'pair_school_mismatch': ['Peta mapel-kelas lintas sekolah', 'Subject-class map across schools'],
         'assignment_school_mismatch': ['Penugasan guru lintas sekolah', 'Teacher assignment across schools'],
+        'exam_school_mismatch': ['Ujian di kelas sekolah lain', 'Exam in another school class'],
+        'submission_school_mismatch': ['Pengerjaan untuk ujian sekolah lain', 'Sitting for another school exam'],
+        'subject_level_school_mismatch': ['Tingkat mapel lintas sekolah', 'Subject level across schools'],
     } %}
     {% set IG_TABLES = {
         'profiles': ['Akun murid', 'Pupil account'],
         'class_subjects': ['Peta mapel-kelas', 'Subject-class map'],
         'teacher_assignments': ['Penugasan guru', 'Teacher assignment'],
+        'exams': ['Ujian', 'Exam'],
+        'submissions': ['Pengerjaan ujian', 'Exam sitting'],
+        'student_subject_levels': ['Tingkat mapel murid', 'Pupil subject level'],
     } %}
     {# One sentence per repair refusal, keyed by the plan's own `reason_key`. A
        refusal the operator cannot read is a button that silently does nothing. #}
@@ -183,13 +189,13 @@
                             <tr class="border-t border-amber-200/60" data-finding="{{ f.kind }}">
                                 <td class="py-2 pr-3 font-bold text-amber-800" x-text="t('{{ kind[0] }}','{{ kind[1] }}')"></td>
                                 <td class="py-2 pr-3 text-amber-700" x-text="t('{{ tbl[0] }}','{{ tbl[1] }}')"></td>
-                                <td class="py-2 pr-3 font-mono text-[10px] text-amber-700 break-all">{% if f.pair_id or f.assignment_id or f.pupil_id %}{{ f.pair_id or f.assignment_id or f.pupil_id }}{% else %}-{% endif %}{% if f.field %} · {{ f.field }} {{ f.subject_id or f.class_id or '' }}{% endif %}</td>
-                                <td class="py-2 pr-3 font-mono text-[10px] text-amber-700 break-all">{% if f.pair_school_id or f.assignment_school_id or f.class_school_id %}{{ f.pair_school_id or f.assignment_school_id or f.class_school_id }}{% else %}-{% endif %}</td>
-                                <td class="py-2 font-mono text-[10px] text-amber-700 break-all">{% if f.subject_school_id or f.pupil_school_id %}{{ f.subject_school_id or f.pupil_school_id }}{% else %}-{% endif %}</td>
+                                <td class="py-2 pr-3 font-mono text-[10px] text-amber-700 break-all">{% if f.pair_id or f.assignment_id or f.pupil_id or f.exam_id or f.submission_id or f.level_id %}{{ f.pair_id or f.assignment_id or f.pupil_id or f.exam_id or f.submission_id or f.level_id }}{% else %}-{% endif %}{% if f.field %} · {{ f.field }} {{ f.subject_id or f.class_id or '' }}{% endif %}</td>
+                                <td class="py-2 pr-3 font-mono text-[10px] text-amber-700 break-all">{% if f.exam_school_id or f.level_school_id or f.pair_school_id or f.assignment_school_id or f.class_school_id %}{{ f.exam_school_id or f.level_school_id or f.pair_school_id or f.assignment_school_id or f.class_school_id }}{% else %}-{% endif %}</td>
+                                <td class="py-2 font-mono text-[10px] text-amber-700 break-all">{% if f.subject_school_id or f.pupil_school_id or f.class_school_id %}{{ f.subject_school_id or f.pupil_school_id or f.class_school_id }}{% else %}-{% endif %}</td>
                                 {# The preview: where this row *would* move, and — for a row the
                                    door will refuse — the sentence saying why, so a refusal
                                    is on the page rather than a surprise after a click. #}
-                                {% set rid = f.pair_id or f.assignment_id or f.pupil_id %}
+                                {% set rid = f.pair_id or f.assignment_id or f.pupil_id or f.exam_id or f.submission_id or f.level_id %}
                                 {% set plan = repair_plans.get(rid) if repair_plans else none %}
                                 <td class="py-2">
                                     {% if plan and plan.ok %}
@@ -214,6 +220,12 @@
                                        service's, never the form's. #}
                                     {% set why = IG_REPAIR.get(plan.reason_key, [plan.reason_key, plan.reason_key]) %}
                                     <p class="text-[10px] font-bold text-surface-500" x-text="t('{{ why[0] }}','{{ why[1] }}')"></p>
+                                    {# The second door only exists for a kind that
+                                       names a table. A finding with no repair door
+                                       yet (its rows join rather than own a school)
+                                       shows the sentence alone, never a form that
+                                       would only answer `unknown_kind`. #}
+                                    {% if plan.table %}
                                     <form method="POST" action="/integrity/quarantine" class="flex items-center gap-1 mt-1 flex-wrap">
                                         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                                         <input type="hidden" name="kind" value="{{ f.kind }}">
@@ -225,6 +237,7 @@
                                                 class="px-2 py-1 bg-sky-50 text-sky-700 rounded-lg font-bold text-[10px] hover:bg-sky-100 transition"
                                                 x-text="t('Karantina','Quarantine')"></button>
                                     </form>
+                                    {% endif %}
                                     {% else %}
                                     <span class="text-amber-700/50">—</span>
                                     {% endif %}
@@ -295,7 +308,7 @@
                                     <form method="POST" action="/integrity/restore" class="flex items-center gap-2">
                                         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                                         <input type="hidden" name="kind" value="{{ q.kind }}">
-                                        <input type="hidden" name="row_id" value="{{ q.row_id }}">
+                                        <input type="hidden" name="row_id" value="{{ q.row_id or '' }}">
                                         <button type="submit"
                                                 class="px-2 py-1 bg-sky-600 text-white rounded-lg font-bold text-[10px] hover:bg-sky-700 transition"
                                                 x-text="t('Pulihkan','Restore')"></button>
@@ -373,11 +386,17 @@
                 </div>
                 <div class="border-t border-slate-100 pt-4 mt-2">
                     <div class="flex gap-2">
-                        <button onclick="resetDemoPasswords()" class="flex-1 px-4 py-2.5 bg-amber-50 text-amber-700 rounded-xl font-bold text-sm hover:bg-amber-100 transition border border-amber-200 flex items-center justify-center gap-2">
-                            <i class="fas fa-key"></i> Reset Password
+                        {# Both of these write, and both are irreversible: one hands
+                           every demo account a known password, the other deletes the
+                           demo schools' data. Their labels were bare English on a
+                           page that carries the language toggle, so a reader of the
+                           other language could not name the control they were about
+                           to press. #}
+                        <button onclick="resetDemoPasswords()" :aria-label="t('Reset Password','Reset Password')" class="flex-1 px-4 py-2.5 bg-amber-50 text-amber-700 rounded-xl font-bold text-sm hover:bg-amber-100 transition border border-amber-200 flex items-center justify-center gap-2">
+                            <i class="fas fa-key"></i> <span x-text="t('Reset Password','Reset Password')"></span>
                         </button>
-                        <button onclick="resetDemoData()" class="flex-1 px-4 py-2.5 bg-red-50 text-red-700 rounded-xl font-bold text-sm hover:bg-red-100 transition border border-red-200 flex items-center justify-center gap-2">
-                            <i class="fas fa-refresh"></i> Reset All Data
+                        <button onclick="resetDemoData()" :aria-label="t('Reset All Data','Reset All Data')" class="flex-1 px-4 py-2.5 bg-red-50 text-red-700 rounded-xl font-bold text-sm hover:bg-red-100 transition border border-red-200 flex items-center justify-center gap-2">
+                            <i class="fas fa-refresh"></i> <span x-text="t('Reset All Data','Reset All Data')"></span>
                         </button>
                     </div>
                 </div>
@@ -449,7 +468,7 @@ function resetDemoPasswords() {
     fetch('/super-admin/reset-demo-passwords', {method:'POST', headers:{'X-CSRF-Token':document.querySelector('meta[name=csrf-token]')?.content||''}})
         .then(r => r.json()).then(d => {
             alert(sgT('password berhasil direset ke default: ', 'passwords reset to default: ') + d.ok + '/' + d.total);
-        btn.disabled = false; btn.innerHTML = '<i class="fas fa-key"></i> Reset Password';
+        btn.disabled = false; btn.innerHTML = '<i class="fas fa-key"></i> ' + sgT('Reset Password', 'Reset Password');
     }).catch(() => { alert(sgT('Gagal', 'Failed')); btn.disabled = false; });
 }
 function reconcilePeriods() {
@@ -470,7 +489,7 @@ function resetDemoData() {
         .then(r => r.json()).then(d => {
             alert(d.message || sgT('Data berhasil direset. Jalankan seed untuk mengisi ulang.',
                                     'Data reset. Run the seed to fill it again.'));
-            btn.disabled = false; btn.innerHTML = '<i class="fas fa-refresh"></i> Reset All Data';
+            btn.disabled = false; btn.innerHTML = '<i class="fas fa-refresh"></i> ' + sgT('Reset All Data', 'Reset All Data');
         }).catch(() => { alert(sgT('Gagal', 'Failed')); btn.disabled = false; });
 }
 </script>

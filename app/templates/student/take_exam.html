@@ -26,8 +26,12 @@
    a ring of colour the size of the screen, so no second element is needed to
    dim what is behind it. The strip that reopens the column stays on screen, so
    putting it away is never a one-way door. */
-.exam-qcol { width: 150px; }
-.exam-qcol--rail { width: 132px; }
+/* The rail is a surface like any other control, so it names the card token
+   rather than the white it was written with: the page's own `<style>` is not
+   reached by the utility remap in theme.css, so a literal here is light in both
+   themes while the label on it follows the theme's own `--text`. */
+.exam-qcol { width: 150px; background: var(--bg-card); }
+.exam-qcol--rail { width: 132px; background: var(--bg-card); }
 
 /* ── where the controls that answer the paper are drawn ───────────────────
    A paper answer sheet is read the other way round from this app's default:
@@ -143,7 +147,7 @@ body.sg-exam .sidebar-overlay { display: none !important; }
     .exam-qcol, .exam-qcol--rail {
         position: fixed; top: 0; bottom: 0; left: 0; z-index: var(--sg-layer-rail);
         width: 86vw; max-width: 320px;
-        padding: 8px; background: #fff;
+        padding: 8px; background: var(--bg-card);
         box-shadow: 0 0 0 100vmax rgba(15, 23, 42, 0.5);
         overflow-y: auto; align-items: stretch;
     }
@@ -244,9 +248,13 @@ body.sg-exam .sidebar-overlay { display: none !important; }
     .math-tools-toggle {
         display: inline-flex; align-items: center;
         min-height: 44px; padding: 8px 12px; font-size: 13px;
-        background: #fff; border: 1.5px solid #e5e7eb; border-radius: 10px; cursor: pointer;
+        background: var(--bg-card); border: 1.5px solid var(--border-strong);
+        border-radius: 10px; cursor: pointer; color: var(--text);
     }
-    .math-tools-toggle.active { background: #f97316; color: #fff; border-color: #f97316; }
+    .math-tools-toggle:not(.active):hover { background: var(--bg-hover); }
+    /* The fill is the app's saturated accent and stays the same in both themes,
+       so the label on it is the accent label rather than the theme's `--text`. */
+    .math-tools-toggle.active { background: #f97316; color: var(--on-accent); border-color: #f97316; }
     /* The collapsed column was a flex item, so it charged a phone 30px plus the
        12px gap — 42px of a 320px screen — for a button whose only job is to
        bring the column back. That 42px is exactly what pushed the fifth
@@ -280,7 +288,7 @@ body.sg-exam .sidebar-overlay { display: none !important; }
 .q-btn { transition: all 0.2s; font-weight: 700; }
 .q-btn:hover { transform: scale(1.08); }
 .opt-btn { transition: all 0.15s; border-radius: 0.75rem; font-weight: 700; }
-.opt-btn.selected { background: #f97316; color: white; border-color: #f97316; box-shadow: 0 4px 12px rgba(249,115,22,0.3); }
+.opt-btn.selected { background: #f97316; color: var(--on-accent); border-color: #f97316; box-shadow: 0 4px 12px rgba(249,115,22,0.3); }
 .opt-btn:not(.selected):hover { background: #fff7ed; border-color: #fdba74; }
 .sticky-topbar { position: sticky; top: 0; z-index: var(--sg-layer-bar); }
 .sticky-questions { position: sticky; top: 60px; z-index: var(--sg-layer-paper); }
@@ -318,21 +326,34 @@ body.sg-exam .sidebar-overlay { display: none !important; }
    the next time one of them moves. */
 .sg-sit-strip.sg-sit-strip-foremost { z-index: var(--sg-layer-strip-over); }
 .draw-toolbar { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
-.draw-toolbar button { padding: 5px 10px; border: 1.5px solid #e5e7eb; border-radius: 10px; font-size: 12px; background: white; cursor: pointer; line-height: 1; font-weight: 600; transition: all 0.15s; }
-.draw-toolbar button:hover { background: #f3f4f6; border-color: #d1d5db; }
-.draw-toolbar button.active { background: #f97316; color: white; border-color: #f97316; }
+/* One declaration per control, for both themes: the toolbar is the row of tools
+   a pupil reaches for mid-paper, and a white button under the dark theme's own
+   light `--text` was light-on-light. The border is a token too, because the
+   neutral it names steps up a shade in dark mode. */
+.draw-toolbar button { padding: 5px 10px; border: 1.5px solid var(--border-strong); border-radius: 10px; font-size: 12px; background: var(--bg-card); color: var(--text); cursor: pointer; line-height: 1; font-weight: 600; transition: all 0.15s; }
+.draw-toolbar button:hover { background: var(--bg-hover); border-color: var(--border-strong); }
+.draw-toolbar button.active { background: #f97316; color: var(--on-accent); border-color: #f97316; }
 .draw-toolbar input[type="color"] { width: 26px; height: 26px; border: none; cursor: pointer; padding: 0; border-radius: 6px; }
 .draw-canvas-wrap { border: 2px dashed #d1d5db; border-radius: 12px; overflow: visible; touch-action: none; max-height: 140px; }
 .draw-canvas-wrap.essay-bg { max-height: none; border-style: solid; border-color: #fdba74; }
 .draw-canvas-wrap canvas { display: block; width: 100%; }
-.full-canvas-wrap { border: 2.5px solid #fdba74; border-radius: 14px; overflow: visible; touch-action: none; background: #fff; position: relative; box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
+/* The sheet, and it is *paper* rather than a surface: the ink drawn on it is
+   dark, so this is the one place a light value is right in both themes — a dark
+   sheet would hide the answer (the same reasoning as the OMR mockup). `--paper`
+   is a token anyway, so the two themes serve it from one declaration and the
+   pair is measured rather than chosen. */
+.full-canvas-wrap { border: 2.5px solid #fdba74; border-radius: 14px; overflow: visible; touch-action: none; background: var(--paper); position: relative; box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
 .full-canvas-wrap canvas { display: block; width: 100%; }
 .text-box { position: absolute; min-width: 120px; max-width: 90%; z-index: var(--sg-layer-canvas-item); touch-action: none; }
-.text-box textarea { width: 100%; min-height: 38px; font-size: 14px; padding: 6px 10px; border: 2.5px solid #f97316; border-radius: 10px; background: rgba(255,255,255,0.95); resize: both; box-shadow: 0 4px 16px rgba(249,115,22,0.2); font-family: 'Nunito', sans-serif; -webkit-user-select: text; }
-.text-box textarea:focus { outline: none; border-color: #ea580c; background: #fff; box-shadow: 0 4px 20px rgba(249,115,22,0.3); }
+/* The box the pupil types an answer into sits *on* the sheet, so its background
+   is the same paper — and its type is pinned to the ink that belongs on paper.
+   Without the pin it inherited the theme's `--text`, which in dark mode is light
+   on light: the answer was invisible in the one control the pupil must read. */
+.text-box textarea { width: 100%; min-height: 38px; font-size: 14px; padding: 6px 10px; border: 2.5px solid #f97316; border-radius: 10px; background: var(--paper); color: var(--paper-ink); resize: both; box-shadow: 0 4px 16px rgba(249,115,22,0.2); font-family: 'Nunito', sans-serif; -webkit-user-select: text; }
+.text-box textarea:focus { outline: none; border-color: #ea580c; background: var(--paper); box-shadow: 0 4px 20px rgba(249,115,22,0.3); }
 .text-box .box-handle { cursor: grab; position: absolute; top: -20px; left: 0; right: 24px; height: 18px; background: #f97316; border-radius: 8px 8px 0 0; display: flex; align-items: center; padding: 0 8px; }
 .text-box .box-handle:active { cursor: grabbing; }
-.text-box .box-del { position: absolute; top: -20px; right: 0; width: 22px; height: 18px; background: #ef4444; border: none; border-radius: 0 8px 0 0; color: white; font-size: 11px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+.text-box .box-del { position: absolute; top: -20px; right: 0; width: 22px; height: 18px; background: #ef4444; border: none; border-radius: 0 8px 0 0; color: var(--on-accent); font-size: 11px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
 .text-box .box-font-controls { display: flex; align-items: center; gap: 3px; position: absolute; top: -40px; left: 0; background: #1e293b; border-radius: 8px; padding: 3px 6px; white-space: nowrap; z-index: var(--sg-layer-canvas-item-ctl); }
 .text-box .box-font-controls select, .text-box .box-font-controls input { font-size: 10px; border-radius: 4px; border: 1px solid #475569; background: #334155; color: #f1f5f9; padding: 1px 3px; height: 20px; }
 .text-box .box-font-controls select { max-width: 90px; }
@@ -341,7 +362,7 @@ body.sg-exam .sidebar-overlay { display: none !important; }
 .tool-overlay svg { position: absolute; touch-action: none; }
 .tool-overlay svg * { pointer-events: none; }
 .tool-controlbar { pointer-events: none !important; }
-.tool-ctrl-btn { pointer-events: auto !important; cursor: pointer; position: absolute; z-index: var(--sg-layer-canvas-item); width: 22px; height: 22px; border-radius: 50%; background: rgba(30,41,59,0.9); color: white; display: flex; align-items: center; justify-content: center; font-size: 10px; border: 1.5px solid rgba(255,255,255,0.15); box-shadow: 0 2px 6px rgba(0,0,0,0.3); transition: transform 0.1s, background 0.1s; }
+.tool-ctrl-btn { pointer-events: auto !important; cursor: pointer; position: absolute; z-index: var(--sg-layer-canvas-item); width: 22px; height: 22px; border-radius: 50%; background: rgba(30,41,59,0.9); color: var(--on-chrome); display: flex; align-items: center; justify-content: center; font-size: 10px; border: 1.5px solid rgba(255,255,255,0.15); box-shadow: 0 2px 6px rgba(0,0,0,0.3); transition: transform 0.1s, background 0.1s; }
 .tool-ctrl-btn:hover { transform: scale(1.15); background: rgba(30,41,59,0.95); }
 .tool-ctrl-btn.drag { cursor: grab; }
 .tool-ctrl-btn.drag:active { cursor: grabbing; }
@@ -399,30 +420,31 @@ body.sg-exam .sidebar-overlay { display: none !important; }
    The rest of the app follows the theme through Tailwind utilities plus the
    token remap in theme.css, but this page's `<style>` is hand-written and was
    written light-only: white boxes, pale greys. In dark mode a pale box under
-   the theme's own light `--text` is light-on-light, so these are repainted from
-   the tokens rather than left as the light theme's leftovers.
+   the theme's own light `--text` is light-on-light.
+
+   Almost nothing is left here now, and that is the point: each of those controls
+   names the theme token in its *base* rule, so one declaration serves both themes
+   and there is no second copy to keep in step. What remains below is only what
+   the two themes genuinely do not share — a hover tint, and the backdrop behind a
+   rendered document. A rule that lands back in this block restating a control its
+   base rule already paints from a token is a regression, not a repaint.
 
    The drawing surfaces are the deliberate exception, and the reason is the
    artefact rather than the theme: an answer canvas is *paper*. The ink drawn on
    it is dark, so a dark sheet would make the answer invisible — the same
-   reasoning that keeps the OMR mockup light. What has to follow the theme on
-   those surfaces is the type, not the sheet: without pinning it, a `<textarea>`
-   on the paper inherited the dark theme's light `--text` and painted white text
-   on white. */
-.dark .math-tools-toggle { background: var(--bg-card); border-color: var(--border-strong); color: var(--text); }
-.dark .math-tools-toggle:not(.active):hover { background: var(--bg-hover); }
-.dark .draw-toolbar button { background: var(--bg-card); border-color: var(--border-strong); color: var(--text); }
-.dark .draw-toolbar button:hover { background: var(--bg-hover); border-color: var(--border); }
+   reasoning that keeps the OMR mockup light. The sheet is `var(--paper)` and the
+   type on it is pinned to `var(--paper-ink)` in the base rules above, which is
+   what makes the exception measurable: `tests/unit/test_theme_literals.py` holds
+   that pair to AAA in both themes and holds `--paper` to being a light sheet in
+   both. */
+/* The tint cannot come from a token: `--bg-hover` is the theme's own hover grey,
+   and the light theme's warm tint is what tells a pupil that this option is the
+   one the pointer is over rather than the selected one. */
 .dark .opt-btn:not(.selected):hover { background: var(--bg-hover); border-color: var(--border-strong); }
-.dark .exam-qcol,
-.dark .exam-qcol--rail { background: var(--bg-card); }
 /* The backdrop behind a rendered document, not the document: the pages come back
    as their own white raster whatever this is, so a fixed near-white panel here
    was a bright rectangle in a dark room for no reason. */
 .dark .pdf-container { background: var(--bg-subtle) !important; }
-.dark .full-canvas-wrap { background: #ffffff; }
-.dark .text-box textarea { background: rgba(255, 255, 255, 0.95); color: #1f2937; }
-.dark .text-box textarea:focus { background: #ffffff; color: #111827; }
 </style>
 {% endblock %}
 {% block content %}
@@ -1589,6 +1611,35 @@ body.sg-exam .sidebar-overlay { display: none !important; }
                             </div>
                         </div>
                     </template>
+                    <!-- The exception: the teacher switched *more than one correct
+                         answer* on for this question (the builder's own toggle), so it is
+                         **ticked** rather than chosen. It is the same row of letters as the
+                         question above it — the control is the only thing that moves, which
+                         is what the teacher's help text promises. The ticks travel as a
+                         list in the paper's own option order, the shape the server's grader
+                         and the answer-key page read. -->
+                    <template x-if="qKind(i) === 'choice' && qIsMulti(i)">
+                        <div>
+                            <div class="flex items-center gap-3 flex-wrap">
+                                <span class="text-sm font-extrabold shrink-0 text-stone-700" x-text="t('Soal ','Question ') + (i + 1) + ':'"></span>
+                                <div class="opt-row flex flex-wrap gap-2">
+                                    <template x-for="opt in (_shuffledOpts[i] || ['A','B','C','D','E'])">
+                                        <button type="button" @click="toggleOption(i, opt)"
+                                                class="opt-btn px-5 py-2 border-2 text-sm font-extrabold cursor-pointer"
+                                                :aria-pressed="isTicked(i, opt) ? 'true' : 'false'"
+                                                :class="isTicked(i, opt) ? 'selected' : 'bg-white border-stone-200 text-stone-600 hover:border-orange-300'">
+                                            <i class="fas mr-1" :class="isTicked(i, opt) ? 'fa-square-check' : 'fa-square'"></i><span x-text="opt"></span>
+                                        </button>
+                                    </template>
+                                </div>
+                                <span x-show="answered[i]" class="inline-flex items-center gap-1 text-xs font-bold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
+                                    <i class="fas fa-check text-emerald-500"></i><span x-text="t('Terjawab','Answered')"></span>
+                                </span>
+                            </div>
+                            <p class="mt-2 text-[11px] font-semibold text-stone-500"
+                               x-text="t('Centang semua jawaban yang benar — boleh lebih dari satu.','Tick every correct answer — more than one is allowed.')"></p>
+                        </div>
+                    </template>
                     <!-- True / False: two answers, one tap. The question text is on the
                          paper, so the control only has to be unmissable and big enough
                          for a finger. -->
@@ -1761,7 +1812,7 @@ body.sg-exam .sidebar-overlay { display: none !important; }
                         <div class="space-y-3">
                             <div class="flex items-center gap-2 flex-wrap">
                                 <span class="text-sm font-extrabold text-stone-700" x-text="t('Soal ','Question ') + (i + 1) + ':'"></span>
-                                <span class="inline-flex items-center gap-1 text-[10px] font-bold text-teal-700 bg-teal-50 px-2 py-0.5 rounded-full border border-teal-200" x-text="t('Pilihan Ganda Kompleks','Complex multiple choice')"></span>
+                                <span class="inline-flex items-center gap-1 text-[10px] font-bold text-teal-700 bg-teal-50 px-2 py-0.5 rounded-full border border-teal-200" x-text="t('Tabel Pernyataan (AKM)','Statement grid (AKM)')"></span>
                                 <span x-show="answered[i]" class="inline-flex items-center gap-1 text-xs font-bold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
                                     <i class="fas fa-check text-emerald-500"></i><span x-text="t('Terjawab','Answered')"></span>
                                 </span>
@@ -4593,9 +4644,17 @@ function examApp(duration, totalQ) {
         // Drive link needs two candidate endpoints and a folder link needs none.
         markAnswered(i, val, overwrite) {
             this.answered[i] = true;
-            // For MCQ: don't overwrite letter answer (A/B/C/D) with boolean true from canvas drawing
-            if (this.questions[i].type === 'mcq' && val === true && typeof this.questions[i].answer === 'string') {
-                // Keep existing MCQ letter answer
+            // A letters question is answered with letters, so the `true` a drawing
+            // overlay writes must not replace them: the drawing says *there is ink on
+            // this page*, not *the answer is B*. The guard named only `mcq`, so a
+            // multi-answer question — the exception this app now has — lost the ticks
+            // the pupil had made the moment they drew anything on that page. Asked by
+            // *kind* now, and of both shapes a choice answer can hold.
+            const _choiceAnswer = this.questions[i].answer;
+            const _isLetters = sgKind(this.questions[i].type) === 'choice' &&
+                (typeof _choiceAnswer === 'string' || Array.isArray(_choiceAnswer));
+            if (_isLetters && val === true) {
+                // Keep the letter(s) the pupil gave
             } else {
                 this.questions[i].answer = val;
             }
@@ -4607,6 +4666,42 @@ function examApp(duration, totalQ) {
             this._ev('answer_changed', {question_index: i});
         },
         selectedAnswer(i) { return this.questions[i]?.answer; },
+
+        // ── the multi-answer exception, on the pupil's side ───────────────────
+        //
+        // A question whose stored type is the exception (`mcq_multi`) is ticked
+        // rather than chosen. The page asks the *stored type* and nothing else: the
+        // builder writes that one name and the server's grader reads the same one, so
+        // a flag of its own here would be a second source of truth — and the failure
+        // it produces is invisible, because the pupil is simply never able to record
+        // the second tick the question asks for.
+        qIsMulti(i) { return ((this.questions[i] || {}).type) === SG_QT.multi; },
+        isTicked(i, opt) {
+            const a = (this.questions[i] || {}).answer;
+            // A draft restored from before the teacher switched the exception on
+            // holds a single letter rather than a list; reading it as a list of one
+            // is what keeps that pupil's answer rather than dropping it.
+            if (Array.isArray(a)) return a.indexOf(opt) > -1;
+            return a === opt;
+        },
+        toggleOption(i, opt) {
+            const q = this.questions[i];
+            if (!q) return;
+            const list = Array.isArray(q.answer) ? q.answer.slice()
+                       : (typeof q.answer === 'string' && q.answer ? [q.answer] : []);
+            const at = list.indexOf(opt);
+            if (at > -1) list.splice(at, 1); else list.push(opt);
+            // The paper's own option order, so the same ticks store the same bytes
+            // however the pupil happened to tap them — the order the grader and the
+            // answer-key page both read.
+            const order = SG_QT.options || ['A','B','C','D','E'];
+            list.sort((a, b) => order.indexOf(a) - order.indexOf(b));
+            // Nothing ticked is *no answer*, not an empty set: `answered[i]` must go
+            // back to unanswered, and an empty list would otherwise travel as a
+            // truthy value and be counted as answered.
+            if (list.length) this._setStructured(i, list, true);
+            else this._setStructured(i, null, false);
+        },
         get answeredCount() { return Object.keys(this.answered).length; },
 
         // ── the three objective types that are not a row of letters ──────────

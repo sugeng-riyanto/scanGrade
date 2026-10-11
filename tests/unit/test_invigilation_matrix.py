@@ -26,8 +26,11 @@ tests use, so a matrix and a schedule are read through the same fake.
 from __future__ import annotations
 
 import io
+import json
 import re
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 SERVICE = ROOT / "app" / "services" / "invigilation_matrix.py"
@@ -37,6 +40,8 @@ ADMIN_ROUTES = ROOT / "app" / "routes" / "admin_sekolah.py"
 PAGE = ROOT / "app" / "templates" / "admin_sekolah" / "invigilation_matrix.html"
 REASONS = ROOT / "app" / "templates" / "shared" / "_invigilation_reasons.html"
 BASE = ROOT / "app" / "templates" / "base.html"
+TEACHER_ROUTES = ROOT / "app" / "routes" / "teacher.py"
+TEACHER_PAGE = ROOT / "app" / "templates" / "teacher" / "invigilation.html"
 
 from app.services import invigilation_matrix as im  # noqa: E402
 from tests.unit.test_invigilation import _DB  # noqa: E402  (the same PostgREST stand-in)
@@ -938,3 +943,360 @@ class TestTheRangeDoor:
         # The interaction must be discoverable, not a hidden keystroke.
         assert re.search(r"shift[^<]{0,80}(klik|click)", page, re.I), (
             "the page never tells the operator that shift-click fills a run")
+
+
+# ── 10. the teacher's own matrix cells ──────────────────────────────────────
+
+class TestTheTeachersOwnMatrixDuties:
+    def test_only_this_teachers_cells_come_back(self):
+        db = _DB(_tables())
+        db.tables["invigilation_duty"] = [
+            _duty("d1", teacher="t1", period="p1", room="r1"),
+            _duty("d2", teacher="t2", period="p1", room="r2"),
+        ]
+        mine = im.duties_for_teacher(db, SCHOOL, "t1")
+        assert [d["id"] for d in mine] == ["d1"], mine
+
+    def test_a_duty_carries_its_slot_and_room_names(self):
+        db = _DB(_tables())
+        db.tables["invigilation_duty"].append(
+            _duty("d1", teacher="t1", period="p2", room="r2"))
+        mine = im.duties_for_teacher(db, SCHOOL, "t1")
+        assert mine[0]["period_name"] == "Sesi 2"
+        assert mine[0]["room_name"] == "Ruang 2"
+
+    def test_another_schools_duty_is_not_read(self):
+        db = _DB(_tables())
+        db.tables["invigilation_duty"] = [
+            {"id": "d9", "school_id": OTHER, "exam_date": "2026-10-01",
+             "period_id": "p9", "room_id": "r9", "teacher_id": "t1",
+             "source": "manual"},
+        ]
+        assert im.duties_for_teacher(db, SCHOOL, "t1") == []
+
+    def test_duties_are_ordered_by_date_then_slot(self):
+        db = _DB(_tables())
+        db.tables["invigilation_duty"] = [
+            _duty("d2", teacher="t1", date="2026-10-02", period="p2", room="r2"),
+            _duty("d1", teacher="t1", date="2026-10-01", period="p2", room="r2"),
+            _duty("d3", teacher="t1", date="2026-10-01", period="p1", room="r1"),
+        ]
+        assert [d["id"] for d in im.duties_for_teacher(db, SCHOOL, "t1")] == [
+            "d3", "d1", "d2"]
+
+    def test_no_duty_is_an_empty_list_not_an_error(self):
+        db = _DB(_tables())
+        assert im.duties_for_teacher(db, SCHOOL, "t1") == []
+
+    def test_the_duty_names_do_not_leak_across_schools(self):
+        db = _DB(_tables())
+        db.tables["invigilation_duty"].append(
+            _duty("d1", teacher="t1", period="p1", room="r1"))
+        # A room id from another school is never looked up, so a same-named
+        # foreign room cannot borrow a name onto this school's cell.
+        mine = im.duties_for_teacher(db, SCHOOL, "t1")
+        assert all(d["room_name"] != "Ruang 1 (asing)" for d in mine)
+
+
+class TestTheTeachersDutyPageReadsTheMatrix:
+    def test_the_duty_route_asks_the_matrix_for_its_cells(self):
+        source = TEACHER_ROUTES.read_text(encoding="utf-8")
+        assert "invigilation_matrix" in source, (
+            "the teacher duty route never reads the matrix")
+        block = next(b for b in _route_blocks(source)
+                     if '@teacher_bp.route("/invigilation")' in b)
+        assert "duties_for_teacher" in block, (
+            "the duty page does not ask for this teacher's own matrix cells")
+        assert "matrix_duties=" in block, (
+            "the matrix cells are read but never handed to the template")
+
+    def test_the_page_renders_the_matrix_duties(self):
+        page = TEACHER_PAGE.read_text(encoding="utf-8")
+        assert "matrix_duties" in page, "the matrix duties never reach the page"
+        assert "period_name" in page and "room_name" in page, (
+            "the page does not name the slot and the room of a matrix duty")
+
+
+# ── 11. the upload end to end ───────────────────────────────────────────────
+
+class TestTheUploadEndToEnd:
+    """The whole door: download the template, fill it, upload it, commit it.
+
+    The service tests drive ``parse_workbook``/``apply_rows`` directly. This one
+    goes through the real routes with a fake PostgREST and a real session, so the
+    file the school downloads is the file it fills, the preview the route renders
+    is the split the operator reads, and only the valid row is written.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _fresh_session_cache(self):
+        """Every request authenticates with one literal token; clear its cache."""
+        from app.utils import kv_cache
+        kv_cache._local.clear()
+        yield
+        kv_cache._local.clear()
+
+    def _client(self, app, monkeypatch, db):
+        """A logged-in school admin whose reads and writes land in the fake."""
+        from app.routes import admin_sekolah as adm
+        from app.utils import auth as auth_utils
+
+        monkeypatch.setattr(adm, "get_supabase", lambda: db)
+        # `_get_email_map` is keyed by user id, and the importer turns it round
+        # into {email: teacher} — the same shape Auth hands over.
+        monkeypatch.setattr(adm, "_get_email_map",
+                            lambda _sb: {"t1": "bu@sekolah.sch.id",
+                                         "t2": "pak@sekolah.sch.id"})
+        monkeypatch.setattr(adm, "log_activity", lambda *a, **k: None)
+        session = {
+            "user_id": "u-admin", "email": "admin@sekolah.sch.id",
+            "name": "Admin", "role": "admin_sekolah", "school_id": SCHOOL,
+            "class_id": None, "status": "active", "must_change_password": False,
+            "prefs": {},
+        }
+        monkeypatch.setattr(auth_utils, "_fetch_session", lambda token: dict(session))
+        return app.test_client()
+
+    def _headers(self):
+        return {"Authorization": "Bearer e2e-inv-token", "Accept": "text/html"}
+
+    def test_download_fill_upload_preview_and_commit(self, app, monkeypatch):
+        from openpyxl import load_workbook
+        from app.routes import admin_sekolah as adm
+
+        db = _DB(_tables())
+        client = self._client(app, monkeypatch, db)
+
+        # 1. Download the template the page offers.
+        got = client.get("/admin-sekolah/invigilation/matrix/template.xlsx",
+                         headers=self._headers())
+        assert got.status_code == 200, got.status_code
+        assert got.data[:4] == b"PK\x03\x04", "the download is not a workbook"
+        wb = load_workbook(io.BytesIO(got.data))
+        assert "Pengawas" in wb.sheetnames and im.REFERENCE_SHEET in wb.sheetnames
+        ws = wb["Pengawas"]
+        assert [c.value for c in ws[1]][:5] == list(im.TEMPLATE_HEADERS)
+        assert any(im.EXAMPLE_MARKER in str(c.value or "").upper() for c in ws[2]), (
+            "the downloaded template has no marked example row")
+
+        # 2. Fill it: one row the service will take, one it must refuse. The bad
+        #    row's period, room and teacher are all real — its **date** is the
+        #    fault. That matters: the preview rejects it, but `assign` itself
+        #    would happily write it, so only the apply door's skip of an invalid
+        #    row keeps it out. A bad row that assign would also refuse would prove
+        #    less.
+        ws.append(["2026-10-01", "Sesi 1", "Ruang 1", "bu@sekolah.sch.id", "ok"])
+        ws.append(["not-a-date", "Sesi 1", "Ruang 2",
+                   "bu@sekolah.sch.id", "bad"])
+        filled = io.BytesIO()
+        wb.save(filled)
+        filled.seek(0)
+
+        # 3. Upload it, capturing the preview the route renders.
+        captured = {}
+
+        def fake_render(name, **ctx):
+            captured["template"] = name
+            captured["ctx"] = ctx
+            return "PREVIEW"
+
+        monkeypatch.setattr(adm, "render_template", fake_render)
+        posted = client.post(
+            "/admin-sekolah/invigilation/matrix/upload",
+            headers=self._headers(),
+            data={"date": "2026-10-01", "file": (filled, "isi.xlsx")},
+            content_type="multipart/form-data")
+        assert posted.status_code == 200, posted.status_code
+        assert captured["template"] == "admin_sekolah/invigilation_matrix.html"
+        preview = captured["ctx"]["preview"]
+        assert preview["total"] == 2, preview
+        assert preview["valid"] == 1, preview
+        assert [e["row"] for e in preview["errors"]] == [4], preview["errors"]
+        reasons = {p["reason"] for e in preview["errors"] for p in e["problems"]}
+        assert "bad_date" in reasons, reasons
+        assert db.tables["invigilation_duty"] == [], (
+            "the upload wrote a duty — it may only preview")
+
+        # 4. Commit exactly what the preview showed.
+        applied = client.post(
+            "/admin-sekolah/invigilation/matrix/apply",
+            headers=self._headers(),
+            data={"date": "2026-10-01", "rows": json.dumps(preview["rows"])})
+        assert applied.status_code in (301, 302, 303), applied.status_code
+        location = applied.headers.get("Location", "")
+        assert "applied=1" in location and "refused=1" in location, location
+        duties = db.tables["invigilation_duty"]
+        assert len(duties) == 1, duties
+        duty = duties[0]
+        assert duty["school_id"] == SCHOOL
+        assert duty["exam_date"] == "2026-10-01"
+        assert duty["period_id"] == "p1" and duty["room_id"] == "r1"
+        assert duty["teacher_id"] == "t1"
+        assert duty["source"] == "excel_upload", (
+            "a duty that came from a sheet must be marked as one")
+
+    def test_a_row_colliding_with_a_duty_on_the_day_is_refused_by_both_doors(
+            self, app, monkeypatch):
+        """A sheet row that clashes with the day's duties never reaches the table.
+
+        The room is already at its cap of two teachers, so the upload must show
+        the collision in the preview and the commit must refuse it — the same
+        conflict sentence the grid itself uses, not a constraint error.
+        """
+        from openpyxl import load_workbook
+        from app.routes import admin_sekolah as adm
+
+        db = _DB(_tables())
+        # Two teachers already stand in Ruang 1 for Sesi 1 on the day.
+        db.tables["invigilation_duty"] = [
+            _duty("seed1", date="2026-10-01", period="p1", room="r1", teacher="t1"),
+            _duty("seed2", date="2026-10-01", period="p1", room="r1", teacher="t2"),
+        ]
+        client = self._client(app, monkeypatch, db)
+
+        got = client.get("/admin-sekolah/invigilation/matrix/template.xlsx",
+                         headers=self._headers())
+        assert got.status_code == 200, got.status_code
+        wb = load_workbook(io.BytesIO(got.data))
+        ws = wb["Pengawas"]
+        # One row that is fine on its own, and one that would seat a third teacher
+        # in the already-full room.
+        ws.append(["2026-10-01", "Sesi 1", "Ruang 2", "bu@sekolah.sch.id", "fine"])
+        ws.append(["2026-10-01", "Sesi 1", "Ruang 1", "pak@sekolah.sch.id", "clash"])
+        filled = io.BytesIO()
+        wb.save(filled)
+        filled.seek(0)
+
+        captured = {}
+
+        def fake_render(name, **ctx):
+            captured["ctx"] = ctx
+            return "PREVIEW"
+
+        monkeypatch.setattr(adm, "render_template", fake_render)
+        posted = client.post(
+            "/admin-sekolah/invigilation/matrix/upload",
+            headers=self._headers(),
+            data={"date": "2026-10-01", "file": (filled, "isi.xlsx")},
+            content_type="multipart/form-data")
+        assert posted.status_code == 200, posted.status_code
+        preview = captured["ctx"]["preview"]
+        assert preview["total"] == 2, preview
+        assert preview["valid"] == 1, preview
+        assert [e["row"] for e in preview["errors"]] == [4], preview["errors"]
+        conflict = preview["errors"][0]["problems"][0]["reason"]
+        assert conflict == "room_full", conflict
+        assert conflict in im.REFUSALS, "the conflict key has no sentence to show"
+        # The sentence exists in both languages — a refusal with no text is a
+        # button that silently does nothing.
+        reasons = REASONS.read_text(encoding="utf-8")
+        assert "'room_full'" in reasons, "the conflict sentence is missing"
+        assert db.tables["invigilation_duty"] == [
+            _duty("seed1", date="2026-10-01", period="p1", room="r1", teacher="t1"),
+            _duty("seed2", date="2026-10-01", period="p1", room="r1", teacher="t2"),
+        ], "the upload wrote a duty it should only have previewed"
+
+        applied = client.post(
+            "/admin-sekolah/invigilation/matrix/apply",
+            headers=self._headers(),
+            data={"date": "2026-10-01", "rows": json.dumps(preview["rows"])})
+        assert applied.status_code in (301, 302, 303), applied.status_code
+        location = applied.headers.get("Location", "")
+        assert "applied=1" in location and "refused=1" in location, location
+        duties = db.tables["invigilation_duty"]
+        assert len(duties) == 3, duties
+        room1 = [d for d in duties
+                 if d["room_id"] == "r1" and d["period_id"] == "p1"]
+        assert len(room1) == 2, (
+            "the colliding row was written — the room now holds three teachers")
+        assert sorted(d["teacher_id"] for d in room1) == ["t1", "t2"]
+
+    def test_a_forged_apply_payload_cannot_commit_a_row_marked_invalid(
+            self, app, monkeypatch):
+        """The preview's own rows are re-proved, never trusted.
+
+        Nothing stops a caller from POSTing a hand-made ``rows`` payload to the
+        apply door — so the door must decide for itself. This posts a BYPASS
+        payload with a row that is perfectly assignable *except* that it is
+        marked ``valid: false``, and a second row marked ``valid: true`` that
+        names another school's room. Neither may be written: the invalid flag is
+        honoured, and the write is put through the same ``assign`` the grid uses.
+        """
+        db = _DB(_tables())
+        client = self._client(app, monkeypatch, db)
+
+        # Show the first row really is assignable on its own — so only the
+        # `valid: false` flag keeps it out, not a broken pointer.
+        probe = _DB(_tables())
+        probe_out = im.assign(probe, SCHOOL, exam_date="2026-10-01", period_id="p1",
+                             room_id="r2", teacher_id="t1")
+        assert probe_out["ok"] is True, probe_out
+
+        forged = [
+            {"valid": False, "exam_date": "2026-10-01", "period_id": "p1",
+             "room_id": "r2", "teacher_id": "t1", "notes": "marked invalid"},
+            {"valid": True, "exam_date": "2026-10-01", "period_id": "p1",
+             "room_id": "r9", "teacher_id": "t1", "notes": "another school's room"},
+        ]
+        applied = client.post(
+            "/admin-sekolah/invigilation/matrix/apply",
+            headers=self._headers(),
+            data={"date": "2026-10-01", "rows": json.dumps(forged)})
+        assert applied.status_code in (301, 302, 303), applied.status_code
+        location = applied.headers.get("Location", "")
+        assert "applied=0" in location and "refused=2" in location, location
+        assert db.tables["invigilation_duty"] == [], (
+            "a forged apply payload wrote a duty — the door trusted the preview")
+
+
+# ── 12. the shift-click coach mark ──────────────────────────────────────────
+
+class TestTheShiftCoachMark:
+    """The run gesture is shown the first time, then dismissible for good.
+
+    The standing hint under the grid is easy to read past, so a fresh operator
+    had to be told the shortcut (or find it by accident). This pins the coach
+    mark that teaches it once and then stays out of the way — a page that never
+    showed it fails the same way as one that showed it forever.
+    """
+
+    def _page(self):
+        return PAGE.read_text(encoding="utf-8")
+
+    def test_the_page_carries_a_coach_mark_and_a_dismiss_control(self):
+        page = self._page()
+        assert "data-shift-coach" in page, "there is no first-use coach mark"
+        assert "matrix-shift-coach-dismiss" in page, (
+            "the coach mark has no dismiss button, so it cannot be a one-time tip")
+
+    def test_the_coach_mark_starts_hidden(self):
+        page = self._page()
+        at = page.index('id="matrix-shift-coach"')
+        open_tag = page[page.rindex("<div", 0, at):page.index(">", at)]
+        assert "hidden" in open_tag, (
+            "the coach mark is visible on every load, not only the first")
+
+    def test_it_is_remembered_in_localstorage_so_it_shows_once(self):
+        page = self._page()
+        assert "localStorage" in page, "the coach mark is not remembered per browser"
+        assert "getItem" in page and "setItem" in page, (
+            "the coach mark neither reads nor writes its seen flag")
+        assert re.search(r"SHIFT_COACH_KEY\s*=\s*'[^']+'", page), (
+            "the seen flag has no stable, versioned key")
+
+    def test_the_script_reveals_it_only_when_unseen_and_hides_it_on_dismiss(self):
+        page = self._page()
+        assert "classList.remove('hidden')" in page, (
+            "the coach mark is never revealed")
+        assert re.search(r"addEventListener\('click',\s*dismissShiftCoach\)", page), (
+            "the dismiss button is not wired to the hide")
+        assert re.search(r"function dismissShiftCoach\(\).*?setItem\(SHIFT_COACH_KEY",
+                         page, re.S), (
+            "dismissing does not mark the tip as seen")
+
+    def test_using_the_run_retires_the_coach_mark(self):
+        """Once the operator does the gesture, the tip has taught — retire it."""
+        page = self._page()
+        body = page.split("function postRange(form)", 1)[1].split("function ", 1)[0]
+        assert "dismissShiftCoach()" in body, (
+            "a used shift-click leaves the coach mark sitting there")

@@ -388,6 +388,101 @@ class TestComparingWithTheApi:
         assert sc.live_differences({"a": {"id"}}, {"a": {"id"}}) == ([], [])
 
 
+class TestTheAppliedCheck:
+    """`--require-applied`: the comparison above, as a *failure* instead of a report.
+
+    `--live` prints a pending migration and exits 0 — which is what a report does, and
+    a report is exactly where an unapplied migration sat while every gate stayed green
+    and the page that reads the table rendered empty. The check is a separate mode for
+    that reason: it is the one thing in this repository that answers "has the SQL this
+    release carries actually been applied?" with a non-zero exit.
+    """
+
+    def test_a_declared_table_the_live_schema_lacks_is_a_failure(self, monkeypatch,
+                                                                 capsys):
+        declared = sc.schema_from_migrations()
+        live = {t: set(cols) for t, cols in declared.items() if t != "exams"}
+        monkeypatch.setattr(sc, "live_schema", lambda: live)
+        assert sc.main(["--require-applied"]) == 1
+        out = capsys.readouterr().out
+        assert "unapplied migrations" in out and "  - table exams" in out, out
+
+    def test_a_declared_column_the_live_schema_lacks_is_a_failure_too(self, monkeypatch,
+                                                                      capsys):
+        """A column is the quieter half of the same defect: the table resolves, so a
+        page that selects `*` works and the one that names it renders empty."""
+        live = {t: set(cols) for t, cols in sc.schema_from_migrations().items()}
+        live["submissions"].discard("score")
+        monkeypatch.setattr(sc, "live_schema", lambda: live)
+        assert sc.main(["--require-applied"]) == 1
+        out = capsys.readouterr().out
+        assert "  - submissions.score" in out, out
+
+    def test_the_count_is_the_number_of_gaps_and_the_fix_is_named(self, monkeypatch,
+                                                                  capsys):
+        live = {t: set(cols) for t, cols in sc.schema_from_migrations().items()}
+        live.pop("exams")
+        live["submissions"].discard("score")
+        monkeypatch.setattr(sc, "live_schema", lambda: live)
+        assert sc.main(["--require-applied"]) == 1
+        out = capsys.readouterr().out
+        assert "(unapplied migrations): 2" in out, out
+        named = [ln for ln in out.splitlines() if ln.startswith("  - ")]
+        assert len(named) == 2, (
+            "every gap is named once — a count that disagrees with the list it heads "
+            f"sends its reader to the wrong place: {out}")
+        assert "deploy/apply_migration.py" in out, (
+            "a refusal that does not say how to apply the migration is a number with "
+            "no next step")
+
+    def test_the_report_and_the_check_disagree_on_purpose(self, monkeypatch, capsys):
+        """The whole change, in one test: the same database state is a *report* in
+        `--live` (exit 0) and a *failure* in `--require-applied`."""
+        declared = sc.schema_from_migrations()
+        live = {t: set(cols) for t, cols in declared.items() if t != "exams"}
+        monkeypatch.setattr(sc, "live_schema", lambda: live)
+        assert sc.main(["--live"]) == 0
+        assert "pending migrations" in capsys.readouterr().out
+        assert sc.main(["--require-applied"]) == 1
+
+    def test_a_live_schema_that_has_everything_passes(self, monkeypatch):
+        live = {t: set(c) for t, c in sc.schema_from_migrations().items()}
+        monkeypatch.setattr(sc, "live_schema", lambda: live)
+        assert sc.main(["--require-applied"]) == 0
+
+    def test_the_guarded_table_is_absent_by_design_and_not_a_gap(self, monkeypatch,
+                                                                 capsys):
+        """`activation_codes` is the one table a migration was written to tolerate,
+        and a check that failed on it would be failing on the repository's own
+        decision to keep the guard."""
+        live = {t: set(c) for t, c in sc.schema_from_migrations().items()
+                if t not in sc.optional_tables()}
+        monkeypatch.setattr(sc, "live_schema", lambda: live)
+        assert sc.main(["--require-applied"]) == 0
+        out = capsys.readouterr().out
+        assert "absent by design" in out and "activation_codes" in out, out
+
+    def test_the_other_direction_is_reported_and_not_failed(self, monkeypatch, capsys):
+        """A column production has and no file declares is `--live`'s failure. This
+        mode asks one question — has our SQL been applied — and a release must not be
+        refused because the database is *ahead* of it."""
+        live = {t: set(c) for t, c in sc.schema_from_migrations().items()}
+        live["hand_added_in_the_editor"] = {"id"}
+        monkeypatch.setattr(sc, "live_schema", lambda: live)
+        assert sc.main(["--require-applied"]) == 0
+        out = capsys.readouterr().out
+        assert "hand_added_in_the_editor" in out, out
+        assert "no file here declares" in out, out
+
+    def test_no_credentials_is_two_and_not_a_finding(self, monkeypatch, capsys):
+        """A box that cannot ask must never read as "the schema is behind": that is
+        how a missing credential becomes a refused release."""
+        monkeypatch.setattr(sc, "live_schema", lambda: None)
+        assert sc.main(["--require-applied"]) == 2
+        out = capsys.readouterr().out
+        assert "cannot measure" in out and "Nothing was judged" in out, out
+
+
 # ── the repository as it stands ─────────────────────────────────────────────
 
 class TestThisRepositoryPasses:
@@ -606,3 +701,106 @@ class TestTheGateRunsIt:
         index = gate.index("SCHEMA_OUT=")
         tail = gate[index:]
         assert 'if [ "$SCHEMA_RC" -eq 1 ]' in tail[:400], "the verdict must be read right there"
+
+    # The applied half: the same question asked of the live schema rather than of the
+    # files, which is the only one of the two that can see a migration the database
+    # never got. Read out of the gate's own markers so a reordering cannot quietly
+    # leave it after the gate has already said OK.
+    def _applied_block(self) -> str:
+        gate = (ROOT / "deploy" / "theme_gate.sh").read_text(encoding="utf-8")
+        start = gate.index("# applied_check:start")
+        return gate[start:gate.index("# applied_check:end")]
+
+    def test_the_theme_gate_asks_whether_our_sql_has_been_applied(self):
+        block = self._applied_block()
+        assert '--require-applied' in block, (
+            "the live-schema check is run without the mode that fails, so an "
+            "unapplied migration stays a line in a report")
+        assert '"$REPO/deploy/schema_contract.py"' in block, (
+            "the checker may not be the one installed somewhere else")
+        assert 'if [ "$APPLIED_RC" -eq 1 ]' in block[:600], (
+            "the verdict must be read right there")
+        assert "exit 1" in block, "a declared object the database lacks must refuse the release"
+        assert "apply_migration.py" in block, "the refusal has to name the fix"
+
+    def test_the_applied_check_runs_before_the_gate_can_say_ok(self):
+        gate = (ROOT / "deploy" / "theme_gate.sh").read_text(encoding="utf-8")
+        assert gate.index("SCHEMA_OUT=") < gate.index("APPLIED_OUT="), (
+            "the offline half runs first, so the applied half is what a release that "
+            "passes has already been held against")
+        assert gate.index("APPLIED_OUT=") < gate.index("theme gate: OK —"), (
+            "the gate says OK before asking the live schema, so an unapplied migration "
+            "is never looked at on the path that matters")
+
+    def test_the_ok_line_only_claims_the_applied_half_when_it_was_asked(self):
+        """A run with no credentials must not say the live schema was checked.
+
+        The gate's success line is what the deploy logs, and a box that never asked the
+        database may not report it as agreeing — the same defect as a page showing a
+        number it never read.
+        """
+        gate = (ROOT / "deploy" / "theme_gate.sh").read_text(encoding="utf-8")
+        ok = [line for line in gate.splitlines() if "theme gate: OK —" in line]
+        assert len(ok) == 1, "the success line is not where this test looks for it"
+        assert "${APPLIED_CLAIM}" in ok[0], (
+            "the success line claims the live schema agrees whether or not anybody "
+            "asked it")
+        block = self._applied_block()
+        assert 'APPLIED_CLAIM=""' in block, (
+            "the claim has to default to nothing, so 'could not measure' claims nothing")
+        at = block.index('if [ "$APPLIED_RC" -eq 0 ]')
+        assert "APPLIED_CLAIM=\", and every table" in block[at:], (
+            "the claim is set somewhere other than the branch that ran the check")
+
+    def test_a_box_that_cannot_ask_the_live_schema_does_not_refuse_the_release(self):
+        """Exit 2 out of the tool must not become this gate's exit 2.
+
+        The deploy reads a theme gate exit 2 as "this is not a release to ship" and
+        rolls it back and quarantines it, so a laptop with no `.env`, or one Supabase
+        call that timed out, would take a good release down — which is the rule every
+        gate here follows about "could not measure".
+        """
+        block = self._applied_block()
+        at = block.index('if [ "$APPLIED_RC" -eq 2 ]')
+        branch = block[at:]
+        assert "exit" not in branch, (
+            "a box that cannot ask the live schema takes a release down with it")
+        assert "NOT asked" in branch, (
+            "a gate that cannot answer has to say so, or the gap it did not look for "
+            "reads as a gap that is not there")
+
+    @pytest.mark.skipif(shutil.which("bash") is None, reason="needs a bash to run the gate")
+    def test_the_applied_block_refuses_on_a_gap_and_carries_on_when_it_cannot_ask(
+            self, tmp_path):
+        """The branches above, run — the one thing a source assertion cannot show."""
+        stub = tmp_path / "stub"
+        block = self._applied_block()
+        program = (
+            "set -uo pipefail\n"
+            f'REPO="{tmp_path}"\n'
+            f'PY="{stub}"\n'
+            + block + "\necho REACHED\n")
+
+        def run(rc: int, out: str):
+            stub.write_text(f"#!/usr/bin/env bash\ncat <<'EOF'\n{out}\nEOF\nexit {rc}\n",
+                            encoding="utf-8")
+            stub.chmod(0o755)
+            return subprocess.run(["bash", "-c", program], capture_output=True,
+                                  text=True, encoding="utf-8", errors="replace")
+
+        gap = run(1, "declared here but not in the live schema (unapplied migrations): 1\n"
+                     "  - table school_membership_request\n")
+        assert gap.returncode == 1, gap.stdout + gap.stderr
+        assert "REACHED" not in gap.stdout, "the gate refused the release and ran on"
+        assert "school_membership_request" in gap.stderr, gap.stderr
+
+        cannot = run(2, "schema contract: cannot measure  -  set SUPABASE_URL and "
+                        "SUPABASE_SERVICE_KEY (or put them in .env)")
+        assert cannot.returncode == 0, cannot.stdout + cannot.stderr
+        assert "REACHED" in cannot.stdout, (
+            "a box that cannot ask the live schema stopped a release it never judged")
+        assert "NOT asked" in cannot.stderr, cannot.stderr
+
+        clean = run(0, "schema contract: OK  -  every table and column this repository "
+                       "declares is in the live schema (78 object(s) served)")
+        assert clean.returncode == 0 and "REACHED" in clean.stdout, clean.stdout + clean.stderr

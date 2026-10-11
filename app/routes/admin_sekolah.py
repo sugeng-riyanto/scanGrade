@@ -2015,10 +2015,21 @@ def admin_grade_defaults_save():
     reach 100% is refused; an empty set clears the default, so subjects without a
     custom distribution fall back to the simple mean again. This is the school
     admin's write alone.
+
+    A closed year is refused before the write, as its own sibling
+    (`admin_grade_reset_level`) does. The default is not *scoped* to a year — but a
+    mark is derived from a weight map every time it is read (`grade_weighting.compute`
+    is pure over the weights), so the fallback a subject inherits is part of how a
+    closed year's marks read. Rewriting it would move marks in a year the wizard
+    promised nobody could move.
     """
     sid = _school_id()
     supabase = get_supabase()
     payload = request.get_json(silent=True) or {}
+    year = ta_service.active_school_year(supabase, sid) or {}
+    closed_reason = academic_year.write_refusal(supabase, year.get("id"))
+    if closed_reason:
+        return jsonify({"error": closed_reason}), 403
     ok, out = grade_weighting.save_defaults(
         supabase, sid, payload.get("weights") or {}, actor_id=g.user_id)
     if not ok:
@@ -2049,10 +2060,19 @@ def admin_grade_component_create():
 @admin_sekolah_bp.route("/grade-weights/components/<component_id>/update", methods=["POST"])
 @admin_sekolah_required
 def admin_grade_component_update(component_id):
-    """Rename, reorder or (de)activate one of the school's components."""
+    """Rename, reorder or (de)activate one of the school's components.
+
+    A closed year is refused before the write, like the rest of this family: a
+    rename is only a label, but switching a component off drops it out of every
+    weighting that names it, and a weighting *is* how a mark reads.
+    """
     sid = _school_id()
     supabase = get_supabase()
     payload = request.get_json(silent=True) or {}
+    year = ta_service.active_school_year(supabase, sid) or {}
+    closed_reason = academic_year.write_refusal(supabase, year.get("id"))
+    if closed_reason:
+        return jsonify({"error": closed_reason}), 403
     ok, out = grade_weighting.update_component(
         supabase, sid, component_id, name=payload.get("name"),
         sort_order=payload.get("sort_order"), is_active=payload.get("is_active"))
@@ -2073,6 +2093,10 @@ def admin_grade_weight_save(subject_id):
     not reach 100% is refused; an empty set clears the subject back to the simple
     mean. CRUD here is the school admin's alone — a teacher cannot decide what a
     subject mark means.
+
+    A closed year is refused before the write. The year comes off the body, so
+    without this a caller could name an archived year and rewrite the weights its
+    marks are derived from — the one edit the close wizard exists to prevent.
     """
     sid = _school_id()
     supabase = get_supabase()
@@ -2081,6 +2105,9 @@ def admin_grade_weight_save(subject_id):
     year_id = payload.get("year_id") or year.get("id")
     if not year_id:
         return jsonify({"error": "Tahun ajaran aktif tidak ditemukan"}), 400
+    closed_reason = academic_year.write_refusal(supabase, year_id)
+    if closed_reason:
+        return jsonify({"error": closed_reason}), 403
     ok, out = grade_weighting.save_config(
         supabase, sid, subject_id, year_id, payload.get("weights") or {},
         actor_id=g.user_id)

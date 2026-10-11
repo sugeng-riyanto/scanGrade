@@ -20,7 +20,7 @@
        server flashes, rendered here once per key and cloned by the grid's script, so
        the no-reload path and the full-reload path read identically. #}
     <div id="matrix-toast" role="status" aria-live="polite"
-         class="hidden fixed bottom-5 right-5 z-50 max-w-sm px-4 py-3 rounded-xl bg-red-50 text-red-700 border border-red-200 text-sm font-semibold shadow-lg"></div>
+         class="hidden fixed bottom-5 right-5 sg-layer-notice max-w-sm px-4 py-3 rounded-xl bg-red-50 text-red-700 border border-red-200 text-sm font-semibold shadow-lg"></div>
     <div class="hidden" aria-hidden="true">
         {% for key in ['room_full','teacher_full','already_assigned','period_not_in_school','room_not_in_school','teacher_not_in_school','write_failed','not_found'] %}
         <template id="matrix-refusal-{{ key }}">{{ reasons.reason_note(key) }}</template>
@@ -219,11 +219,26 @@
         <p class="mt-2 text-[11px] text-stone-500" id="matrix-range-hint">
             <span x-text="t('Tahan Shift lalu klik sel yang lain di baris yang sama untuk mengisi/mengosongkan sepanjang baris itu sekaligus.','Hold Shift and click another cell in the same row to fill or clear the run between them in one go.')"></span>
         </p>
+        {# A one-time coach mark for the shift-click run. The standing hint above is
+           easy to read past; this one appears until the operator dismisses it (or
+           uses the gesture), then never again on this browser, so it teaches the
+           shortcut without becoming permanent chrome. #}
+        <div class="mt-3 hidden rounded-xl border border-primary-200 bg-primary-50/70 p-3 flex items-start gap-3"
+             id="matrix-shift-coach" data-shift-coach>
+            <i class="fas fa-hand-pointer text-primary-600 mt-0.5"></i>
+            <div class="min-w-0 flex-1 text-xs text-primary-900">
+                <strong x-text="t('Isi sepanjang baris sekaligus.','Fill a whole run at once.')"></strong>
+                <span x-text="t('Klik satu sel, lalu tahan Shift dan klik sel lain di baris yang sama — semua sel di antaranya ikut terisi atau dikosongkan dalam satu simpan.','Click one cell, then hold Shift and click another cell in the same row — every cell between them is filled or cleared in one save.')"></span>
+            </div>
+            <button type="button" id="matrix-shift-coach-dismiss"
+                    class="shrink-0 px-2 py-1 bg-white text-primary-700 border border-primary-200 rounded-lg text-[11px] font-bold hover:bg-primary-100 transition"
+                    x-text="t('Mengerti','Got it')"></button>
+        </div>
         <div class="overflow-x-auto mt-3">
             <table class="w-full text-xs min-w-[640px]">
                 <thead>
                     <tr class="text-stone-500">
-                        <th class="text-left py-2 pr-3 font-bold sticky left-0 bg-white" x-text="t('Guru','Teacher')"></th>
+                        <th class="text-left py-2 pr-3 font-bold sticky left-0 bg-white sg-layer-sticky" x-text="t('Guru','Teacher')"></th>
                         {% for r in grid.rooms %}
                         <th class="text-left py-2 pr-3 font-bold">
                             {{ r.name }}
@@ -239,7 +254,7 @@
                     {% for t in teachers %}
                     {% set tseats = teacher_seats.get(t.id|string, 0) %}
                     <tr class="border-t border-surface-100">
-                        <td class="py-1.5 pr-3 font-semibold text-stone-700 whitespace-nowrap sticky left-0 bg-white">
+                        <td class="py-1.5 pr-3 font-semibold text-stone-700 whitespace-nowrap sticky left-0 bg-white sg-layer-sticky">
                             {{ t.name }}
                             <span data-teacher-seat="{{ t.id }}"
                                   class="text-[10px] font-mono px-1.5 py-0.5 rounded-full ml-1 {% if tseats == 0 %}bg-amber-100 text-amber-800{% else %}bg-surface-100 text-surface-700{% endif %}">{{ tseats }}/{{ max_per_teacher }}</span>
@@ -375,6 +390,24 @@
     if (!grid) return;
     var toast = document.getElementById('matrix-toast');
 
+    /* The shift-click coach mark, shown the first time only. A storage error
+       (a browser in private mode, storage disabled) simply leaves it visible
+       rather than throwing, so the tip still teaches once per visit instead of
+       vanishing for a reader who never saw it. */
+    var SHIFT_COACH_KEY = 'sg.matrix.shift-coach.v1';
+    var coach = document.getElementById('matrix-shift-coach');
+    function dismissShiftCoach() {
+        if (coach) coach.classList.add('hidden');
+        try { window.localStorage.setItem(SHIFT_COACH_KEY, '1'); } catch (e) {}
+    }
+    if (coach) {
+        var seen = null;
+        try { seen = window.localStorage.getItem(SHIFT_COACH_KEY); } catch (e) { seen = null; }
+        if (!seen) coach.classList.remove('hidden');
+        var closeCoach = document.getElementById('matrix-shift-coach-dismiss');
+        if (closeCoach) closeCoach.addEventListener('click', dismissShiftCoach);
+    }
+
     function refusalText(reason) {
         var tpl = document.getElementById('matrix-refusal-' + reason);
         return tpl ? tpl.innerHTML
@@ -482,6 +515,9 @@
     }
 
     function postRange(form) {
+        // The operator just used the gesture the coach mark teaches — it has
+        // done its job, so retire it for this browser.
+        dismissShiftCoach();
         var forms = rowForms(form);
         var here = forms.indexOf(form);
         var run = forms.slice(Math.min(anchor.index, here), Math.max(anchor.index, here) + 1);

@@ -33,6 +33,7 @@ scores.
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Mapping, Sequence
 
@@ -46,6 +47,18 @@ from typing import Any, Iterable, Mapping, Sequence
 # only to reproduce papers marked before the scheme existed, and the scheme gives
 # every type its own row.
 MCQ = "mcq"
+#: The *exception* a single-answer question may carry: this one paper question has
+#: more than one correct option, so the pupil is shown checkboxes and every option
+#: they tick has to be in the key. A stored name of its own rather than a flag,
+#: because every reader in the app — the builder's editor, the pupil's control, the
+#: grader, the mark scheme, the answer-key page — already decides what a question is
+#: by its type, and a second decision source is how one of them ends up disagreeing.
+#:
+#: Deliberately **not** `complex_multiple_choice`: that type is the AKM
+#: statement-and-category grid (`docs/features/PGK_QUESTION_TYPE.md`), not "several
+#: letters are right". Storing this exception as a PGK would show the pupil a grid
+#: and hand an unreadable key to its grader.
+MCQ_MULTI = "mcq_multi"
 TRUE_FALSE = "true_false"
 COMPLEX_MULTIPLE_CHOICE = "complex_multiple_choice"
 MATCH = "match"
@@ -56,7 +69,7 @@ ESSAY = "essay"
 ESSAY_TEXT = "essay_text"
 ESSAY_CANVAS = "essay_canvas"
 
-OBJECTIVE_TYPES = (MCQ, TRUE_FALSE, COMPLEX_MULTIPLE_CHOICE, MATCH, DRAG_DROP, ORDER)
+OBJECTIVE_TYPES = (MCQ, MCQ_MULTI, TRUE_FALSE, COMPLEX_MULTIPLE_CHOICE, MATCH, DRAG_DROP, ORDER)
 ESSAY_TYPES = (ESSAY, ESSAY_TEXT, ESSAY_CANVAS)
 
 #: The strings the answer key uses to mean "a teacher marks this one". The scanner
@@ -777,6 +790,10 @@ KIND_ESSAY = "essay"
 
 _KIND_BY_TYPE: dict[str, str] = {
     MCQ: KIND_CHOICE,
+    # The exception is a *flavour* of one kind, not a kind of its own: the builder
+    # draws the same editor, the pupil answers the same row of letters, and the mark
+    # scheme gives it the same row. Only the control and the grading rule move.
+    MCQ_MULTI: KIND_CHOICE,
     TRUE_FALSE: KIND_TRUE_FALSE,
     COMPLEX_MULTIPLE_CHOICE: KIND_PGK,
     MATCH: KIND_MATCH,
@@ -805,9 +822,23 @@ PICKER_TYPES: tuple[str, ...] = (
 #: `SCORING_MODES` so the vocabulary the SQL CHECK mirrors does not move.
 
 _TYPE_LABELS: dict[str, tuple[str, str]] = {
+    # The one entry a teacher picks for a paper question with letters, and the name
+    # says only that: whether *one* letter or several are right is the exception
+    # toggle *under* this entry (`mcq_multi`), not a second entry beside it. The old
+    # name spelled the single-answer rule into the type a teacher chooses, which read
+    # as a second, nearly identical choice type as soon as the toggle existed — and
+    # two entries whose names differ by one word is exactly how a teacher ends up on
+    # the wrong one. This name never changes with the toggle.
     MCQ: ("Pilihan Ganda", "Multiple choice"),
     TRUE_FALSE: ("Benar / Salah", "True / False"),
-    COMPLEX_MULTIPLE_CHOICE: ("Pilihan Ganda Kompleks", "Complex multiple choice"),
+    # Named for its *shape* rather than for the AKM label it is usually known by.
+    # "Pilihan Ganda Kompleks" is the official name of this assessment format and it
+    # is also, in ordinary use, what "more than one correct answer" is called — which
+    # made it read as a second kind of ordinary multiple choice sitting beside the
+    # real one. The stored type is unchanged (`complex_multiple_choice`); only the
+    # words on the button moved, and `kind_label()` still prints "Complex multiple
+    # choice" to a report reader, where no teacher is choosing between types.
+    COMPLEX_MULTIPLE_CHOICE: ("Tabel Pernyataan (AKM)", "Statement grid (AKM)"),
     MATCH: ("Menjodohkan", "Matching"),
     DRAG_DROP: ("Tarik & Letakkan", "Drag & drop"),
     ORDER: ("Mengurutkan", "Ordering"),
@@ -815,6 +846,18 @@ _TYPE_LABELS: dict[str, tuple[str, str]] = {
     ESSAY_TEXT: ("Esai (ketik)", "Essay (typed)"),
     ESSAY: ("Esai", "Essay"),
 }
+
+
+#: The letters a multiple-choice question offers, in the order its paper prints them.
+#:
+#: One definition for the whole app, because "what an option is" was until now spelled
+#: out in eight templates and six modules, in four different shapes — `['A','B','C','D','E']`
+#: in the builder and the answer-key page, `list("ABCDEFGH")[:options]` in the OMR
+#: geometry, `list("ABCDEFG")[:5]` in the scan service. A sixth copy is how one page
+#: starts offering an option the printed sheet does not have, and an option a pupil
+#: cannot pick is worse than a missing one. `item_analysis.CHOICE_OPTIONS` aliases this
+#: rather than listing it again.
+CHOICE_OPTIONS: tuple[str, ...] = ("A", "B", "C", "D", "E")
 
 
 def vocabulary() -> dict[str, Any]:
@@ -832,13 +875,30 @@ def vocabulary() -> dict[str, Any]:
     """
     return {
         "kinds": dict(_KIND_BY_TYPE),
+        #: The option letters, for the same reason `picker` is here: the builder draws
+        #: the key buttons for a choice question, and the answer-key page draws them
+        #: again for the same question. Two hand-written `['A','B','C','D','E']`
+        #: arrays are two answers to "what is an option", and only one of them can be
+        #: right when a school adds a sixth option.
+        "options": list(CHOICE_OPTIONS),
+        #: The type name the exception is *stored* under. Handed over for the same
+        #: reason `picker` is: the builder has to write it and the pupil's page has
+        #: to recognise it, and a string spelled out in two templates is two
+        #: spellings of one type — the second of which stores a question the grader
+        #: reads as a plain single-answer one.
+        "multi": MCQ_MULTI,
         "objective": list(OBJECTIVE_TYPES),
         "essay": list(ESSAY_TYPES),
         "default": DEFAULT_TYPE,
         "labels": {
+            # The builder's own words for the kind, and the same string as the picker
+            # entry above: the *entry* a teacher picks is "Pilihan Ganda", and its
+            # label may not change with the exception toggle — see `MCQ_MULTI`.
+            # `kind_label()` (reports, spreadsheets, printouts) answers the same words
+            # for this kind, which they have always been.
             KIND_CHOICE: ["Pilihan Ganda", "Multiple choice"],
             KIND_TRUE_FALSE: ["Benar / Salah", "True / False"],
-            KIND_PGK: ["Pilihan Ganda Kompleks", "Complex multiple choice"],
+            KIND_PGK: ["Tabel Pernyataan (AKM)", "Statement grid (AKM)"],
             KIND_MATCH: ["Menjodohkan", "Matching"],
             KIND_DRAG: ["Tarik & Letakkan", "Drag & drop"],
             KIND_ORDER: ["Mengurutkan", "Ordering"],
@@ -1132,6 +1192,255 @@ def key_has_answer(qtype: Any, value: Any) -> bool:
     return str(value).strip() != ""
 
 
+#: The three things a *stored* key can be, for the question it is filed against.
+KEY_SET, KEY_EMPTY, KEY_STALE = "set", "empty", "stale"
+
+
+def _blank_payload(qtype: Any, key: Any) -> bool:
+    """A value of this question's *own* shape that carries nothing.
+
+    `[]`. `{}`. `{"pairs": []}` — the payload the builder writes for a matching
+    question nobody has keyed yet. Every one of these is "not filled in", which is a
+    different fact from "filled in with something this question cannot read".
+    """
+    kind = question_kind(qtype)
+    if isinstance(key, Mapping):
+        if kind == KIND_MATCH:
+            return not match_pairs(key)
+        if kind in (KIND_DRAG, KIND_ORDER):
+            return not drag_order(key)
+        if kind == KIND_PGK:
+            return not pgk_statements(key) and not pgk_key(key)
+        # A mapping is not this kind's shape at all, so it is never its empty one.
+        return False
+    if isinstance(key, (list, tuple, set)):
+        return not key
+    if isinstance(key, str):
+        return not key.strip()
+    return False
+
+
+def key_state(qtype: Any, key: Any) -> str:
+    """How a stored key reads for the question it is filed against.
+
+    * ``KEY_SET`` — the app can mark this question from it.
+    * ``KEY_EMPTY`` — nothing is stored, or the value is this question's own empty
+      shape. Not filled in; nothing to warn about.
+    * ``KEY_STALE`` — something *is* stored and this question cannot read it. This
+      is what a structural edit leaves behind: the `"B"` a question had when it was
+      multiple choice, on the question that has since become a matching one. It is
+      also the `"essay"` this app's own answer-key page used to write over every
+      question it did not understand. Reporting the difference matters — a page that
+      shows "Belum diatur" for a stale key tells the teacher something untrue, and
+      one that quietly rewrites it destroys a mark somebody set on purpose.
+
+    Built on :func:`key_has_answer` and :func:`essay_marker` rather than on a fresh
+    comparison, so what this reports and what the grader reads cannot drift: a
+    second rule about "is this a key" would mark the same paper two ways.
+    """
+    if question_kind(qtype) == KIND_ESSAY:
+        return KEY_EMPTY                 # a teacher marks it; there is no key to read
+    if key is None or key == "":
+        return KEY_EMPTY
+    if key_has_answer(qtype, key):
+        return KEY_SET
+    if _blank_payload(qtype, key):
+        return KEY_EMPTY
+    return KEY_STALE
+
+
+def answer_letters(value: Any) -> frozenset[str]:
+    """The option letters a choice answer names, however it is written down.
+
+    A single-answer question stores a letter; the exception stores a list of them,
+    and a key pasted by hand in the Supabase console arrives as either. One reader,
+    because "`"A"` and `["A"]` are the same answer" is exactly the kind of rule that
+    gets re-decided in six places and answered two ways.
+
+    A `{"answer": …}` wrapper is unwrapped, so a synced answer and a submitted one
+    read the same. Nothing is case-folded: the letters this app writes are the
+    printed sheet's own, and a comparison that folds case would also have to fold
+    whatever else it was handed.
+    """
+    if isinstance(value, Mapping):
+        value = unwrap(value)
+    if isinstance(value, Mapping):
+        return frozenset()
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return frozenset(str(v).strip() for v in value if str(v).strip())
+    if value is None:
+        return frozenset()
+    text = str(value).strip()
+    return frozenset({text}) if text else frozenset()
+
+
+#: The two things a choice question's key can be, and which one each *type* writes
+#: today. The mode belongs to the type and not to the value on file: a single-answer
+#: question whose key happens to hold two letters is a question whose key was
+#: written in the other mode, and that is a fact to *report*, not a mode to switch
+#: to. Deriving the control from the stored value instead is what made the answer-key
+#: page offer a set of ticks for a question that accepts one letter.
+CHOICE_MODE_SINGLE = "single"
+CHOICE_MODE_MULTI = "multi"
+
+#: The two ways a stored key can disagree with the mode its own type writes.
+#:
+#: ``KEY_MODE_LOST`` is the old-data case: a single-answer question whose key names
+#: **more than one** letter. Until this app had the exception, such a key was legal
+#: on an `mcq` and the grader read it as *any of these* (``value in key``), so the
+#: question silently asked for one of several. It is not repaired here and the extra
+#: letters are not trimmed: whether the paper meant "all of these" or one of them is
+#: the owner's decision, and saying so is this module's whole job.
+#:
+#: ``KEY_MODE_NARROW`` is the mirror: the exception was switched on *after* a
+#: single-answer key was set, so the key names one letter where the question now
+#: takes a set. It is readable — one letter is a valid set of one — and the reader is
+#: told only that more answers may be correct.
+KEY_MODE_LOST = "lost"
+KEY_MODE_NARROW = "narrow"
+
+
+def choice_mode(qtype: Any) -> str:
+    """Which key control this choice question is written with."""
+    return CHOICE_MODE_MULTI if canonical_type(qtype) == MCQ_MULTI else CHOICE_MODE_SINGLE
+
+
+def key_mode_drift(qtype: Any, key: Any) -> str:
+    """``""``, ``KEY_MODE_LOST`` or ``KEY_MODE_NARROW`` for a choice question.
+
+    Asked of the *stored* key against the question's current type, in both
+    directions, because the two directions are different sentences to the reader:
+    one is a mark that cannot be read as the single answer the question now asks
+    for, the other is a key that may be too narrow for the question it is on. A list
+    of one letter on a single-answer question is neither — it is the same answer the
+    mode writes, spelled the other way — and nothing that is not a choice question,
+    or carries no letter at all, has anything to say here.
+    """
+    if question_kind(qtype) != KIND_CHOICE:
+        return ""
+    letters = answer_letters(key)
+    if not letters:
+        return ""
+    if choice_mode(qtype) == CHOICE_MODE_SINGLE:
+        return KEY_MODE_LOST if len(letters) > 1 else ""
+    # A multi-answer question whose key is a bare letter: written before the
+    # exception was switched on. A list of one is exactly what the mode writes, so
+    # it is not a drift — the question is simply keyed with a single right answer.
+    return KEY_MODE_NARROW if isinstance(unwrap(key), str) else ""
+
+
+def ambiguous_choice_keys(question_types: Any, answer_key: Any,
+                          ) -> list[int]:
+    """The indices of single-answer questions whose stored key names several letters.
+
+    This is the *read* side of :data:`KEY_MODE_LOST`, over a whole paper: which
+    questions are in the state this app could only produce before it had the
+    exception. The owner has two honest ways out — switch the question to the
+    exception and keep the key, or choose one of the letters — and neither can be
+    taken automatically, because the stored key does not say which was meant. So the
+    job here is to *name* them, once, so that the review panel, the dashboard card
+    and the answer-key page cannot each select a slightly different set.
+
+    Order is numeric, not lexicographic: question 10 belongs after question 9.
+    """
+    types = _mapping_or_empty(question_types)
+    keys = _mapping_or_empty(answer_key)
+    found = [
+        int(index) for index in types
+        if str(index).lstrip("-").isdigit() and int(index) >= 0
+        and key_mode_drift(types[index], keys.get(str(index))) == KEY_MODE_LOST
+    ]
+    return sorted(set(found))
+
+
+def _mapping_or_empty(value: Any) -> Mapping[str, Any]:
+    """A jsonb column as an object, whether it arrived parsed or as a JSON *string*.
+
+    `answer_key` is written with `json.dumps`, so a project whose column is text
+    hands every reader a string — and iterating a string yields characters, which
+    would quietly turn this into "no ambiguous questions at all".
+    """
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            return {}
+    return value if isinstance(value, Mapping) else {}
+
+
+def normalize_answer(qtype: Any, answer: Any) -> Any:
+    """A choice answer in the shape this question's own type can hold.
+
+    A single-answer question holds **one** letter; the exception holds the set. A
+    client that sends the other shape — a page loaded before the question's
+    exception was switched on, a hand-made request, a draft written while the
+    question still had the other type — is *read* here rather than refused, because
+    refusing a submit throws away a pupil's whole sitting over something they cannot
+    fix from their side.
+
+    Three things are deliberately left alone:
+
+    * any answer that names no letter at all (a `true` the drawing overlay wrote,
+      an empty string), because the rule here is about letters, not about every
+      value a choice question's answer column can hold;
+    * every non-choice type, whose answer is a shape of its own;
+    * the *order* is made deterministic (the paper's own option order) so the same
+      ticks store the same bytes however the client listed them.
+    """
+    if canonical_type(qtype) not in (MCQ, MCQ_MULTI):
+        return answer
+    if isinstance(answer, (bool, int, float)) or answer is None:
+        return answer
+    if not isinstance(answer, (str, list, tuple, set, frozenset, Mapping)):
+        return answer
+    letters = answer_letters(answer)
+    if not letters:
+        return answer
+    ordered = [opt for opt in CHOICE_OPTIONS if opt in letters]
+    ordered += sorted(letters.difference(CHOICE_OPTIONS))
+    # A single-answer question keeps the **first** of the ticks in the paper's own
+    # order: the one thing that cannot be invented here is which of several a pupil
+    # meant, and the first is the only choice that is the same for every reader and
+    # every retry.
+    if canonical_type(qtype) == MCQ:
+        return ordered[0]
+    return ordered
+
+
+def normalize_answer_map(question_types: Any, answers: Any) -> Any:
+    """Every choice answer in the shape its own question's type can hold.
+
+    The one door both writers go through — `student_sync_draft` on every autosave
+    and the submit route on the paper that is finally marked — because the rule is
+    one rule (`normalize_answer`), and two call sites that each remembered it is how
+    a draft and the paper it becomes end up disagreeing about what the pupil said.
+
+    A key that names no question is left exactly as it is, and that is not
+    incidental: an answer column also carries `_device_info`, `_timestamps`,
+    `_flags` and the draft revision, and "the type of question `_timestamps`" is a
+    question with no answer.
+
+    A question whose type this version does not know is left alone for the same
+    reason. `question_kind` folds an unknown name to the app's default, and reading
+    a value of an unknown shape through a known type's rule is how a paper gets a
+    mark nobody can explain.
+    """
+    if not isinstance(answers, dict):
+        return answers
+    types = _mapping_or_empty(question_types)
+    if not types:
+        return answers
+    out = dict(answers)
+    for index, value in answers.items():
+        qtype = types.get(str(index))
+        if qtype is None:
+            continue
+        fixed = normalize_answer(qtype, value)
+        if fixed != value:
+            out[index] = fixed
+    return out
+
+
 def has_answer(qtype: Any, answer: Any) -> bool:
     """Did the student actually answer this one?
 
@@ -1154,6 +1463,9 @@ def has_answer(qtype: Any, answer: Any) -> bool:
         if isinstance(value, str) or not isinstance(value, (list, tuple)):
             return False
         return any(item is not None and item != "" for item in value)
+    if kind == KIND_CHOICE and canonical_type(qtype) == MCQ_MULTI:
+        # A ticked box is an answer; an empty list is not.
+        return bool(answer_letters(value))
     if kind == KIND_ESSAY:
         if isinstance(answer, Mapping):
             text = answer.get("text")
@@ -1207,6 +1519,15 @@ def grade_answer(qtype: Any, key: Any, answer: Any) -> bool:
         # one all-or-nothing rule rather than a fourth comparison, so a page that
         # asks "is this right" cannot disagree with the marks.
         return pgk_score(SCORING_ALL_OR_NOTHING, key, answer) >= 1.0
+
+    if kind == MCQ_MULTI:
+        # The exception: the pupil's ticked letters must be the key's letters, no
+        # more and no fewer. All-or-nothing on purpose — "select all that apply" is
+        # what this question is, and a partial rule would pay a pupil who ticked
+        # every option, which is the answer a guesser reaches first.
+        want = answer_letters(key)
+        got = answer_letters(value)
+        return bool(want) and want == got
 
     # mcq, and anything that reaches here without a type of its own: the rule that
     # has always shipped. `str(answer).strip()` is only for the bonus case, where

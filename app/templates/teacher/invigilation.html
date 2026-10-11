@@ -86,6 +86,49 @@
         </div>
     </div>
 
+    {# The matrix cells that name this teacher — the *rooms* they stand in, which the
+       schedule service above knows nothing about. Kept as its own list rather than
+       merged into the schedule: one row is "I invigilate this exam in this class",
+       the other is "I stand in this room during this slot". A teacher needs both, and
+       folding them together would make one of the two facts unreadable. #}
+    <div class="card overflow-hidden">
+        <div class="px-5 py-4 border-b border-surface-100">
+            <h2 class="font-extrabold text-surface-800" x-text="t('Jadwal ruangan saya','My room duties')"></h2>
+            <p class="text-xs text-surface-500 mt-1" x-text="t('Penugasan ruangan dari matriks pengawas: tanggal, sesi, dan ruangan tempat Anda berdiri. Jadwal di atas adalah pelaksanaan per kelas; ini adalah penugasan per ruangan.','Room assignments from the invigilator matrix: the date, session and room you stand in. The schedule above is per class; this is per room.')"></p>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm min-w-[520px]" data-matrix-duties>
+                <thead class="bg-surface-50 text-surface-500">
+                    <tr>
+                        <th class="text-left px-4 py-3 font-bold" x-text="t('Tanggal','Date')"></th>
+                        <th class="text-left px-4 py-3 font-bold" x-text="t('Sesi','Session')"></th>
+                        <th class="text-left px-4 py-3 font-bold" x-text="t('Ruangan','Room')"></th>
+                        <th class="text-left px-4 py-3 font-bold" x-text="t('Sumber','Source')"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for d in matrix_duties %}
+                    <tr class="border-t border-surface-100" data-matrix-duty="{{ d.id }}">
+                        <td class="px-4 py-2.5 text-surface-600">{{ d.exam_date }}</td>
+                        <td class="px-4 py-2.5 text-surface-700 font-medium">{{ d.period_name or '—' }}</td>
+                        <td class="px-4 py-2.5 text-surface-600">{{ d.room_name or '—' }}</td>
+                        <td class="px-4 py-2.5">
+                            {% if d.source == 'excel_upload' %}
+                            <span class="text-xs font-bold text-primary-700" x-text="t('Unggahan','Upload')"></span>
+                            {% else %}
+                            <span class="text-xs font-bold text-surface-400" x-text="t('Manual','Manual')"></span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    {% if not matrix_duties %}
+                    <tr><td colspan="4" class="px-4 py-8 text-center text-sm text-surface-400" x-text="t('Belum ada penugasan ruangan untuk Anda.','You have no room duty yet.')"></td></tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
     {# The pupils' recovery codes, for the sittings this teacher holds. A locked pupil
        reads their code off their own screen; the invigilator letting them back in
        needs the number to compare against, and before this the only copy was the

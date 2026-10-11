@@ -16,12 +16,20 @@ can name a school in more than one place:
   → `profiles.school_id`);
 * a **subject** names a school, and so does every **offering** of it
   (`class_subjects.school_id`) and every **assignment** of a teacher to it
-  (`teacher_assignments.school_id`).
+  (`teacher_assignments.school_id`);
+* an **exam** names a school, and so does the **class** its candidates sit in
+  (`exams.class_id` → `classes.school_id`);
+* a **sitting** (`submissions`) holds no school of its own — it joins a paper to a
+  pupil, and the two must agree (`exams.school_id` vs `profiles.school_id`);
+* a **subject level** (`student_subject_levels`) names a school, and so do the
+  **pupil** on that track and the **class** they were placed in.
 
 Any pair that disagrees on the school is a row that will be read by one school's
 pages while describing another school's people — which is exactly how a subject list
 "mixed with other NPSN" and how an assignment count named a school's own subjects
-while numbering another's.
+while numbering another's. A paper scheduled in another school's class, a pupil
+sitting a paper that is not their school's, and a level set against another
+school's pupil are the same fault in three more tables.
 
 Three decisions, each of which a caller could get wrong:
 
@@ -63,20 +71,32 @@ MAX_FINDINGS = 200
 CLASS_PUPIL = "class_pupil_mismatch"
 PAIR = "pair_school_mismatch"
 ASSIGNMENT = "assignment_school_mismatch"
+EXAM = "exam_school_mismatch"
+SUBMISSION = "submission_school_mismatch"
+LEVEL = "subject_level_school_mismatch"
 
-def _read(supabase, table, columns, *, errors, not_null=None, **filters):
+def _read(supabase, table, columns, *, errors, not_null=None, in_=None, **filters):
     """One read of one table, with its failure recorded rather than swallowed.
 
     The failure is *returned* to the caller as an entry in `errors` instead of
     being turned into an empty list: for this sweep, "could not read" and "read
     and found nothing" are different answers and the whole point is not to
     confuse them.
+
+    ``in_`` is ``(column, values)`` for a read bounded to a set of ids — the
+    pupil schools behind the submissions and levels. An empty set is no read at
+    all: ``.in_("id", [])`` is not a query for nothing, it is a query for
+    nothing PostgREST will answer.
     """
+    if in_ is not None and not list(in_[1]):
+        return []
     try:
         query = supabase.table(table).select(columns)
         for column, value in filters.items():
             if value is not None:
                 query = query.eq(column, value)
+        if in_ is not None:
+            query = query.in_(in_[0], list(in_[1]))
         if not_null:
             # Rows where the relation is absent cannot express a disagreement, and
             # every account holding no class would otherwise be pulled in.
@@ -121,10 +141,27 @@ def cross_school_findings(supabase, *, limit: int = MAX_FINDINGS) -> dict:
                         "id, class_id, subject_id, school_id, status", errors=errors)
     pupils = _read(supabase, "profiles", "id, class_id, school_id",
                    errors=errors, not_null="class_id")
+    # The papers, the sittings and the tracks — three rows that each name a school
+    # and point at a class or a pupil that names another.
+    exams = _read(supabase, "exams", "id, title, class_id, school_id", errors=errors)
+    submissions = _read(supabase, "submissions", "id, exam_id, student_id",
+                        errors=errors)
+    levels = _read(supabase, "student_subject_levels",
+                   "id, student_id, subject_id, class_id, school_id", errors=errors)
+
+    # A submission holds no `school_id` and a level's pupil is what it must agree
+    # with, so the pupils these two name are read once by id — bounded to the ids
+    # actually referenced, rather than pulling every account in the install.
+    referenced = sorted({str(r.get("student_id")) for r in submissions + levels
+                         if r.get("student_id")})
+    pupil_rows = _read(supabase, "profiles", "id, school_id", errors=errors,
+                       in_=("id", referenced))
+    pupil_school = {str(r["id"]): r.get("school_id") for r in pupil_rows if r.get("id")}
 
     class_school = {str(c["id"]): c.get("school_id") for c in classes if c.get("id")}
     class_name = {str(c["id"]): c.get("name") for c in classes if c.get("id")}
     subject_school = {str(s["id"]): s.get("school_id") for s in subjects if s.get("id")}
+    exam_school = {str(e["id"]): e.get("school_id") for e in exams if e.get("id")}
 
     findings: list[dict] = []
 
@@ -183,6 +220,67 @@ def cross_school_findings(supabase, *, limit: int = MAX_FINDINGS) -> dict:
                 f"{field}_school_id": other,
             })
 
+    # 4. A paper, and the class its candidates sit in.
+    for exam in exams:
+        class_id = str(exam.get("class_id") or "")
+        if not class_id or class_id not in class_school:
+            continue
+        if _same(exam.get("school_id"), class_school[class_id]):
+            continue
+        findings.append({
+            "kind": EXAM,
+            "table": "exams",
+            "field": "class",
+            "exam_id": exam.get("id"),
+            "title": exam.get("title"),
+            "class_id": class_id,
+            "class_name": class_name.get(class_id),
+            "exam_school_id": exam.get("school_id"),
+            "class_school_id": class_school[class_id],
+        })
+
+    # 5. A sitting, which joins a paper to a pupil — no school of its own, so the
+    #    pair is the paper's school against the pupil's.
+    for row in submissions:
+        exam_id = str(row.get("exam_id") or "")
+        student_id = str(row.get("student_id") or "")
+        exam_s = exam_school.get(exam_id)
+        pupil_s = pupil_school.get(student_id)
+        if exam_s is None or pupil_s is None or _same(exam_s, pupil_s):
+            continue
+        findings.append({
+            "kind": SUBMISSION,
+            "table": "submissions",
+            "field": "pupil",
+            "submission_id": row.get("id"),
+            "exam_id": row.get("exam_id"),
+            "student_id": row.get("student_id"),
+            "exam_school_id": exam_s,
+            "pupil_school_id": pupil_s,
+        })
+
+    # 6. A pupil's track in a subject: one row naming a pupil and a class.
+    for row in levels:
+        row_school = row.get("school_id")
+        subject_id = row.get("subject_id")
+        class_id = str(row.get("class_id") or "")
+        student_id = str(row.get("student_id") or "")
+        for field, other in (("pupil", pupil_school.get(student_id)),
+                             ("class", class_school.get(class_id) if class_id else None)):
+            if other is None or _same(other, row_school):
+                continue
+            findings.append({
+                "kind": LEVEL,
+                "table": "student_subject_levels",
+                "field": field,
+                "level_id": row.get("id"),
+                "student_id": row.get("student_id"),
+                "subject_id": subject_id,
+                "class_id": row.get("class_id"),
+                "level_school_id": row_school,
+                f"{field}_school_id": other,
+            })
+
     return {
         "ok": not errors,
         "findings": findings[: max(0, int(limit))],
@@ -194,8 +292,12 @@ def cross_school_findings(supabase, *, limit: int = MAX_FINDINGS) -> dict:
             "class_subjects": len(pairs),
             "teacher_assignments": len(assignments),
             "profiles": len(pupils),
+            "exams": len(exams),
+            "submissions": len(submissions),
+            "student_subject_levels": len(levels),
         },
     }
 
 
-__all__ = ["cross_school_findings", "CLASS_PUPIL", "PAIR", "ASSIGNMENT", "MAX_FINDINGS"]
+__all__ = ["cross_school_findings", "CLASS_PUPIL", "PAIR", "ASSIGNMENT",
+           "EXAM", "SUBMISSION", "LEVEL", "MAX_FINDINGS"]

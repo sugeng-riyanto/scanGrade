@@ -106,7 +106,14 @@ def covered_classes() -> set[str]:
 
 
 REQUIRED_TOKENS = ("bg-body", "bg-card", "bg-subtle", "bg-hover", "text", "text-dim",
-                   "text-muted", "border", "input", "input-border")
+                   "text-muted", "border", "input", "input-border",
+                   # The four *role* colours a page-local `<style>` cannot get from
+                   # the utility remap: the sheet a pupil draws on and the ink on
+                   # it, a label on a saturated accent, and a label on the chrome
+                   # that is dark in both themes. Their contrast is measured in
+                   # tests/unit/test_theme_literals.py, which is also the sweep that
+                   # keeps the pages from spelling these by hand instead.
+                   "paper", "paper-ink", "on-accent", "on-chrome")
 
 
 def test_both_themes_declare_the_same_tokens():

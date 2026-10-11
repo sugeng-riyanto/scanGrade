@@ -18,6 +18,7 @@ Three things make that work, and each one is guarded here:
 """
 
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -131,13 +132,50 @@ def _checker(tmp_path: Path, code: int, text: str) -> Path:
 
 # ── the refusal, and the journal that has to name it ─────────────────────────
 
+def _checkout_the_app_will_construct(tmp_path: Path) -> Path:
+    """A clean checkout — or a directory that is not a checkout at all.
+
+    Both answer the *reproducibility* question the same way, and both are what a box
+    looks like: a directory with no `.git` is not a checkout (the app asks nothing),
+    and a clean one has no modified path to measure. Built here so this file's
+    subject — whether the box is *armed* — is reachable from any developer's tree.
+    """
+    from tests.unit.git_env import git_env
+
+    root = tmp_path / "a-box"
+    (root / "app").mkdir(parents=True)
+    (root / "app" / "clean.py").write_text("x = 1\n", encoding="utf-8")
+    git = shutil.which("git")
+    if git is None:
+        return root
+    for args in (["init", "-q"], ["-c", "user.email=t@example.com", "-c", "user.name=t",
+                                  "add", "-A"],
+                 ["-c", "user.email=t@example.com", "-c", "user.name=t",
+                  "commit", "-q", "-m", "the box's own clean checkout"],):
+        subprocess.run([git, *args], cwd=str(root), check=True, capture_output=True,
+                       env=git_env())
+    return root
+
+
 class TestTheReleaseIsRefused:
     @pytest.fixture
-    def probe(self, monkeypatch):
-        """A construct that believes it is the deploy's probe."""
+    def probe(self, monkeypatch, tmp_path):
+        """A construct that believes it is the deploy's probe, over a clean checkout.
+
+        `DEPLOY_PROBE` is what makes the app ask whether the box is armed — and the
+        probe is the one construction the scan-cap permission is *refused* on
+        (`checkout_integrity.dev_allowance`), deliberately: a release may never
+        answer that question for itself. So the reproducibility question is answered
+        the way a box answers it — with a checkout that is clean — instead of being
+        waived, and a developer's own dirty tree cannot hide the refusal this class
+        exists to prove.
+        """
         from app.config import TestingConfig
+        from app.utils import checkout_integrity
 
         monkeypatch.setattr(TestingConfig, "DEPLOY_PROBE", True)
+        monkeypatch.setattr(checkout_integrity, "REPO_ROOT",
+                            _checkout_the_app_will_construct(tmp_path))
         return TestingConfig
 
     def test_an_unarmed_box_exits_nonzero_with_the_marker(self, probe, monkeypatch, capsys):

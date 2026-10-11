@@ -57,6 +57,23 @@ API = _source("app", "routes", "api.py")
 RECALC = block_of(TEACHER, "def _recalculate_scores")
 BATCH = block_of(API, "def grade_batch")
 
+# The teacher's rule lives in a service now, so that the answer-key page's "what
+# would this save do" preview and the mark this writes are one arithmetic. The
+# guard moves with it: what has to be true is still "completed exactly once, before
+# anything reads a share", and the place it is written is `exam_parts`.
+ENGINE = _source("app", "services", "exam_scoring.py")
+PARTS = block_of(ENGINE, "def exam_parts", stop="\ndef ")
+
+
+def running(block: str, call: str) -> bool:
+    """Is this call on a line that actually runs?
+
+    The same anchor `CALL` uses and for the same reason: a commented-out call is the
+    mutation these guards exist to catch, and `call in block` cannot see the
+    difference.
+    """
+    return re.search(rf"^[ \t][^\n#]*{re.escape(call)}", block, re.M) is not None
+
 
 def the_paper() -> dict:
     """"Ujian Fisika" as it is stored: three MCQ priced, two essays not."""
@@ -150,7 +167,11 @@ class TestTheRule:
 #: is deliberately not `"complete_weights(" in block` — a **commented-out** call
 #: satisfies that, and the mutation that comments the line out is precisely the
 #: defect this has to catch ("the rule is present but never runs").
-CALL = re.compile(r"^[ \t]*question_weights = complete_weights\(", re.M)
+#:
+#: The left-hand side is any name, not `question_weights`: the rule moved into
+#: `exam_scoring.exam_parts`, where the map being completed is the local `weights`.
+#: A leading `#` still fails the anchor, which is the property that matters.
+CALL = re.compile(r"^[ \t]*[A-Za-z_][\w.]*\s*=\s*complete_weights\(", re.M)
 
 
 class TestBothEnginesUseIt:
@@ -159,13 +180,41 @@ class TestBothEnginesUseIt:
     Each of these failed before this change: `teacher._recalculate_scores` and
     `api.grade_batch` both looked a question's share up, got 0 for a question the
     paper had not priced, and skipped the teacher's mark on it.
+
+    The teacher's half of the rule moved into `app/services/exam_scoring.py` so the
+    answer-key page can ask what a save *would* do with the same arithmetic. The
+    guard moved with it: `teacher.py` must own no copy, `exam_parts` exactly one, and
+    the completion must still happen before anything reads a share.
     """
 
-    def test_the_teacher_recalculation_completes_the_weights(self):
-        assert CALL.search(RECALC), (
-            "the recalculation can still drop a teacher's mark on a question the "
-            "paper does not price — or the call is there but commented out, which "
-            "is the same thing with a grep for company")
+    def test_the_teacher_recalculation_resolves_the_paper_through_the_rule(self):
+        """It completes the weights via the shared resolver, not inline.
+
+        Where the call sits changed (`_recalculate_scores` -> `exam_scoring`), and
+        what it must not become is a recalculation that reads the shares itself: the
+        defect was a share looked up and found 0 for a question the paper does not
+        price, and a second copy of the repair is how that happened. `exam_parts` is
+        the one copy now, and this asserts the route goes through it.
+        """
+        assert running(RECALC, "exam_scoring.load_parts("), (
+            "the recalculation no longer resolves the paper through the shared "
+            "resolver, so a question the paper does not price can still lose the "
+            "teacher's mark — or the call is there but commented out, which is the "
+            "same thing with a grep for company")
+        assert running(RECALC, "exam_scoring.rescore("), (
+            "the recalculation no longer scores through the shared rule")
+
+    def test_the_shared_resolver_completes_the_weights(self):
+        """The rule is present, in the one place both engines now share."""
+        assert CALL.search(PARTS), (
+            "nothing completes the weights any more: a teacher's mark on a question "
+            "the paper does not price is worth 0 again")
+
+    def test_the_route_no_longer_carries_a_copy_of_the_rule(self):
+        """One rule, one place — the whole reason this defect happened twice."""
+        assert not running(TEACHER, "complete_weights("), (
+            "teacher.py is completing the weights itself again; the resolver owns "
+            "that, and a second copy is how the rule and the writer drift apart")
 
     def test_the_batch_grade_route_completes_the_weights(self):
         assert CALL.search(BATCH), (
@@ -176,15 +225,34 @@ class TestBothEnginesUseIt:
         """One rule, one place. A second call is how the first one went wrong.
 
         A duplicate also defeats the ordering guard below: the original call still
-        precedes the marks, so a copy after them reads as a pass.
+        precedes the marks, so a copy after them reads as a pass. The teacher's whole
+        path is counted, not just the route: `teacher.py` must hold none and the
+        resolver exactly one, or the arithmetic a preview uses is not the arithmetic
+        a save writes.
         """
-        for name, block in (("teacher.py", RECALC), ("api.py", BATCH)):
+        for name, block in (("exam_scoring.exam_parts", PARTS), ("api.py", BATCH)):
             found = len(CALL.findall(block))
             assert found == 1, f"{name} completes the weights {found} times"
+        assert not CALL.search(TEACHER), (
+            "teacher.py has a second copy of the rule again")
 
-    def test_the_teacher_recalculation_completes_them_before_reading_the_marks(self):
-        assert CALL.search(RECALC).start() < RECALC.index("fb_scores"), (
-            "the weights are completed after the marks are read, so nothing changes")
+    def test_the_completed_map_is_what_the_reader_is_handed(self):
+        """The ordering, stated as the stronger thing it now is.
+
+        `exam_parts` completes the map *as the argument* it builds `ExamParts`
+        with, so no reader can be handed the stored one: the completion is not a
+        statement that precedes the hand-off, it is the hand-off. Completing it
+        anywhere else — before the construction into a name nothing reads, or after
+        — would put the stored map back in the reader's hands with the call still
+        present, which is the original defect.
+        """
+        construction = PARTS[PARTS.index("return ExamParts("):]
+        construction = construction[:construction.index("\n    )") + len("\n    )")]
+        assert CALL.search(construction), (
+            "the parts are built without the completed map, so every reader gets the "
+            "stored shares — which are 0 for a question the paper does not price")
+        assert RECALC.index("exam_scoring.load_parts(") < RECALC.index("exam_scoring.rescore("), (
+            "the recalculation scores before the paper is resolved")
 
     def test_the_batch_route_completes_them_before_reading_the_marks(self):
         assert CALL.search(BATCH).start() < BATCH.index("fb_scores"), (

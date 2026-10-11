@@ -20,7 +20,8 @@ from app.decorators.security import require_role, STAFF_ROLES
 from app.decorators.subscription import require_subscription
 from app.services.anti_cheat_service import validate_violation_log
 from app.services.question_types import (
-    complete_weights, earned_points, grade_answer, is_objective, objective_result,
+    complete_weights, earned_points, grade_answer, is_objective,
+    normalize_answer_map, objective_result,
 )
 from app.services.student_import import create_student_account
 from app.utils.logger import get_logger
@@ -365,32 +366,28 @@ def log_violation():
 
     from app.services.anti_cheat_service import (
         calculate_graduated_penalty, count_penalized_violations,
+        refusal as anti_cheat_refusal,
     )
     supabase = get_supabase()
     results = []
     for log in logs:
         exam_id = log.get("exam_id", "")
-        # The exam is read **before** anything is written, and a paper with
-        # anti-cheat switched off records nothing at all.
+        # The exam is read **before** anything is written, and whether it counts
+        # violations is not this route's question: `exams.anti_cheat_enabled` is the
+        # school's own switch, and `anti_cheat_service.refusal` is the one reader of
+        # it — the same guard the ladder (`calculate_graduated_penalty`), the count
+        # stored on the sitting and the resume-code lock ask. The log used to answer
+        # for itself and asked the flag only after it had already written the row,
+        # which is how a switched-off paper collected violations the school had not
+        # asked to see.
         #
-        # `exams.anti_cheat_enabled` is the school's own switch, and a row in this
-        # table *is* the record the teacher reads — so writing one for a paper the
-        # school switched off puts a violation in front of them that nobody asked
-        # to have. The rest of the ladder already honours the flag
-        # (`calculate_graduated_penalty` charges nothing, and the resume-code
-        # service will not lock the sitting); the log was the half that did not,
-        # because it wrote the row before it had read the exam.
+        # Relayed rather than rebuilt, so the refusal the page matches on
+        # (`anti_cheat_disabled`) is the service's own word. The decision stays on the
+        # server: a hand-crafted POST is refused exactly as the page's own is.
         #
-        # The decision is taken here rather than in the page on purpose: a paper's
-        # promise is not the client's to keep, so a hand-crafted POST is refused
-        # exactly as the page's own is. Read as `is False`, like the penalty does:
-        # a row that could not be read is not a school asking for silence, and
-        # treating it as one would switch anti-cheat off for every paper whose row
-        # went missing.
-        #
-        # Read before the debounce as well, so a disabled paper answers without a
-        # second round-trip — and so nothing about the refusal depends on what is
-        # already in the log.
+        # Read before the debounce, so a disabled paper answers without a second
+        # round-trip — and so nothing about the refusal depends on what is already in
+        # the log.
         exam = row_or_none(
             supabase.table("exams")
             .select("anti_cheat_enabled, penalty_per_violation, max_violations,"
@@ -398,8 +395,9 @@ def log_violation():
                     " duration_minutes, start_at, end_at, auto_submit_on_window_end")
             .eq("id", exam_id).maybe_single().execute()
         ) or {}
-        if exam.get("anti_cheat_enabled") is False:
-            results.append({"logged": False, "reason": "anti_cheat_disabled"})
+        refused = anti_cheat_refusal(exam)
+        if refused is not None:
+            results.append(refused)
             continue
         valid = validate_violation_log(
             g.user_id,
@@ -422,7 +420,10 @@ def log_violation():
             # read above it so the response carries the penalty the server would
             # actually apply. The client displays that number: it must never show a
             # penalty the server will not charge (or hide one it will).
-            total_count = count_penalized_violations(supabase, g.user_id, exam_id)
+            # The exam row is handed in so the count asks the same switch the ladder
+            # does: a sitting whose stored penalty was written before the school
+            # switched the paper off must not keep charging.
+            total_count = count_penalized_violations(supabase, g.user_id, exam_id, exam)
             penalty_info = calculate_graduated_penalty(total_count, exam)
             # Keep the submission's penalty in step with the ladder so the results
             # screen agrees with the score, without ever double-charging: the value
@@ -517,7 +518,10 @@ def force_submit():
         if sub.data:
             answers = sub.data[0].get("answers") or {}
             # Re-fetch submission for answer key
-            exam = supabase.table("exams").select("answer_key,question_types,question_weights,question_scoring,total_questions,penalty_per_violation").eq("id", exam_id).single().execute().data or {}
+            # `anti_cheat_enabled` belongs in this select: a column left out arrives
+            # *absent*, never as an error, so the ladder below read `None` for a paper
+            # the school had switched off and charged the pupil anyway.
+            exam = supabase.table("exams").select("answer_key,question_types,question_weights,question_scoring,total_questions,penalty_per_violation,anti_cheat_enabled").eq("id", exam_id).single().execute().data or {}
             # Parse JSON fields that may be strings
             for _fld in ("answer_key", "question_types", "question_weights"):
                 _v = exam.get(_fld)
@@ -544,7 +548,7 @@ def force_submit():
             from app.services.anti_cheat_service import (
                 calculate_graduated_penalty, count_penalized_violations,
             )
-            viol_count = count_penalized_violations(supabase, g.user_id, exam_id)
+            viol_count = count_penalized_violations(supabase, g.user_id, exam_id, exam)
             pinfo = calculate_graduated_penalty(viol_count, exam)
             total_penalty = pinfo.get("penalty", 0)
             final = max(0.0, round(earned - total_penalty, 2))
@@ -579,7 +583,9 @@ def violation_count():
         .select("anti_cheat_enabled, penalty_per_violation, max_violations, auto_submit_on_max")
         .eq("id", exam_id).maybe_single().execute()
     ) or {}
-    count = count_penalized_violations(supabase, g.user_id, exam_id)
+    # Both answers come from the same switch: a page that shows a count of 3 beside a
+    # penalty of 0 is telling the pupil two different things about one paper.
+    count = count_penalized_violations(supabase, g.user_id, exam_id, exam)
     info = calculate_graduated_penalty(count, exam)
     return jsonify({"count": count, **info})
 
@@ -1178,6 +1184,13 @@ def student_sync_draft():
         # Use cached exam fetch — avoids duplicate queries when many students sync simultaneously
         exam_data = _get_exam_cached(exam_id, supabase)
         duration = (exam_data["duration_minutes"] * 60) if exam_data and exam_data.get("duration_minutes") else None
+        # ── The shape each choice answer is allowed to hold ──────────────────
+        # The same rule the submit route applies, so a draft and the paper it
+        # becomes cannot disagree about what the pupil said. The multi-answer
+        # exception holds the set, a single-answer question holds one letter, and
+        # a page loaded before the teacher flipped the toggle is *read* into the
+        # right shape rather than refused (see `question_types.normalize_answer`).
+        answers = normalize_answer_map((exam_data or {}).get("question_types"), answers)
         existing = supabase.table("submissions").select("id,status,answers,started_at,updated_at").eq("exam_id", exam_id).eq("student_id", g.user_id).limit(1).execute().data
         if existing:
             sub = existing[0]

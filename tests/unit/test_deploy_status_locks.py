@@ -34,7 +34,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from app.services import deploy_status_service as status  # noqa: E402
-from app.utils import lock_health  # noqa: E402
+from app.utils import auth_health, lock_health  # noqa: E402
 
 TEMPLATE = ROOT / "app" / "templates" / "super_admin" / "deploy_status.html"
 ROUTE = ROOT / "app" / "routes" / "super_admin.py"
@@ -74,8 +74,8 @@ def report_for(tmp_path) -> dict:
                          perf_history_file=str(tmp_path / "absent.jsonl"))
 
 
-def render(app, locks: dict, tmp_path) -> str:
-    """The page with a given lock reading, for the tests that read its copy."""
+def render(app, locks: dict, tmp_path, authretries: dict | None = None) -> str:
+    """The page with given readings, for the tests that read its copy."""
     from flask import g, render_template
     with app.test_request_context("/super-admin/deploy-status"):
         g.user_id = "a-super-admin"
@@ -86,7 +86,32 @@ def render(app, locks: dict, tmp_path) -> str:
         return render_template("super_admin/deploy_status.html",
                                status=report_for(tmp_path),
                                alerts={"interval_seconds": 21600}, locks=locks,
+                               authretries=authretries or auth_reading(
+                                   auth_health.CLEAN),
                                testalert=None, released=None)
+
+
+def auth_reading(key: str, **over) -> dict:
+    """An `auth_health.state()` reading, in the shape the card reads."""
+    out = {
+        "key": key,
+        "measured_at": "2026-09-26T03:00:00+00:00",
+        "recorded": key == auth_health.RECORDED,
+        "worker": "4242",
+        "state_file": "/tmp/scangrade-auth-retries.json",
+        "marker": {"present": False, "key": "absent", "at": None, "reason": None,
+                   "worker": None, "age_seconds": None},
+        "worker_retries": 0,
+        "worker_exhausted": 0,
+        "worker_first_at": None,
+        "worker_last_at": None,
+        "worker_reason": None,
+        "worker_cleared": 0,
+        "worker_cleared_at": None,
+        "worker_started_at": None,
+    }
+    out.update(over)
+    return out
 
 
 # ── every state has its own words ────────────────────────────────────────────
@@ -245,3 +270,53 @@ class TestHowTheRouteFeedsIt:
 
         assert "could not be asked" in html, (
             "a missing reading rendered as something other than 'unknown'")
+
+
+# ── nowhere to keep the marker at all ────────────────────────────────────────
+
+NOWHERE = {
+    "present": False, "key": "unavailable", "at": None,
+    "reason": "FileNotFoundError: No usable temporary directory found in ['/tmp']",
+    "worker": None, "age_seconds": None,
+}
+
+
+class TestTheBoxHasNowhereToKeepTheMarker:
+    """Both marker lines have a fourth state, and it is not `None`.
+
+    `tempfile.gettempdir()` raises when no candidate directory can be written to, and
+    both modules used it to build their default marker path *in the module body* — so
+    the failure arrived as an import-time death, in the two modules whose contract is
+    that no state problem reaches a student's save. Now the path is `None` and the card
+    has to say so: "None" on the marker line would read as a clean record, which is the
+    one thing a box that cannot keep a marker has not established.
+    """
+
+    def test_the_lock_marker_line_says_there_is_nowhere_to_keep_it(self, app, tmp_path):
+        html = render(app, reading(lock_health.SHARED, state_file="", marker=NOWHERE),
+                      tmp_path)
+
+        assert "Nowhere to keep it" in html, (
+            "a marker with nowhere to live was rendered as 'None'")
+        assert "No usable temporary directory" in html, (
+            "the line says what cannot be done but not why")
+
+    def test_the_auth_marker_line_says_there_is_nowhere_to_keep_it(self, app, tmp_path):
+        html = render(app, reading(lock_health.SHARED), tmp_path,
+                      authretries=auth_reading(auth_health.UNAVAILABLE,
+                                               state_file="", marker=NOWHERE))
+
+        assert "Nowhere to keep it" in html, (
+            "a marker with nowhere to live was rendered as 'None'")
+
+    def test_the_auth_card_is_not_a_clean_bill_when_it_could_not_check(self, app, tmp_path):
+        """The headline is the marker's, so `unavailable` must not take the green one."""
+        html = render(app, reading(lock_health.SHARED), tmp_path,
+                      authretries=auth_reading(auth_health.UNAVAILABLE,
+                                               state_file="", marker=NOWHERE))
+
+        assert "nowhere on this appliance to keep the marker" in html, (
+            "the auth card claimed the first-try-clean sentence for a box that could "
+            "not look at all")
+        assert "creates are landing on the first try" not in html, (
+            "the auth card rendered the clean sentence for a box that could not check")

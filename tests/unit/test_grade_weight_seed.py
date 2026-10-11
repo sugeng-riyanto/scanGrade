@@ -18,11 +18,19 @@ This file pins the seed end to end, in the four places it can go wrong:
   filter, and the doors in `admin_sekolah.py` check the pupil and the subject
   against the caller's own school before reading anything, so neither id in the
   URL can widen the scope.
+* **the default's own seed** (`sgPickSpreadSubject`) — the school default has no
+  subject of its own, so the learner's **spread** chooses which subject the sample
+  is read from, and the page says which. The choice is weight-aware, because a
+  subject whose marks share none of the weights on screen would preview a mark
+  built entirely from the "missing component is zero" policy; a tie keeps the
+  server's name order so the choice is reproducible.
 * **the agreement** — what the page computes from a seeded sample must equal what
   the server computes for that pupil, which is the whole point of the preview.
 * **the wiring** — the card can be seeded, seeding is a read (never a POST), a
-  hand-edited sample drops the attribution, and changing the subject re-reads
-  rather than leaving another subject's marks under this subject's weights.
+  hand-edited sample marks the badge *edited* rather than leaving it claiming the
+  record, the default's seed reuses the one spread read the comparison table makes,
+  and changing the subject re-reads rather than leaving another subject's marks
+  under this subject's weights.
 """
 from __future__ import annotations
 
@@ -48,6 +56,7 @@ NODE = shutil.which("node")
 needs_node = pytest.mark.skipif(NODE is None, reason="needs node to run the page's own rule")
 
 PREVIEW = re.compile(r"function sgPreviewFinal\([^)]*\) \{(.*?)\r?\n\}", re.S)
+SPREAD = re.compile(r"function sgPickSpreadSubject\([^)]*\) \{(.*?)\r?\n\}", re.S)
 
 
 def _tables() -> dict:
@@ -234,6 +243,88 @@ def _page_final(weights: dict, marks: dict) -> dict:
     return json.loads(done.stdout.strip())
 
 
+# ── the school default's seed: the learner's own spread picks the subject ────
+
+def _spread_function() -> str:
+    """The page's own spread rule, read out of the template."""
+    html = WEIGHTS_HTML.read_text(encoding="utf-8")
+    match = SPREAD.search(html)
+    assert match, "the page no longer defines the spread rule"
+    return match.group(0)
+
+
+def _page_spread(weights: dict, subjects: list) -> dict | None:
+    """Run the page's own spread rule over one learner's rows, through node."""
+    script = (
+        "const src = " + json.dumps(_spread_function()) + ";\n"
+        "eval(src);\n"
+        "console.log(JSON.stringify(sgPickSpreadSubject(" + json.dumps(weights) + ", "
+        + json.dumps(subjects) + ")));\n"
+    )
+    done = subprocess.run([NODE, "-e", script], capture_output=True, text=True, timeout=60)
+    assert done.returncode == 0, done.stderr
+    return json.loads(done.stdout.strip())
+
+
+def _row(name: str, marks: dict, subject_id: str = None) -> dict:
+    return {"subject_id": subject_id or name.lower(), "name": name, "marks": marks}
+
+
+class TestTheSpreadPicksTheSubject:
+    """The school default has no subject of its own, so the spread chooses one.
+
+    Marks belong to a subject. Rather than making the admin pick one (which is
+    what the page used to demand), the learner's own spread decides — and the
+    page then names the subject the sample came from. The rule is deliberately
+    *weight-aware*: every row carries the same learner's component means, but the
+    weights on screen name component ids, and a subject whose marks share none of
+    them would preview a mark built entirely from the "missing component is
+    zero" policy rather than from anything the learner actually sat.
+    """
+
+    @needs_node
+    def test_the_subject_covering_the_most_weighted_components_wins(self):
+        weights = {"gc1": 40, "gc2": 60}
+        subjects = [_row("Biologi", {"gc3": 70}),
+                    _row("Fisika", {"gc1": 80, "gc2": 90})]
+        assert _page_spread(weights, subjects)["name"] == "Fisika", (
+            "the spread picked a subject whose marks the weights cannot place")
+
+    @needs_node
+    def test_a_tie_keeps_the_servers_own_name_order(self):
+        weights = {"gc1": 40, "gc2": 60}
+        subjects = [_row("Biologi", {"gc1": 70}), _row("Kimia", {"gc2": 80})]
+        assert _page_spread(weights, subjects)["name"] == "Biologi", (
+            "a tie is decided by something other than the server's ordering, so the "
+            "chosen subject is not reproducible")
+
+    @needs_node
+    def test_a_row_with_no_mark_is_never_chosen(self):
+        weights = {"gc1": 40}
+        subjects = [_row("Biologi", {}), _row("Kimia", {"gc1": 50})]
+        assert _page_spread(weights, subjects)["name"] == "Kimia", (
+            "an empty row was chosen, so the sample is from nowhere")
+
+    @needs_node
+    def test_nothing_scored_is_no_subject_at_all(self):
+        assert _page_spread({"gc1": 40}, []) is None
+        assert _page_spread({"gc1": 40}, [_row("Biologi", {})]) is None
+
+    @needs_node
+    def test_a_zero_percent_weight_is_not_a_component(self):
+        """Same rule the arithmetic uses: a 0% weight is not on screen."""
+        weights = {"gc1": 0, "gc2": 60}
+        subjects = [_row("Biologi", {"gc1": 70}), _row("Kimia", {"gc2": 80})]
+        assert _page_spread(weights, subjects)["name"] == "Kimia"
+
+    @needs_node
+    def test_the_rows_own_marks_are_what_the_pick_hands_back(self):
+        """The pick carries the marks, so the seed needs no second read."""
+        pick = _page_spread({"gc1": 100}, [_row("Fisika", {"gc1": 80})])
+        assert pick["marks"] == {"gc1": 80}
+        assert pick["subject_id"] == "fisika"
+
+
 class TestTheSeedAgreesWithTheServer:
     @needs_node
     def test_a_seeded_sample_carries_the_same_final_mark_as_the_server(self):
@@ -304,15 +395,23 @@ class TestTheDoors:
 
 # ── the page ─────────────────────────────────────────────────────────────────
 
-def _seed_methods() -> str:
+def _method(name: str) -> str:
+    """One Alpine method's body, read out of the template.
+
+    Anchored at the 8-space indent so a *call* (`this.seedFromSpread(`) can never
+    be mistaken for the declaration: the marker has to name the definition, or the
+    body read back is the tail of whichever method happened to call it first.
+    """
     html = WEIGHTS_HTML.read_text(encoding="utf-8")
-    names = ("searchPupils", "seedFrom", "clearSeed", "onPreviewSubjectChange")
-    chunks = []
-    for name in names:
-        marker = f"{name}("
-        assert marker in html, f"the page has no {name} method"
-        chunks.append(html.split(marker, 1)[1].split("\n        },", 1)[0])
-    return "\n".join(chunks)
+    marker = f"\n        {name}("
+    assert marker in html, f"the page has no {name} method"
+    return html.split(marker, 1)[1].split("\n        },", 1)[0]
+
+
+def _seed_methods() -> str:
+    return "\n".join(_method(n) for n in (
+        "searchPupils", "seedFrom", "seedFromSpread", "seedFromSubject",
+        "applySeed", "loadPupilSubjects", "clearSeed", "onPreviewSubjectChange"))
 
 
 def _seed_block() -> str:
@@ -354,10 +453,57 @@ class TestThePageIsWired:
             "a subject change must re-read, not leave the old subject's marks under "
             "this subject's weights")
 
-    def test_the_school_default_asks_for_a_subject_rather_than_guessing(self):
+    def test_the_school_default_seeds_from_the_pupils_own_spread(self):
+        """The one distribution that covers the whole school can name a learner.
+
+        The page used to answer the school default with "pick a subject first", so
+        the policy that applies to every subject that has not been given its own
+        row was the single policy that could not be previewed against a real
+        learner. Now the learner's own spread decides which subject the sample is
+        read from, in the same one read the comparison table already makes.
+        """
         body = _seed_methods()
         assert "'__default__'" in body, (
-            "seeding the school default has no subject to read from and must say so")
+            "the school default is no longer a case the seed knows about")
+        assert "seedFromSpread(" in body, (
+            "the school default still has nothing to read the sample from")
+        assert "sgPickSpreadSubject(" in body, (
+            "the spread is not what chooses the subject, so the choice is a coin toss")
+        assert "Pilih satu mapel dulu" not in body, (
+            "the school default still asks for a subject before it will seed")
+
+    def test_the_spread_is_read_once_for_both_callers(self):
+        """The table and the seed want the same rows; the seed does not re-ask."""
+        assert ("return this.get('/admin-sekolah/grade-weights/pupil-subjects"
+                in _method("loadPupilSubjects")), (
+            "loadPupilSubjects does not hand its rows back, so the seed cannot "
+            "wait on the read that is already in flight")
+        assert "pupil-subjects" not in _method("seedFromSpread"), (
+            "the default's seed issues a second read for rows the page already has")
+
+    def test_the_page_says_which_subject_the_sample_came_from(self):
+        html = WEIGHTS_HTML.read_text(encoding="utf-8")
+        assert "data-seed-source" in html, (
+            "the school default's sample names no subject, so its numbers cannot be "
+            "attributed to anything the admin can check")
+        assert "seedSource" in _method("applySeed"), (
+            "the seed never records which subject it read")
+
+    def test_the_source_copy_is_bilingual(self):
+        html = WEIGHTS_HTML.read_text(encoding="utf-8")
+        assert "t('dari','from')" in html, (
+            "the source label carries no bilingual pair")
+
+    def test_a_failed_spread_read_is_not_reported_as_no_marks(self):
+        """"Could not read" and "nothing graded" are different facts."""
+        assert "this.pupilSubjectsNote" in _method("seedFromSpread"), (
+            "a read that failed would be shown as 'this pupil has no marks', which "
+            "is a different fact and hides the failure")
+
+    def test_clearing_and_switching_drop_the_source(self):
+        for name in ("clearSeed", "onPreviewSubjectChange"):
+            assert "this.seedSource = ''" in _method(name), (
+                f"{name} leaves the previous subject's name on the badge")
 
     def test_clearing_the_seed_empties_the_sample(self):
         body = _seed_methods()

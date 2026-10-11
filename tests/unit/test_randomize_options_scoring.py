@@ -328,7 +328,11 @@ def test_the_choice_control_renders_the_letter_and_no_option_content():
     """
     src = _source()
     start = src.index('x-for="opt in (_shuffledOpts[i]')
-    button = src[start:start + 900]
+    # To the element's own close tag rather than a character count: the bubble grew
+    # attributes when a choice question gained the multi-answer exception (`:role`,
+    # `:data-answer-mode`, a tick), and a fixed window is a measurement of the
+    # markup's *length* — which is not the question being asked here.
+    button = src[start:src.index("</button>", start)]
     assert 'x-text="opt"' in button, (
         "the bubble no longer renders the letter itself — if it now renders option "
         "content, this file's question has changed and must be asked again"

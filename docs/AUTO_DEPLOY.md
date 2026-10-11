@@ -1260,6 +1260,17 @@ by an unarmed runner), the theme gate, and the post-reload verification (smoke t
 claims gate, performance gate, and the app not answering `200`). The quarantine
 record names which one, so "why did nothing deploy" is answered by one `cat`.
 
+One of the theme gate's refusals is a **database** state rather than a theme: it runs
+`schema_contract.py --require-applied`, which fails when a migration this repository
+carries declares a table or a column the live schema does not have. That is the same
+question the schema gate below asks through `apply_migration.py --verify`, asked
+through `SUPABASE_URL` and the service key instead of `DIRECT_URL` — so a box that
+cannot open a Postgres session is still held against the live schema. A gap refuses
+the release through the theme gate's exit 1 (so the quarantine reason reads
+`theme gate (exit 1)`), and a box with no credentials to ask with is said loudly and
+**not** refused: `--require-applied` exits 2 there, and the gate deliberately does not
+turn that into its own exit 2, which this deploy reads as a release not to ship.
+
 One refusal deliberately writes **no** quarantine: the armament preflight, which
 refuses the *run* rather than a commit. Its record is
 `/var/lib/scangrade-deploy/unarmed`, which the status page reads, and it is deleted

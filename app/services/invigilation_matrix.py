@@ -321,6 +321,48 @@ def matrix(supabase, school_id: str, exam_date: str) -> dict:
                                                     key=lambda kv: (-kv[1], kv[0]))]}
 
 
+def duties_for_teacher(supabase, school_id: str, teacher_id: str) -> list[dict]:
+    """The matrix cells that name this teacher, each with its slot and room.
+
+    The schedule service answers *the sittings a teacher holds*; this answers the
+    other half of the same question — *the rooms they stand in* — so a teacher
+    given a room slot through the matrix sees it beside a schedule-based duty
+    rather than only on the officials' page. The scope is a required argument and
+    the school filters both the duty read and the two name lookups, so a duty or a
+    same-named room from another school can never be borrowed onto the list.
+
+    Ordered by date, then the school's own slot order, then room name: the order
+    the school sees the day in, not the order the rows happened to come back.
+    """
+    duties = _rows(supabase.table("invigilation_duty")
+                   .select("id, exam_date, period_id, room_id, source, notes")
+                   .eq("school_id", school_id).eq("teacher_id", teacher_id))
+    if not duties:
+        return []
+    period_ids = sorted({str(d["period_id"]) for d in duties if d.get("period_id")})
+    room_ids = sorted({str(d["room_id"]) for d in duties if d.get("room_id")})
+    periods = {str(r["id"]): r for r in _rows(
+        supabase.table("exam_period").select("id, name, sort_order")
+        .eq("school_id", school_id).in_("id", period_ids))} if period_ids else {}
+    rooms = {str(r["id"]): _clean(r.get("name")) for r in _rows(
+        supabase.table("exam_room").select("id, name")
+        .eq("school_id", school_id).in_("id", room_ids))} if room_ids else {}
+
+    out = []
+    for duty in duties:
+        period = periods.get(str(duty.get("period_id"))) or {}
+        room_name = rooms.get(str(duty.get("room_id")), "")
+        out.append(dict(duty,
+                        period_name=_clean(period.get("name")),
+                        room_name=room_name,
+                        sort_key=(str(duty.get("exam_date") or ""),
+                                  period.get("sort_order") or 0, room_name)))
+    out.sort(key=lambda d: d["sort_key"])
+    for row in out:
+        row.pop("sort_key", None)
+    return out
+
+
 def available_teachers(supabase, school_id: str, exam_date: str,
                        period_id: str) -> list[dict]:
     """Teachers who still have a free seat in this slot — what a cell offers.

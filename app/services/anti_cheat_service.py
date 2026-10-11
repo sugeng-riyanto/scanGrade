@@ -121,6 +121,54 @@ KIND_LABELS = {
 }
 
 
+# ── The school's own switch, read in one place ───────────────────────────────
+#
+# `exams.anti_cheat_enabled` decides whether a paper counts violations at all, and
+# four callers need that answer: the door that writes a row, the ladder that prices
+# it, the count that feeds both the ladder and the sitting's stored penalty, and the
+# resume-code lock that trips at the threshold. Each of them used to ask for itself
+# — `is not False` spelled out in the route, in the ladder and in `resume_code` —
+# which is how the log was the one half that wrote a row for a paper the school had
+# switched off while the ladder charged nothing for it. The answer is here now, so
+# there is one place to read and one place to change.
+#
+# The comparison is `is not False` on purpose, and it is not the same as truthiness:
+# a row that could not be read, a column a migration has not added yet, or a null is
+# *not* a school asking for silence. Only an explicit `false` switches a paper off.
+#: Why a violation this paper does not count is refused. A named reason rather than
+#: a sentence, because the exam page matches on it to stay quiet.
+DISABLED_REASON = "anti_cheat_disabled"
+
+#: What the ladder answers for a paper the school switched off: nothing charged, no
+#: warning, no auto-submit. A value rather than four zeros in two places.
+NONE_CHARGED = {"penalty": 0.0, "warning": False, "auto_submit": False,
+                "current_penalty_this_violation": 0.0}
+
+
+def enabled(exam_settings: dict | None) -> bool:
+    """Whether this paper counts anti-cheat violations at all.
+
+    The one reader of `anti_cheat_enabled`. A paper that is switched off records
+    nothing, charges nothing, counts nothing and never locks — and every one of
+    those four answers comes from here, so they cannot disagree.
+    """
+    return (exam_settings or {}).get("anti_cheat_enabled") is not False
+
+
+def refusal(exam_settings: dict | None) -> dict | None:
+    """The answer a violation gets from a paper that does not count it.
+
+    ``None`` means *record this one*; anything else is the whole refusal, shaped the
+    way the log endpoint answers (``{"logged": False, "reason": ...}``) so a caller
+    relays it rather than building a second shape of its own. The decision belongs
+    to the server and not the page: a hand-crafted POST from a switched-off paper is
+    refused exactly as the page's own would be.
+    """
+    if enabled(exam_settings):
+        return None
+    return {"logged": False, "reason": DISABLED_REASON}
+
+
 def _as_event(row: dict) -> dict:
     """One stored violation row as the report needs it.
 
@@ -192,6 +240,99 @@ def events_for_student(supabase, exam_id: str, user_id: str) -> list[dict]:
         return []
 
 
+def unmonitored_report(supabase, *, school_id: str | None = None,
+                       exam_ids: list[str] | None = None) -> dict:
+    """The violations already recorded on papers whose anti-cheat is switched off.
+
+    A read, and only a read: it selects and counts, and it writes nothing — no score,
+    no penalty, and no row is created, changed or deleted. The restraint is the point
+    of the report. A row in `violation_logs` was evidence when it was taken, and the
+    school switching the paper off afterwards does not make that evidence wrong;
+    deleting it would destroy the only record that a pupil was charged under a policy
+    the school has since changed. What a school needs is the list, so that what to do
+    about marks already awarded is a decision for people rather than for a script.
+
+    Returns four views of one read: ``papers`` (every switched-off paper found, with
+    how many rows it holds — a switched-off paper with none is a fact about the
+    assessment, not a finding about a pupil), ``pupils`` (one line per pupil and
+    paper — the unit a teacher acts on), ``rows`` (the events themselves, labelled)
+    and ``total``, so
+    "how big is this" is answered before anyone scrolls. Nothing is charged here and
+    nothing is un-charged: the ladder is not consulted, because an audit that moved
+    a mark would be the opposite of an audit.
+    """
+    empty = {"papers": [], "pupils": [], "rows": [], "total": 0}
+    try:
+        exams_query = supabase.table("exams").select("id, title, teacher_id, school_id")
+        if school_id:
+            exams_query = exams_query.eq("school_id", school_id)
+        if exam_ids:
+            exams_query = exams_query.in_("id", list(exam_ids))
+        # `is false`, never "falsy": a column a migration has not added, or a null,
+        # is not a school asking for silence — the same reading `enabled` makes.
+        papers = exams_query.eq("anti_cheat_enabled", False).execute().data or []
+    except Exception:
+        logger.exception("Could not read the switched-off papers")
+        return dict(empty)
+    if not papers:
+        return dict(empty)
+    by_id = {paper["id"]: paper for paper in papers}
+    try:
+        # `exam_id` is named explicitly: `EVENT_COLUMNS` leaves it out because the
+        # per-exam readers already know which exam they asked for, and this one asks
+        # for several at once.
+        raw = (supabase.table("violation_logs")
+               .select("exam_id, " + EVENT_COLUMNS)
+               .in_("exam_id", list(by_id)).order("created_at").execute().data or [])
+    except Exception:
+        logger.exception("Could not read the log for %d switched-off paper(s)", len(by_id))
+        raw = []
+
+    rows = []
+    for row in raw:
+        event = _as_event(row)
+        event["exam_id"] = row.get("exam_id")
+        event["exam_title"] = (by_id.get(row.get("exam_id")) or {}).get("title")
+        rows.append(event)
+
+    # The pupils' names, in one query rather than one per row.
+    names: dict[str, str] = {}
+    user_ids = sorted({r.get("user_id") for r in rows if r.get("user_id")})
+    if user_ids:
+        try:
+            found = (supabase.table("profiles").select("id, full_name")
+                     .in_("id", user_ids).execute().data or [])
+            names = {p["id"]: p.get("full_name") for p in found}
+        except Exception:
+            logger.exception("Could not read the pupil names for the audit")
+
+    grouped: dict[tuple, dict] = {}
+    for row in rows:
+        key = (row.get("exam_id"), row.get("user_id"))
+        line = grouped.setdefault(key, {
+            "exam_id": row.get("exam_id"), "exam_title": row.get("exam_title"),
+            "user_id": row.get("user_id"), "name": names.get(row.get("user_id")),
+            "recorded": 0, "charged": 0, "kinds": [],
+            "first_at": row.get("at"), "last_at": row.get("at"),
+        })
+        line["recorded"] += 1
+        if row.get("charged"):
+            line["charged"] += 1
+        if row.get("kind") not in line["kinds"]:
+            line["kinds"].append(row.get("kind"))
+        line["last_at"] = row.get("at")
+
+    return {
+        "papers": [{"id": paper["id"], "title": paper.get("title"),
+                    "recorded": sum(1 for r in rows if r.get("exam_id") == paper["id"])}
+                   for paper in papers],
+        "pupils": [grouped[key] for key in sorted(
+            grouped, key=lambda k: (str(k[0]), str(k[1])))],
+        "rows": rows,
+        "total": len(rows),
+    }
+
+
 def leaving_summary(events: list[dict]) -> dict:
     """What the results list says about one student in one line.
 
@@ -208,13 +349,23 @@ def leaving_summary(events: list[dict]) -> dict:
     }
 
 
-def count_penalized_violations(supabase, user_id: str, exam_id: str) -> int:
+def count_penalized_violations(supabase, user_id: str, exam_id: str,
+                               exam_settings: dict | None = None) -> int:
     """How many violations count toward the penalty.
 
     Fails to 0 on a lookup error rather than inventing a penalty — but logs it,
     because silently reporting 0 is how an entire class can finish an exam with
     no penalty recorded and nobody notices.
+
+    The count is what gets *stored* on the sitting and shown to the pupil, so it
+    asks the switch like everything else: a paper the school switched off has
+    nothing charged, and a count read before the switch was flipped must not keep
+    a penalty alive in the results. Pass ``exam_settings`` wherever the exam row is
+    already in hand (it is, at every caller that charges); omitting it counts the
+    log as it stands, which is what an audit of recorded rows wants.
     """
+    if exam_settings is not None and not enabled(exam_settings):
+        return 0
     try:
         res = (
             supabase.table("violation_logs")
@@ -226,7 +377,11 @@ def count_penalized_violations(supabase, user_id: str, exam_id: str) -> int:
         )
         return int(res.count or 0)
     except Exception:
-        current_app.logger.exception(
+        # The module logger, not `current_app.logger`: the count is a *reader*, and a
+        # reader that raises while reporting its own failure turns "the count could
+        # not be read" into a stack trace at whichever caller had no request context
+        # — the same lesson `events_for_exam` above is written to.
+        logger.exception(
             "Could not count penalized violations for user=%s exam=%s", user_id, exam_id
         )
         return 0
@@ -254,15 +409,15 @@ def calculate_graduated_penalty(
         dict with keys: penalty (float), warning (bool), auto_submit (bool),
                         current_penalty_this_violation (float)
     """
-    if exam_settings.get("anti_cheat_enabled") is False:
-        return {"penalty": 0, "warning": False, "auto_submit": False, "current_penalty_this_violation": 0}
+    if not enabled(exam_settings):
+        return dict(NONE_CHARGED)
 
     base = float(exam_settings.get("penalty_per_violation", 5))
     max_violations = int(exam_settings.get("max_violations", 5))
     auto_submit = bool(exam_settings.get("auto_submit_on_max", True))
 
     if violation_count <= 0:
-        return {"penalty": 0, "warning": False, "auto_submit": False, "current_penalty_this_violation": 0}
+        return dict(NONE_CHARGED)
 
     total = 0.0
     for v in range(1, violation_count + 1):

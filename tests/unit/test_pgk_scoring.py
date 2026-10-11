@@ -96,7 +96,9 @@ class TestTheVocabulary:
         """
         assert PGK in qt.PICKER_TYPES, (
             "the PGK editor ships with the type; the two are added in the same change")
-        assert qt._TYPE_LABELS[PGK] == ("Pilihan Ganda Kompleks", "Complex multiple choice")
+        assert qt._TYPE_LABELS[PGK] == ("Tabel Pernyataan (AKM)", "Statement grid (AKM)"), (
+            "the picker calls it after its shape; 'Pilihan Ganda Kompleks' read as a "
+            "second kind of ordinary multiple choice beside the real one")
 
     def test_the_picker_did_not_gain_a_typed_essay_on_the_way(self):
         assert qt.ESSAY_TEXT not in qt.PICKER_TYPES

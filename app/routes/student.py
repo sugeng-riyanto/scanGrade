@@ -14,7 +14,8 @@ from app.utils.exam_recovery import issue_code, redeem_code
 from app.services.audit_service import log_activity
 from app.services.pdf_service import ensure_page_thumbs
 from app.services.question_types import (
-    default_weights, earned_points, is_objective, objective_result, public_options,
+    default_weights, earned_points, is_objective, normalize_answer_map,
+    objective_result, public_options,
 )
 from app.services.submission_service import finish_sitting, open_sitting
 from app.services import exam_media
@@ -1037,7 +1038,12 @@ def submit_exam(exam_id):
     exam = supabase.table("exams").select(
         "id,is_published,status,class_ids,target_mode,max_attempts,publish_mode,"
         "total_questions,answer_key,question_types,question_weights,question_pages,"
-        "question_scoring,"
+        # `anti_cheat_enabled` belongs in this select. The ladder below is asked for
+        # a penalty with `exam` as its settings, and a column left out of a select
+        # arrives *absent* rather than as an error — and `anti_cheat_service.enabled`
+        # reads an absent column as monitored, so a paper the school had switched off
+        # was charged on submit through the one writer that never read the switch.
+        "question_scoring,anti_cheat_enabled,"
         "start_at,end_at,auto_submit_on_window_end,duration_minutes"
     ).eq("id", exam_id).single().execute().data
     if not exam:
@@ -1102,6 +1108,13 @@ def submit_exam(exam_id):
                 exam[_fld] = {}
 
     question_types = exam.get("question_types") or {}
+    # ── The shape a choice answer is allowed to hold ────────────────────────
+    # Applied *before* anything is graded or stored, so the mark and the answer it
+    # was made from agree. The multi-answer exception holds the set, a single-answer
+    # question holds one letter, and a page loaded before the teacher flipped the
+    # toggle is read into the right shape rather than refused: a pupil must not lose
+    # a sitting over a control they cannot reach from their side.
+    answers = normalize_answer_map(question_types, answers)
     total_q = exam["total_questions"]
     question_weights = exam.get("question_weights") or {}
     if not question_weights and total_q > 0:

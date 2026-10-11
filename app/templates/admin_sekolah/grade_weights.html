@@ -54,6 +54,36 @@ function sgPreviewFinal(weights, scores) {
     };
 }
 
+// Which of the learner's subjects the school-default sample is drawn from.
+// Marks belong to a subject, so "the school default" has no record of its own to
+// read; the learner's own spread decides, and the badge then says which subject
+// the sample came from. Every row carries that learner's component means, but the
+// weights on screen name component ids — a subject whose marks share none of them
+// would preview a mark built entirely from the "missing component is zero" policy,
+// which is not what this learner carries in that subject. So the subject covering
+// the most weighted components wins; ties keep the server's own order (subject
+// name), which makes the choice reproducible rather than incidental. A row with no
+// mark at all is never chosen: an empty sample is not a sample from anywhere.
+function sgPickSpreadSubject(weights, subjects) {
+    const rows = (subjects || []).filter(function (s) {
+        return s && s.marks && Object.keys(s.marks).length > 0;
+    });
+    if (!rows.length) { return null; }
+    const ids = Object.keys(weights || {}).filter(function (id) {
+        const w = parseInt(weights[id], 10);
+        return !isNaN(w) && w > 0;      // a 0% weight is not a component
+    });
+    let best = rows[0];
+    let bestCover = -1;
+    rows.forEach(function (s) {
+        const cover = ids.filter(function (id) {
+            return Object.prototype.hasOwnProperty.call(s.marks, id);
+        }).length;
+        if (cover > bestCover) { best = s; bestCover = cover; }
+    });
+    return best;
+}
+
 function gradeWeights() {
     return {
         components: {{ components|tojson }},
@@ -156,6 +186,13 @@ function gradeWeights() {
         pupilHint: '',
         seedPupil: null,
         seedIntact: false,
+        // The subject the sample was read from, when the admin did not pick one.
+        // The school default has no subject of its own, so the learner's own
+        // spread chooses it — and the badge names it, rather than leaving the
+        // admin to guess which of that learner's subjects these numbers came
+        // from. Empty when the preview is already scoped to a subject the select
+        // above names.
+        seedSource: '',
         // The comparison across subjects: this learner's saved final in every
         // subject they have a mark in, plus the component means each figure was
         // built from — so the "with these weights" column can re-run the page's
@@ -168,6 +205,7 @@ function gradeWeights() {
         // button rather than live, because it is the one heavy read on this page.
         impact: {
             pupils: [], subjects: [], shown: 0, capped: false, typed_total: 0,
+            kkm: {pupils: [], count: 0, shown: 0, checked: 0},
             counts: {pairs: 0, moved: 0, up: 0, down: 0, reported: 0,
                      pupils_marked: 0, pupils_moved: 0, max_up: null, max_down: null},
         },
@@ -186,55 +224,99 @@ function gradeWeights() {
             if (!pupil || !pupil.id) { return; }
             this.seedPupil = pupil;
             this.seedIntact = false;
+            this.seedSource = '';
             this.pupilHint = '';
             // The comparison belongs to the learner, not to the subject being
-            // previewed, so it is read whichever subject is selected — under
-            // the school default it is even the only figure the page can show
-            // for them.
-            this.loadPupilSubjects(pupil.id);
+            // previewed, so it is read whichever subject is selected. Under the
+            // school default it is also where the *sample* comes from, so the one
+            // read serves both the table below and the seed.
+            const spread = this.loadPupilSubjects(pupil.id);
             if (this.previewSubject === '__default__') {
-                // Marks belong to a subject, so the school default has no record
-                // to read. Say so rather than guessing which subject to read.
-                this.pupilHint = this.t('Pilih satu mapel dulu: nilai dibaca dari satu mapel.',
-                                        'Pick a subject first: marks are read from one subject.');
+                // Marks belong to a subject and the school default has no subject
+                // of its own — so the learner's own spread decides which subject
+                // the sample is read from, and the badge says which. This used to
+                // be a dead end that asked the admin to pick a subject first.
+                this.seedFromSpread(spread);
                 return;
             }
-            this.get('/admin-sekolah/grade-weights/pupil-marks?student_id=' + encodeURIComponent(pupil.id)
-                     + '&subject_id=' + encodeURIComponent(this.previewSubject))
+            this.seedFromSubject(pupil.id, this.previewSubject);
+        },
+        // The school default's seed: the learner's spread, picked by
+        // `sgPickSpreadSubject` and read from the row it names — no second
+        // request, because the spread already carries this learner's component
+        // means per subject.
+        seedFromSpread(spread) {
+            return spread.then(subjects => {
+                const pick = sgPickSpreadSubject(this.previewWeights(), subjects || []);
+                if (!pick) {
+                    // A read that failed is not the same fact as a learner with no
+                    // marks, and `loadPupilSubjects` already wrote the difference.
+                    this.pupilHint = this.pupilSubjectsNote
+                        || this.t('Murid ini belum punya nilai di mapel mana pun.',
+                                  'This pupil has no marks in any subject yet.');
+                    return;
+                }
+                this.applySeed(pick.marks, pick.name);
+            });
+        },
+        // One subject's marks, read by the server through the same component
+        // bucketing the roster uses.
+        seedFromSubject(studentId, subjectId) {
+            return this.get('/admin-sekolah/grade-weights/pupil-marks?student_id='
+                            + encodeURIComponent(studentId)
+                            + '&subject_id=' + encodeURIComponent(subjectId))
                 .then(d => {
                     if (!d.ok) {
                         this.pupilHint = d.data.error
                             || this.t('Gagal membaca nilai murid.', 'Could not read the pupil marks.');
                         return;
                     }
-                    this.previewScores = d.data.marks || {};
-                    this.seedIntact = Object.keys(this.previewScores).length > 0;
-                    this.pupilHint = d.data.scored
-                        ? this.t('Nilai murid ini dimuat.', 'This pupil marks are loaded.')
-                        : this.t('Murid ini belum punya nilai di mapel ini.',
-                                 'This pupil has no marks in this subject yet.');
+                    this.applySeed(d.data.marks, '');
+                    if (!d.data.scored) {
+                        this.pupilHint = this.t('Murid ini belum punya nilai di mapel ini.',
+                                                'This pupil has no marks in this subject yet.');
+                    }
                 });
         },
+        // The learner's own record becomes the sample, and the attribution that
+        // says so. `subjectName` is only set when the admin did not pick the
+        // subject (see `seedSource`). A hand-typed value does not erase the
+        // source — it is still where the sample started from — it marks the badge
+        // as `(edited)`, in `setSample`.
+        applySeed(marks, subjectName) {
+            this.previewScores = Object.assign({}, marks || {});
+            this.seedSource = subjectName || '';
+            this.seedIntact = Object.keys(this.previewScores).length > 0;
+            if (this.seedIntact) {
+                this.pupilHint = this.t('Nilai murid ini dimuat.', 'This pupil marks are loaded.');
+            }
+        },
+        // The learner's spread across subjects, read once per seeded pupil. It has
+        // two callers — the comparison table below, and the school default's seed,
+        // which has no subject of its own — so it hands the rows back rather than
+        // making the seed ask the server for the same figures a second time.
         loadPupilSubjects(studentId) {
             this.pupilSubjects = [];
             this.pupilSubjectsNote = '';
-            this.get('/admin-sekolah/grade-weights/pupil-subjects?student_id='
-                     + encodeURIComponent(studentId))
+            return this.get('/admin-sekolah/grade-weights/pupil-subjects?student_id='
+                            + encodeURIComponent(studentId))
                 .then(d => {
                     if (!d.ok) {
                         this.pupilSubjectsNote = d.data.error
                             || this.t('Gagal membaca nilai murid.', 'Could not read the pupil marks.');
-                        return;
+                        return [];
                     }
                     this.pupilSubjects = d.data.subjects || [];
                     this.pupilSubjectsNote = this.pupilSubjects.length ? ''
                         : this.t('Murid ini belum punya nilai di mapel mana pun.',
                                  'This pupil has no marks in any subject yet.');
+                    return this.pupilSubjects;
                 });
         },
         clearSeed() {
             this.seedPupil = null;
             this.seedIntact = false;
+            this.seedSource = '';
             this.previewScores = {};
             this.pupilHint = '';
             this.pupilResults = [];
@@ -242,10 +324,13 @@ function gradeWeights() {
             this.pupilSubjectsNote = '';
         },
         onPreviewSubjectChange() {
-            // The seed belongs to a subject, so a new subject is a fresh read —
-            // re-seeding the same pupil keeps the comparison the admin is making.
+            // A different preview is a different question, so the sample is read
+            // again for the same pupil — from the new subject's own marks, or from
+            // the learner's spread when the new preview is the school default. The
+            // comparison the admin is making is kept.
             const pupil = this.seedPupil;
             this.seedIntact = false;
+            this.seedSource = '';
             this.previewScores = {};
             this.pupilHint = '';
             if (pupil) { this.seedFrom(pupil); }
@@ -307,33 +392,77 @@ function gradeWeights() {
         // which is the one heavy read on this page, so it is a deliberate button
         // rather than something that fires while the admin types.
         impactQuery() {
-            const weights = this.previewWeights() || {};
-            const parts = Object.keys(weights).sort().map(cid => {
+            // The panel answers for the distribution the **preview** is showing.
+            const scope = this.previewSubject === '__default__' ? 'default' : 'subject';
+            const subject = scope === 'subject' ? this.previewSubject : null;
+            return this.impactUrl(scope, subject, this.previewWeights() || {});
+        },
+        impactUrl(scope, subjectId, weights) {
+            // One serializer for the door and its parameters, whether the question
+            // comes from the panel or from a save: a second copy is a second chance
+            // for the figures shown and the figures acted on to disagree.
+            const parts = Object.keys(weights || {}).sort().map(cid => {
                 const w = parseInt(weights[cid], 10);
                 return (!isNaN(w) && w > 0)
                     ? 'w=' + encodeURIComponent(cid) + ':' + w : null;
             }).filter(Boolean);
-            parts.push('scope=' + (this.previewSubject === '__default__' ? 'default' : 'subject'));
-            if (this.previewSubject !== '__default__') {
-                parts.push('subject_id=' + encodeURIComponent(this.previewSubject));
+            parts.push('scope=' + scope);
+            if (scope === 'subject' && subjectId) {
+                parts.push('subject_id=' + encodeURIComponent(subjectId));
             }
             return '/admin-sekolah/grade-weights/class-impact?' + parts.join('&');
         },
-        loadImpact() {
+        loadImpact(targetUrl) {
             this.impactLoading = true;
             this.impactNote = '';
-            const url = this.impactQuery();
-            this.get(url).then(d => {
+            const url = targetUrl || this.impactQuery();
+            return this.get(url).then(d => {
                 this.impactLoading = false;
                 if (!d.ok) {
                     this.impactNote = d.data.error
                         || this.t('Gagal menghitung dampak.', 'Could not work out the impact.');
-                    return;
+                    return false;
                 }
                 this.impact = d.data;
                 this.impactSignature = url;
                 this.impactDone = true;
+                return true;
             });
+        },
+        // ── the KKM line: the one movement a save must not make silently ────
+        // A distribution is only a problem when it moves a mark the pupil can
+        // already open from *passing* to *failing*. That answer belongs to the
+        // policy being saved, so the figures are asked for **that** policy — the
+        // ones on screen are reused when they already answer for it, so the common
+        // flow pays nothing twice — and when any already-reported pupil would cross
+        // the line, the save stops and names them. If the read fails, the save goes
+        // ahead: a preview that could not load must not become a lock on the page.
+        async confirmKkm(scope, subjectId, weights) {
+            const url = this.impactUrl(scope, subjectId, weights);
+            if (!this.impactDone || this.impactSignature !== url) {
+                // The figures are the ones for this exact policy — never a stale
+                // set that answered a different question. A read that fails is not
+                // a lock on the page: the save goes ahead rather than being held
+                // hostage by a preview that could not load.
+                if (!(await this.loadImpact(url))) { return true; }
+            }
+            const block = this.impact.kkm || {};
+            const rows = block.pupils || [];
+            if (!rows.length) { return true; }
+            const shown = rows.slice(0, 10).map(r =>
+                '• ' + r.name + (r.class_name ? ' (' + r.class_name + ')' : '')
+                + ' — ' + r.subject_name + ': ' + Number(r.saved).toFixed(1)
+                + ' → ' + Number(r.live).toFixed(1)
+                + ' (' + this.t('KKM','KKM') + ' ' + r.kkm + ')');
+            const more = block.count > shown.length
+                ? '\n' + this.t('…dan ' + (block.count - shown.length) + ' murid lain.',
+                                 '…and ' + (block.count - shown.length) + ' more pupils.')
+                : '';
+            return confirm(this.t(
+                'Bobot ini menurunkan nilai akhir yang sudah terbit sampai di bawah KKM:\n\n',
+                'These weights would drop already-reported final marks below the KKM:\n\n')
+                + shown.join('\n') + more + '\n\n'
+                + this.t('Tetap simpan?', 'Save anyway?'));
         },
         impactStale() {
             // A figure computed before the admin typed another weight answers for a
@@ -351,7 +480,10 @@ function gradeWeights() {
             const n = parseInt(value, 10);
             if (isNaN(n) || n <= 0) { delete this.defaults[compId]; } else { this.defaults[compId] = n; }
         },
-        saveDefaults() {
+        async saveDefaults() {
+            // The default binds every subject that follows it, so the check is run
+            // against the default's own policy before it is written.
+            if (!(await this.confirmKkm('default', null, this.defaults))) { return; }
             this.saving = 'defaults'; this.msg = '';
             this.post('/admin-sekolah/grade-weights/defaults', { weights: this.defaults })
                 .then(d => {
@@ -394,7 +526,11 @@ function gradeWeights() {
                     this.flash(d.ok, d.ok ? this.t('Tersimpan.','Saved.') : (d.data.error || this.t('Gagal.','Failed.')));
                 });
         },
-        saveRow(subjectId) {
+        async saveRow(subjectId) {
+            // Judged against the row about to be written, not against whatever the
+            // preview happens to be showing.
+            if (!(await this.confirmKkm('subject', subjectId,
+                                        this.row(subjectId)))) { return; }
             this.saving = subjectId; this.msg = '';
             this.post('/admin-sekolah/grade-weights/' + subjectId, { weights: this.row(subjectId) })
                 .then(d => {
@@ -586,6 +722,13 @@ function gradeWeights() {
                             <span x-text="seedPupil && seedPupil.name"></span>
                             <span class="text-slate-400" x-show="seedPupil && seedPupil.class_name"
                                   x-text="seedPupil && seedPupil.class_name ? '· ' + seedPupil.class_name : ''"></span>
+                            <!-- Which subject the sample came from, when the admin did
+                                 not pick one: the school default has no subject of its
+                                 own, so the learner's own spread chose it. The select
+                                 above still says "school default" — this says which
+                                 subject's marks are standing in for it. -->
+                            <span class="text-slate-400" x-show="seedSource" data-seed-source
+                                  x-text="'· ' + t('dari','from') + ' ' + seedSource"></span>
                             <span x-show="!seedIntact" x-text="t('(diedit)','(edited)')"></span>
                         </span>
                         <button type="button" x-show="seedPupil" @click="clearSeed()"
@@ -741,6 +884,33 @@ function gradeWeights() {
                            x-text="t('Total bobot belum 100% — angka ini baru gambaran.','The weights do not total 100% yet — these figures are indicative only.')"></p>
                         <p class="text-xs font-bold text-amber-700 mt-1" x-show="impact.capped"
                            x-text="t('Sebagian data melewati batas baca, jadi angka ini bisa kurang lengkap.','Part of the data exceeded the read cap, so these figures may be incomplete.')"></p>
+                        <!-- The pass line. A movement is a figure; a pupil whose
+                             already-published mark would read as *failing* is a
+                             decision — so the pupils are named, with the KKM each
+                             one is measured against and where that KKM came from,
+                             rather than summarised into a count. -->
+                        <div class="mt-3 p-3 rounded-xl bg-red-50 border border-red-200"
+                             x-show="impact.kkm.count > 0" data-impact-kkm>
+                            <p class="text-xs font-extrabold text-red-600">
+                                <i class="fas fa-triangle-exclamation mr-1"></i>
+                                <span x-text="impact.kkm.count + t(' nilai yang sudah terbit akan turun di bawah KKM:',' already-reported final mark(s) would fall below the KKM:')"></span>
+                            </p>
+                            <ul class="mt-1">
+                                <template x-for="row in impact.kkm.pupils" :key="row.student_id + '-' + row.subject_id">
+                                    <li class="text-xs font-medium text-red-600">
+                                        <span class="font-bold" x-text="row.name"></span>
+                                        <span class="text-red-500" x-text="row.class_name ? ' · ' + row.class_name : ''"></span>
+                                        <span x-text="' — ' + row.subject_name + ': ' + Number(row.saved).toFixed(1) + ' → ' + Number(row.live).toFixed(1)"></span>
+                                        <span class="font-bold" x-text="' (' + t('KKM','KKM') + ' ' + row.kkm + ')'"></span>
+                                        <span class="text-red-500" x-show="!row.source"
+                                              x-text="' · ' + t('KKM bawaan aplikasi','app default KKM')"></span>
+                                    </li>
+                                </template>
+                            </ul>
+                            <p class="text-xs font-medium text-red-500 mt-1"
+                               x-show="impact.kkm.shown < impact.kkm.count"
+                               x-text="t('Menampilkan ','Showing ') + impact.kkm.shown + ' / ' + impact.kkm.count"></p>
+                        </div>
                         <div class="overflow-x-auto mt-3" x-show="impact.pupils.length > 0">
                             <table class="w-full text-sm min-w-[640px]">
                                 <thead><tr class="text-left text-slate-500 bg-slate-50 border-b border-slate-100">
