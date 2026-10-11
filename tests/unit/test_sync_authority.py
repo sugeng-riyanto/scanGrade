@@ -406,3 +406,75 @@ class TestThePageCarriesTheOrder:
 
     def test_the_unload_beacon_carries_the_revision_too(self):
         assert "rev: sgGetDraftRev()" in self.SOURCE
+
+
+# ── 7. the shape of an answer survives this door, list included ───────────────
+
+class TestTheShapeOfAnAnswerReachesTheRow:
+    """The multi-answer exception, checked at the *write* rather than at the control.
+
+    `tests/unit/test_multi_answer_control.py` proves the pupil's page builds a list
+    when two letters are ticked, and that both doors call `normalize_answer_map`.
+    Neither of those is the same claim as "the list is what lands in the row": a door
+    can normalise into a local, or a later flattening step can quietly take the first
+    letter, and every test that only asks "did it call the rule" still passes. So the
+    assertion here is against the payload the route hands PostgREST — the last thing
+    the app controls before the database does.
+
+    This is what makes a real school's data legible years later: a checked paper is a
+    `list`, a single-answer paper is a `string`, and reading one as the other is a
+    bug in whichever direction it happens.
+    """
+
+    def test_two_ticks_land_in_the_row_as_a_list_in_paper_order(self, monkeypatch, app):
+        supa, _row = sitting(started=NOW - 60,
+                             exam_over={"question_types": {"0": "mcq_multi"}})
+        _body, status = sync(supa, monkeypatch, app,
+                             payload={"answers": {"0": ["C", "A"]}, "rev": 1})
+
+        assert status == 200
+        stored = writes(supa)[-1][1]["answers"]
+        assert stored["0"] == ["A", "C"], (
+            "the ticks the pupil made did not reach the row as a list in the paper's "
+            f"own order — the row holds {stored['0']!r} instead")
+
+    def test_one_letter_on_the_exception_is_still_a_set_of_one(self, monkeypatch, app):
+        """A key set before the toggle was switched on is a valid set of one."""
+        supa, _row = sitting(started=NOW - 60,
+                             exam_over={"question_types": {"0": "mcq_multi"}})
+        sync(supa, monkeypatch, app, payload={"answers": {"0": "B"}, "rev": 1})
+
+        assert writes(supa)[-1][1]["answers"]["0"] == ["B"], (
+            "a single letter on a multi-answer question was stored as a string, so "
+            "two shapes now mean different things in the same column")
+
+    def test_a_list_on_a_single_answer_question_narrows_to_one_letter(self, monkeypatch, app):
+        """The other direction, so the rule is one rule and not a widening only."""
+        supa, _row = sitting(started=NOW - 60,
+                             exam_over={"question_types": {"0": "mcq"}})
+        sync(supa, monkeypatch, app, payload={"answers": {"0": ["C", "A"]}, "rev": 1})
+
+        assert writes(supa)[-1][1]["answers"]["0"] == "A", (
+            "a single-answer question stored a set, which the grader reads as an "
+            "answer to a question the teacher never asked")
+
+    def test_a_legacy_letter_widens_to_a_set_of_one_without_losing_it(self, monkeypatch, app):
+        """A paper sat before the exception existed keeps the letter it holds.
+
+        The live data looks exactly like this: submissions written before a teacher
+        switched the toggle on carry one letter for that question, and they are
+        answers, not corruption — the door widens the shape and keeps the letter,
+        rather than refusing the pupil's paper or inventing ticks for them.
+        """
+        supa, _row = sitting(started=NOW - 60, answers={"0": "B"},
+                             exam_over={"question_types": {"0": "mcq_multi"}})
+        _body, status = sync(supa, monkeypatch, app,
+                             payload={"answers": {"0": "B"}, "rev": 1})
+
+        assert status == 200
+        stored = writes(supa)[-1][1]["answers"]
+        assert stored["0"] == ["B"], (
+            "the letter a pupil gave before the toggle was switched on was lost")
+        assert not isinstance(stored["0"], str), (
+            "the row kept one shape for a question the exam now marks as a set"
+        )
