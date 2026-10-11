@@ -71,6 +71,12 @@ def _one(pattern: str, what: str) -> str:
 
 #: The client's kind map, so `sgKind` is the page's own answer rather than a guess.
 SG_KIND = r"function sgKind\(type\) \{[^\n]*\}"
+#: One branch of the paper's choice renderer, read as a region rather than as a
+#: whole-file search — a `fa-square` anywhere else must not satisfy a rule about
+#: this branch. Each runs to the comment that introduces the next branch, which is
+#: the marker that survives a change inside either one.
+SINGLE_BRANCH = r"<template x-if=\"qKind\(i\) === 'choice'\">(.*?)<!-- The exception:"
+MULTI_BRANCH = r"<template x-if=\"qKind\(i\) === 'choice' && qIsMulti\(i\)\">(.*?)<!-- True / False"
 #: The three methods the tick control is made of, and the two they lean on.
 Q_IS_MULTI = r"qIsMulti\(i\) \{[^\n]*\}"
 IS_TICKED = r"isTicked\(i, opt\) \{.*?\n        \}(?=,)"
@@ -229,20 +235,86 @@ class TestTheControlIsWiredToTheTypeNotToAFlag:
         assert "@click=\"markAnswered(i, opt)\"" in page, (
             "the single-answer row no longer records a tap the way it always did")
 
-    def test_the_tick_control_is_told_apart_visually(self):
-        """A pupil must be able to see that this question takes several ticks."""
-        page = _page()
-        assert "fa-square-check" in page and "fa-square" in page, (
-            "the tick row draws no checkbox affordance")
-        assert "Centang semua jawaban yang benar" in page, (
-            "the row does not say that more than one answer is allowed")
+    def test_the_tick_control_is_told_apart_by_its_behaviour_not_its_looks(self):
+        """The contract **changed on purpose**, and this is the rewrite of the
+        guard that encoded the opposite one.
 
-    def test_the_tap_target_keeps_the_forty_four_pixel_floor(self):
-        """Fase 5: the control a pupil touches during a paper stays reachable."""
+        The exception used to draw a checkbox affordance (`fa-square` /
+        `fa-square-check`) and a helper line. A pupil answered a question that
+        looked and read as a second kind of question, when what the teacher asked
+        for was *the same single-choice row, able to hold more than one letter*.
+        The row is deliberately identical now — the same control, the same letter,
+        no icon and no helper paragraph — so the cue that has to survive is the
+        accessible one, not a drawing. These assertions are the *stricter* half of
+        that swap: they fail if a checkbox affordance comes back, if the guidance
+        paragraph comes back, or if the marker stops being the exception's alone.
+        """
+        branch = _one(MULTI_BRANCH, "the exception's branch")
+        single = _one(SINGLE_BRANCH, "the single-answer branch")
+        # No checkbox affordance, and no second kind of button: the letter is the
+        # whole content of the control.
+        assert "fa-square" not in branch, (
+            "the exception draws a checkbox affordance again — the row was meant to "
+            "stop looking like a second kind of question")
+        assert '<i class="fas mr-1"' not in branch, (
+            "an icon rides inside the option button, so the row no longer reads as "
+            "the single-choice row above it")
+        # The helper paragraph is gone: parity is the point.
+        assert "<p " not in branch, (
+            "a paragraph under the row is the visual difference the change removed")
+        # The cue that survives, and it belongs to this branch alone.
+        assert ':aria-pressed="isTicked(i, opt)' in branch, (
+            "nothing tells a screen reader this control can hold more than one "
+            "letter, and the row looks the same so nothing else can")
+        assert "aria-pressed" not in single, (
+            "the single-answer row claims to be a toggle too, so the marker no "
+            "longer distinguishes the exception")
+
+    def test_the_rule_is_named_by_a_badge_not_by_a_second_control(self):
+        """The cue that replaced the checkbox glyph, and how it is allowed to look.
+
+        A pupil has to be able to *see* that this question takes several letters —
+        the row looking the same is the point, not the reason to say nothing. The
+        cue is a badge beside the question number that borrows the true/false
+        badge's classes verbatim: one place in the page to learn "this question
+        works differently", and no way for the two to drift. It must stay a
+        *label* — a `<span>`, never a button — or it becomes the second control the
+        change removed.
+        """
+        page = _page()
+        branch = _one(MULTI_BRANCH, "the exception's branch")
+        single = _one(SINGLE_BRANCH, "the single-answer branch")
+        BADGE = ('class="inline-flex items-center gap-1 text-[10px] font-bold '
+                 'text-primary-600 bg-primary-50 px-2 py-0.5 rounded-full border '
+                 'border-primary-200"')
+        assert BADGE in branch, (
+            "nothing tells the pupil this question allows more than one letter, "
+            "and the row is deliberately identical to a single-choice one")
+        assert page.count(BADGE) == 2, (
+            "the exception's badge and the true/false badge are meant to be the same "
+            "class string, so one of them was restyled and the two can now drift")
+        assert BADGE not in single, (
+            "the single-answer row wears the badge too, so it no longer marks the "
+            "exception")
+        assert 't(\'Boleh lebih dari satu\',\'More than one allowed\')' in branch, (
+            "the badge is a bilingual pair like every other label on this page")
+        badge = re.search(r'<span ' + re.escape(BADGE) + r'[^>]*>', branch)
+        assert badge and '<button' not in badge.group(0), (
+            "the cue became a control of its own rather than a label beside one")
+
+    def test_both_rows_are_the_one_shared_option_control(self):
+        """Fase 5, and the parity half of the change: the same 44px control, twice."""
         page = _page()
         assert ".opt-btn { min-width: 44px; min-height: 44px; }" in page
-        assert 'class="opt-btn px-5 py-2 border-2 text-sm font-extrabold cursor-pointer"' \
-            in page, "the tick row abandoned the shared 44px option control"
+        assert page.count(
+            'class="opt-btn px-5 py-2 border-2 text-sm font-extrabold cursor-pointer"') == 2, (
+            "the exception and the single-answer row no longer share one control, "
+            "which is how their tap targets drift apart")
+        single = _one(SINGLE_BRANCH, "the single-answer branch")
+        branch = _one(MULTI_BRANCH, "the exception's branch")
+        assert '<span x-text="opt"></span>' in single and \
+            '<span x-text="opt"></span>' in branch, (
+            "the two rows no longer paint the option letter the same way")
 
 
 # ── 2. the marks the paper is scored by ──────────────────────────────────────

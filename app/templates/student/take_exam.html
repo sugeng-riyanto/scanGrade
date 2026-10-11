@@ -1612,23 +1612,32 @@ body.sg-exam .sidebar-overlay { display: none !important; }
                         </div>
                     </template>
                     <!-- The exception: the teacher switched *more than one correct
-                         answer* on for this question (the builder's own toggle), so it is
-                         **ticked** rather than chosen. It is the same row of letters as the
-                         question above it — the control is the only thing that moves, which
-                         is what the teacher's help text promises. The ticks travel as a
-                         list in the paper's own option order, the shape the server's grader
-                         and the answer-key page read. -->
+                         answer* on for this question (the builder's own toggle). The row is
+                         deliberately **identical** to the single-answer row above it — same
+                         control, same size, same letter, no icon and no helper line — so a
+                         pupil is not handed a second way of *drawing* an answer to learn.
+                         What changes is the behaviour (a tap adds a letter where the row
+                         above replaces one) and two pieces of *labelling*: `aria-pressed`
+                         on each option says the control is a toggle, and the badge beside
+                         the question number says the rule in words. The badge borrows the
+                         true/false badge's classes verbatim, so the two can never drift
+                         apart and a pupil has one place to learn to look for "this question
+                         works differently". Neither touches the option row itself, which is
+                         why the cue cannot be mistaken for a second control. The ticks
+                         travel as a list in the paper's own option order, the shape the
+                         server's grader and the answer-key page read. -->
                     <template x-if="qKind(i) === 'choice' && qIsMulti(i)">
                         <div>
                             <div class="flex items-center gap-3 flex-wrap">
                                 <span class="text-sm font-extrabold shrink-0 text-stone-700" x-text="t('Soal ','Question ') + (i + 1) + ':'"></span>
+                                <span class="inline-flex items-center gap-1 text-[10px] font-bold text-primary-600 bg-primary-50 px-2 py-0.5 rounded-full border border-primary-200" x-text="t('Boleh lebih dari satu','More than one allowed')"></span>
                                 <div class="opt-row flex flex-wrap gap-2">
                                     <template x-for="opt in (_shuffledOpts[i] || ['A','B','C','D','E'])">
                                         <button type="button" @click="toggleOption(i, opt)"
                                                 class="opt-btn px-5 py-2 border-2 text-sm font-extrabold cursor-pointer"
                                                 :aria-pressed="isTicked(i, opt) ? 'true' : 'false'"
                                                 :class="isTicked(i, opt) ? 'selected' : 'bg-white border-stone-200 text-stone-600 hover:border-orange-300'">
-                                            <i class="fas mr-1" :class="isTicked(i, opt) ? 'fa-square-check' : 'fa-square'"></i><span x-text="opt"></span>
+                                            <span x-text="opt"></span>
                                         </button>
                                     </template>
                                 </div>
@@ -1636,8 +1645,6 @@ body.sg-exam .sidebar-overlay { display: none !important; }
                                     <i class="fas fa-check text-emerald-500"></i><span x-text="t('Terjawab','Answered')"></span>
                                 </span>
                             </div>
-                            <p class="mt-2 text-[11px] font-semibold text-stone-500"
-                               x-text="t('Centang semua jawaban yang benar — boleh lebih dari satu.','Tick every correct answer — more than one is allowed.')"></p>
                         </div>
                     </template>
                     <!-- True / False: two answers, one tap. The question text is on the
