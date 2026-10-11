@@ -152,12 +152,16 @@ def locking_enabled(exam: dict) -> bool:
     """Whether this exam locks rather than simply ending at the threshold.
 
     Two conditions, both required: the school asked for it (`lock_pending_resume`),
-    and violations are being counted at all (`anti_cheat_enabled`). With anti-cheat
-    off nothing is charged, so there is nothing to cross.
+    and violations are being counted at all — which is the anti-cheat service's
+    question, not this module's. Asking `anti_cheat_service.enabled` rather than
+    spelling `is not False` a third time is what keeps the lock in step with the
+    ladder and the log: with anti-cheat off nothing is charged, so there is nothing
+    to cross, and a switch flipped off mid-sitting takes the lock with it.
     """
     if not (exam or {}).get("lock_pending_resume"):
         return False
-    return (exam or {}).get("anti_cheat_enabled") is not False
+    from app.services.anti_cheat_service import enabled
+    return enabled(exam)
 
 
 def effective_limit(exam: dict, row: dict) -> int:

@@ -219,6 +219,21 @@
         <p class="mt-2 text-[11px] text-stone-500" id="matrix-range-hint">
             <span x-text="t('Tahan Shift lalu klik sel yang lain di baris yang sama untuk mengisi/mengosongkan sepanjang baris itu sekaligus.','Hold Shift and click another cell in the same row to fill or clear the run between them in one go.')"></span>
         </p>
+        {# A one-time coach mark for the shift-click run. The standing hint above is
+           easy to read past; this one appears until the operator dismisses it (or
+           uses the gesture), then never again on this browser, so it teaches the
+           shortcut without becoming permanent chrome. #}
+        <div class="mt-3 hidden rounded-xl border border-primary-200 bg-primary-50/70 p-3 flex items-start gap-3"
+             id="matrix-shift-coach" data-shift-coach>
+            <i class="fas fa-hand-pointer text-primary-600 mt-0.5"></i>
+            <div class="min-w-0 flex-1 text-xs text-primary-900">
+                <strong x-text="t('Isi sepanjang baris sekaligus.','Fill a whole run at once.')"></strong>
+                <span x-text="t('Klik satu sel, lalu tahan Shift dan klik sel lain di baris yang sama — semua sel di antaranya ikut terisi atau dikosongkan dalam satu simpan.','Click one cell, then hold Shift and click another cell in the same row — every cell between them is filled or cleared in one save.')"></span>
+            </div>
+            <button type="button" id="matrix-shift-coach-dismiss"
+                    class="shrink-0 px-2 py-1 bg-white text-primary-700 border border-primary-200 rounded-lg text-[11px] font-bold hover:bg-primary-100 transition"
+                    x-text="t('Mengerti','Got it')"></button>
+        </div>
         <div class="overflow-x-auto mt-3">
             <table class="w-full text-xs min-w-[640px]">
                 <thead>
@@ -375,6 +390,24 @@
     if (!grid) return;
     var toast = document.getElementById('matrix-toast');
 
+    /* The shift-click coach mark, shown the first time only. A storage error
+       (a browser in private mode, storage disabled) simply leaves it visible
+       rather than throwing, so the tip still teaches once per visit instead of
+       vanishing for a reader who never saw it. */
+    var SHIFT_COACH_KEY = 'sg.matrix.shift-coach.v1';
+    var coach = document.getElementById('matrix-shift-coach');
+    function dismissShiftCoach() {
+        if (coach) coach.classList.add('hidden');
+        try { window.localStorage.setItem(SHIFT_COACH_KEY, '1'); } catch (e) {}
+    }
+    if (coach) {
+        var seen = null;
+        try { seen = window.localStorage.getItem(SHIFT_COACH_KEY); } catch (e) { seen = null; }
+        if (!seen) coach.classList.remove('hidden');
+        var closeCoach = document.getElementById('matrix-shift-coach-dismiss');
+        if (closeCoach) closeCoach.addEventListener('click', dismissShiftCoach);
+    }
+
     function refusalText(reason) {
         var tpl = document.getElementById('matrix-refusal-' + reason);
         return tpl ? tpl.innerHTML
@@ -482,6 +515,9 @@
     }
 
     function postRange(form) {
+        // The operator just used the gesture the coach mark teaches — it has
+        // done its job, so retire it for this browser.
+        dismissShiftCoach();
         var forms = rowForms(form);
         var here = forms.indexOf(form);
         var run = forms.slice(Math.min(anchor.index, here), Math.max(anchor.index, here) + 1);

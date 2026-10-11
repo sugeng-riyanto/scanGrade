@@ -58,6 +58,7 @@ from app.services.question_types import (
     ESSAY_TEXT,
     MATCH,
     MCQ,
+    MCQ_MULTI,
     ORDER,
     SCHEME_KEY,
     TRUE_FALSE,
@@ -107,6 +108,32 @@ DEFAULT_MARKS: dict[str, float] = {
 SCHEME_ORDER: tuple[str, ...] = (
     MCQ, TRUE_FALSE, COMPLEX_MULTIPLE_CHOICE, MATCH, DRAG_DROP, ORDER, ESSAY_CANVAS,
 )
+
+#: The *row* a stored type is priced in, where that is not the type itself.
+#:
+#: The multi-answer exception is a flavour of one kind: the builder's own table draws
+#: it in the multiple-choice row (`SG_SCHEME_OF` in `teacher/exam_form.html`), the
+#: grader asks it for one question's marks, and the answer-key page reads it as a
+#: choice question. The stored scheme has to fold it the same way, and two things
+#: went wrong without this — neither visible from either file alone:
+#:
+#:   * `type_counts` counted an exception question as an **essay**. Its `else` branch
+#:     is the legacy-essay bucket, so a paper with one multi-answer question reported
+#:     one more essay than it had, and the mark-scheme table grew an essay row for a
+#:     question that is nothing of the kind.
+#:   * `build_weights` priced it at the *default* multiple-choice marks rather than
+#:     the marks the teacher set for multiple choice, so a scheme of `mcq: 3` paid an
+#:     exception question 1 — the two rows would then add up to less than the paper.
+#:
+#: A row of its own is deliberately not offered: it would put the exception on the
+#: paper's face, which is the one thing it must never be.
+SCHEME_OF: dict[str, str] = {MCQ_MULTI: MCQ}
+
+
+def scheme_type(raw_type: Any) -> str:
+    """Which scheme row a question of this type is priced in."""
+    kind = canonical_type(raw_type)
+    return SCHEME_OF.get(kind, kind)
 
 
 def default_marks(raw_type: Any) -> float:
@@ -190,7 +217,7 @@ def type_counts(
     types = question_types or {}
     counts: dict[str, int] = {t: 0 for t in SCHEME_ORDER}
     for i in range(total_questions or 0):
-        kind = canonical_type(types.get(str(i), DEFAULT_TYPE))
+        kind = scheme_type(types.get(str(i), DEFAULT_TYPE))
         if kind in counts:
             counts[kind] += 1
         else:
@@ -213,7 +240,7 @@ def build_weights(
     """
     types = question_types or {}
     raw = [
-        marks_for(types.get(str(i), DEFAULT_TYPE), by_type)
+        marks_for(scheme_type(types.get(str(i), DEFAULT_TYPE)), by_type)
         for i in range(total_questions or 0)
     ]
     return {str(i): marks for i, marks in enumerate(normalise_to_100(raw))}
@@ -295,7 +322,7 @@ def describe(
             continue
         marks = marks_for(t, by_type)
         indexes = [str(i) for i in range(total_questions or 0)
-                   if canonical_type(types.get(str(i), DEFAULT_TYPE)) == t]
+                   if scheme_type(types.get(str(i), DEFAULT_TYPE)) == t]
         if t == ESSAY_CANVAS:
             # The legacy essay names are priced as essays, so their points belong to
             # this row too rather than disappearing from the table's total.

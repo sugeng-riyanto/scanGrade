@@ -1,0 +1,133 @@
+{% set content_lang = 'id' %}
+{% extends "base.html" %}
+{% block title %}Tinjau Kunci Ganda - ScanGrade{% endblock %}
+{% block content %}
+<div class="p-4 lg:p-6 max-w-5xl mx-auto space-y-4">
+    <div>
+        <a href="/teacher/exams" class="text-sm text-primary-600 hover:underline">&larr; Kembali ke Daftar Ujian</a>
+        <h1 class="text-2xl font-bold mt-1">Tinjau Kunci Ganda</h1>
+        {# The page has to say what state it is looking for, because the state is not a
+           mistake the teacher can be blamed for: this app could produce it before the
+           multiple-answer exception existed. #}
+        <p class="text-sm text-gray-500 mt-1">
+            Soal pilihan ganda tunggal yang kunci jawabannya menandai <b>lebih dari satu</b> huruf.
+            Kondisi ini hanya bisa terjadi sebelum pengecualian &ldquo;lebih dari satu jawaban
+            benar&rdquo; ada, dan tidak diperbaiki otomatis: hanya Anda yang tahu apakah soalnya
+            memang punya beberapa jawaban benar atau hanya satu.
+        </p>
+    </div>
+
+    {% if detail %}
+    <div class="card p-4">
+        <h2 class="font-bold text-lg">{{ detail.exam.title }}</h2>
+        <p class="text-xs text-gray-500 mt-1">
+            {{ detail.exam.subject or '-' }} &middot;
+            {% if detail.attempts %}
+            {{ detail.attempts }} pengerjaan yang sudah dinilai akan dibandingkan di bawah ini
+            {% else %}
+            belum ada pengerjaan yang dinilai, jadi tidak ada nilai murid yang bisa berubah
+            {% endif %}
+        </p>
+    </div>
+
+    {% if not detail.questions %}
+    <div class="card p-8 text-center">
+        <div class="text-4xl mb-3">&#x2705;</div>
+        <p class="font-semibold">Tidak ada kunci ganda lagi di ujian ini</p>
+        <p class="text-sm text-gray-500 mt-1">Semua kunci sudah cocok dengan tipe soalnya.</p>
+    </div>
+    {% endif %}
+
+    {% for q in detail.questions %}
+    <div class="card p-4" data-review-question="{{ q.index }}">
+        <div class="flex items-center justify-between flex-wrap gap-2 mb-2">
+            <span class="font-bold text-sm">Soal {{ q.index + 1 }}</span>
+            <span class="text-xs text-gray-500">
+                Kunci tersimpan:
+                <span class="font-mono font-bold text-rose-700">{{ q.letters | join(' + ') }}</span>
+            </span>
+        </div>
+        <p class="text-xs text-gray-500 mb-3">
+            Pilih salah satu penyelesaian. Angka &ldquo;naik/turun&rdquo; adalah berapa murid yang
+            nilainya berubah <i>jika</i> skornya dihitung ulang dengan kunci baru ini.
+        </p>
+
+        <div class="space-y-2">
+            {% for r in q.resolutions %}
+            <div class="rounded-xl border border-gray-200 p-3"
+                 data-review-resolution="{{ r.kind }}" data-keep="{{ r.keep }}">
+                <div class="flex items-start justify-between gap-3 flex-wrap">
+                    <div class="flex-1 min-w-[200px]">
+                        <p class="text-sm font-semibold">
+                            {% if r.kind == 'multi' %}
+                            Jadikan pengecualian: pertahankan
+                            <span class="font-mono">{{ q.letters | join(' + ') }}</span> sebagai jawaban benar
+                            {% else %}
+                            Jadikan kunci tunggal: pilih <span class="font-mono">{{ r.keep }}</span> saja
+                            {% endif %}
+                        </p>
+                        <p class="text-xs mt-1">
+                            <span class="text-emerald-700 font-bold">{{ r.impact.up }} naik</span>
+                            &middot;
+                            <span class="text-rose-700 font-bold">{{ r.impact.down }} turun</span>
+                            &middot;
+                            <span class="text-gray-500">{{ r.impact.same }} tetap</span>
+                            {% if r.impact.moved %}
+                            &middot; perubahan terbesar {{ r.impact.worst }} poin
+                            {% else %}
+                            &middot; tidak ada nilai yang berubah
+                            {% endif %}
+                        </p>
+                    </div>
+                    <form method="POST" action="/teacher/answer-key-review/{{ detail.exam.id }}/apply"
+                          class="flex items-center gap-3 flex-wrap">
+                        <input type="hidden" name="index" value="{{ q.index }}">
+                        <input type="hidden" name="resolution" value="{{ r.kind }}">
+                        {% if r.kind == 'single' %}
+                        <input type="hidden" name="key" value="{{ r.keep }}">
+                        {% endif %}
+                        {# Two decisions, two controls. Keeping a key changes what the paper
+                           means from here on; recomputing changes marks already handed to
+                           pupils. The tick is offered beside the number it would move, and
+                           is never taken for the teacher. #}
+                        {% if r.impact.moved %}
+                        <label class="flex items-center gap-2 text-xs font-semibold text-gray-700 min-h-[44px] cursor-pointer">
+                            <input type="checkbox" name="recompute" value="1" class="w-4 h-4">
+                            Hitung ulang skor murid
+                        </label>
+                        {% endif %}
+                        <button type="submit" class="btn btn-primary min-h-[44px] text-sm">Terapkan</button>
+                    </form>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endfor %}
+
+    {% else %}
+    {% if rows %}
+    <div class="space-y-2">
+        {% for row in rows %}
+        <a href="/teacher/answer-key-review/{{ row.exam.id }}"
+           class="card p-4 flex items-center justify-between gap-3 hover:border-primary-400 border border-transparent transition">
+            <div>
+                <p class="font-bold text-sm">{{ row.exam.title }}</p>
+                <p class="text-xs text-gray-500">{{ row.exam.subject or '-' }}</p>
+            </div>
+            <span class="text-xs font-bold px-3 py-1.5 rounded-full bg-rose-50 text-rose-700 shrink-0">
+                {{ row.indices | length }} soal kunci ganda
+            </span>
+        </a>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="card p-8 text-center">
+        <div class="text-4xl mb-3">&#x2705;</div>
+        <p class="font-semibold">Tidak ada soal dengan kunci ganda</p>
+        <p class="text-sm text-gray-500 mt-1">Semua kunci pilihan ganda cocok dengan tipe soalnya.</p>
+    </div>
+    {% endif %}
+    {% endif %}
+</div>
+{% endblock %}

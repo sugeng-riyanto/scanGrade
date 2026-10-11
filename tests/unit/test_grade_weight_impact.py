@@ -461,7 +461,7 @@ class TestThePageIsWired:
 
     def test_the_impact_is_asked_for_deliberately_not_while_typing(self):
         html = WEIGHTS_HTML.read_text(encoding="utf-8")
-        method = html.split("loadImpact() {", 1)[1].split("\n        },", 1)[0]
+        method = html.split("loadImpact(targetUrl) {", 1)[1].split("\n        },", 1)[0]
         assert "@click=\"loadImpact()\"" in html, (
             "there is no way to ask for the impact")
         assert "impactLoading" in method, "the button has no working state"
@@ -479,15 +479,20 @@ class TestThePageIsWired:
     def test_the_scope_follows_the_preview_and_is_sent_to_the_door(self):
         html = WEIGHTS_HTML.read_text(encoding="utf-8")
         method = html.split("impactQuery() {", 1)[1].split("\n        },", 1)[0]
-        assert "/admin-sekolah/grade-weights/class-impact?" in method
         assert "previewSubject === '__default__' ? 'default' : 'subject'" in method, (
             "the scope must follow the distribution being previewed")
-        assert "w=" in method, "the typed weights must travel to the door"
-        assert "subject_id=" in method
+        # The URL and its parameters live in the one serializer both the panel and
+        # a save go through, so the figures shown and the figures a save is judged
+        # by cannot be asked for differently.
+        builder = html.split("impactUrl(scope, subjectId, weights) {", 1)[1]\
+            .split("\n        },", 1)[0]
+        assert "/admin-sekolah/grade-weights/class-impact?" in builder
+        assert "w=" in builder, "the typed weights must travel to the door"
+        assert "subject_id=" in builder
 
     def test_the_impact_is_a_read(self):
         html = WEIGHTS_HTML.read_text(encoding="utf-8")
-        for name in ("impactQuery() {", "loadImpact() {", "impactStale() {"):
+        for name in ("impactQuery() {", "loadImpact(targetUrl) {", "impactStale() {"):
             body = html.split(name, 1)[1].split("\n        },", 1)[0]
             assert "post(" not in body, f"{name} writes to the server"
 

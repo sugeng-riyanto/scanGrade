@@ -631,9 +631,15 @@
       "coverage": 100.0,
       "frozen": false
     },
+    "teacher/answer_key_review.html": {
+      "pairs": 0,
+      "leftovers": 17,
+      "coverage": 0.0,
+      "frozen": false
+    },
     "teacher/answer_keys.html": {
       "pairs": 0,
-      "leftovers": 16,
+      "leftovers": 21,
       "coverage": 0.0,
       "frozen": false
     },

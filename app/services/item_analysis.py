@@ -80,8 +80,11 @@ FIT_LOW, FIT_HIGH = 0.5, 1.5
 #: A choice question's five options, which is what the app's answer sheet prints and
 #: what its student page renders. Listed rather than inferred so a distractor that
 #: *nobody* chose still gets a line — an option nobody picks is a finding, and an
-#: option missing from the table looks like it was never on the paper.
-CHOICE_OPTIONS = ("A", "B", "C", "D", "E")
+#: option missing from the table looks like it was never on the paper. It is an
+#: alias of `question_types.CHOICE_OPTIONS`, not a second list: two answers to "what
+#: is an option" is how a table of this paper's distractors starts measuring an
+#: option the sheet never printed.
+CHOICE_OPTIONS = qt.CHOICE_OPTIONS
 
 #: A true/false question's two, spelled as `question_types._as_bool_word` writes them.
 BOOL_OPTIONS = ("true", "false")

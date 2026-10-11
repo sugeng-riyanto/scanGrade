@@ -36,11 +36,53 @@
                         <span class="text-amber-600">Bonus (semua benar)</span>
                     </label>
                 </div>
-                <div class="flex gap-2 flex-wrap">
-                    {% for opt in ['A','B','C','D','E'] %}
+                {# What this question accepts, said in the teacher's own words: one
+                   letter, or as many as are right. The control below follows it, so
+                   a single-answer question cannot be given two letters by clicking. #}
+                <p class="mb-2 text-xs font-semibold {% if q.mode == 'multi' %}text-primary-700{% else %}text-gray-500{% endif %}"
+                   data-key-mode="{{ q.mode }}">
+                    {% if q.mode == 'multi' %}Pilih semua jawaban yang benar{% else %}Pilih satu jawaban{% endif %}
+                </p>
+                {# A stored key that disagrees with the question's own type. Neither
+                   direction is repaired here: only the owner can say whether the
+                   extra letters were meant, so the page says so and offers the way
+                   out (Tinjau Kunci Ganda) instead of guessing. #}
+                {% if q.drift == 'lost' %}
+                <div class="mb-3 rounded-xl border border-rose-300 bg-rose-50 px-3 py-2 text-xs text-rose-800"
+                     data-key-drift="lost" data-key-index="{{ q.index }}">
+                    <i class="fas fa-circle-question mr-1"></i>
+                    Kunci soal ini berisi lebih dari satu huruf, padahal tipe soalnya menerima satu jawaban.
+                    Pilih satu huruf di bawah, atau
+                    <a href="/teacher/answer-key-review/{{ exam.id }}" class="font-bold underline">tinjau kuncinya</a>
+                    bila soal ini memang punya beberapa jawaban benar.
+                </div>
+                {% elif q.drift == 'narrow' %}
+                <div class="mb-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800"
+                     data-key-drift="narrow" data-key-index="{{ q.index }}">
+                    <i class="fas fa-circle-info mr-1"></i>
+                    Soal ini menerima lebih dari satu jawaban benar, tetapi kuncinya baru menandai satu.
+                    Tambahkan huruf lain bila memang ada.
+                </div>
+                {% endif %}
+                {# A structural edit (a question that was multiple choice becoming a
+                   matching one, say) leaves a key this question can no longer read.
+                   Say so plainly and keep the old value out of the editor, rather
+                   than showing it as if it were still a valid letter. #}
+                {% if q.is_stale %}
+                <div class="mb-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800"
+                     data-key-stale="{{ q.index }}">
+                    <i class="fas fa-triangle-exclamation mr-1"></i>
+                    Kunci lama <span class="font-mono font-bold">{{ q.answer_text }}</span> tidak lagi cocok untuk soal ini
+                    (tipe soal berubah). Pilih kunci yang benar; yang lama tidak akan terhapus sampai Anda menyimpan perubahan.
+                </div>
+                {% endif %}
+                <div class="flex gap-2 flex-wrap" role="{% if q.mode == 'multi' %}group{% else %}radiogroup{% endif %}">
+                    {% for opt in option_letters %}
                     <button type="button" @click="toggle({{ q.index }}, '{{ opt }}')"
+                            data-key-option="{{ opt }}"
+                            :aria-pressed="isSelected({{ q.index }}, '{{ opt }}') ? 'true' : 'false'"
                             :class="isSelected({{ q.index }}, '{{ opt }}') ? 'bg-primary-600 text-white border-primary-600' : 'bg-white text-gray-700 border-gray-300 hover:border-primary-400'"
-                            class="px-5 py-2.5 rounded-xl font-bold text-sm border-2 transition">
+                            class="min-w-[44px] min-h-[44px] px-5 py-2.5 rounded-xl font-bold text-sm border-2 transition">
                         {{ opt }}
                     </button>
                     {% endfor %}
@@ -96,11 +138,22 @@
 function answerKeyEditor() {
     return {
         keys: {},
+        // Which questions the teacher actually touched. Only these are posted, so
+        // an untouched Save sends nothing and the server writes nothing. It also
+        // means a stale key is left in the database unless the teacher replaces
+        // it — a page load must never delete a mark on its own.
+        dirty: {},
+        // One letter, or as many as are right — per question, from the *type*, so
+        // the control and the server agree about what a question accepts.
+        modes: {},
         init() {
             {% for q in questions %}
             {% if q.kind == 'choice' %}
+            this.modes[{{ q.index }}] = '{{ q.mode }}';
             {% if q.is_bonus %}
             this.keys[{{ q.index }}] = 'bonus';
+            {% elif q.is_stale %}
+            this.keys[{{ q.index }}] = [];
             {% elif q.is_multi %}
             this.keys[{{ q.index }}] = {{ q.key | tojson | safe }};
             {% elif q.key and q.key != 'essay' %}
@@ -111,31 +164,32 @@ function answerKeyEditor() {
             {% endif %}
             {% endfor %}
         },
-        toggle(idx, opt) {
+        markDirty(idx) { this.dirty[idx] = true; },
+        // The stored value can be a letter, a list, or nothing; every reader here
+        // normalises to a list first so there is one shape to reason about.
+        letters(idx) {
             let cur = this.keys[idx];
-            if (!cur || cur === 'bonus') {
-                this.keys[idx] = [opt];
+            if (cur === 'bonus' || !cur) return [];
+            if (Array.isArray(cur)) return cur.slice();
+            return [cur];
+        },
+        toggle(idx, opt) {
+            this.markDirty(idx);
+            const cur = this.letters(idx);
+            // A single-answer question behaves like a radio: picking a letter
+            // replaces, and picking the selected one clears it. A multi-answer
+            // question adds and removes — that is the whole difference the
+            // exception exists to express.
+            if (this.modes[idx] === 'single') {
+                this.keys[idx] = (cur.length === 1 && cur[0] === opt) ? [] : [opt];
                 return;
             }
-            if (typeof cur === 'string') {
-                if (cur === opt) {
-                    this.keys[idx] = [];
-                } else {
-                    this.keys[idx] = [cur, opt];
-                }
-                return;
-            }
-            if (Array.isArray(cur)) {
-                const i = cur.indexOf(opt);
-                if (i > -1) {
-                    cur.splice(i, 1);
-                    if (cur.length === 0) this.keys[idx] = [];
-                } else {
-                    cur.push(opt);
-                }
-            }
+            const i = cur.indexOf(opt);
+            if (i > -1) cur.splice(i, 1); else cur.push(opt);
+            this.keys[idx] = cur;
         },
         toggleBonus(idx) {
+            this.markDirty(idx);
             let cur = this.keys[idx];
             if (cur === 'bonus') {
                 this.keys[idx] = [];
@@ -144,11 +198,8 @@ function answerKeyEditor() {
             }
         },
         isSelected(idx, opt) {
-            let cur = this.keys[idx];
-            if (cur === 'bonus') return true;
-            if (typeof cur === 'string') return cur === opt;
-            if (Array.isArray(cur)) return cur.indexOf(opt) > -1;
-            return false;
+            if (this.keys[idx] === 'bonus') return true;
+            return this.letters(idx).indexOf(opt) > -1;
         },
         displayKey(idx) {
             let cur = this.keys[idx];
@@ -161,12 +212,15 @@ function answerKeyEditor() {
         getJson() {
             let out = {};
             Object.keys(this.keys).forEach(k => {
-                let v = this.keys[k];
-                if (v === 'bonus') { out[k] = 'bonus'; return; }
-                if (Array.isArray(v) && v.length === 1) { out[k] = v[0]; return; }
-                if (Array.isArray(v) && v.length > 1) { out[k] = v; return; }
-                if (typeof v === 'string') { out[k] = v; return; }
-                out[k] = 'essay';
+                if (!this.dirty[k]) return;
+                if (this.keys[k] === 'bonus') { out[k] = 'bonus'; return; }
+                const arr = this.letters(k);
+                // The shape the question's own type writes: a single-answer
+                // question stores one letter, the exception stores the set. An
+                // empty single-answer key is stored as an empty string, which is
+                // what "cleared" is — never an `essay` marker written over a
+                // choice question, which is what this used to post.
+                out[k] = this.modes[k] === 'single' ? (arr.length ? arr[0] : '') : arr;
             });
             return JSON.stringify(out);
         }

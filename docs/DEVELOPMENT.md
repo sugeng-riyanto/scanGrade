@@ -76,6 +76,67 @@ pytest tests/test_error_handling.py -v
 pytest tests/ --cov=app --cov-report=term-missing
 ```
 
+### When the checkout is too dirty to build
+
+`app/utils/checkout_integrity.py` refuses to construct the app once a checkout holds
+more than its scan cap (**64**) of modified *tracked* files. That is correct for a box
+that serves, but it also stops the suite running on a laptop with several features in
+flight. Two answers, and the first one is the usual one.
+
+**In place.** Export the development permission and run the suite or the gate where
+the work is:
+
+```bash
+SCANGRADE_ALLOW_DIRTY_CHECKOUT=1 pytest tests -q
+SCANGRADE_ALLOW_DIRTY_CHECKOUT=1 bash deploy/theme_gate.sh
+```
+
+Without the variable the gate does not invent a verdict. Its checks are settled by one
+app, so it sees this refusal as a wall of `error at setup` — a release finding it is not,
+and a pass it is not either: it prints **exit 2, `NOT CHECKED`** and names the command
+above. (Its exit 1 is for the failure it looks for, and a *measured* blob keeps that one:
+nothing about the checkout's cap makes a path unreproducible.)
+
+It waives the *cap* — "more than 64 modified files, so the rest could not be measured"
+— and nothing else. A **measured** blob (a path whose stored bytes the path's own
+`.gitattributes` filter could never write) still refuses whatever the variable says,
+because that one is a defect in the repository rather than a limit of the scan; its
+remedy is `deploy/scangrade-recover.sh` or a snapshot. The permission needs the
+variable **and** a config that is not `ProductionConfig` (`IS_PRODUCTION` is a class
+attribute, so no `.env` on a box can grant it) and not the deploy's probe — so it can
+never answer the question for a release. Two things follow, and both are deliberate: a
+run that used it prints `SCANGRADE-DIRTY-CHECKOUT-ALLOWED` to stderr, so it is never
+mistaken for a run that measured; and a waived run is *not* evidence that the checkout
+is reproducible, so the gate that matters — `deploy/theme_gate.sh` in the release and
+the deploy runner before it merges — still asks and still refuses.
+
+**A snapshot**, when you want a tree that is clean by construction (or you are in the
+measured-blob case above). Snapshot the working tree into a committed scratch worktree
+and run there:
+
+```bash
+python deploy/dirty_snapshot.py --run      # snapshot, then `pytest tests -q` inside it
+python deploy/dirty_snapshot.py            # just snapshot; prints the path and commit
+python deploy/dirty_snapshot.py --run --pytest "tests/unit/test_foo.py -q"
+python deploy/dirty_snapshot.py --clean    # remove the scratch worktree
+```
+
+The snapshot is a linked worktree under `.freebuff/snapshot` (gitignored, so it never
+becomes a dirty path in the tree it came from) holding your tracked edits, untracked
+files and deletions as one commit — so the tree the suite measures is clean and the cap
+is not reached. Your own checkout is only ever **read**: the edits are copied, never
+stashed or applied. Ignored files (`.env`, `.venv`) stay behind, and `--run` uses this
+checkout's own interpreter, so the dependencies under test are still the ones here.
+
+`node_modules` is the one exception, and it is a **link** rather than a copy: without
+it `deploy/theme_gate.sh` cannot run the Tailwind CLI and reports the stylesheet check
+as *could not measure*, which is not a pass — so the snapshot would quietly stop
+checking the half of the gate that catches a class no build ever emitted. The link is
+a Windows junction (`mklink /J`) and is removed by unlinking the name, never by
+`rmtree` or `git worktree remove`: both of those follow a reparse point and delete the
+**target's** contents, which once emptied this checkout's own `node_modules`. If you
+clear a snapshot by hand, use `--clean`, or `cmd /c rmdir` on the link first.
+
 ## Debugging
 
 - Use `app.logger.info()` for debug messages (structured JSON)

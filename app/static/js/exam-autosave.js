@@ -8,7 +8,7 @@
  * form is saved by itself, a couple of seconds after the teacher stops changing
  * it.
  *
- * Three rules make the loop safe, and each of them is here rather than in the
+ * Four rules make the loop safe, and each of them is here rather than in the
  * page because a second copy would drift from this one.
  *
  *   1. **It never navigates.** The save is a `fetch` answered with JSON, so the
@@ -28,6 +28,15 @@
  *      decision is this file's (`adopt`, below, and only while the row is still
  *      new).
  *
+ *   4. **A save that never arrived is not a failure.** A school connection that
+ *      drops mid-sentence leaves the body unjudged, not rejected, so it is queued
+ *      and offered again when the browser says the link is back (and on a backstop
+ *      timer, for the server that restarts without the link ever dropping). The
+ *      teacher is told the draft is *waiting* — never that it was not saved, which
+ *      is what sends someone reloading the page and losing the paper. A body the
+ *      server actually refused is still shown as a refusal, and is still not
+ *      retried on its own.
+ *
  * Loaded as a plain `<script src>` and driven from the page's own script, like
  * `exam-window.js` beside it. `tests/unit/test_exam_autosave.py` runs it in node
  * against injected collaborators — the page's three functions and a stubbed
@@ -42,6 +51,14 @@
      * closed tab costs a sentence instead of a paper. */
     var DEBOUNCE_MS = 2500;
 
+    /* How long a draft that never reached the server waits before it is offered
+     * again. The browser's `online` event is the usual way out of a dropped
+     * connection and the page wakes on it at once; this timer is the backstop for
+     * the case where that event never fires — a school proxy answering 5xx, or a
+     * server restart while the link itself stayed up. Only a draft whose fate the
+     * server never ruled on waits here. */
+    var RETRY_MS = 15000;
+
     /* The two fields this file owns, and the reason `draft_id` cannot appear in the
      * snapshot: the module writes it *after* a reply arrives, so counting it as
      * teacher input would make every save look like the page changed underneath
@@ -51,6 +68,13 @@
      * `name="action"`, and the explicit Publish button is in the form. Its value
      * belongs to the submit that pressed it, not to a background save. */
     var OWNED = { action: true, draft_id: true };
+
+    /* Where "the network is back" comes from. The browser's own `online` event is
+     * the answer on a real page; the tests hand in their own so the reconnect can
+     * be fired by hand rather than waited for. */
+    function defaultListenOnline(fn) {
+        if (typeof root.addEventListener === 'function') root.addEventListener('online', fn);
+    }
 
     /* Every field the form would post, as (name, value) pairs, minus the ones this
      * file owns and minus any file input.
@@ -89,9 +113,12 @@
      * `opts`:
      *   form, indicator  elements (the indicator may be absent: the save still runs)
      *   read()           -> the shape `collect` returns; the page's own reading
-     *   send(state)      -> a promise for `{ok, exam_id, error}`
+     *   send(state)      -> a promise for `{ok, exam_id, error}`, or `{queued: true}`
+     *                       when the request never reached the server
      *   adopt(examId)    where the page writes the id it has just been handed
      *   label(state)     the words, from the page, so the language toggle reaches them
+     *   listenOnline(fn) where "the network is back" comes from; the browser's
+     *                    `online` event here, a hand-fired one in the tests
      *   setTimer/clearTimer, debounceMs   injected by the tests, real timers here
      */
     function wire(opts) {
@@ -101,7 +128,8 @@
             adopt = opts.adopt, label = opts.label,
             debounceMs = opts.debounceMs || DEBOUNCE_MS,
             setT = opts.setTimer || setTimeout,
-            clearT = opts.clearTimer || clearTimeout;
+            clearT = opts.clearTimer || clearTimeout,
+            listenOnline = opts.listenOnline || defaultListenOnline;
 
         if (!form || typeof form.addEventListener !== 'function') return false;
         if (typeof read !== 'function' || typeof send !== 'function') return false;
@@ -119,20 +147,35 @@
             if (indicator.textContent !== text) indicator.textContent = text;
         }
 
+        /* A reply is one of three things, and telling them apart is the whole
+         * point of this file outliving a dropped connection:
+         *
+         *   - **`queued`** (or a request that rejected): the server never ruled on
+         *     the draft. Nothing is wrong with the body, so it is kept and offered
+         *     again — on the browser's `online` event, and every `RETRY_MS` until
+         *     then. The teacher is told the draft is *waiting*, not that it failed:
+         *     the words are the difference between a teacher who keeps writing and
+         *     one who reloads the page and loses the paper chasing a save that was
+         *     never lost.
+         *   - **`ok: false`**: the server judged the body and refused it (a window
+         *     end before its start, no questions at all). Shown as the server's own
+         *     sentence and deliberately **not** retried on its own — a refusal is
+         *     the teacher's to fix, and a retry loop would only repeat it.
+         *   - **`ok`**: written. `last` moves, and the loop quiets down. */
         function settle(reply, sent, sentRev) {
-            var ok = !(reply && reply.ok === false);
+            var r = reply || {};
+            var queued = r.queued === true;
+            var ok = !queued && r.ok !== false;
             inFlight = false;
-            if (!ok) {
-                /* The refusal is the server's own sentence (a window end before its
-                 * start, no questions at all) — shown, not swallowed. `last` is left
-                 * alone, so the same body is offered again once the teacher fixes the
-                 * field, and *nothing is retried on its own*: a body the server keeps
-                 * refusing must not become a request every few seconds. */
-                paint('error', (reply && reply.error) || '');
+            if (queued) {
+                paint('waiting', r.error || '');
+                if (timer === null) arm(RETRY_MS);
+            } else if (!ok) {
+                paint('error', r.error || '');
             } else {
                 last = sent.snapshot;
-                if (reply.exam_id && !read().id && typeof adopt === 'function') {
-                    adopt(reply.exam_id);
+                if (r.exam_id && !read().id && typeof adopt === 'function') {
+                    adopt(r.exam_id);
                 }
                 paint('saved');
             }
@@ -152,15 +195,18 @@
             var sentRev = rev;
             inFlight = true;
             paint('saving');
+            /* A `send` that throws, or rejects, is a request that never produced a
+             * verdict — the same shape as a dropped connection, so it queues rather
+             * than painting the draft as failed. */
             var reply;
             try {
                 reply = send(state);
             } catch (e) {
-                settle({ ok: false }, state, sentRev);
+                settle({ queued: true }, state, sentRev);
                 return;
             }
             Promise.resolve(reply).then(function (r) { settle(r || {}, state, sentRev); },
-                                        function () { settle({ ok: false }, state, sentRev); });
+                                        function () { settle({ queued: true }, state, sentRev); });
         }
 
         function arm(wait) {
@@ -184,11 +230,25 @@
             form.addEventListener(type, onChange, true);
         });
 
+        /* The link coming back is the moment to write the draft that had nowhere to
+         * go, so a pending backstop retry is pulled forward rather than left to
+         * its own 15 seconds. Only something actually waiting is offered: an idle
+         * page that merely regained a connection has nothing to say, and an open
+         * request is already on its way. */
+        if (typeof listenOnline === 'function') {
+            listenOnline(function () {
+                if (inFlight) return;
+                if (read().snapshot === last) return;
+                arm(0);
+            });
+        }
+
         return true;
     }
 
     root.SGExamAutosave = {
         DEBOUNCE_MS: DEBOUNCE_MS,
+        RETRY_MS: RETRY_MS,
         collect: collect,
         wire: wire
     };

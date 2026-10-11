@@ -66,6 +66,30 @@
     </div>
     {% endif %}
 
+    {# A key that marks two letters on a question that accepts one is not a missing
+       key and not a short one: it is a mark that can be read two ways. It cannot be
+       repaired for the teacher — the stored key does not say which reading was
+       meant — so the card's job is to point at the panel where they decide. #}
+    {% if exams_ambiguous_key %}
+    <div class="rounded-2xl bg-rose-50 border-2 border-rose-200 p-4 flex items-start gap-3">
+        <i class="fas fa-circle-question text-rose-600 mt-0.5"></i>
+        <div class="flex-1">
+            <p class="font-bold text-rose-800 text-sm"><span x-text="t('Kunci ganda pada soal satu jawaban','Two-letter key on a single-answer question')"></span></p>
+            <p class="text-xs text-rose-700 mt-1" x-text="'{{ exams_ambiguous_key|length }} ' + t('ujian punya soal pilihan ganda tunggal yang kuncinya menandai lebih dari satu jawaban — hanya Anda yang bisa memutuskan apakah itu memang disengaja.','exam(s) have a single-answer question whose key marks more than one answer — only you can decide whether that was meant.')"></p>
+            <div class="flex flex-wrap gap-2 mt-2">
+                {% for e in exams_ambiguous_key[:3] %}
+                <a href="/teacher/answer-key-review/{{ e.id }}" class="text-xs font-bold bg-white border border-rose-300 px-3 py-1.5 rounded-lg hover:bg-rose-100 transition">{{ e.title[:30] }}</a>
+                {% endfor %}
+                {% if exams_ambiguous_key|length > 3 %}
+                <a href="/teacher/answer-key-review" class="text-xs font-bold bg-white border border-rose-300 px-3 py-1.5 rounded-lg hover:bg-rose-100 transition" x-text="'+' + '{{ exams_ambiguous_key|length - 3 }} ' + t('lainnya','more')"></a>
+                {% else %}
+                <a href="/teacher/answer-key-review" class="text-xs font-bold bg-white border border-rose-300 px-3 py-1.5 rounded-lg hover:bg-rose-100 transition" x-text="t('Tinjau kuncinya','Review the keys')"></a>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
     {% if exams_unassigned %}
     <div class="rounded-2xl bg-rose-50 border-2 border-rose-200 p-4 flex items-start gap-3">
         <i class="fas fa-user-slash text-rose-600 mt-0.5"></i>
@@ -385,8 +409,13 @@
                             <p class="font-bold text-sm text-surface-800">{{ a.subjects.name if a.subjects else "-" }}</p>
                             <p class="text-xs text-surface-500 font-medium">{{ a.classes.name if a.classes else "-" }}</p>
                         </div>
+                        {# It removes an assignment, it was an unlabelled ``×``, and
+                           the only words it carried were in the confirm — which a
+                           reader only meets after they have already pressed it. #}
                         <button hx-delete="/teacher/assignments/{{ a.id }}" hx-target="closest div" hx-swap="outerHTML"
                                 :hx-confirm="t('Hapus kelas & mapel ini?','Remove this class & subject?')"
+                                :title="t('Hapus kelas & mapel ini','Remove this class & subject')"
+                                :aria-label="t('Hapus kelas & mapel ini','Remove this class & subject')"
                                 class="opacity-0 group-hover:opacity-100 text-surface-300 hover:text-red-500 transition p-1"><i class="fas fa-times text-xs"></i></button>
                     </div>
                     {% endfor %}

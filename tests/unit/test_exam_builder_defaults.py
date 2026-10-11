@@ -19,15 +19,20 @@ from app.routes import teacher as t
 
 TEMPLATE = (Path(__file__).resolve().parents[2] / "app" / "templates"
             / "teacher" / "exam_form.html")
+ROUTE = (Path(__file__).resolve().parents[2] / "app" / "routes" / "teacher.py")
 
 #: Every control the builder had before the redesign. If one disappears, the
 #: guard fails: "advanced" may collapse a control, never remove it.
+#:
+#: `anti_cheat_enabled` is *not* here, and the absence is a decision rather than
+#: an omission — it is the one control the page must not carry, which is why it has
+#: a guard of its own below rather than an entry that would demand the opposite.
 INVENTORY_FIELDS = (
     "title", "subject_id", "class_ids", "description", "duration_minutes",
     "start_at", "end_at", "max_attempts", "auto_submit_on_window_end",
     "total_questions", "question_types", "answer_key", "question_weights",
     "question_pages", "question_audio", "question_cognitive",
-    "anti_cheat_enabled", "penalty_per_violation", "max_violations",
+    "penalty_per_violation", "max_violations",
     "fullscreen_required", "watermark_name", "block_copy_paste",
     "block_right_click", "auto_submit_on_max", "allow_calculator",
     "block_screenshot", "randomize_questions", "randomize_options", "action",
@@ -60,6 +65,37 @@ class _Sb:
 
     def table(self, name):
         return _Q(self.rows)
+
+
+class _Recording:
+    """Answers like Supabase and keeps the chain it was asked for, so a guard can
+    assert *which* rows a default was derived from rather than only its value."""
+
+    def __init__(self, rows):
+        self.rows = rows
+        self.reads = []
+
+    def table(self, name):
+        self.reads.append(("table", name))
+        return self
+
+    def select(self, *a, **k):
+        return self
+
+    def eq(self, col, val):
+        self.reads.append(("eq", col, val))
+        return self
+
+    def order(self, col, **k):
+        self.reads.append(("order", col, k.get("desc")))
+        return self
+
+    def limit(self, n):
+        self.reads.append(("limit", n))
+        return self
+
+    def execute(self):
+        return SimpleNamespace(data=self.rows)
 
 
 def _subjects(n):
@@ -98,12 +134,52 @@ class TestDerivableDefaults:
         d = t._builder_defaults(Boom(), "t1", _subjects(1), _classes(1))
         assert d["duration_minutes"] == 60
 
+    def test_the_memory_is_this_teachers_own_latest_paper(self):
+        """The remembered duration is a claim about one teacher, so it has to be
+        *their* rows and the newest of them: an unscoped read would pre-fill from
+        another teacher's paper, and an unordered one from whichever row the
+        database happened to return first."""
+        sb = _Recording([{"duration_minutes": 75}])
+        d = t._builder_defaults(sb, "teacher-7", _subjects(2), _classes(2))
+        assert d["duration_minutes"] == 75
+        assert sb.reads == [("table", "exams"), ("eq", "teacher_id", "teacher-7"),
+                            ("order", "created_at", True), ("limit", 1)]
+
+    def test_an_unlimited_last_paper_is_not_inherited(self):
+        """`0` is *Tak terbatas*, a decision about one paper rather than a habit.
+        Carrying it forward would open the next paper with no duration at all — the
+        one state the timing pipeline cannot enforce — so it falls back to the app
+        default instead."""
+        d = t._builder_defaults(_Sb([{"duration_minutes": 0}]), "t1",
+                                _subjects(2), _classes(2))
+        assert d["duration_minutes"] == 60
+
 
 class TestDisclosureRemovedNothing:
     def test_every_inventory_field_is_still_in_the_template(self):
         src = TEMPLATE.read_text(encoding="utf-8")
         missing = [f for f in INVENTORY_FIELDS if f'name="{f}"' not in src]
         assert not missing, f"the redesign dropped field(s): {missing}"
+
+    def test_the_school_switch_is_absent_on_purpose_and_preserved(self):
+        """The one field that must *not* be posted, pinned from both ends.
+
+        `exams.anti_cheat_enabled` is the school's own switch. This page used to
+        post a hidden `value="true"` for it and the route used to hard-code `True`,
+        so a paper the school had switched off came back monitored at the next
+        save — while the card on this very page read "Always on". The field is gone
+        and the route now carries the stored value through instead, so both halves
+        are asserted: a field that reappears silently re-arms papers, and a route
+        that stops preserving the row decides the state for itself.
+        """
+        src = TEMPLATE.read_text(encoding="utf-8")
+        assert 'name="anti_cheat_enabled"' not in src, (
+            "the builder posts the school's anti-cheat switch again — a hidden value "
+            "here is what silently re-armed a paper the school had turned off")
+        route = ROUTE.read_text(encoding="utf-8")
+        assert "anti_cheat_on(exam_row)" in route, (
+            "the save route no longer preserves the stored switch, so the paper's "
+            "anti-cheat state is decided by whatever this form happens to send")
 
     def test_the_same_checkbox_can_always_be_un_checked(self):
         src = TEMPLATE.read_text(encoding="utf-8")

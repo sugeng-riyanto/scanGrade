@@ -8,23 +8,36 @@
 {% block page_title %}Koreksi{% endblock %}
 {% block head_extra %}
 <style>
-.pdf-container { background: #f8fafc; min-height: 50vh; }
+/* ── One declaration per control, for both themes ─────────────────────────────
+   This is the teacher's marking desk: the same toolbar, the same canvas tools and
+   the same paper as the student's exam page, so it reads the same tokens. A rule
+   here names the token rather than a literal, and that is what lets it serve the
+   dark theme with no second block to keep in step — the exam page's `.dark` block
+   was trimmed to the two declarations the two themes genuinely do not share for
+   the same reason. Spelling `white` here instead put a white button under the dark
+   theme's own light `--text`, which is light-on-light.
+
+   The drawing surfaces are paper in both themes: an answer canvas keeps its light
+   sheet because the ink drawn on it is dark, and `--paper-ink` is what the
+   annotation box reads, so a text box on that sheet cannot come out white on
+   white. */
+.pdf-container { background: var(--bg-subtle); min-height: 50vh; }
 .q-btn { transition: all 0.2s; font-weight: 700; }
 .q-btn:hover { transform: scale(1.08); }
 .draw-toolbar { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
-.draw-toolbar button { padding: 5px 10px; border: 1.5px solid #e5e7eb; border-radius: 10px; font-size: 12px; background: white; cursor: pointer; line-height: 1; font-weight: 600; transition: all 0.15s; }
-.draw-toolbar button:hover { background: #f3f4f6; border-color: #d1d5db; }
-.draw-toolbar button.active { background: #059669; color: white; border-color: #059669; }
+.draw-toolbar button { padding: 5px 10px; border: 1.5px solid var(--border); border-radius: 10px; font-size: 12px; background: var(--bg-card); cursor: pointer; line-height: 1; font-weight: 600; transition: all 0.15s; }
+.draw-toolbar button:hover { background: var(--bg-hover); border-color: var(--border-strong); }
+.draw-toolbar button.active { background: #059669; color: var(--on-accent); border-color: #059669; }
 .draw-toolbar button.student-tool { cursor: default; opacity: 0.5; }
-.draw-toolbar button.student-tool:hover { background: white; border-color: #e5e7eb; }
+.draw-toolbar button.student-tool:hover { background: var(--bg-card); border-color: var(--border); }
 .draw-toolbar input[type=color] { width: 26px; height: 26px; border: none; cursor: pointer; padding: 0; border-radius: 6px; }
-.full-canvas-wrap { border: 2.5px solid #fdba74; border-radius: 14px; overflow: visible; touch-action: none; background: #fff; position: relative; box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
+.full-canvas-wrap { border: 2.5px solid #fdba74; border-radius: 14px; overflow: visible; touch-action: none; background: var(--paper); position: relative; box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
 .full-canvas-wrap canvas { display: block; width: 100%; }
 .full-canvas-wrap img { display: block; width: 100%; pointer-events: none; }
 .text-box { position: absolute; min-width: 120px; max-width: 90%; z-index: var(--sg-layer-canvas-item); }
-.text-box textarea { width: 100%; min-height: 38px; font-size: 14px; padding: 6px 10px; border: 2.5px solid #f97316; border-radius: 10px; background: rgba(255,255,255,0.95); resize: both; box-shadow: 0 4px 16px rgba(249,115,22,0.2); }
+.text-box textarea { width: 100%; min-height: 38px; font-size: 14px; padding: 6px 10px; border: 2.5px solid #f97316; border-radius: 10px; background: var(--paper); color: var(--paper-ink); resize: both; box-shadow: 0 4px 16px rgba(249,115,22,0.2); }
 .text-box .box-handle { cursor: grab; position: absolute; top: -20px; left: 0; right: 24px; height: 18px; background: #f97316; border-radius: 8px 8px 0 0; display: flex; align-items: center; padding: 0 8px; }
-.text-box .box-del { position: absolute; top: -20px; right: 0; width: 22px; height: 18px; background: #ef4444; border: none; border-radius: 0 8px 0 0; color: white; font-size: 11px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+.text-box .box-del { position: absolute; top: -20px; right: 0; width: 22px; height: 18px; background: #ef4444; border: none; border-radius: 0 8px 0 0; color: var(--on-accent); font-size: 11px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
 .teacher-box textarea { border-color: #059669 !important; }
 .teacher-box .box-handle { background: #059669 !important; }
 /* ── The finger, not the width ───────────────────────────────────────────────
@@ -64,7 +77,7 @@
 }
 [x-cloak] { display: none !important; }
 .tool-controlbar { pointer-events: none !important; }
-.tool-ctrl-btn { pointer-events: auto !important; cursor: pointer; position: absolute; z-index: var(--sg-layer-canvas-item); width: 22px; height: 22px; border-radius: 50%; background: rgba(30,41,59,0.9); color: white; display: inline-flex; align-items: center; justify-content: center; font-size: 10px; border: 1.5px solid rgba(255,255,255,0.15); box-shadow: 0 2px 6px rgba(0,0,0,0.3); transition: transform 0.1s; }
+.tool-ctrl-btn { pointer-events: auto !important; cursor: pointer; position: absolute; z-index: var(--sg-layer-canvas-item); width: 22px; height: 22px; border-radius: 50%; background: rgba(30,41,59,0.9); color: var(--on-chrome); display: inline-flex; align-items: center; justify-content: center; font-size: 10px; border: 1.5px solid rgba(255,255,255,0.15); box-shadow: 0 2px 6px rgba(0,0,0,0.3); transition: transform 0.1s; }
 .tool-ctrl-btn:hover { transform: scale(1.15); }
 .tool-ctrl-btn.drag { cursor: grab; }
 .tool-ctrl-btn.close { background: rgba(220,38,38,0.85); }

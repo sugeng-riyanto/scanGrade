@@ -128,9 +128,14 @@
 #   0  the release is readable, compiled, translated and matches its own SQL.
 #   1  a real finding in the release. The deploy rolls back.
 #   2  **this box** cannot answer the question — no node, no node_modules, no
-#      SQL to read, a build that failed. Nothing is wrong with the release, and
-#      a checker that breaks must not be able to take the site down, so the
-#      deploy says so loudly and continues WITHOUT rolling back.
+#      SQL to read, a build that failed, or a checkout the app will not construct
+#      in because it holds more modified tracked files than its own scan bound.
+#      Nothing is wrong with *the release*, and nothing about it was read either,
+#      which is the difference from exit 1: the deploy says which of the two it
+#      was and, like the other refusals, rolls back — carrying on would ship a
+#      commit nobody read, which is the same as having no gate at all (the
+#      preflight refuses the run outright when this box cannot run the gate, so
+#      reaching here with exit 2 means the box changed between the two).
 #   3  the release **removed the check** — one of the files below is gone, or the
 #      named tests collected nothing. That is a property of the release, not of
 #      the box, and it is refused like any other finding: a gate someone can
@@ -143,6 +148,16 @@ set -uo pipefail
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # Word-split on purpose: pytest takes them as separate paths.
 TESTS="tests/unit/test_dark_theme_contrast.py tests/unit/test_tailwind_class_names.py tests/unit/test_theme_stylesheet.py tests/unit/test_language_toggle.py tests/unit/test_i18n_coverage.py tests/unit/test_css_freshness.py tests/unit/test_landing_facilities.py tests/unit/test_static_tree.py tests/unit/test_no_committed_secrets.py"
+
+# The app's own refusal markers, and the reason they are named here rather than
+# spelled out in the block that reads them: they are literals in
+# `app/utils/checkout_integrity.py`, so a rename there would leave this gate
+# matching a string nothing prints — it would fall through to "this release ships
+# an unreadable element" and blame a release for a checkout. The two assignments
+# are compared against the module's own constants by
+# `tests/unit/test_checkout_integrity.py`.
+CONSTRUCT_MARKER="SCANGRADE-UNREPRODUCIBLE"
+ALLOW_DIRTY_VAR="SCANGRADE_ALLOW_DIRTY_CHECKOUT"
 
 # ── Armament ─────────────────────────────────────────────────────────────────
 # Everything that makes this a gate: the checks themselves, and the three tools
@@ -187,6 +202,60 @@ fi
 cd "$REPO" || exit 2
 OUTPUT=$("$PY" -m pytest $TESTS -q -p no:cacheprovider --no-header 2>&1)
 RC=$?
+
+# ── The one refusal that is about the checkout and not the release ───────────
+#
+# `app/utils/checkout_integrity.py` is asked at construction, and one of its
+# refusals is reachable here: a checkout with more modified tracked paths than its
+# scan bound is one the app will not construct in, so every check above comes back
+# "error at setup" — once per test, in a wall of `E   SystemExit: 1`. Read as a
+# release defect that is a false entry in the ledger, and it is the state a laptop
+# mid-feature is permanently in: the checks never ran, so there is nothing to
+# blame on the release and nothing to pass either.
+#
+# Hence exit 2, and the refusal's own remedy printed with it. The cap is the one
+# refusal a development run may answer for itself (`SCANGRADE_ALLOW_DIRTY_CHECKOUT`,
+# which the refusal itself names), and a box that serves and the deploy's probe
+# refuse that permission, so the workaround is never the answer for a release.
+# A *measured* blob — a path whose stored bytes no checkout of HEAD can reproduce
+# — is not this case: it is a property of the release, so it stays a finding.
+# checkout_refusal:start
+case "$OUTPUT" in
+  *"$CONSTRUCT_MARKER"*)
+    case "$OUTPUT" in
+      *"$ALLOW_DIRTY_VAR"*)
+        echo >&2
+        echo "theme gate: NOT CHECKED — this checkout has more modified tracked files" >&2
+        echo "            than the app's own scan bound, so the app refused to construct" >&2
+        echo "            and not one check in this gate ran. Nothing here is a finding" >&2
+        echo "            about the release; and nothing here is a pass either, which is" >&2
+        echo "            why this is exit 2 rather than exit 1." >&2
+        echo >&2
+        echo "            A development checkout answers the question for itself, which" >&2
+        echo "            is the refusal's own remedy — it is refused on a box that" >&2
+        echo "            serves and in the deploy's probe, so it can never answer it" >&2
+        echo "            for a release:" >&2
+        echo "                $ALLOW_DIRTY_VAR=1 bash deploy/theme_gate.sh" >&2
+        exit 2
+        ;;
+      *)
+        echo >&2
+        echo "theme gate: FAILED — a path in this checkout stores bytes no checkout of" >&2
+        echo "            HEAD can reproduce, so the app will not construct in it and not" >&2
+        echo "            one check in this gate ran. That is a property of the release:" >&2
+        echo "            it can neither be merged nor explained while it serves, and the" >&2
+        echo "            remedy is not a restore (the path's own filter writes through" >&2
+        echo "            it) — HEAD's bytes go in verbatim and git is told to read that" >&2
+        echo "            path without the filter. The deploy's own heal does exactly that" >&2
+        echo "            before this gate runs, so reaching here means it did not happen:" >&2
+        echo >&2
+        printf '%s\n' "$OUTPUT" | grep -E '^SCANGRADE-UNREPRODUCIBLE|^ +[^ ]' | head -12 >&2
+        exit 1
+        ;;
+    esac
+    ;;
+esac
+# checkout_refusal:end
 
 # The coverage table is printed, not just checked: the gate is where a release is
 # looked at, and "54.0% across 115 templates" is the number that says whether the

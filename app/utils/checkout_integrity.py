@@ -33,15 +33,35 @@ Three rules, and each one is why this is a module rather than a line in `wsgi.py
   the gate it quarantines under has a sentence on the status page — so the refusal
   never reads as "app did not construct" and never sends the next reader hunting
   for a Python fault.
+
+The two refusals are not the same claim, and only one of them is evidence
+----------------------------------------------------------------------------
+Two of them come out of `unreproducible_reason`, and conflating them is how a
+working checkout becomes un-verifiable:
+
+* the **blob** refusal, above, is a *measurement* — a named path whose stored bytes
+  the path's own filter could never write. It refuses everywhere, and
+  `allow_unmeasured` cannot reach it.
+* the **cap** refusal is the absence of a measurement. `SCAN_LIMIT` bounds the scan
+  (two git calls per path), so a checkout with more modified tracked paths than the
+  bound is one this process cannot *rule out* — and a box that serves must not guess.
+  A laptop with four features in flight is exactly that checkout, and so is the
+  checkout whose suite therefore cannot run at all: the change that would prove
+  itself green cannot be measured, and the workaround was a hand-typed linked
+  worktree with a `cp -f` of the files the feature touched. So the cap is the one
+  refusal a development run may answer for itself, through `ALLOW_DIRTY_ENV` —
+  explicitly, loudly, and never on a box that serves.
 """
 
 from __future__ import annotations
 
 import datetime as _dt
+import os
 import pathlib
 import subprocess
+import sys
 
-from app.utils import build_info
+from app.utils import build_info, import_safety
 
 #: The deploy greps for this to tell the app's refusal apart from a construct
 #: error. Not a log level and not a return code: the probe captures stdout, and
@@ -51,8 +71,12 @@ MARKER = "SCANGRADE-UNREPRODUCIBLE"
 #: Where this code was loaded from — the app package's own location, three levels
 #: up from here, exactly as `app/utils/build_info.py` resolves it. Read at call
 #: time rather than bound as a default argument so a test can point it at a
-#: temporary checkout and build a real app over it.
-REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
+#: temporary checkout and build a real app over it. Resolved through
+#: `import_safety.resolved`: `.resolve()` probes the filesystem (an `lstat`, and a
+#: `readlink` per link) and raises on a symlink loop or an unreadable link, and this
+#: is a module body — the app would refuse to *construct*, which is the one failure
+#: this gate exists to explain rather than to be.
+REPO_ROOT = import_safety.resolved(pathlib.Path(__file__)).parents[2]
 
 #: A `git status` and a handful of blob reads; no network, no network mounts. This
 #: is a startup cost on a 1-vCPU box, so anything approaching it is a wedged git
@@ -64,6 +88,74 @@ GIT_TIMEOUT = 8
 #: than this is not one a release merges over either, which is why reaching the cap
 #: refuses rather than passing.
 SCAN_LIMIT = 64
+
+#: The variable a **development** checkout may export to answer the cap question by
+#: hand, and the only refusal it reaches. Named in the refusal itself, because the
+#: reader who hits it is a developer mid-feature and the remedy has to be where the
+#: obstacle is: the alternative they kept reaching for was a linked worktree with a
+#: `cp -f` of the files in flight, which is different every time and quietly wrong
+#: whenever a new test file is left behind (the guard then does not run, and the
+#: suite reports green for a tree that was never measured).
+ALLOW_DIRTY_ENV = "SCANGRADE_ALLOW_DIRTY_CHECKOUT"
+
+#: What counts as yes. Spelled out rather than tested for truthiness, so an empty
+#: value or `=0` — how a script that forwards its environment says no — cannot
+#: switch it on by being non-empty, which is exactly the shape of an `env_bool`
+#: whose default is read backwards.
+ALLOW_DIRTY_WORDS = ("1", "true", "yes", "on")
+
+#: Printed whenever the allowance is used, so no run that was permitted can be
+#: mistaken for one that measured. Deliberately **not** `MARKER` and deliberately
+#: not containing it: the deploy greps for `MARKER` to tell a refusal apart from a
+#: construct error, and a waiver that printed it would quarantine a release for the
+#: opposite of the reason it happened.
+ALLOWED_MARKER = "SCANGRADE-DIRTY-CHECKOUT-ALLOWED"
+
+
+def dev_allowance(config, environ=None) -> bool:
+    """May this run leave the scan-cap question unanswered?
+
+    Two independent conditions, and the second is the one that keeps this from
+    being a hole in the gate rather than a development convenience:
+
+    * the variable is exported *and* says yes (`ALLOW_DIRTY_WORDS`); and
+    * the config proves this process is not the app that serves (or the deploy's
+      probe, which is the release's own construction). `IS_PRODUCTION` is a class
+      attribute on `ProductionConfig`, not an environment read, so a variable left
+      in a shell profile on the box cannot travel here with the next `git pull`.
+
+    `config` is a Flask `app.config` (any mapping). An object with no `get` — or no
+    config at all — answers no, because "I could not tell where I am" is not
+    permission to keep going; that direction is the whole point of the check.
+    """
+    get = getattr(config, "get", None)
+    if get is None:
+        return False
+    if get("IS_PRODUCTION") or get("DEPLOY_PROBE"):
+        return False
+    value = (os.environ if environ is None else environ).get(ALLOW_DIRTY_ENV, "")
+    return str(value).strip().lower() in ALLOW_DIRTY_WORDS
+
+
+def _cap_sentence(git: str, repo: pathlib.Path, limit: int, read: int) -> str:
+    """The cap refusal: what could not be ruled out, and the two ways to answer it.
+
+    `read` is how many paths were measured before the bound — reported because the
+    count is the difference between "some of this tree was measured and the rest was
+    not" and a sentence about a number the reader cannot see.
+    """
+    return (
+        f"this checkout has more than {limit} modified tracked file(s), so this "
+        f"process cannot rule out a blob no checkout of {_head_short(git, repo)} can "
+        f"reproduce among the rest — and a checkout with that many uncommitted files "
+        f"is not one a release merges over either. Measure the rest with the same "
+        f"rule by hand: `git status --porcelain`, then for each path `git check-attr "
+        f"text eol -- <path>` and `git cat-file blob HEAD:<path>`. A development "
+        f"checkout may answer it for itself instead — `{ALLOW_DIRTY_ENV}=1`, which "
+        f"waives this refusal and nothing else; {read} path(s) were read before the "
+        f"bound, and that permission is refused on a box that serves and in the "
+        f"deploy's probe, so it can never answer the question for a release."
+    )
 
 
 def _run(argv: list[str], timeout: int = GIT_TIMEOUT) -> tuple[int, str]:
@@ -139,13 +231,17 @@ def _blob_sentence(git: str, repo: pathlib.Path, paths: list[str]) -> str:
 
 
 def unreproducible_reason(repo: pathlib.Path | str | None = None, *,
-                          limit: int = SCAN_LIMIT) -> str | None:
+                          limit: int = SCAN_LIMIT,
+                          allow_unmeasured: bool = False) -> str | None:
     """Why this checkout cannot serve, or None when it can.
 
     None is the answer for every state that is not *measured* evidence of the
-    defect — see the module docstring. The exception is the scan cap: a checkout
-    with more modified tracked files than `limit` is one this cannot rule out, and
-    one no release merges over either, so it says so instead of passing quietly.
+    defect — see the module docstring. Two of the exits below are refusals and they
+    are different claims: a measured blob (never waived, in any environment) and the
+    scan cap, which is the absence of a measurement and therefore the one a
+    development run may answer for itself by passing `allow_unmeasured` — the value
+    `dev_allowance` computes from the environment *and* the config. The waiver is
+    printed when it is used, so a permitted run is never read as a clean one.
     """
     repo = pathlib.Path(repo) if repo is not None else REPO_ROOT
     if not (repo / ".git").exists():
@@ -169,16 +265,19 @@ def unreproducible_reason(repo: pathlib.Path | str | None = None, *,
         paths=paths, limit=max(1, limit))
     offenders = [entry["path"] for entry in reading["paths"]
                  if entry["kind"] == status.DIRTY_BLOB]
+    # The measured refusal, first and unconditional: it is a named path, not a
+    # budget, and none of the allowance's two conditions reaches it.
     if offenders:
         return _blob_sentence(git, repo, offenders)
     if reading["truncated"]:
-        return (
-            f"this checkout has more than {max(1, limit)} modified tracked file(s), so "
-            f"this process cannot rule out a blob no checkout of "
-            f"{_head_short(git, repo)} can reproduce among the rest — and a checkout "
-            f"with that many uncommitted files is not one a release merges over "
-            f"either. Measure the rest with the same rule by hand: `git status "
-            f"--porcelain`, then for each path `git check-attr text eol -- <path>` and "
-            f"`git cat-file blob HEAD:<path>`."
-        )
+        if allow_unmeasured:
+            print(
+                f"{ALLOWED_MARKER}: {len(paths)} modified tracked path(s) in this "
+                f"checkout, more than the {max(1, limit)} this scan measures — the "
+                f"rest were NOT measured ({ALLOW_DIRTY_ENV} is in force). This run is "
+                f"not evidence that the checkout is reproducible; a box that serves "
+                f"and the deploy's probe refuse the same permission.",
+                file=sys.stderr)
+            return None
+        return _cap_sentence(git, repo, max(1, limit), len(paths))
     return None

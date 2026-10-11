@@ -154,6 +154,13 @@ class Config:
     #: attribute rather than a running app.
     PAYMENT_SIMULATION = env_bool("PAYMENT_SIMULATION", False)
 
+    #: True only for the config that serves real users. A class attribute and not a
+    #: read of the environment, for the same reason `PAYMENT_SIMULATION` above is
+    #: pinned in `ProductionConfig`: a permission that a `.env` file could grant is
+    #: not a permission, and the reader here (`checkout_integrity.dev_allowance`)
+    #: has to judge *where this process is running*, not where someone said it was.
+    IS_PRODUCTION = False
+
     @classmethod
     def email_configured(cls):
         return bool(cls.SMTP_EMAIL and cls.SMTP_PASSWORD)
@@ -258,6 +265,11 @@ class ProductionConfig(Config):
     # attribute, not a read of the environment, so no `.env` on the box can turn it
     # on; `PAYMENT_SIMULATION` in `Config` is what the other environments inherit.
     PAYMENT_SIMULATION = False
+    #: And never let a development-only shortcut answer a deploy's question. The
+    #: one reader is `checkout_integrity.dev_allowance`, which refuses the
+    #: allowance here whatever the environment says — so a variable left exported in
+    #: a shell profile cannot travel into the box with the next `git pull`.
+    IS_PRODUCTION = True
     # Production is fronted by nginx, which appends the real client address to
     # X-Forwarded-For. Trust exactly one hop.
     TRUSTED_PROXY_HOPS = env_int("TRUSTED_PROXY_HOPS", 1)

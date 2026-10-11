@@ -27,7 +27,29 @@
            slate tone that clears it against both surfaces (3.13:1 on the page,
            3.43:1 on a card) — the dark theme's own border is held to 3:1 too.
            Dark: every value below is measured against every surface in
-           tests/unit/test_dark_theme_contrast.py, not chosen by eye. */
+           tests/unit/test_dark_theme_contrast.py, not chosen by eye.
+
+           Four of them are *roles* rather than surfaces, and they are named here
+           because the exam and correction pages used to spell them out by hand.
+           A page-local `<style>` is not remapped by the utility rules below, so a
+           `#fff` written in one was a decision nobody had recorded:
+
+             · `--paper`      the sheet an answer is drawn on. Light is white
+                              because a scanned page is white and the two are laid
+                              on each other; dark steps it down the same ladder
+                              every other surface uses, so the answer keeps its
+                              dark ink instead of the sheet going black.
+             · `--paper-ink`  what is written on that sheet — a tiered near-black
+                              rather than `#000`, and the same in both themes
+                              because the sheet is light in both.
+             · `--on-accent`  a label on a saturated accent fill. This is the
+                              app's convention (`bg-primary-600 text-white`) and
+                              one value for both themes, like the fills are.
+             · `--on-chrome`  a label on the chrome that is dark in both themes
+                              (the canvas tool dots) — off-white, not pure white.
+
+           tests/unit/test_theme_literals.py measures all four and holds the pages
+           that read them to having no pure white or black left in their own CSS. */
         /* ── the layer scale ───────────────────────────────────────────────────
            One ordered list, and the only place in the whole app a stacking height
            is written. Every panel, drawer, modal and toast takes the nearest
@@ -46,7 +68,7 @@
            take a line by name. The values are re-declared identically in `.dark`
            so a theme cannot move a layer, and tests/unit/test_layer_scale.py
            holds the grouping, the order and that equality. */
-        :root { color-scheme: light; --bg-body: #f1f5f9; --bg-card: #ffffff; --bg-subtle: #f8fafc; --bg-hover: #f1f5f9; --bg-card-translucent: rgba(255,255,255,0.92); --text: #1e293b; --text-dim: #5d6a7d; --text-muted: #606c80; --text-nav: #94a3b8; --border: #e2e8f0; --border-strong: #cbd5e1; --input: #ffffff; --input-border: #7c8ca2; --sb-size: 12px; --sb-track: #e8edf6; --sb-thumb: #6f819c; --sb-thumb-hover: #586a86; --sb-thumb-active: #2563eb; --shadow: 0 1px 2px rgba(0,0,0,0.03); --sg-layer-local: 1; --sg-layer-sticky: 20; --sg-layer-header: 30; --sg-layer-over: 40; --sg-layer-drawer: 50; --sg-layer-badge: 60; --sg-layer-dialog: 100; --sg-layer-notice: 200; --sg-layer-paper: 10; --sg-layer-bar: 20; --sg-layer-qstrip: 30; --sg-layer-float: 50; --sg-layer-rail: 85; --sg-layer-watermark: 88; --sg-layer-scrim: 90; --sg-layer-strip: 95; --sg-layer-media: 9998; --sg-layer-modal: 9999; --sg-layer-strip-over: 10000; --sg-layer-gate: 10001; --sg-layer-canvas-tool: 5; --sg-layer-canvas-grip: 6; --sg-layer-canvas-item: 10; --sg-layer-canvas-item-ctl: 20; --sg-layer-out: auto; }
+        :root { color-scheme: light; --bg-body: #f1f5f9; --bg-card: #ffffff; --bg-subtle: #f8fafc; --bg-hover: #f1f5f9; --bg-card-translucent: rgba(255,255,255,0.92); --text: #1e293b; --text-dim: #5d6a7d; --text-muted: #606c80; --text-nav: #94a3b8; --border: #e2e8f0; --border-strong: #cbd5e1; --input: #ffffff; --input-border: #7c8ca2; --paper: #ffffff; --paper-ink: #111827; --on-accent: #ffffff; --on-chrome: #f1f5f9; --sb-size: 12px; --sb-track: #e8edf6; --sb-thumb: #6f819c; --sb-thumb-hover: #586a86; --sb-thumb-active: #2563eb; --shadow: 0 1px 2px rgba(0,0,0,0.03); --sg-layer-local: 1; --sg-layer-sticky: 20; --sg-layer-header: 30; --sg-layer-over: 40; --sg-layer-drawer: 50; --sg-layer-badge: 60; --sg-layer-dialog: 100; --sg-layer-notice: 200; --sg-layer-paper: 10; --sg-layer-bar: 20; --sg-layer-qstrip: 30; --sg-layer-float: 50; --sg-layer-rail: 85; --sg-layer-watermark: 88; --sg-layer-scrim: 90; --sg-layer-strip: 95; --sg-layer-media: 9998; --sg-layer-modal: 9999; --sg-layer-strip-over: 10000; --sg-layer-gate: 10001; --sg-layer-canvas-tool: 5; --sg-layer-canvas-grip: 6; --sg-layer-canvas-item: 10; --sg-layer-canvas-item-ctl: 20; --sg-layer-out: auto; }
         /* Every layer, so a template takes a line by name and never a number. */
         .sg-layer-local { z-index: var(--sg-layer-local); }
         .sg-layer-sticky { z-index: var(--sg-layer-sticky); }
@@ -367,7 +389,7 @@ html { transition: background-color .3s, color .3s; }
            on its own, with no second set of values to keep in step.
            ═════════════════════════════════════════════════════════════════════ */
         @media screen {
-        .dark { color-scheme: dark; --bg-body: #0f1117; --bg-card: #191c2b; --bg-subtle: #202436; --bg-hover: #262b41; --bg-card-translucent: rgba(25,28,43,0.92); --text: #e6e9f0; --text-dim: #a8b0c8; --text-muted: #949db5; --text-nav: #8892b0; --border: #2f3448; --border-strong: #3d4460; --input: #1e2233; --input-border: #66738f; --sb-size: 12px; --sb-track: #1a1f31; --sb-thumb: #5f6e91; --sb-thumb-hover: #7285ad; --sb-thumb-active: #3b82f6; --shadow: 0 1px 3px rgba(0,0,0,0.35); --sg-layer-local: 1; --sg-layer-sticky: 20; --sg-layer-header: 30; --sg-layer-over: 40; --sg-layer-drawer: 50; --sg-layer-badge: 60; --sg-layer-dialog: 100; --sg-layer-notice: 200; --sg-layer-paper: 10; --sg-layer-bar: 20; --sg-layer-qstrip: 30; --sg-layer-float: 50; --sg-layer-rail: 85; --sg-layer-watermark: 88; --sg-layer-scrim: 90; --sg-layer-strip: 95; --sg-layer-media: 9998; --sg-layer-modal: 9999; --sg-layer-strip-over: 10000; --sg-layer-gate: 10001; --sg-layer-canvas-tool: 5; --sg-layer-canvas-grip: 6; --sg-layer-canvas-item: 10; --sg-layer-canvas-item-ctl: 20; --sg-layer-out: auto; }
+        .dark { color-scheme: dark; --bg-body: #0f1117; --bg-card: #191c2b; --bg-subtle: #202436; --bg-hover: #262b41; --bg-card-translucent: rgba(25,28,43,0.92); --text: #e6e9f0; --text-dim: #a8b0c8; --text-muted: #949db5; --text-nav: #8892b0; --border: #2f3448; --border-strong: #3d4460; --input: #1e2233; --input-border: #66738f; --paper: #e8ecf2; --paper-ink: #111827; --on-accent: #ffffff; --on-chrome: #f1f5f9; --sb-size: 12px; --sb-track: #1a1f31; --sb-thumb: #5f6e91; --sb-thumb-hover: #7285ad; --sb-thumb-active: #3b82f6; --shadow: 0 1px 3px rgba(0,0,0,0.35); --sg-layer-local: 1; --sg-layer-sticky: 20; --sg-layer-header: 30; --sg-layer-over: 40; --sg-layer-drawer: 50; --sg-layer-badge: 60; --sg-layer-dialog: 100; --sg-layer-notice: 200; --sg-layer-paper: 10; --sg-layer-bar: 20; --sg-layer-qstrip: 30; --sg-layer-float: 50; --sg-layer-rail: 85; --sg-layer-watermark: 88; --sg-layer-scrim: 90; --sg-layer-strip: 95; --sg-layer-media: 9998; --sg-layer-modal: 9999; --sg-layer-strip-over: 10000; --sg-layer-gate: 10001; --sg-layer-canvas-tool: 5; --sg-layer-canvas-grip: 6; --sg-layer-canvas-item: 10; --sg-layer-canvas-item-ctl: 20; --sg-layer-out: auto; }
 
         /* ══ Dark theme ════════════════════════════════════════════════════════
            Templates carry light utilities (bg-white, text-slate-600,

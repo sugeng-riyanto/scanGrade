@@ -22,12 +22,18 @@ from app.utils.exam_access import (
 from app.services.export_service import export_to_xlsx, export_to_pdf
 from app.services.answer_sheet_generator import generate_answer_sheet
 from app.services.question_types import (
-    KIND_CHOICE, KIND_DRAG, KIND_ESSAY, KIND_MATCH, KIND_TRUE_FALSE, MCQ,
-    canonical_type, complete_weights, default_weights, describe_answer, earned_points,
+    CHOICE_MODE_SINGLE, CHOICE_OPTIONS, KEY_MODE_LOST, KEY_MODE_NARROW, KEY_STALE,
+    KIND_CHOICE, KIND_DRAG,
+    KIND_ESSAY, KIND_MATCH, MCQ, MCQ_MULTI, public_options,
+    KIND_TRUE_FALSE,
+    ambiguous_choice_keys, answer_letters,
+    canonical_type, choice_mode, default_weights, describe_answer,
     essay_marker,
-    grade_answer, has_answer, is_essay, is_objective, normalise_key,
-    objective_result, public_options, question_kind, scheme_in,
+    grade_answer, has_answer, is_essay, is_objective, key_mode_drift, key_state,
+    normalise_key,
+    objective_result, question_kind, scheme_in,
 )
+from app.services import exam_scoring
 from app.services import mark_scheme
 from app.services import assignments as assignments_service
 from app.services import exam_media
@@ -38,6 +44,7 @@ from app.services import grading_assist
 from app.services import exam_codes
 from app.services import attempt_timeline
 from app.services import invigilation
+from app.services import invigilation_matrix
 from app.services import session_review
 from app.services import seb_door_log
 from app.services import teacher_assignments as ta_service
@@ -418,62 +425,27 @@ def _json_fields(row):
 
 
 def _recalculate_scores(exam_id):
+    """Rewrite every marked submission's score from the exam's current key.
+
+    The arithmetic is `app/services/exam_scoring` now — the same function the
+    answer-key page asks what a save *would* do. A preview and a writer that each
+    computed the mark themselves is how the number a teacher agreed to stops being
+    the number a pupil gets. What is left here is the I/O: load the paper, load the
+    marked papers, write each one back.
+    """
     supabase = get_supabase()
-    exam = supabase.table("exams").select("*").eq("id", exam_id).single().execute().data
-    if not exam:
+    loaded = exam_scoring.load_parts(supabase, exam_id)
+    if not loaded:
         return
-    _json_fields(exam)
-    answer_key = exam.get("answer_key") or {}
-    question_types = exam.get("question_types") or {}
-    question_weights = exam.get("question_weights") or {}
-    total_q = exam.get("total_questions", 0)
-    # The 70/30 split and the per-question shares are one function now. Writing
-    # them out here is what made this route decide that a true/false question was
-    # an essay and place it in the essay pool — where it earned nothing from the
-    # auto-grader and then had 30% of the paper's marks divided among the wrong
-    # questions.
-    if not question_weights and total_q > 0:
-        question_weights = default_weights(question_types, total_q)
-    # A question the map does not cover still has a share — the paper's remainder.
-    # Without this the loop below earns nothing for a teacher's mark on it, because
-    # "no stored weight" and "marked zero" are the same number here, and the paper
-    # the teacher had just corrected kept its 0.
-    question_weights = complete_weights(question_weights, total_q)
-    subs = supabase.table("submissions").select("id, answers, penalty, teacher_feedback").eq("exam_id", exam_id).in_("status", ["submitted", "graded", "published"]).execute().data or []
+    _exam, parts = loaded
+    subs = exam_scoring.load_marked(supabase, exam_id)
     if not subs:
         return
     # Build update list — all scoring in Python, then parallel DB writes
     updates = []
     for sub in subs:
-        for _sf in ("answers", "teacher_feedback"):
-            _sv = sub.get(_sf)
-            if isinstance(_sv, str):
-                try: sub[_sf] = json.loads(_sv)
-                except (json.JSONDecodeError, TypeError): sub[_sf] = {}
-        answers = sub.get("answers") or {}
-        earned, _graded = earned_points(question_types, answer_key, answers,
-                                       question_weights, total_q,
-                                       exam.get("question_scoring"))
-        fb = sub.get("teacher_feedback") or {}
-        fb_scores = fb.get("scores", {}) or {}
-        for qi, sv in fb_scores.items():
-            if sv is not None and sv != "":
-                ew = float(question_weights.get(str(qi), 0))
-                if ew > 0:
-                    earned += float(sv) / 100.0 * ew
-        final = round(min(earned, 100), 2)
-        penalty = float(sub.get("penalty") or 0)
-        final = max(0, round(final - penalty, 2))
-        # The stored objective score, by the same one rule every other writer uses
-        # (`question_types.objective_result`): a percentage of the paper's
-        # objective questions, with an unkeyed question scored wrong. The number
-        # here is the one this function has always written
-        # (`correct / objective questions`); what changed is that the routes which
-        # divided by the *keyed* count now agree with it instead of paying a pupil
-        # 100 for a two-tenths-marked paper.
-        objective = objective_result(question_types, answer_key, answers, total_q,
-                                     exam.get("question_scoring"))
-        updates.append((sub["id"], objective.score, final))
+        final, score = exam_scoring.rescore(sub, parts=parts)
+        updates.append((sub["id"], score, final))
     # Parallel DB updates — 300 subs / 20 threads ≈ 3s instead of 60s serial
     def _update_one(item):
         sub_id, sc, fs = item
@@ -636,6 +608,18 @@ def _partial_answer_key(exam: dict) -> bool:
     return bool(gap) and gap["keyed"] > 0
 
 
+def _has_ambiguous_key(exam: dict) -> bool:
+    """Does this exam hold a single-answer question whose key names several letters?
+
+    The old-data state: legal before this app had the multiple-answer exception, and
+    the grader read such a key as *any of these* — so the question silently asked for
+    one of several. `question_types.ambiguous_choice_keys` is the same selection the
+    review panel lists, so a paper cannot be flagged on one page and invisible on the
+    other.
+    """
+    return bool(_ambiguous_questions(_json_fields(dict(exam))))
+
+
 def _needs_class_assignment(exam: dict) -> bool:
     """Is this exam invisible to every pupil because no class was picked?
 
@@ -709,6 +693,9 @@ def dashboard():
     # Both warnings are computed inside `if exam_ids`, so they need a default for
     # the teacher who has no exams yet — the template reads them unconditionally.
     exams_unassigned = []
+    # Read unconditionally by the template, like the two warnings above — computed
+    # inside `if exam_ids`, so the teacher with no exams yet needs a default.
+    exams_ambiguous_key = []
     # Assigned inside `if exam_ids` below, but the class-analytics section always
     # reads it — a teacher with zero exams got UnboundLocalError (500) otherwise.
     subs = []
@@ -770,6 +757,10 @@ def dashboard():
         partial_key_ceiling = int(ceiling) if float(ceiling).is_integer() else ceiling
         # Live exams that reach nobody: no class ticked, so no pupil can see them.
         exams_unassigned = [e for e in exams if _needs_class_assignment(e)]
+        # Papers carrying the old two-letter key on a one-answer question. It is not
+        # a mark that is wrong — it is a mark that could be read two ways, and only
+        # the owner can say which one was meant.
+        exams_ambiguous_key = [e for e in exams if _has_ambiguous_key(e)]
 
     # ── Class Analytics ──
     # Per-exam performance breakdown (sorted by avg — hardest first)
@@ -830,6 +821,7 @@ def dashboard():
         "exams_no_key": exams_no_key, "exams_partial_key": exams_partial_key,
         "partial_key_ceiling": partial_key_ceiling,
         "exams_unassigned": exams_unassigned,
+        "exams_ambiguous_key": exams_ambiguous_key,
         "pending_grading": pending_grading, "upcoming_exams": upcoming_exams,
         "grading_progress": grading_progress,
         "exam_stats": exam_stats[:6],
@@ -1145,13 +1137,14 @@ def _builder_defaults(supabase, teacher_id, subjects, classes) -> dict:
     and a remembered value is a fact about *this teacher's own* work rather than a
     school-wide guess — so it is pre-filled like the sole subject/class, and the
     page marks it `otomatis` and clears the mark the moment the teacher touches the
-    field. An earlier version of this helper dropped the memory and always answered
-    60; the loss was real and one-sided, because the value is visible, editable and
-    labelled, while the constant cost every teacher with a fixed paper length a
-    retype on every paper. The one thing that is deliberately **not** inherited is
-    `0` — Unlimited is a choice made about *one* paper, and carrying it into the
-    next would open a paper with no duration at all, which is the single state the
-    timing pipeline cannot enforce.
+    field (see `test_exam_builder_defaults.py`). An earlier version of this helper
+    dropped the memory and always answered 60. But the loss was real and one-sided:
+    the value is visible, editable and labelled, so the teacher is never misled,
+    while the constant cost every teacher with a fixed paper length a retype on every
+    paper. The one thing that is deliberately **not** inherited is `0` — Unlimited is
+    a choice made about *one* paper, and carrying it into the next would open a paper
+    with no duration at all, which is the single state the timing pipeline cannot
+    enforce.
 
     The read is scoped to this teacher and ordered, because the memory is a claim
     about *their* work: an unscoped read would pre-fill from another teacher's
@@ -1240,6 +1233,7 @@ def exam_form():
         return render_template("teacher/exam_form.html", exam=None, subjects=subjects, classes=classes,
                                classes_by_subject=classes_by_subject,
                                grade_components=_grade_components_by_subject(supabase, sid),
+                               option_letters=list(CHOICE_OPTIONS),
                                builder_defaults=_builder_defaults(supabase, g.user_id, subjects, classes))
 
     # ── the builder's background save ─────────────────────────────────────────
@@ -1318,7 +1312,11 @@ def exam_form():
     question_weights = _apply_mark_scheme(question_types, total_questions, question_weights)
     question_audio = {}
     question_canvas = {}
-    anti_cheat_enabled = True
+    # A paper is *born* monitored — the safe default — and the switch is not this
+    # form's to make: `exams.anti_cheat_enabled` is the school's own flag and the
+    # builder offers no control for it. The edit door below preserves whatever the
+    # row already holds rather than writing this default back over it.
+    anti_cheat_enabled = True   # the school switches a paper off, not this form
     penalty_per_violation = int(request.form.get("penalty_per_violation", 5))
     max_violations = int(request.form.get("max_violations", 5))
     auto_submit_on_max = request.form.get("auto_submit_on_max") == "true"
@@ -1444,6 +1442,12 @@ def exam_form():
     if autosave:
         return jsonify({"ok": True, "exam_id": exam_id})
     _sync_exam_targets(supabase, exam_id, class_ids, request.form)
+    # The paper is now filed under a component; if the subject does not weight it,
+    # say so while the teacher is still looking at the choice. Silent in the
+    # non-gap cases (uncategorised, no policy) — see `_flash_weight_gap`.
+    _flash_weight_gap(grade_weighting.paper_weight_gap(
+        supabase, g.get("user_school_id"), subject_id, grade_component_id,
+        active_year_id))
     # Handle PDF upload inline
     pdf_file = request.files.get("pdf")
     if pdf_file and pdf_file.filename:
@@ -1610,10 +1614,21 @@ def exam_detail(exam_id):
         # rather than resetting to "everyone ticked" (which would silently undo an
         # exclusion the teacher made).
         saved_targets = exam_targets.targets_for_exam(supabase, exam_id)
+        # The paper's own year decides its weights (a mark already reported was
+        # decided by the weights in force then), so read the stored year first and
+        # fall back to the running one. The banner keeps the loss visible after
+        # the save-time flash is gone.
+        component_gap = grade_weighting.paper_weight_gap(
+            supabase, sid, exam_data.get("subject_id"),
+            exam_data.get("grade_component_type_id"),
+            exam_data.get("school_year_id")
+            or (ta_service.active_school_year(supabase, sid) or {}).get("id"))
         return render_template("teacher/exam_form.html", exam=exam_data, subjects=subjects, classes=classes,
                                classes_by_subject=classes_by_subject,
                                saved_targets=saved_targets,
+                               component_gap=component_gap,
                                grade_components=_grade_components_by_subject(supabase, sid),
+                               option_letters=list(CHOICE_OPTIONS),
                                builder_defaults=_builder_defaults(supabase, g.user_id, subjects, classes))
 
     # ── the builder's background save ─────────────────────────────────────────
@@ -1692,7 +1707,14 @@ def exam_detail(exam_id):
     question_weights = _apply_mark_scheme(question_types, total_questions, question_weights)
     question_audio = {}
     question_canvas = {}
-    anti_cheat_enabled = True
+    # The school's own switch, **preserved** rather than re-armed. This used to be
+    # hard-coded `True`, and the form posted a matching hidden `value="true"` — so a
+    # paper the school had switched off came back monitored at the next save, while
+    # the card on this page read "Always on". Nothing this form posts may decide it:
+    # the stored value travels through, and `anti_cheat_service.enabled` is the one
+    # reader of it — the log, the ladder, the count and the resume lock all ask it.
+    from app.services.anti_cheat_service import enabled as anti_cheat_on
+    anti_cheat_enabled = anti_cheat_on(exam_row)
     penalty_per_violation = int(request.form.get("penalty_per_violation", 5))
     max_violations = int(request.form.get("max_violations", 5))
     auto_submit_on_max = request.form.get("auto_submit_on_max") == "true"
@@ -1800,6 +1822,11 @@ def exam_detail(exam_id):
     if autosave:
         return jsonify({"ok": True, "exam_id": exam_id})
     _sync_exam_targets(supabase, exam_id, class_ids, request.form)
+    # Same warning as the create door — a save that leaves the paper outside its
+    # subject's weights is not silent, whichever door wrote it.
+    _flash_weight_gap(grade_weighting.paper_weight_gap(
+        supabase, g.get("user_school_id"), subject_id, grade_component_id,
+        active_year_id))
 
     # Process PDF: upload to Supabase, generate page images for student canvas
     pdf_preview = request.form.get("pdf_preview_url", "")
@@ -2025,7 +2052,14 @@ def my_exams():
     # Jinja, so `{% if not exam.class_ids %}` would miss exactly the empty case it
     # is there to catch.
     unassigned_ids = {e["id"] for e in exams if _needs_class_assignment(e)}
-    return render_template("teacher/exams.html", exams=exams, unassigned_ids=unassigned_ids)
+    # Which cards get the "two-letter key" badge, and the way into the review panel.
+    # Computed here for the same reason as the set above: the review panel has to be
+    # reachable from the page a teacher is already looking at, not only from a URL
+    # nobody told them about.
+    ambiguous_ids = {e["id"] for e in exams if _has_ambiguous_key(e)}
+    return render_template("teacher/exams.html", exams=exams,
+                           unassigned_ids=unassigned_ids,
+                           ambiguous_ids=ambiguous_ids)
 
 
 #: The three sizes a paper is checked at, and each one's two orientations. A real
@@ -2310,22 +2344,50 @@ def answer_keys(exam_id):
         # letter here destroyed a key the builder had set. Merge instead, and keep
         # what the form did not have a control for.
         merged = dict(stored)
+        # A question that takes one answer cannot hold two. This page's own control
+        # is a radio for such a question, so a set here means a hand-made request or
+        # a page loaded before the question's type changed — and writing it would
+        # re-create the very ambiguity the exception exists to remove. Refuse it,
+        # name the question, and point at the two honest ways out rather than
+        # trimming a letter the teacher did not ask to drop.
+        refused = []
         for k, v in answer_key.items():
             qtype = qtypes.get(str(k))
             if is_objective(qtype) and question_kind(qtype) != KIND_CHOICE:
                 continue
+            if choice_mode(qtype) == CHOICE_MODE_SINGLE and len(answer_letters(v)) > 1:
+                refused.append(int(k) + 1 if str(k).isdigit() else k)
+                continue
             merged[str(k)] = normalise_key(qtype, v)
         answer_key = merged
-        supabase.table("exams").update({"answer_key": json.dumps(answer_key)}).eq("id", exam_id).execute()
-        # Recalculate scores
-        try:
-            from app.routes.teacher import _recalculate_scores
-            _recalculate_scores(exam_id)
-        except Exception:
-            pass
-        # The dashboard's warning is about this key, and that page is cached.
-        _invalidate_teacher_dashboard()
-        flash("Kunci jawaban berhasil disimpan & nilai diperbarui!", "success")
+        # A save that changes nothing writes nothing. The page posts only the
+        # questions a teacher actually edited, so an untouched form arrives with
+        # an empty payload, `merged` comes out equal to what is stored, and this
+        # becomes a read. Without the guard, opening the page and clicking Save
+        # would rewrite the key and re-grade every submission for no change —
+        # the load that a 1 vCPU box feels most during a run of papers.
+        if answer_key != stored:
+            supabase.table("exams").update({"answer_key": json.dumps(answer_key)}).eq("id", exam_id).execute()
+            # Recalculate scores
+            try:
+                from app.routes.teacher import _recalculate_scores
+                _recalculate_scores(exam_id)
+            except Exception:
+                pass
+            # The dashboard's warning is about this key, and that page is cached.
+            _invalidate_teacher_dashboard()
+            flash("Kunci jawaban berhasil disimpan & nilai diperbarui!", "success")
+        else:
+            flash("Tidak ada perubahan pada kunci jawaban.", "success")
+        if refused:
+            flash(
+                "Soal " + ", ".join(str(i) for i in refused)
+                + " hanya menerima satu jawaban, jadi kunci berisi beberapa huruf tidak "
+                "disimpan. Pilih satu huruf saja, atau aktifkan pengecualian \"lebih dari "
+                "satu jawaban benar\" lewat Tinjau Kunci Ganda bila soal itu memang punya "
+                "beberapa jawaban.",
+                "error",
+            )
         return redirect(f"/teacher/exams/{exam_id}/answer-keys")
 
     # GET: build question list from question_types
@@ -2346,9 +2408,185 @@ def answer_keys(exam_id):
             "key": k,
             "is_bonus": k == "bonus",
             "is_multi": isinstance(k, list),
+            # Which control this question gets, and whether its stored key disagrees
+            # with it. The mode comes from the *type*, never from the stored value —
+            # a single-answer question whose key happens to hold two letters must
+            # still be shown as a radio, because that is the question the paper asks.
+            "mode": choice_mode(qtype),
+            "drift": key_mode_drift(qtype, k),
+            # What the stored key *is* for this question: readable, nothing, or
+            # something this question can no longer read (a structural edit left
+            # it behind). The page seeds a stale key empty and warns, rather than
+            # showing it as a key or quietly deleting it.
+            "key_state": key_state(qtype, k),
+            "is_stale": key_state(qtype, k) == KEY_STALE,
         })
 
-    return render_template("teacher/answer_keys.html", exam=exam, questions=questions)
+    return render_template("teacher/answer_keys.html", exam=exam, questions=questions,
+                           option_letters=list(CHOICE_OPTIONS))
+
+
+#: The two resolutions a single-answer question with a multi-letter key can be
+#: taken to. Named here so the GET that prints them and the POST that accepts one
+#: cannot disagree about the spelling of an action.
+RESOLUTION_ALLOW_MULTI = "multi"
+RESOLUTION_SINGLE = "single"
+
+
+def _ambiguous_questions(exam: dict) -> list[int]:
+    """The indices of this exam's single-answer questions holding more than one letter.
+
+    Thin on purpose: the selection is `question_types.ambiguous_choice_keys`, the
+    same function the dashboard card counts with, so a question cannot be flagged on
+    one page and invisible on the other.
+    """
+    return ambiguous_choice_keys(exam.get("question_types"), exam.get("answer_key"))
+
+
+def _teacher_exams_for_review(supabase):
+    """The teacher's own papers (or the school's, for an admin) and nothing else.
+
+    The same scoping the exams list uses — one place, so the review panel cannot
+    become a window onto somebody else's keys.
+    """
+    columns = "id,title,subject,question_types,answer_key,total_questions,created_at"
+    if g.get("user_role") == "admin_sekolah" and g.get("user_school_id"):
+        query = supabase.table("exams").select(columns).eq("school_id", g.get("user_school_id"))
+    else:
+        query = supabase.table("exams").select(columns).eq("teacher_id", g.user_id)
+    return query.order("created_at", desc=True).execute().data or []
+
+
+@teacher_bp.route("/answer-key-review")
+@teacher_or_admin_required
+def answer_key_review():
+    """The old-data panel: which of my papers have a two-letter key on a one-answer question.
+
+    This state could only be produced before the exception existed — a key that told
+    the grader "one of these" on a question that says "pick one" — and it is not
+    repaired automatically, because the stored key cannot say whether the paper meant
+    "all of these" or one of them. Only the owner can. So the panel's job is to find
+    them and name them, and to leave the decision where it belongs.
+    """
+    supabase = get_supabase()
+    rows = []
+    for exam in _teacher_exams_for_review(supabase):
+        indices = _ambiguous_questions(exam)
+        if indices:
+            rows.append({"exam": exam, "indices": indices})
+    return render_template("teacher/answer_key_review.html", rows=rows, detail=None)
+
+
+@teacher_bp.route("/answer-key-review/<exam_id>")
+@teacher_or_admin_required
+def answer_key_review_exam(exam_id):
+    """One paper's ambiguous questions, each with what every resolution would cost.
+
+    The number a teacher is deciding on is \"who moves, and by how far\", so it is
+    computed *before* the save, by `exam_scoring` — the same arithmetic the save then
+    writes with. A preview that computed a mark its own way would be a second opinion
+    about the teacher's own paper.
+    """
+    supabase = get_supabase()
+    exam, err = _guard_exam(supabase, exam_id, columns="*")
+    if err:
+        return err
+    _json_fields(exam)
+    parts = exam_scoring.exam_parts(exam)
+    subs = exam_scoring.load_marked(supabase, exam_id)
+    questions = []
+    for index in _ambiguous_questions(exam):
+        key = str(index)
+        stored = parts.answer_key.get(key)
+        letters = sorted(answer_letters(stored))
+        resolutions = []
+        # Keeping every letter means the question has to *become* the exception:
+        # under the single-answer rule the grader reads a list as "any of these",
+        # which is not what the teacher is being asked to confirm.
+        types, keys = exam_scoring.after_edit(parts, index, MCQ_MULTI, stored)
+        resolutions.append({
+            "kind": RESOLUTION_ALLOW_MULTI,
+            "keep": stored,
+            "impact": exam_scoring.key_change_impact(
+                subs, parts=parts, question_types=types, answer_key=keys),
+        })
+        for letter in letters:
+            _types, keys = exam_scoring.after_edit(parts, index, MCQ, letter)
+            resolutions.append({
+                "kind": RESOLUTION_SINGLE,
+                "keep": letter,
+                "impact": exam_scoring.key_change_impact(
+                    subs, parts=parts, question_types=_types, answer_key=keys),
+            })
+        questions.append({"index": index, "stored": stored, "letters": letters,
+                          "resolutions": resolutions})
+    detail = {"exam": exam, "questions": questions, "attempts": len(subs)}
+    return render_template("teacher/answer_key_review.html", rows=[], detail=detail)
+
+
+@teacher_bp.route("/answer-key-review/<exam_id>/apply", methods=["POST"])
+@teacher_or_admin_required
+@open_year_required("exam_id")
+def answer_key_review_apply(exam_id):
+    """Write one resolution, and rewrite marks only if asked — in the same breath.
+
+    The key (or the type) is written by this request; the marks are not. Those are
+    two decisions with different costs: keeping a key changes what the paper *means*
+    from here on, while recomputing changes numbers already handed to pupils. So the
+    recompute is a separate, explicit tick — offered beside the impact it would have,
+    never taken on the teacher's behalf — and each one it is taken for is recorded.
+    """
+    supabase = get_supabase()
+    exam, err = _guard_exam(supabase, exam_id, columns="*")
+    if err:
+        return err
+    _json_fields(exam)
+    qtypes = dict(exam.get("question_types") or {})
+    stored = dict(exam.get("answer_key") or {})
+    index = str(request.form.get("index") or "")
+    resolution = request.form.get("resolution") or ""
+    # The question has to still be in the state this panel exists for. Between the
+    # page load and this request another tab may have resolved it, and applying a
+    # resolution to a question that no longer needs one would write a type or a key
+    # nobody asked to change.
+    if index not in qtypes or key_mode_drift(qtypes.get(index), stored.get(index)) != KEY_MODE_LOST:
+        flash("Soal itu tidak lagi memiliki kunci ganda.", "error")
+        return redirect(f"/teacher/answer-key-review/{exam_id}")
+    letters = sorted(answer_letters(stored.get(index)))
+    old_value = stored.get(index)
+    old_type = qtypes.get(index)
+    if resolution == RESOLUTION_ALLOW_MULTI:
+        qtypes[index] = MCQ_MULTI
+        kept = old_value
+    elif resolution == RESOLUTION_SINGLE:
+        kept = str(request.form.get("key") or "").strip().upper()
+        if kept not in letters:
+            flash("Pilih salah satu huruf yang ada di kunci lama.", "error")
+            return redirect(f"/teacher/answer-key-review/{exam_id}")
+        stored[index] = kept
+    else:
+        flash("Penyelesaian itu tidak dikenal.", "error")
+        return redirect(f"/teacher/answer-key-review/{exam_id}")
+    supabase.table("exams").update({
+        "question_types": json.dumps(qtypes),
+        "answer_key": json.dumps(stored),
+    }).eq("id", exam_id).execute()
+    log_activity("resolve_ambiguous_key", "exam", exam_id,
+                 old_data={"index": index, "question_type": old_type, "answer_key": old_value},
+                 new_data={"index": index, "question_type": qtypes.get(index),
+                           "answer_key": stored.get(index), "resolution": resolution},
+                 user_id=g.user_id)
+    _invalidate_teacher_dashboard()
+    if request.form.get("recompute") == "1":
+        _recalculate_scores(exam_id)
+        log_activity("recompute", "exam", exam_id,
+                     new_data={"index": index, "reason": "resolve_ambiguous_key"},
+                     user_id=g.user_id)
+        flash("Kunci diperbarui dan skor murid dihitung ulang.", "success")
+    else:
+        flash("Kunci diperbarui. Skor murid belum diubah — buka panel ini lagi bila "
+              "ingin menghitung ulang dengan pratinjau dampaknya.", "success")
+    return redirect(f"/teacher/answer-key-review/{exam_id}")
 
 
 @teacher_bp.route("/scan")
@@ -4801,6 +5039,28 @@ def _resolve_grade_component(supabase, school_id, raw):
     return cid if cid in grade_weighting.component_ids(supabase, school_id) else None
 
 
+def _flash_weight_gap(gap):
+    """Warn the teacher that a paper they filed misses the weighted final mark.
+
+    A paper whose component the subject does not weight is counted in `untagged`
+    by :func:`grade_weighting.compute` — it contributes nothing. Saving is the
+    moment the teacher is standing in front of the decision, so the warning names
+    both the component filed and a component that *would* count, not just that
+    something is wrong. Silence is the whole point in the three non-gap cases
+    (uncategorised, no policy, foreign component), which is why this reads
+    :func:`grade_weighting.paper_weight_gap` rather than re-deriving the rule.
+    """
+    if not gap:
+        return
+    counts = ", ".join(gap.get("weighted") or []) or "-"
+    flash(
+        f"Ujian ini terdaftar di komponen '{gap.get('name')}' yang tidak diberi "
+        f"bobot mapel ini, jadi tidak dihitung di Nilai Akhir. Komponen yang "
+        f"dihitung: {counts}.",
+        "warning",
+    )
+
+
 def _grade_components_by_subject(supabase, school_id):
     """``{subject_id: [components]}`` for a school's whole weight policy.
 
@@ -5664,6 +5924,12 @@ def invigilation_duties():
         return redirect(login_door_for(g.get("user_role"), request.path))
     supabase = get_supabase()
     board = invigilation.teacher_board(supabase, school_id, g.user_id)
+    # The matrix cells that name this teacher — the *rooms* they stand in, which
+    # the schedule service does not know about. Read here so the one duty page a
+    # teacher opens shows both kinds of duty; the two are rendered as separate
+    # lists because one is a sitting of a class and the other is a slot in a room.
+    matrix_duties = invigilation_matrix.duties_for_teacher(supabase, school_id,
+                                                           g.user_id)
     # The pupil's recovery code, for the sittings this teacher holds — so an
     # invigilator asked to let a locked pupil back in has the number to compare
     # against rather than reading it off the pupil's screen. Read-only.
@@ -5674,6 +5940,7 @@ def invigilation_duties():
     timelines = attempt_timeline.for_exam(supabase, school_id, held)
     return render_template("teacher/invigilation.html",
                            tasks=board["tasks"],
+                           matrix_duties=matrix_duties,
                            requests=board["pending_requests"],
                            codes=codes,
                            timelines=timelines)

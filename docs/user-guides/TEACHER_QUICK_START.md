@@ -59,6 +59,40 @@ Klik **Publikasikan** → siswa bisa mulai mengerjakan.
 - **XLSX**: Klik Export → unduh Excel dengan kolom Bahasa Indonesia
 - **PDF**: Export per siswa lengkap dengan jawaban canvas
 
+## 10. Kunci Jawaban: satu atau beberapa jawaban benar
+
+Buka **Ujian Saya → (ujian) → Kunci Jawaban**. Halaman ini mengatur kunci soal pilihan
+ganda, dan sekarang menyesuaikan diri dengan tipe soalnya:
+
+- **Pilihan ganda tunggal (biasa)** — tombol hurufnya seperti radio: memilih satu huruf
+  menggantikan yang lain. Bila soalnya hanya menerima satu jawaban, halaman ini menolak
+  menyimpan kunci berisi dua huruf dan memberi tahu soal nomor berapa.
+- **Soal dengan lebih dari satu jawaban benar** — nyalakan toggle pengecualian di
+  editor ujian (*Izinkan pengecualian: lebih dari satu jawaban benar untuk soal ini*).
+  Nama tipenya tetap **Pilihan Ganda**. Setelah itu halaman kunci jawaban menampilkan
+  kotak centang, dan murid melihat soal itu sebagai kotak centang juga — boleh
+  mencentang lebih dari satu huruf, dan nilainya benar hanya bila ticksnya tepat sama
+  dengan kunci. Bila soal itu sudah tersimpan sebelumnya dan kuncinya baru berisi satu
+  huruf, editor ujian memberi tahu supaya Anda menandai opsi lain yang benar.
+
+Perlu diketahui saat mengubah soal yang sudah punya jawaban: kunci berisi "A + B" pada
+soal satu jawaban dinilai **salah satu saja** (A atau B dianggap benar), sedangkan pada
+soal pengecualian dinilai **tepat A dan B**. Jadi mengaktifkan pengecualian dapat
+menurunkan nilai murid yang hanya memilih salah satu huruf.
+
+**Tinjau Kunci Ganda** (tombol di kanan atas *Ujian Saya*, atau kartu merah di
+dashboard) muncul bila Anda punya soal pilihan ganda tunggal yang kuncinya menandai
+lebih dari satu huruf — kondisi dari sebelum pengecualian ini ada. Untuk tiap soal
+yang ditemukan, panel menampilkan dua pilihan penyelesaian beserta **berapa murid yang
+naik, turun, dan tetap** bila skornya dihitung ulang:
+
+1. **Jadikan pengecualian** — semua huruf yang tertulis tetap benar.
+2. **Jadikan kunci tunggal** — pilih satu huruf saja.
+
+Menyimpan pilihan itu **tidak mengubah nilai murid**. Bila nilainya memang perlu
+dihitung ulang, centang *Hitung ulang skor murid* di baris pilihan yang sama — angka
+dampaknya ada persis di sebelah centang itu. Setiap tindakan tercatat di log audit.
+
 ## Troubleshooting
 
 | Masalah | Solusi |

@@ -40,9 +40,15 @@ import pathlib
 import shutil
 import subprocess
 
+from app.utils import import_safety
+
 #: Where this code was loaded from: the app package's own location, three levels up
-#: from here (`app/utils/build_info.py` → the repository root).
-CODE_ROOT = pathlib.Path(__file__).resolve().parents[2]
+#: from here (`app/utils/build_info.py` → the repository root). Resolved through
+#: `import_safety.resolved`, because `.resolve()` is a probe that raises —
+#: `RuntimeError` on a symlink loop, `OSError` on a link it cannot read — and this
+#: runs at import, in the app *and* in the worker, to answer a question the deploy
+#: gate asks about both. An unresolved path still names the checkout.
+CODE_ROOT = import_safety.resolved(pathlib.Path(__file__)).parents[2]
 
 #: Where the git that answers may be. The deploy service carries the same list for
 #: the same reason: the app runs under a service manager whose `PATH` is not a

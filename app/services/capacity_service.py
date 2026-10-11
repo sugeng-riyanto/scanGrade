@@ -37,9 +37,15 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
+from app.utils import import_safety
+
 logger = logging.getLogger(__name__)
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+#: Resolved through `import_safety.resolved`: `.resolve()` probes the filesystem (an
+#: `lstat`, and a `readlink` per link) and raises on a symlink loop or an unreadable
+#: link — in a module body, that is the app refusing to construct, over a path used to
+#: choose which directory to read measurements from. An unresolved path still names it.
+REPO_ROOT = import_safety.resolved(Path(__file__)).parents[2]
 DEFAULT_MEASUREMENTS = REPO_ROOT / "docs" / "measurements"
 DEFAULT_STATE = Path("/var/lib/scangrade-deploy")
 

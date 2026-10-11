@@ -117,6 +117,11 @@ class TestTheBuildersKeyIsTheGradersKey:
 
     QUESTIONS = [
         {"type": "mcq", "answers": ["A"], "bonus": False},
+        # The exception: the same kind of question, with more than one right letter.
+        # It is here because its key is the one shape the grader reads as a *set*,
+        # and a page that wrote a bare letter for it would mark a correct pupil
+        # wrong without saying anything — which is the failure this test is for.
+        {"type": qt.MCQ_MULTI, "answers": ["A", "C"]},
         {"type": "mcq", "answers": [], "bonus": True},
         {"type": "true_false", "tf": "false"},
         {"type": "match", "pairs": [{"l": "Ibu kota", "r": "Jakarta"}],
@@ -132,10 +137,21 @@ class TestTheBuildersKeyIsTheGradersKey:
         text = source(EXAM_FORM)
         script = "\n".join([
             "const SG_QT = " + json.dumps(qt.vocabulary()) + ";",
-            "globalThis.kindOf = q => SG_QT.kinds[q.type] || SG_QT.kinds[SG_QT.default];",
+            # `keyFor` is a *method* on the Alpine component, and its body reaches
+            # for two more of them: `this.kindOf`, and `this.isMulti` since a choice
+            # question can allow more than one answer (which itself asks
+            # `this.typeFor`). Lifting `keyFor` out alone and calling it bare left
+            # `this` unbound, so the sandbox threw on the first question whose type
+            # had to be asked about — the harness was measuring its own snippet
+            # rather than the page. They are lifted together and called on one
+            # object, which is what the page calls them on.
+            extract_method(text, "kindOf"),
+            extract_method(text, "typeFor"),
+            extract_method(text, "isMulti"),
             extract_method(text, "keyFor"),
+            "const builder = { kindOf, typeFor, isMulti, keyFor };",
             "const qs = " + json.dumps(self.QUESTIONS) + ";",
-            "console.log(JSON.stringify(qs.map(q => keyFor(q))));",
+            "console.log(JSON.stringify(qs.map(q => builder.keyFor(q))));",
         ])
         done = subprocess.run([NODE, "-e", script], capture_output=True, text=True,
                               timeout=60)
@@ -152,7 +168,10 @@ class TestTheBuildersKeyIsTheGradersKey:
                 assert qt.key_has_answer(qtype, key), (
                     f"the page wrote a {qtype} key with no answer in it: {key!r}"
                 )
-                if qtype not in ("mcq", "true_false"):
+                # A choice question carries no material of its own — its control *is*
+                # the letters — so `public_options` answering None is the design, and
+                # that goes for the multi-answer exception for the same reason.
+                if qtype not in ("mcq", qt.MCQ_MULTI, "true_false"):
                     # …and the pupil's page has to be *answerable*: the key is
                     # what `public_options` builds the columns and the chip bank
                     # from, so a key nothing can be answered against is a question

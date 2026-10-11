@@ -158,11 +158,14 @@ def finding_row_id(finding: dict) -> str | None:
 
     One definition, because the page and the batch apply both need it and an OR-chain
     of id fields in two places is how one of them starts reading a field the other
-    stopped writing.
+    stopped writing. The last three ids belong to the kinds with **no repair door
+    yet** (a paper, a sitting, a track — rows that join two schools rather than own
+    one): naming their id is what lets the page say so, instead of showing nothing.
     """
     finding = finding or {}
     return (finding.get("pair_id") or finding.get("assignment_id")
-            or finding.get("pupil_id"))
+            or finding.get("pupil_id") or finding.get("exam_id")
+            or finding.get("submission_id") or finding.get("level_id"))
 
 
 def row_from_finding(finding: dict) -> dict:

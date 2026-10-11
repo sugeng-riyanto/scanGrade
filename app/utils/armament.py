@@ -35,12 +35,18 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+from app.utils import import_safety
+
 #: The deploy greps for this to tell the app's refusal apart from a construct
 #: error. Not a log level, not a return code: the probe is a `python -c` whose
 #: output is the only channel back.
 MARKER = "SCANGRADE-UNARMED"
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+#: Resolved through `import_safety.resolved`: `.resolve()` is a probe (an `lstat`, and
+#: a `readlink` per link) that raises on a symlink loop or an unreadable link, and
+#: this runs in a module body — the import every `python -c` probe of this app does.
+#: An unresolved path still points at the same checkout.
+REPO_ROOT = import_safety.resolved(Path(__file__)).parents[2]
 CHECKER = REPO_ROOT / "deploy" / "arm-auto-deploy.sh"
 
 #: The checker reads the filesystem and a roster; it does no network work. Anything

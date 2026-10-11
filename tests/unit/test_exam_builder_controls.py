@@ -4,7 +4,9 @@ a schedule that survives publishing.
 Five changes were asked for on `/teacher/exams/new`, and each was a real fault:
 
 1. **Duration** was a fixed `<select>` of half-step values, so a teacher could not
-   enter "any number of minutes"; it is now a number input, step 5, default 60.
+   enter "any number of minutes"; it is now a number input, step 5, default 60 —
+   the *app* default, which `_builder_defaults` departs from only to remember this
+   teacher's own last timed paper (guarded in `test_exam_builder_defaults.py`).
 2. **Target Classes** listed every class the teacher was assigned to *any* subject,
    so a class the admin assigned for Physics showed up while building a Maths paper
    — and the write guard then refused the save. The list must follow the admin's
@@ -121,6 +123,9 @@ class TestTheDurationField:
         assert _duration_value(_render_form(app, _exam(duration_minutes=None))) == "0"
 
     def test_the_builder_defaults_to_sixty(self):
+        """Sixty is what the field opens on when there is nothing to remember —
+        never built a paper, or the history read failed. This stub raises on the
+        read, so it pins the *fallback* rather than the absence of a read."""
         from app.routes import teacher as t
 
         class _Sb:
@@ -129,7 +134,7 @@ class TestTheDurationField:
 
         d = t._builder_defaults(_Sb(), "t1", [{"id": "s1"}], [{"id": "c1"}])
         assert d["duration_minutes"] == 60, (
-            "the duration default is not the requested 60 minutes")
+            "the app default for a teacher with nothing to remember is not 60")
 
 
 # ── 2. target classes follow the subject's assignment ───────────────────────

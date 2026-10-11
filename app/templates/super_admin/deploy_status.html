@@ -1848,6 +1848,7 @@
                             {% elif M.key == 'absent' %}<span x-text="t('Tidak ada','None')"></span>
                             {% elif M.key == 'unreadable' %}<span class="text-amber-700" x-text="t('Ada dan tidak bisa dibaca','Present and unreadable')"></span>{% if M.reason %} <code class="font-mono text-surface-500">{{ M.reason }}</code>{% endif %}
                             {% elif M.key == 'malformed' %}<span class="text-amber-700" x-text="t('Ada dan isinya bukan rekaman','Present and not a record')"></span>{% if M.reason %} <code class="font-mono text-surface-500">{{ M.reason }}</code>{% endif %}
+                            {% elif M.key == 'unavailable' %}<span class="text-surface-500" x-text="t('Tidak ada tempat menyimpannya: direktori sementara kotak ini tidak bisa dipakai, jadi penanda lintas-worker tidak bisa ditulis maupun dibaca.','Nowhere to keep it: this appliance has no usable temp directory, so the cross-worker marker can be neither written nor read.')"></span>{% if M.reason %} <code class="font-mono text-surface-500">{{ M.reason }}</code>{% endif %}
                             {% else %}<span class="text-surface-500" x-text="t('Tidak terbaca','Unreadable')"></span>{% endif %}
                         </span>
                     </div>
@@ -1893,6 +1894,7 @@
                 </div>
                 <p class="text-sm mt-1 leading-relaxed {{ ARC.text }}">
                     {% if AR.key == 'clean' %}<span x-text="t('Tidak ada percobaan ulang yang tercatat: pembuatan akun mendarat pada percobaan pertama, jadi server akun (GoTrue) tidak sedang tersendat.','Nothing on record: account creates are landing on the first try, so the auth server (GoTrue) is not hiccupping.')"></span>
+                    {% elif AR.key == 'unavailable' %}<span x-text="t('Tidak ada tempat menyimpan penanda di kotak ini, jadi angka di bawah hanya milik worker ini: pemeriksaan lintas-worker tidak bisa dilakukan, dan ini bukan berarti sehat.','There is nowhere on this appliance to keep the marker, so the counts below cover this worker only: no cross-worker check could be made, and this is not a clean bill.')"></span>
                     {% else %}<span x-text="t('Setidaknya satu pembuatan akun memerlukan percobaan ulang karena GoTrue menjawab galat basis data yang bersifat sementara. Sekolah hanya melihat keberhasilannya — kotak ini yang menyimpan buktinya. Bila angka ini terus bertambah, periksa kesehatan GoTrue/Postgres di kotak itu sebelum ada sekolah yang melapor.','At least one account create needed a retry because GoTrue answered a transient database error. The school only saw the success — this box kept the evidence. If this number keeps rising, check GoTrue/Postgres on the box before a school reports it.')"></span>{% endif %}
                 </p>
 
@@ -1930,6 +1932,7 @@
                             {% elif AM.key == 'absent' %}<span x-text="t('Tidak ada','None')"></span>
                             {% elif AM.key == 'unreadable' %}<span class="text-amber-700" x-text="t('Ada dan tidak bisa dibaca','Present and unreadable')"></span>{% if AM.reason %} <code class="font-mono text-surface-500">{{ AM.reason }}</code>{% endif %}
                             {% elif AM.key == 'malformed' %}<span class="text-amber-700" x-text="t('Ada dan isinya bukan rekaman','Present and not a record')"></span>{% if AM.reason %} <code class="font-mono text-surface-500">{{ AM.reason }}</code>{% endif %}
+                            {% elif AM.key == 'unavailable' %}<span class="text-surface-500" x-text="t('Tidak ada tempat menyimpannya: direktori sementara kotak ini tidak bisa dipakai, jadi penanda lintas-worker tidak bisa ditulis maupun dibaca.','Nowhere to keep it: this appliance has no usable temp directory, so the cross-worker marker can be neither written nor read.')"></span>{% if AM.reason %} <code class="font-mono text-surface-500">{{ AM.reason }}</code>{% endif %}
                             {% else %}<span class="text-surface-500" x-text="t('Tidak terbaca','Unreadable')"></span>{% endif %}
                         </span>
                     </div>

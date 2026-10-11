@@ -17,11 +17,19 @@ Two complaints, one page:
   this page that paints a light background must either be repainted for the dark
   theme or be one of the surfaces that is deliberately light in both.
 
-The exception is the interesting part. The drawing surfaces stay light on
-purpose — an answer canvas is paper, the ink on it is dark, and a dark sheet would
-hide the answer (the same reasoning that keeps the OMR mockup light). What has to
-follow the theme there is the *type*: without pinning it, the `<textarea>` on the
-paper inherited the dark theme's light text and painted white on white.
+The exception is the interesting part, and it is a *token* rather than a literal
+now. The drawing surfaces stay light on purpose — an answer canvas is paper, the ink
+on it is dark, and a dark sheet would hide the answer (the same reasoning that keeps
+the OMR mockup light). What has to follow the theme there is the *type*: the
+`<textarea>` on the paper reads `--paper-ink`, without which it inherited the dark
+theme's light text and painted white on white.
+
+`tests/unit/test_theme_literals.py` owns the token half of that — it measures the
+pair in both themes and sweeps the literals out of every page that draws a paper.
+The checks here own the page: that it reads the token, and that it does so in a rule
+serving both themes at once. That is what the sweep bought — the `.dark` block shrank
+to the few neutrals the two themes genuinely do not share (a border that steps up a
+shade, a hover whose light value is a warm tint), instead of restating every control.
 """
 from __future__ import annotations
 
@@ -30,19 +38,25 @@ from pathlib import Path
 
 EXAM_PAGE = Path(__file__).resolve().parents[2] / "app" / "templates" / "student" / "take_exam.html"
 
-#: Surfaces that are *paper* rather than chrome, or that are the accent colour in
-#: both themes. Each is a decision, not an oversight: a drawing sheet must stay
-#: light because the ink is dark, and an orange active state is the same orange
-#: in either theme.
-DELIBERATELY_LIGHT = {
-    ".math-tools-toggle.active",       # the accent, identical in both themes
-    ".opt-btn.selected",               # the accent
-    ".draw-toolbar button.active",     # the accent
-    ".text-box .box-handle",           # the accent
-    ".full-canvas-wrap",               # paper: the ink is dark
-    ".text-box textarea",              # paper: the ink is dark (colour is pinned)
-    ".text-box textarea:focus",        # the same box, focused
-}
+#: The rules that paint a control from the theme's own tokens, one declaration
+#: serving both themes. Asserted so the sweep cannot be undone by moving a colour
+#: back into the `.dark` block — or by deleting the rule, which would make the
+#: literal check pass by looking at nothing.
+TOKEN_RULES = (
+    (".exam-qcol", "var(--bg-card)"),
+    (".math-tools-toggle", "var(--bg-card)"),
+    (".draw-toolbar button", "var(--bg-card)"),
+    (".draw-toolbar button:hover", "var(--bg-hover)"),
+    (".full-canvas-wrap", "var(--paper)"),
+    (".text-box textarea", "var(--paper)"),
+)
+
+#: The two rules that were on the old `DELIBERATELY_LIGHT` list and are not any
+#: more, because the sweep removed the need for the list at all: the paper reads
+#: `--paper` rather than a literal, so nothing here has to excuse it. The set's
+#: other entries were the accent fills, which `LIGHT_BG` never matched — they were
+#: dead weight in a list whose whole job is to be argued for, so they are gone.
+PAPER_RULES = (".full-canvas-wrap", ".text-box textarea", ".text-box textarea:focus")
 
 RULE = re.compile(r"([^{}]+)\{([^{}]*)\}", re.S)
 LIGHT_BG = re.compile(
@@ -84,6 +98,15 @@ def dark_selectors(css: str) -> set[str]:
             for sel, _ in rules(css) if sel.startswith(".dark ")}
 
 
+def declarations(css: str, selector: str) -> str:
+    """Every declaration body for one selector, across every rule that names it.
+
+    `.exam-qcol` sets a width in one rule and a background in another, so reading
+    only the first rule would miss the declaration being looked for.
+    """
+    return " ".join(body for sel, body in rules(css) if sel == selector)
+
+
 # ── the tablet range ─────────────────────────────────────────────────────────
 
 class TestTheTabletRangeIsItsOwn:
@@ -114,9 +137,15 @@ class TestTheTabletRangeIsItsOwn:
 # ── dark mode ────────────────────────────────────────────────────────────────
 
 class TestNoLightOnlyControlSurvivesDarkMode:
-    def test_every_light_background_is_repainted_or_deliberate(self):
-        """The general guard: a new white box on this page fails here unless it is
-        repainted for the dark theme or added to the short, explained list."""
+    def test_every_light_background_is_repainted_or_tokenised(self):
+        """The general guard: a new pale box on this page fails here unless it is
+        repainted for the dark theme.
+
+        Since the sweep most rules need neither — they name the token in their base
+        rule, which is why the `.dark` block is down to a few neutrals — so what is
+        left for this to catch is a rule that spies a pale *literal* and has no dark
+        counterpart (a tint, a wash).
+        """
         css = style_block()
         repainted = dark_selectors(css)
         offenders = []
@@ -127,48 +156,65 @@ class TestNoLightOnlyControlSurvivesDarkMode:
             if selector.startswith(".dark "):
                 continue
             plain = selector.replace(".dark ", "")
-            if plain in DELIBERATELY_LIGHT:
-                continue
-            if any(part.strip() in repainted or part.strip() in DELIBERATELY_LIGHT
-                   for part in selector.split(",")):
+            if any(part.strip() in repainted for part in selector.split(",")):
                 continue
             if plain in repainted:
                 continue
             offenders.append(selector)
         assert not offenders, (
             "these rules paint a light background and are not repainted for the "
-            "dark theme, so their text is the theme's own light colour on white:\n"
+            "dark theme, so their text is the theme's own light colour on white. "
+            "Read a token (`var(--bg-card)`, `var(--bg-hover)`, `var(--bg-subtle)`) "
+            "instead, and the two themes are served by one declaration:\n"
             + "\n".join(f"  {o}" for o in offenders))
 
-    def test_the_chrome_is_repainted_from_the_tokens(self):
+    def test_the_chrome_is_painted_from_the_tokens(self):
+        """One declaration per control, for both themes.
+
+        This replaced an assertion that a `.dark` rule repeats the token its base
+        rule already names — which was an assertion that the theme has two places to
+        keep in step, and that is precisely what the sweep removed.
+        """
         css = style_block()
-        for selector, token in (
-            (".dark .math-tools-toggle", "var(--bg-card)"),
-            (".dark .draw-toolbar button", "var(--bg-card)"),
-            (".dark .opt-btn:not(.selected):hover", "var(--bg-hover)"),
-            (".dark .exam-qcol", "var(--bg-card)"),
-            (".dark .pdf-container", "var(--bg-subtle)"),
-        ):
-            rule = next((body for sel, body in rules(css) if sel == selector), None)
-            assert rule is not None, f"{selector} is missing"
-            assert token in rule, (
-                f"{selector} is repainted from a colour of its own instead of the "
-                f"theme token {token}")
+        for selector, token in TOKEN_RULES:
+            body = declarations(css, selector)
+            assert body, f"{selector} is missing — was the rule deleted?"
+            assert token in body, (
+                f"{selector} is painted from a colour of its own instead of the "
+                f"theme token {token}: {body!r}")
+
+    def test_the_dark_block_keeps_only_what_the_themes_do_not_share(self):
+        """A rule left in `.dark` still has to name a token.
+
+        The block is the page's one theme-specific region, so a literal is exactly
+        what may not be hiding in it.
+        """
+        css = style_block()
+        for selector, body in rules(css):
+            if not selector.startswith(".dark "):
+                continue
+            assert "var(" in body, (
+                f"{selector} repaints with a literal rather than a token: {body!r}")
 
     def test_the_paper_stays_paper_and_its_ink_is_pinned(self):
-        """The deliberate exception, asserted so it cannot be 'fixed' by mistake:
-        the drawing sheet keeps its light background, and the type on it is
-        pinned dark rather than following the theme's light `--text`."""
+        """The deliberate exception, asserted so it cannot be 'fixed' by mistake.
+
+        The drawing sheet is the one surface that stays *light in both themes* — the
+        ink on it is dark, so a dark sheet would hide the answer — and it is a token
+        now rather than a literal, which is what makes it measurable:
+        `tests/unit/test_theme_literals.py` holds `--paper-ink` to AAA on `--paper` in
+        both themes and holds `--paper` to being light in both. This checks the page
+        reads it, and reads it for the type on the sheet too.
+        """
         css = style_block()
-        sheet = next((body for sel, body in rules(css) if sel == ".dark .full-canvas-wrap"),
-                     None)
-        assert sheet is not None, "the drawing sheet has no dark-mode rule"
-        assert LIGHT_BG.search(sheet), (
-            "the drawing sheet was inverted — the dark ink drawn on it would be "
-            "invisible")
-        box = next((body for sel, body in rules(css) if sel == ".dark .text-box textarea"),
-                   None)
-        assert box is not None, "the text box has no dark-mode rule"
-        assert re.search(r"color\s*:\s*#1[0-9a-f]{5}", box, re.I), (
-            "the text box on the paper follows the theme's text colour, so it is "
-            "white text on white paper in dark mode")
+        for selector in PAPER_RULES:
+            body = declarations(css, selector)
+            assert body, f"{selector} is missing — was the rule deleted?"
+            assert "var(--paper)" in body, (
+                f"{selector} does not take the sheet from --paper, so it is a "
+                f"literal that is only right in light mode: {body!r}")
+
+        box = declarations(css, ".text-box textarea")
+        assert "var(--paper-ink)" in box, (
+            "the text box on the paper does not pin its type, so it follows the "
+            f"theme's light `--text` and is white text on white paper: {box!r}")
