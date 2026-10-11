@@ -295,7 +295,12 @@
                                     <form method="POST" action="/integrity/restore" class="flex items-center gap-2">
                                         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                                         <input type="hidden" name="kind" value="{{ q.kind }}">
-                                        <input type="hidden" name="row_id" value="{{ q.row_id }}">
+                                        {# `or ''` and not the bare value: a quarantine record
+                                           with no row id is a table-level finding, and Python's
+                                           `None` renders as the word *None* — which the POST then
+                                           hands Postgres as a uuid. `or '-'` is right in the
+                                           column beside it, where the reader is a human. #}
+                                        <input type="hidden" name="row_id" value="{{ q.row_id or '' }}">
                                         <button type="submit"
                                                 class="px-2 py-1 bg-sky-600 text-white rounded-lg font-bold text-[10px] hover:bg-sky-700 transition"
                                                 x-text="t('Pulihkan','Restore')"></button>
