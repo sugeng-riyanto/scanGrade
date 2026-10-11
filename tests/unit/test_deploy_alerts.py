@@ -105,6 +105,14 @@ def report_of(runner: dict | None = None, checkout: dict | None = None,
         "unarmed": {"path": "/var/lib/scangrade-deploy/unarmed", "present": False,
                     "key": "none", "at": None, "age_seconds": None, "detail": None,
                     "reason": None},
+        # The card that runs the checker the deploy itself refuses on, built by the
+        # service for the same reason `perf` and `refusals` are: the template reads
+        # `a.key`, `a.lines`, `a.exit` and `a.armed` one attribute at a time, so a
+        # fixture that lags the reader is a 500 on this page rather than a failed
+        # assertion. `/nonexistent` is the honest reading here — this fixture is not
+        # a box, so its checkout has no checker — and `TestWhatCountsAsStale` holds
+        # the two shapes equal.
+        "armament": status.armament_state(Path("/nonexistent"), now=NOW),
         # Built by the service, for the same reason `perf` and `refusals` are: the
         # refusal card reads this attribute by attribute (`pf.diff_key`,
         # `pf.diff_lines`, ...), so a hand-written copy silently falls behind the
@@ -193,6 +201,9 @@ class TestWhatCountsAsStale:
         assert set(report_of()["last_stop"]) == set(real["last_stop"])
         assert set(report_of()["refusals"]) == set(real["refusals"])
         assert set(report_of()["box_edits"]) == set(real["box_edits"])
+        # The armament card joined them: it runs the checker read-only and prints
+        # every reading by name, so its shape has to match the reader too.
+        assert set(report_of()["armament"]) == set(real["armament"])
         assert set(report_of()["exit_codes"]) == set(real["exit_codes"])
         # And the reading the policy keys on is really in there.
         assert "gate0" in real["runner"] and "origin_behind" in real["runner"]
