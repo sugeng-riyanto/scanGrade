@@ -524,12 +524,24 @@ def test_both_doors_read_the_autosave_verb_and_the_draft_id():
         "the create door and the edit door both have to know a save is an autosave")
 
 
+def _door_body(src: str, name: str) -> str:
+    """One route function's body, from its `def` to the next top-level one."""
+    start = src.index(f"def {name}(")
+    rest = src[start:]
+    nxt = rest.find("\ndef ", 1)
+    return rest if nxt == -1 else rest[:nxt]
+
+
 def test_one_refusal_helper_answers_both_a_json_and_a_browser_save():
     src = _routes()
-    assert src.count("return _exam_save_refused(autosave,") == 6, (
-        "each door has three refusals — the question count, the window order and "
-        "the assessment calendar — and every one of them has to answer an autosave "
-        "with a sentence rather than a redirect")
+    # Four per door: the question count, the window order, the assessment calendar,
+    # and the school the paper is filed under (`filing_school_for_request`, which
+    # refuses a create it cannot verify). Counted per door rather than over the file,
+    # so a door that loses one while another gains two cannot pass.
+    for name in ("exam_form", "exam_detail"):
+        assert _door_body(src, name).count("return _exam_save_refused(autosave,") == 4, (
+            f"{name}: every refusal has to answer an autosave with a sentence "
+            "rather than a redirect")
     assert 'return jsonify({"ok": False, "error": message}), 400' in src, (
         "an autosave must never navigate")
     assert 'flash(message, "error")' in src and 'return redirect(request.referrer or "/teacher/exams")' in src, (
