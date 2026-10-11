@@ -378,6 +378,19 @@ class TestClosedMeansNoAccess:
                   _row(school_id="sc-2", status=membership.STATUS_CLOSED)])
         assert membership.resolve_active_school(
             db, "u-1", "sc-home", "sc-2", "guru") == "sc-home"
+        # The second call used to answer `None`, and the merge with
+        # `feat/membership-phases` changed it deliberately: a teacher whose *home*
+        # school closed them while another membership is still active is moved to
+        # that school rather than signed out of the app entirely. `None` is still
+        # the answer when nothing active is left (`test_nothing_left_is_none` below),
+        # which is what `require_school_access` refuses on.
         assert membership.resolve_active_school(
-            db, "u-1", "sc-2", "sc-2", "guru") is None, (
-            "a closed school was offered as the active one")
+            db, "u-1", "sc-2", "sc-2", "guru") == "sc-home", (
+            "a closure locked a teacher out of the school they still belong to")
+
+    def test_nothing_left_is_none(self):
+        """Every membership closed: there is no school to serve, and saying so is
+        the refusal `require_school_access` turns into a sign-in page."""
+        db = _Sb([_row(school_id="sc-1", status=membership.STATUS_CLOSED)])
+        assert membership.resolve_active_school(
+            db, "u-1", "sc-1", "sc-1", "guru") is None

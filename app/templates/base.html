@@ -364,6 +364,10 @@ window.sgSavePrefs = function (patch) {
             {# Kepala sekolah dan wakilnya: akun yang membaca sekolah, bukan
                mengelolanya. Dibuat oleh sekolah sendiri, seperti guru dan murid. #}
             <a href="/admin-sekolah/officials" class="nav-item {% if request.path == '/admin-sekolah/officials' %}active{% endif %}"><i class="fas fa-user-tie"></i><span x-text="t('Pejabat Sekolah','School Officials')"></span></a>
+            {# Siapa yang bekerja di sekolah ini, dan siapa yang meminta bergabung dari
+               NPSN lain. Halaman dan rute keputusannya satu, di prefiks sekolah, karena
+               keputusannya milik sekolah — bukan milik satu pejabat. #}
+            <a href="/admin-sekolah/membership" class="nav-item {% if request.path == '/admin-sekolah/membership' %}active{% endif %}"><i class="fas fa-id-badge"></i><span x-text="t('Keanggotaan','Membership')"></span></a>
             <div class="nav-section-title pt-2"><span x-text="t('Data','Data')"></span></div>
             <a href="/admin-sekolah/import" class="nav-item {% if request.path == '/admin-sekolah/import' %}active{% endif %}"><i class="fas fa-upload"></i><span x-text="t('Import Excel','Import Excel')"></span></a>
             {# The batch half of the accounts: the email an account is reached at, and
@@ -414,6 +418,12 @@ window.sgSavePrefs = function (patch) {
                the deputy's prefix, so the head's copy draws no form. #}
             <a href="{{ _official_home.replace('/dashboard', '/assessment-periods') }}" class="nav-item {% if request.path.endswith('/assessment-periods') %}active{% endif %}"><i class="fas fa-calendar-check"></i><span x-text="t('Periode Penilaian','Assessment Periods')"></span></a>
             <a href="{{ _official_home.replace('/dashboard', '/invigilation') }}" class="nav-item {% if request.path.endswith('/invigilation') %}active{% endif %}"><i class="fas fa-clipboard-check"></i><span x-text="t('Jadwal Pengawasan','Invigilation')"></span></a>
+            {# The school's membership page, opened at the school's own address rather
+               than at a second copy under each official's prefix: deciding a request
+               and closing a membership are POSTs, and a POST may not live under
+               `/principal/*` — read-only there is structural, and a guard enforces it.
+               The route itself admits all three approver roles. #}
+            <a href="/admin-sekolah/membership" class="nav-item {% if request.path == '/admin-sekolah/membership' %}active{% endif %}"><i class="fas fa-id-badge"></i><span x-text="t('Keanggotaan','Membership')"></span></a>
             <div class="nav-section-title pt-2"><span x-text="t('Panduan','Guide')"></span></div>
             <a href="/guide/skor" class="nav-item {% if request.path == '/guide/skor' %}active{% endif %}"><i class="fas fa-book-open"></i><span x-text="t('Panduan Skor','Scoring Guide')"></span></a>
 
@@ -613,6 +623,7 @@ window.sgSavePrefs = function (patch) {
                     'manage': ('Kelola', 'Manage'),
                     'matrix': ('Matriks Pengawas', 'Invigilator Matrix'),
                     'email-settings': ('Email (SMTP)', 'Email (SMTP)'),
+                    'membership': ('Keanggotaan', 'Membership'),
                     'midtrans': ('Midtrans', 'Midtrans'),
                     'new': ('Baru', 'New'),
                     'omr-test': ('Uji OMR', 'OMR Test'),

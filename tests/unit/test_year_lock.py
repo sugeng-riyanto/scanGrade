@@ -169,6 +169,13 @@ EXEMPT = {
     "student_bp /heartbeat/<exam_id>":
         "records one liveness ping on a running sitting's own row; it opens no "
         "paper and changes no mark, and a closed year's attempts are finalised",
+    "student_bp /media-play":
+        "charges one play of one question's media against the reader's own sitting, "
+        "and only while that sitting is ongoing — a finished, expired or locked "
+        "paper charges nothing, so a closed year has no sitting left to charge",
+    "student_bp /media-pause":
+        "records one pause on the reader's own sitting's timeline; it says what the "
+        "player did and never what it meant, charges nothing and changes no mark",
 
     # ── admin.py: the legacy admin panel ──
     "admin_bp /teachers/<teacher_id>/delete": "an account and its roster row",
@@ -237,6 +244,28 @@ EXEMPT = {
         "fills the empty rooms of one session through the same assign; no mark",
     "admin_sekolah_bp /invigilation/matrix/cells":
         "a shift-click run through the same assign; a room and a teacher, no mark",
+    # The weights family is excused on one footing — by refusing the closed year
+    # itself, not by being exempt from the question. A mark is *derived* from a
+    # weight map every time it is read (`grade_weighting.compute` is pure over the
+    # weights), so there is no frozen copy for a late policy edit to leave alone:
+    # the weights a subject carries ARE its closed year's marks.
+    "admin_sekolah_bp /grade-weights/<subject_id>":
+        "sets one subject's weights for a year named off the body; the route refuses "
+        "a closed year itself (write_refusal) before the distribution is written",
+    "admin_sekolah_bp /grade-weights/defaults":
+        "the school-wide fallback distribution a subject without one of its own "
+        "inherits; the route refuses a closed year itself (write_refusal)",
+    "admin_sekolah_bp /grade-weights/reset-level":
+        "returns a grade level's subjects to the policy default; the route refuses "
+        "a closed year itself (write_refusal) before any weight is cleared",
+    "admin_sekolah_bp /grade-weights/components":
+        "adds an entry to the school's component list; it carries no weight until one "
+        "is set, and `compute` places only components with a weight above zero, so "
+        "no year's marks move",
+    "admin_sekolah_bp /grade-weights/components/<component_id>/update":
+        "renames, reorders or (de)activates a component, and switching one off drops "
+        "it from every weighting that names it; the route refuses a closed year "
+        "itself (write_refusal)",
     "admin_sekolah_bp /subjects/<subject_id>/kkm":
         "subject_kkm refuses a closed year itself (year_closed), before writing",
     "admin_sekolah_bp /subjects/<subject_id>/kkm/<grade_level>/clear":
@@ -318,6 +347,19 @@ EXEMPT = {
     "super_bp /whatsapp-settings": "platform messaging configuration",
     "super_bp /file-management":
         "a platform file inventory; it moves storage objects, not a year's rows",
+    # The three integrity doors touch one thing: a cross-school *link* — a pupil's
+    # class, a class↔subject pair, a teacher's pair. Each re-derives the school the
+    # row belongs to from the row itself (the form names only which row), so none
+    # can re-home data of the caller's choosing, and none reads or writes a mark.
+    "super_bp /integrity/repair":
+        "re-points a mis-wired profile, class_subject or teacher_assignment row at "
+        "the school its people belong to; no mark, paper or year row is touched",
+    "super_bp /integrity/quarantine":
+        "detaches one such link the repair door cannot re-point, with a reason from "
+        "the operator; no mark, paper or year row is touched",
+    "super_bp /integrity/restore":
+        "undoes one recorded detach of the same link, replaying the value the audit "
+        "record holds; no mark, paper or year row is touched",
     "super_bp /api/omr-test/batch": "a calibration harness; writes no marks",
     "super_bp /api/omr-test/single": "a calibration harness; writes no marks",
     "super_bp /api/omr-test/calibrate": "a calibration harness; writes no marks",
@@ -328,6 +370,26 @@ EXEMPT = {
     "super_bp /api/privacy-settings/save": "platform privacy configuration",
     "super_bp /email-settings": "platform SMTP configuration",
     "super_bp /email-settings/test": "sends a test email",
+    # ── cross-school membership: who may work here, not what a year holds ──
+    # An academic year being closed says nothing about whether a teacher may be
+    # taken on or let go: a school hires and offboards between years, and a
+    # membership row carries no marks, no pupils and no exam of any year. Refusing
+    # these while a year is closed would leave a school unable to close an
+    # offboarded teacher's access at exactly the moment it needs to. The four doors
+    # are also the ones a *decision* travels through, so gating them on a year would
+    # make a pending request depend on which year happens to be running.
+    "teacher_membership_bp /membership/request":
+        "a teacher asking to join another school; belongs to no year, writes no "
+        "mark, and is refused or approved before it grants anything",
+    "membership_bp /membership-requests/<request_id>/<decision>":
+        "a decision on one join request — the access it grants is a membership "
+        "row, not a year's data, and it is taken by the destination school alone",
+    "membership_bp /memberships/<user_id>/close":
+        "closing a membership is offboarding: it must never wait on a year, since "
+        "leaving access open until a year closes is the failure it prevents",
+    "membership_bp /memberships/<user_id>/reopen":
+        "reopening is the school admin's own decision about a person, and the way "
+        "back from a closure; it touches no mark of any year",
 }
 
 MUTATING = ("POST", "PUT", "PATCH", "DELETE")

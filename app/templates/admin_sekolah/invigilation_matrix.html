@@ -20,7 +20,7 @@
        server flashes, rendered here once per key and cloned by the grid's script, so
        the no-reload path and the full-reload path read identically. #}
     <div id="matrix-toast" role="status" aria-live="polite"
-         class="hidden fixed bottom-5 right-5 z-50 max-w-sm px-4 py-3 rounded-xl bg-red-50 text-red-700 border border-red-200 text-sm font-semibold shadow-lg"></div>
+         class="hidden fixed bottom-5 right-5 sg-layer-notice max-w-sm px-4 py-3 rounded-xl bg-red-50 text-red-700 border border-red-200 text-sm font-semibold shadow-lg"></div>
     <div class="hidden" aria-hidden="true">
         {% for key in ['room_full','teacher_full','already_assigned','period_not_in_school','room_not_in_school','teacher_not_in_school','write_failed','not_found'] %}
         <template id="matrix-refusal-{{ key }}">{{ reasons.reason_note(key) }}</template>
@@ -223,7 +223,7 @@
             <table class="w-full text-xs min-w-[640px]">
                 <thead>
                     <tr class="text-stone-500">
-                        <th class="text-left py-2 pr-3 font-bold sticky left-0 bg-white" x-text="t('Guru','Teacher')"></th>
+                        <th class="text-left py-2 pr-3 font-bold sticky left-0 bg-white sg-layer-sticky" x-text="t('Guru','Teacher')"></th>
                         {% for r in grid.rooms %}
                         <th class="text-left py-2 pr-3 font-bold">
                             {{ r.name }}
@@ -239,7 +239,7 @@
                     {% for t in teachers %}
                     {% set tseats = teacher_seats.get(t.id|string, 0) %}
                     <tr class="border-t border-surface-100">
-                        <td class="py-1.5 pr-3 font-semibold text-stone-700 whitespace-nowrap sticky left-0 bg-white">
+                        <td class="py-1.5 pr-3 font-semibold text-stone-700 whitespace-nowrap sticky left-0 bg-white sg-layer-sticky">
                             {{ t.name }}
                             <span data-teacher-seat="{{ t.id }}"
                                   class="text-[10px] font-mono px-1.5 py-0.5 rounded-full ml-1 {% if tseats == 0 %}bg-amber-100 text-amber-800{% else %}bg-surface-100 text-surface-700{% endif %}">{{ tseats }}/{{ max_per_teacher }}</span>

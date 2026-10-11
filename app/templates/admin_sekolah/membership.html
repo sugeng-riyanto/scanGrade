@@ -1,0 +1,179 @@
+{% extends "base.html" %}
+{% block title %}Keanggotaan & Permintaan - ScanGrade{% endblock %}
+{% block page_title %}Keanggotaan Sekolah{% endblock %}
+{% block content %}
+{# The destination school's door: who asked to join, and who works here.
+
+   One page for the three roles that may decide, because deciding is one job — and
+   the one thing that is *not* the same for all three is the reopen control, which
+   is rendered only for `admin_sekolah`. The asymmetry is a product decision
+   (`app/services/school_membership.py`), and showing a button that would refuse its
+   reader is how a page teaches people that the button sometimes lies.
+
+   Every action is a plain form post: the app's readers are on school Wi-Fi, and a
+   redirect back to this page with the outcome in the query string works when the
+   JavaScript does not. #}
+{% set OUTCOMES = {
+    'ok': ('Keputusan tersimpan.', 'The decision was saved.'),
+    'closed': ('Keanggotaan ditutup: akses ke sekolah ini hilang seluruhnya.', 'The membership is closed: all access to this school is gone.'),
+    'reopened': ('Keanggotaan dibuka kembali.', 'The membership was reopened.'),
+    'not_found': ('Permintaan itu tidak ditemukan di sekolah ini.', 'That request was not found in this school.'),
+    'not_closed_or_missing': ('Tidak ada keanggotaan yang ditutup untuk dibuka.', 'There is no closed membership to reopen.'),
+    'membership_closed': ('Keanggotaannya sudah ditutup — pembukaan kembali hanya oleh admin sekolah.', 'That membership is closed — only the school admin reopens it.'),
+    'not_authorised': ('Peran Anda tidak berwenang untuk tindakan itu.', 'Your role is not authorised for that action.'),
+    'read_failed': ('Datanya belum bisa dibaca sekarang. Coba lagi sebentar lagi.', 'The data could not be read just now. Try again shortly.'),
+    'bad_decision': ('Keputusannya tidak dikenali.', 'That decision is not recognised.'),
+    'failed': ('Tindakannya tidak tersimpan.', 'The action was not saved.'),
+} %}
+{% set MEMBER_STATUS = {
+    'active': ('Aktif', 'Active'),
+    'invited': ('Diundang', 'Invited'),
+    'closed': ('Ditutup', 'Closed'),
+} %}
+{% set SCHOOL_ROLES = {
+    'guru': ('Guru', 'Teacher'),
+    'principal': ('Kepala Sekolah', 'Principal'),
+    'vice_principal': ('Wakil Kepala Sekolah', 'Vice Principal'),
+    'admin_sekolah': ('Admin Sekolah', 'School Admin'),
+} %}
+<div class="space-y-6" :lang="lang">
+
+    {% if status_code %}
+    {% set pair = OUTCOMES.get(status_code) or OUTCOMES['failed'] %}
+    <div class="rounded-2xl border-2 {% if status_code in ('ok', 'closed', 'reopened') %}border-emerald-200 bg-emerald-50{% else %}border-amber-200 bg-amber-50{% endif %} p-4 flex items-start gap-3">
+        <i class="fas {% if status_code in ('ok', 'closed', 'reopened') %}fa-circle-check text-emerald-600{% else %}fa-circle-exclamation text-amber-600{% endif %} mt-0.5"></i>
+        <p class="text-sm font-semibold {% if status_code in ('ok', 'closed', 'reopened') %}text-emerald-800{% else %}text-amber-800{% endif %}"
+           x-text="t('{{ pair[0] }}','{{ pair[1] }}')"></p>
+    </div>
+    {% endif %}
+
+    <div>
+        <h2 class="text-2xl font-extrabold text-slate-800" x-text="t('Keanggotaan Sekolah','School Membership')"></h2>
+        <p class="text-sm text-slate-500 font-medium mt-0.5"
+           x-text="t('Permintaan bergabung dari guru sekolah lain, dan keanggotaan yang sudah tercatat di sekolah ini.','Join requests from teachers at other schools, and the memberships already recorded at this school.')"></p>
+    </div>
+
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="px-4 py-3 border-b border-slate-100">
+            <h3 class="text-sm font-extrabold text-slate-700" x-text="t('Menunggu keputusan','Awaiting a decision')"></h3>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full min-w-[820px] text-sm">
+                <thead class="bg-slate-50">
+                    <tr class="text-left text-xs uppercase text-slate-500 font-bold">
+                        <th class="px-3 py-3" x-text="t('Nama','Name')"></th>
+                        <th class="px-3 py-3" x-text="t('Email','Email')"></th>
+                        <th class="px-3 py-3" x-text="t('Status akun','Account status')"></th>
+                        <th class="px-3 py-3" x-text="t('Diajukan','Requested')"></th>
+                        <th class="px-3 py-3" x-text="t('Kedaluwarsa','Expires')"></th>
+                        <th class="px-3 py-3" x-text="t('Keputusan','Decision')"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for req in join_requests %}
+                    <tr class="border-t border-slate-100 align-top">
+                        <td class="px-3 py-3 font-semibold text-slate-800">{{ req.name or '—' }}</td>
+                        <td class="px-3 py-3 text-slate-600">{{ req.email or '—' }}</td>
+                        <td class="px-3 py-3 text-slate-600">{{ req.account_status or '—' }}</td>
+                        <td class="px-3 py-3 text-slate-600">{{ (req.requested_at or '')[:10] }}</td>
+                        <td class="px-3 py-3 text-slate-600">{{ (req.expires_at or '')[:10] }}</td>
+                        <td class="px-3 py-3">
+                            {% if may_approve %}
+                            <div class="flex flex-col sm:flex-row gap-2">
+                                <form method="POST" action="/admin-sekolah/membership-requests/{{ req.request_id }}/approve">
+                                    <button type="submit"
+                                            class="tap-44 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs transition"
+                                            x-text="t('Setujui','Approve')"></button>
+                                </form>
+                                <form method="POST" action="/admin-sekolah/membership-requests/{{ req.request_id }}/reject"
+                                      class="flex items-center gap-2">
+                                    <input type="text" name="reason" maxlength="200"
+                                           :placeholder="t('Alasan (opsional)','Reason (optional)')"
+                                           class="px-3 py-2 border border-slate-200 rounded-xl text-xs w-40">
+                                    <button type="submit"
+                                            class="tap-44 px-4 py-2 bg-white border border-rose-300 text-rose-700 hover:bg-rose-100 rounded-xl font-bold text-xs transition"
+                                            x-text="t('Tolak','Reject')"></button>
+                                </form>
+                            </div>
+                            {% else %}
+                            <span class="text-xs text-slate-400" x-text="t('Tidak berwenang','Not authorised')"></span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% if not join_requests %}
+        <p class="px-4 py-6 text-sm text-slate-500 font-medium text-center"
+           x-text="t('Tidak ada permintaan yang menunggu.','No request is waiting.')"></p>
+        {% endif %}
+    </div>
+
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="px-4 py-3 border-b border-slate-100">
+            <h3 class="text-sm font-extrabold text-slate-700" x-text="t('Anggota sekolah ini','Members of this school')"></h3>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full min-w-[820px] text-sm">
+                <thead class="bg-slate-50">
+                    <tr class="text-left text-xs uppercase text-slate-500 font-bold">
+                        <th class="px-3 py-3" x-text="t('Nama','Name')"></th>
+                        <th class="px-3 py-3" x-text="t('Email','Email')"></th>
+                        <th class="px-3 py-3" x-text="t('Peran','Role')"></th>
+                        <th class="px-3 py-3" x-text="t('Status','Status')"></th>
+                        <th class="px-3 py-3" x-text="t('Sejak','Since')"></th>
+                        <th class="px-3 py-3" x-text="t('Tindakan','Action')"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for m in members %}
+                    {% set status_pair = MEMBER_STATUS.get(m.status) or (m.status, m.status) %}
+                    {% set role_pair = SCHOOL_ROLES.get(m.school_role) or (m.school_role, m.school_role) %}
+                    <tr class="border-t border-slate-100 align-top">
+                        <td class="px-3 py-3 font-semibold text-slate-800">{{ m.name or '—' }}</td>
+                        <td class="px-3 py-3 text-slate-600">{{ m.email or '—' }}</td>
+                        <td class="px-3 py-3 text-slate-600" x-text="t('{{ role_pair[0] }}','{{ role_pair[1] }}')"></td>
+                        <td class="px-3 py-3">
+                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold {% if m.closed %}bg-rose-100 text-rose-800{% else %}bg-emerald-100 text-emerald-800{% endif %}"
+                                  x-text="t('{{ status_pair[0] }}','{{ status_pair[1] }}')"></span>
+                        </td>
+                        <td class="px-3 py-3 text-slate-600">
+                            {{ (m.joined_at or '')[:10] }}
+                            {% if m.closed_on %}
+                            <span class="block text-xs text-slate-500">{{ m.closed_on }}</span>
+                            {% endif %}
+                        </td>
+                        <td class="px-3 py-3">
+                            {% if m.closed %}
+                                {% if may_reopen %}
+                                <form method="POST" action="/admin-sekolah/memberships/{{ m.user_id }}/reopen">
+                                    <button type="submit"
+                                            class="tap-44 px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-xl font-bold text-xs transition"
+                                            x-text="t('Buka kembali','Reopen')"></button>
+                                </form>
+                                {% else %}
+                                <span class="text-xs text-slate-400" x-text="t('Hanya admin sekolah','School admin only')"></span>
+                                {% endif %}
+                            {% else %}
+                                {% if may_approve %}
+                                <form method="POST" action="/admin-sekolah/memberships/{{ m.user_id }}/close">
+                                    <button type="submit"
+                                            class="tap-44 px-4 py-2 bg-white border border-rose-300 text-rose-700 hover:bg-rose-100 rounded-xl font-bold text-xs transition"
+                                            x-text="t('Tutup akses','Close access')"></button>
+                                </form>
+                                {% endif %}
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% if not members %}
+        <p class="px-4 py-6 text-sm text-slate-500 font-medium text-center"
+           x-text="t('Belum ada keanggotaan tercatat di sekolah ini.','No membership is recorded at this school yet.')"></p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

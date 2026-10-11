@@ -1136,10 +1136,27 @@ def _builder_defaults(supabase, teacher_id, subjects, classes) -> dict:
       available. With a choice to make, the field is left empty — a wrong guess is
       worse than an empty field (`unassigned_class_ids` already fails closed for
       the same reason);
-    * the duration is the app's own **60 minutes**. It used to be the duration of
-      this teacher's last paper, but the request is explicit that the default is 60
-      and that the field is free to type into — a remembered 90 is a number the
-      teacher did not choose for this paper.
+    * the duration is the one this teacher set on their **last paper**, falling back
+      to the app's own **60 minutes** when they have never built one, when the read
+      fails, or when that last paper was left Unlimited.
+
+    **Why the last duration, and why not Unlimited with it.** A teacher who always
+    gives ninety minutes gives ninety minutes; retyping it every paper is friction,
+    and a remembered value is a fact about *this teacher's own* work rather than a
+    school-wide guess — so it is pre-filled like the sole subject/class, and the
+    page marks it `otomatis` and clears the mark the moment the teacher touches the
+    field. An earlier version of this helper dropped the memory and always answered
+    60; the loss was real and one-sided, because the value is visible, editable and
+    labelled, while the constant cost every teacher with a fixed paper length a
+    retype on every paper. The one thing that is deliberately **not** inherited is
+    `0` — Unlimited is a choice made about *one* paper, and carrying it into the
+    next would open a paper with no duration at all, which is the single state the
+    timing pipeline cannot enforce.
+
+    The read is scoped to this teacher and ordered, because the memory is a claim
+    about *their* work: an unscoped read would pre-fill from another teacher's
+    paper, and an unordered one from whichever row the database happened to return
+    first.
 
     An unscoped caller (admin) usually has many subjects/classes, so they get no
     pre-selection and keep full manual control.
@@ -1149,6 +1166,18 @@ def _builder_defaults(supabase, teacher_id, subjects, classes) -> dict:
         defaults["subject_id"] = subjects[0]["id"]
     if len(classes) == 1 and classes[0].get("id"):
         defaults["class_ids"] = [classes[0]["id"]]
+    try:
+        last = (supabase.table("exams").select("duration_minutes")
+                .eq("teacher_id", teacher_id).order("created_at", desc=True)
+                .limit(1).execute().data or [])
+        remembered = last[0].get("duration_minutes") if last else None
+        # Truthiness is the test on purpose: `None` is "no paper yet" and `0` is
+        # Unlimited, and neither is a duration to carry into the next paper.
+        if remembered:
+            defaults["duration_minutes"] = remembered
+    except Exception:
+        # A failed read must not cost the teacher a page; the 60 default stands.
+        logger.warning("duration default lookup failed for %s", teacher_id)
     return defaults
 
 
@@ -1386,6 +1415,13 @@ def exam_form():
             exam_id = draft_row["id"]
         else:
             res = supabase.table("exams").insert(data).execute()
+            # A paper that is not a draft save is *minted* here, and the id every
+            # door below needs (the audit entry, the roster sync, the upload, the
+            # autosave's own answer) comes off the row this insert just created.
+            # Leaving it to the `except` branch alone meant a first save of a new
+            # paper died on `UnboundLocalError` — measured, not theorised: the
+            # calendar suite's "inside the window" case reaches exactly this line.
+            exam_id = res.data[0]["id"]
     except Exception:
         for key in ["question_weights", "question_texts", "anti_cheat_enabled", "penalty_per_violation", "max_violations", "auto_submit_on_max", "fullscreen_required", "randomize_questions", "randomize_options", "watermark_name", "block_copy_paste", "block_right_click", "block_screenshot", "allow_calculator", "lock_pending_resume", "resume_code_limit", "grade_component_type_id", "school_year_id", "subject_id", "class_ids", "start_at", "end_at", "assessment_period_id", "auto_submit_on_window_end", "is_template", "source_exam_id", "max_attempts", "publish_mode", "question_pages", "question_cognitive"]:
             data.pop(key, None)

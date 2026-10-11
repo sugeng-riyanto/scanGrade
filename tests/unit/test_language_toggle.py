@@ -623,6 +623,17 @@ TRANSLATED = [
     # carries none — it only sets a state word, so every sentence a pupil reads
     # follows the toggle instead of being frozen in the language it was built in.
     "student/seb_claim.html",
+    # Cross-school membership, the two halves of one feature. The teacher's half is
+    # the destination search: the stage a school serves, the sentence that says the
+    # stage is not recorded yet, and the consent text that is *shown and hashed* —
+    # all of it pairs, because the reader may be the one who cannot read Indonesian
+    # and the consent they are agreeing to is printed on the page. The school's half
+    # is the queue and the membership list, where three roles read one decision, and
+    # a refusal in one language is a school admin who does not learn why a
+    # principal's reopen button is absent (`Only the school admin`). Both measured
+    # at 100% coverage by deploy/i18n_coverage.py.
+    "teacher/membership.html",
+    "admin_sekolah/membership.html",
 ]
 # Partials are deliberately *not* on this list, and the assertion below says why:
 # an entry has to extend base.html, because it is the page's own scope that owns
@@ -988,12 +999,14 @@ def test_the_translated_list_only_grows_with_intent():
     The bump is still the deliberate act: it is what turns the sweep on for each of
     them.
     """
-    # 57, and the one that moved is this merge's own: main carried 58, and the
-    # merge *deletes* `auth/login_user.html` — the two sign-in pages are one page
-    # now. The guard's rule is unchanged: bumping the number is the deliberate act
-    # for a page that is *added*, and a page that no longer exists has to leave the
-    # list, or the existence check above fails on a file that is not there.
-    assert len(TRANSLATED) == 57, (
+    # 59, and both movements are this merge's own: main carried 58 and the merge
+    # *deletes* `auth/login_user.html` — the two sign-in pages are one page now —
+    # while `feat/membership-phases` adds the teacher's and the school's membership
+    # pages, two pair-bearing pages measured at 100% coverage. The guard's rule is
+    # unchanged: bumping the number is the deliberate act for a page that is
+    # *added*, and a page that no longer exists has to leave the list, or the
+    # existence check above fails on a file that is not there.
+    assert len(TRANSLATED) == 59, (
         f"{len(TRANSLATED)} pages are on the translated list. Bump this number when "
         f"you translate another one — and if you *removed* a page, put it back, "
         f"because dropping it turns the sweep off for that page: {TRANSLATED}")

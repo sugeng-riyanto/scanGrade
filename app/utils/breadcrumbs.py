@@ -109,6 +109,11 @@ MACHINE = frozenset({
     # deadline, remaining seconds) as JSON for the exam page's own timer and
     # lock screen — a readback, never a page of its own.
     "attempt-status",
+    # `/admin-sekolah/membership-requests` answers the destination school's join
+    # queue as JSON — the same rows the membership page renders, for a caller that
+    # wants them without the document. It is not a page: the reader's page is
+    # `/admin-sekolah/membership`, and that is the crumb.
+    "membership-requests",
     "members", "slides", "snapshots", "ops", "can-annotate", "sessions-data",
     "wizard-status", "check-pdf", "contacts", "task",
     "violation", "status", "transaction", "evidence", "data", "school",

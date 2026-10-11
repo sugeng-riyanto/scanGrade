@@ -121,11 +121,38 @@ def test_no_valid_school_resolves_to_none_not_a_default():
     assert membership.resolve_active_school(sb, "u-1", None, None, "guru") is None
 
 
-def test_a_missing_table_fails_closed():
+def test_a_missing_table_fails_closed_on_the_access_question():
+    """"Is this user an active member?" answered from a read that failed is *no*."""
     sb = _Sb(fail=True)
     assert membership.is_active_member(sb, "u-1", "sc-1") is False
+
+
+def test_a_missing_table_keeps_the_home_school():
+    """...but "which school is this request for?" is not narrowed by an outage.
+
+    This assertion used to be the opposite (`None`), and the change is deliberate
+    rather than a relaxation: returning `None` for a table the database has not been
+    migrated for — every box before migration 044 ran this path — signed **every**
+    teacher out of a school their profile names, and an outage that locks a
+    classroom out is a worse failure than the pre-membership answer. Two directions,
+    one boundary: a *known closure* narrows (`closed` is what removes the school,
+    tested below), and a *failed read* narrows nothing. `is_active_member` above
+    stays fail-closed because it answers an access question about one row, not a
+    question about which school the request is for.
+    """
     assert membership.resolve_active_school(_Sb(fail=True), "u-1", "sc-home", "sc-2",
-                                            "guru") is None
+                                            "guru") == "sc-home"
+
+
+def test_a_closed_row_is_what_removes_the_home_school():
+    """The fail-safe above must not become a way to keep a closed school."""
+    sb = _Sb([{"school_id": "sc-home", "status": "closed", "user_id": "u-1"}])
+    assert membership.resolve_active_school(sb, "u-1", "sc-home", None, "guru") is None
+    # ...and a school with no row at all is not a closure: accounts created after
+    # migration 044 have no membership row, and locking them out would be the bug.
+    sb = _Sb([{"school_id": "sc-other", "status": "active", "user_id": "u-1"}])
+    assert membership.resolve_active_school(sb, "u-1", "sc-home", None,
+                                            "guru") == "sc-home"
 
 
 # ── membership writes ────────────────────────────────────────────────────────

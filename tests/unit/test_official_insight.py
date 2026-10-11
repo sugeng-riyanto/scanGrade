@@ -467,7 +467,7 @@ class TestTheOfficialBlueprint:
     #: so a *new* write domain has to be added here on purpose — which is the point
     #: of the guard: `/principal/*` stays read-only only as long as somebody decides
     #: what else the deputy may write, rather than as long as a regex happens to match.
-    DELEGATED = ("invigilation", "retake", "assessment-periods")
+    DELEGATED = ("invigilation", "retake", "assessment-periods", "locked")
 
     def test_the_head_of_school_prefix_has_no_writing_route(self):
         """`/principal/*` is read-only by construction — the head of school oversees.

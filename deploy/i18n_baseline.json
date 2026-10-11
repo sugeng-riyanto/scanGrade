@@ -115,6 +115,12 @@
       "coverage": 16.7,
       "frozen": true
     },
+    "admin_sekolah/membership.html": {
+      "pairs": 28,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
     "admin_sekolah/officials.html": {
       "pairs": 31,
       "leftovers": 0,
@@ -266,7 +272,7 @@
       "frozen": false
     },
     "base.html": {
-      "pairs": 176,
+      "pairs": 178,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -638,7 +644,7 @@
       "frozen": false
     },
     "teacher/dashboard.html": {
-      "pairs": 63,
+      "pairs": 65,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -693,6 +699,12 @@
     },
     "teacher/invigilation.html": {
       "pairs": 40,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
+    "teacher/membership.html": {
+      "pairs": 23,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
