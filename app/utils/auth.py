@@ -610,13 +610,82 @@ def _session_for(token):
     return data
 
 
+def _resolved_school(token, data):
+    """The school THIS request is for — resolved, not read off the session row.
+
+    For a pupil or a school admin it is ``profiles.school_id``, unchanged, and the
+    membership table is never consulted. For the roles that may belong to more than
+    one school (guru, principal, vice_principal) it is the verified active
+    membership, read fresh once per request: that is what makes a closure total
+    rather than eventual, because the session cache holds the *profile* (whose
+    `school_id` is the home school) and never the resolved answer, so nothing in a
+    cache can keep serving a school a membership row no longer grants.
+
+    See ``app/services/school_membership.py`` for the order of the resolution and
+    for why a database that cannot answer leaves the home school in place here: a
+    closure narrows, an outage narrows nothing — and why the *write* path
+    (`filing_school_for_request`) refuses in the same situation instead.
+    """
+    from app.services.school_membership import (is_cross_school_role,
+                                                resolve_for_request)
+    school = data.get("school_id")
+    role = data.get("role", "murid")
+    if not is_cross_school_role(role):
+        return school
+    try:
+        return resolve_for_request(token, data.get("user_id"), school, role)
+    except Exception:
+        # An *unexpected* failure is treated exactly like a read that failed: it
+        # narrows nothing. Without this guard the exception lands in
+        # `login_required`'s own handler, which tries a token refresh and then signs
+        # the reader out — so a membership lookup nobody could answer would end every
+        # teacher's session, the worst outcome available here. The rule cannot be
+        # smuggled through this door either: a closure arrives as *rows*, never as an
+        # exception, so no exception can keep a closed school alive.
+        logger.debug("membership resolution failed; keeping the profile's school",
+                     exc_info=True)
+        return school
+
+
+def filing_school_for_request(requested_school_id=None):
+    """``(school_id, error)`` for the caller of *this* request: the school a row it
+    writes must be filed under.
+
+    The one reader of the session for the write side, the way
+    `check_subscription_write` is one reader for billing: the rule itself lives in
+    ``app/services/school_membership.filing_school`` (pure, and pinned by its own
+    guard file), and this wrapper exists so a route does not have to reassemble the
+    four facts that decide it — the resolved school, the *home* school, the role and
+    the profile — from `g` each time, with the one mistake that matters being to pass
+    the resolved school where the home school belongs.
+
+    ``g.user_home_school_id`` is the profile's own school, kept beside the resolved
+    one because the resolution needs both: the home school is who the teacher is on
+    paper, the resolved school is where they are working now, and the rule that
+    decides whether the second may be written to needs to tell them apart.
+    """
+    from app.services.school_membership import filing_school
+    return filing_school(
+        role=g.get("user_role"),
+        user_id=g.get("user_id"),
+        active_school_id=g.get("user_school_id"),
+        home_school_id=g.get("user_home_school_id"),
+        requested_school_id=requested_school_id,
+    )
+
+
 def _apply_session(data, token):
     g.user_id = data["user_id"]
     g.user_token = token
     g.user_email = data.get("email", "")
     g.user_name = data.get("name", "")
     g.user_role = data.get("role", "murid")
-    g.user_school_id = data.get("school_id")
+    # The profile's school — who this account is on paper — and then the school this
+    # request is for. They are the same value for every role but the three that may
+    # hold more than one membership, and both are kept because the write side has to
+    # tell them apart (see `filing_school_for_request`).
+    g.user_home_school_id = data.get("school_id")
+    g.user_school_id = _resolved_school(token, data)
     g.user_class_id = data.get("class_id")
     g.user_status = data.get("status", "active")
     # Whether the password on this account is still the one the school printed. False
@@ -758,6 +827,12 @@ def _refresh_token():
     rt = request.cookies.get("refresh_token")
     if not rt:
         return None
+    # The access token this refresh is *for*. A refresh is the same session with a
+    # new token, so anything the session had chosen has to move with it — the active
+    # school is kept server-side under the token, and re-keying it here is what stops
+    # an hourly refresh from quietly returning a cross-school teacher to the school
+    # their profile names (which is the school their next paper would be filed in).
+    previous_token = _extract_token()
     try:
         supabase = get_auth_client()
         res = supabase.auth.refresh_session(rt)
@@ -765,6 +840,13 @@ def _refresh_token():
             return None
         token = res.session.access_token
         g.user_id = res.user.id
+        # Re-key the session's chosen school onto the new token **before** anything
+        # below resolves a school against it. Carrying it afterwards left exactly one
+        # request — this one — resolving a cross-school teacher into the school their
+        # profile names, because the resolution reads the choice off the token it is
+        # given and the new token had none yet; if that request was a save, that is
+        # the school the paper went to.
+        _carry_active_school(previous_token, token)
         g.user_email = res.user.email
         _meta = res.user.user_metadata or {}
         g.user_name = _meta.get("full_name", "")
@@ -778,8 +860,15 @@ def _refresh_token():
             g.user_name = pd["full_name"]
         if pd:
             g.user_role = _normalize_role(pd.get("role", "murid"))
-            g.user_school_id = pd.get("school_id") or res.user.user_metadata.get("school_id")
-            if g.user_school_id == "None": g.user_school_id = None
+            g.user_home_school_id = pd.get("school_id") or res.user.user_metadata.get("school_id")
+            if g.user_home_school_id == "None": g.user_home_school_id = None
+            # The same resolution the cached-session path makes: a refreshed token
+            # for a cross-school role must land in a verified membership, not in the
+            # profile's home school — otherwise refreshing would be a way back into
+            # a school a closure removed.
+            g.user_school_id = _resolved_school(token, {
+                "user_id": g.user_id, "role": g.user_role,
+                "school_id": g.user_home_school_id})
             g.user_class_id = pd.get("class_id")
             if g.user_class_id in ("None", ""): g.user_class_id = None
             g.user_status = pd.get("status", "active")
@@ -787,8 +876,11 @@ def _refresh_token():
         else:
             meta = res.user.user_metadata
             g.user_role = _normalize_role(meta.get("role", "murid"))
-            g.user_school_id = meta.get("school_id")
-            if g.user_school_id == "None": g.user_school_id = None
+            g.user_home_school_id = meta.get("school_id")
+            if g.user_home_school_id == "None": g.user_home_school_id = None
+            g.user_school_id = _resolved_school(token, {
+                "user_id": g.user_id, "role": g.user_role,
+                "school_id": g.user_home_school_id})
             g.user_class_id = meta.get("class_id")
             if g.user_class_id == "None": g.user_class_id = None
             g.user_status = "active"
@@ -797,6 +889,29 @@ def _refresh_token():
         return token
     except Exception:
         return None
+
+
+def _carry_active_school(previous_token, token) -> None:
+    """Move this session's chosen school onto its new token (and drop the old key).
+
+    Best-effort by design: a cache miss simply means the next request resolves the
+    school from the memberships, which is the same answer the choice was checked
+    against. Nothing here decides access — the choice is only ever honoured while an
+    active membership grants it (`school_membership.resolve_for_request`).
+    """
+    if not previous_token or not token or previous_token == token:
+        return
+    try:
+        from app.services.school_membership import (clear_active_school,
+                                                    get_active_school,
+                                                    set_active_school)
+        chosen = get_active_school(previous_token)
+        if chosen:
+            set_active_school(token, chosen)
+        clear_active_school(previous_token)
+    except Exception:
+        logger.debug("could not carry the chosen school across a token refresh",
+                     exc_info=True)
 
 
 def _check_roles(user_role: str, allowed_roles: tuple) -> bool:

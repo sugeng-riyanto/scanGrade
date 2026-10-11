@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from flask import Blueprint, jsonify, render_template, request, redirect, url_for, flash, g, send_file, current_app
 from app.utils.auth import (teacher_or_admin_required, teacher_required, get_supabase,
                             login_required, role_required, subscription_write_required,
-                            login_door_for)
+                            login_door_for, filing_school_for_request)
 from app.utils.cache import cache_get, cache_set, cache_delete
 from app.utils import failure
 from app.utils.helpers import read_with_retry, row_or_none
@@ -1351,9 +1351,21 @@ def exam_form():
     # the class a pupil is in this year, and a closed year stays read-only.
     active_year_id = (ta_service.active_school_year(
         supabase, g.get("user_school_id")) or {}).get("id")
+    # ── the school this paper is filed under ───────────────────────────────────
+    # A create is a tenant decision, so it goes through the authority rather than
+    # through whatever `g.user_school_id` happens to hold: the answer is the school
+    # this request is *verified* in, or a refusal. Before this, the row was written
+    # with `g.user_school_id`, which for a teacher whose active NPSN is not the one
+    # their profile names meant the paper — and the weighting and results that
+    # follow its `school_id` — landed in the home school. See
+    # `app/services/school_membership.py::filing_school`.
+    school_id, _school_error = filing_school_for_request(
+        requested_school_id=request.form.get("school_id"))
+    if _school_error:
+        return _exam_save_refused(autosave, _school_error)
     data = {
         "teacher_id": g.user_id,
-        "school_id": g.get("user_school_id"),
+        "school_id": school_id,
         "title": title,
         "subject": subject,
         "subject_id": subject_id,
@@ -1746,13 +1758,24 @@ def exam_detail(exam_id):
     publication = _publication_state(exam_row, action)
     grade_component_id = _resolve_grade_component(
         supabase, g.get("user_school_id"), request.form.get("grade_component_type_id"))
+    # ── the school this paper is filed under ───────────────────────────────────
+    # A paper's school is a fact about the paper, and a save may not restate it: the
+    # row keeps what it has, so editing a paper can never move it into another
+    # school's weighting and results (which is exactly what writing the caller's own
+    # school into every save used to do). The one exception is a row that has no
+    # school at all — a paper written before the column was filled — and repairing it
+    # is a write, so it goes through the same verified authority as a create.
+    filing_school_id = None
+    if not exam_row.get("school_id"):
+        filing_school_id, _school_error = filing_school_for_request()
+        if _school_error:
+            return _exam_save_refused(autosave, _school_error)
     # Date the paper to the running year, so the pupil dashboard can scope scores to
     # the class a pupil is in this year, and a closed year stays read-only.
     active_year_id = (ta_service.active_school_year(
         supabase, g.get("user_school_id")) or {}).get("id")
     data = {
         "teacher_id": g.user_id,
-        "school_id": g.get("user_school_id"),
         "title": title,
         "subject": subject,
         "subject_id": subject_id,
@@ -1795,6 +1818,10 @@ def exam_detail(exam_id):
         "grade_component_type_id": grade_component_id,
         "school_year_id": active_year_id,
     }
+    if filing_school_id:
+        # A row that had no school gets one now, and it is the school this request
+        # was verified in — the only repair an edit is allowed to make.
+        data["school_id"] = filing_school_id
     try:
         supabase.table("exams").update(data).eq("id", exam_id).execute()
     except Exception:
@@ -2270,6 +2297,12 @@ def duplicate_exam(exam_id):
         new_data["is_published"] = False
         new_data["is_template"] = False
         new_data["source_exam_id"] = exam_id
+        # `new_data` carries the *source's* `school_id`, and that is the point: the
+        # copy belongs to the school the original belongs to, which `_guard_exam`
+        # has already proven is the school this request is acting in. A copy filed
+        # under the caller's own school instead would be a cross-school copy — the
+        # paper the teacher may not even open, duplicated into a school that never
+        # set it.
         # A copy is this year's paper, not the year it was copied from.
         new_data["school_year_id"] = (ta_service.active_school_year(
             supabase, g.get("user_school_id")) or {}).get("id")
@@ -5603,7 +5636,12 @@ def generate_remedial(exam_id):
     total_new = len(questions)
     new_exam = {
         "teacher_id": g.user_id,
-        "school_id": g.get("user_school_id"),
+        # The remedial set of a paper belongs to the paper's own school — the school
+        # `require_school_access` just checked this caller against — and not to the
+        # caller's profile. Written as `g.get("user_school_id")` it followed whichever
+        # school the request had resolved, which for a teacher working at a second
+        # NPSN is not the school the source paper (and its results) live in.
+        "school_id": exam.get("school_id") or g.get("user_school_id"),
         "title": title,
         "subject": exam.get("subject", ""),
         "class_ids": exam.get("class_ids", []),

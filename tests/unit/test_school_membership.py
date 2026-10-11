@@ -31,7 +31,7 @@ class _Query:
 
     def select(self, *a, **k):
         if self.fail:
-            raise RuntimeError("no such table")
+            raise RuntimeError("connection reset by peer")
         return self
 
     def eq(self, col, val):
@@ -52,7 +52,7 @@ class _Query:
 
     def execute(self):
         if self.fail:
-            raise RuntimeError("no such table")
+            raise RuntimeError("connection reset by peer")
         if self.upserted is not None:
             return SimpleNamespace(data=[dict(self.upserted, id="m-1")])
         if self.updated is not None:
@@ -121,11 +121,28 @@ def test_no_valid_school_resolves_to_none_not_a_default():
     assert membership.resolve_active_school(sb, "u-1", None, None, "guru") is None
 
 
-def test_a_missing_table_fails_closed():
+def test_an_unanswerable_read_narrows_nothing_but_refuses_a_write():
+    """The two directions answer a failed read differently, on purpose.
+
+    A *read* keeps the home school, because an outage must not take a school away
+    from a teacher for the length of the outage — the old expectation here was
+    ``None``, which turned a database hiccup into every page refusing them. A
+    *write* refuses, because a paper filed against a school nobody could confirm is
+    a paper the wrong school grades (see `filing_school`).
+
+    The fake's failure is a generic one on purpose: a table that is genuinely absent
+    (migration 044 unrun) is a *different* state, answers `[]`, and keeps saving
+    exams — that case has its own test in `test_exam_school_authority.py`.
+    """
     sb = _Sb(fail=True)
     assert membership.is_active_member(sb, "u-1", "sc-1") is False
     assert membership.resolve_active_school(_Sb(fail=True), "u-1", "sc-home", "sc-2",
-                                            "guru") is None
+                                            "guru") == "sc-home"
+    school, error = membership.filing_school(
+        role="guru", user_id="u-1", active_school_id="sc-home",
+        home_school_id="sc-home", supabase=_Sb(fail=True))
+    assert school is None
+    assert error == membership.FILING_UNVERIFIED
 
 
 # ── membership writes ────────────────────────────────────────────────────────

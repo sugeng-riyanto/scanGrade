@@ -474,3 +474,54 @@ Aturan yang ditegakkan server, bukan UI:
 Sumber otorisasi guru tetap `app/services/assignments.py`: guru hanya boleh membuat/mengubah
 ujian untuk pasangan yang benar-benar dipegangnya, dan daftar dropdown yang kosong **menutup**
 (admin sekolah & super admin tidak dibatasi per pasangan).
+
+## Sekolah aktif: sekolah tempat sebuah ujian disimpan (guru anggota dua NPSN)
+
+`exams.school_id` adalah satu-satunya kolom yang menentukan **sekolah mana yang
+menimbang** sebuah makalah, **murid siapa** yang boleh mengerjakannya, **nilai siapa**
+yang muncul di bawahnya, dan **laporan siapa** yang menghitungnya. Guru yang menjadi
+anggota aktif lebih dari satu sekolah (`teacher_school_membership`, migrasi 044) punya
+dua sekolah yang bisa disebut "sekolahnya": `profiles.school_id` (sekolah rumah, di atas
+kertas) dan sekolah tempat ia **sedang bekerja** di request ini.
+
+- `g.user_home_school_id` = `profiles.school_id`. `g.user_school_id` = sekolah yang
+  **diresolusi** untuk request ini (`app/utils/auth.py::_resolved_school`, satu kali per
+  request, hanya untuk peran yang boleh lintas sekolah: `guru`, `principal`,
+  `vice_principal`). Murid dan `admin_sekolah` tidak pernah menyentuh tabel keanggotaan.
+- Dua arah, dua fungsi, dan perbedaannya disengaja
+  (`app/services/school_membership.py`):
+  - **membaca** — `resolve_for_request`: pilihan sekolah di sesi (disimpan di server,
+    per token, tidak pernah di cookie) dihormati **hanya bila masih ada baris `active`**;
+    baris yang hilang membatalkan pilihan itu; dan **tabel yang tidak terbaca
+    mengembalikan sekolah rumah** — gangguan basis data tidak boleh mengambil sekolah
+    seseorang di tengah halaman.
+  - **menulis** — `filing_school`: sekolah yang **tidak dapat dipastikan justru
+    ditolak**, karena gangguan basis data yang diam-diam menjadi sekolah rumah adalah
+    tepat kebocoran yang aturan ini ada untuk mencegah. Dipanggil lewat
+    `app.utils.auth::filing_school_for_request` (satu pembaca `g`, seperti
+    `check_subscription_write`).
+- **Nama sekolah di dalam body bukan otoritas.** Body yang menyebut sekolah lain
+  ditolak (400), bukan dituruti dan bukan pula diam-diam ditimpa.
+- Pintu tulis: builder create (`/teacher/exams/new`) memakai jawaban otoritas dan
+  menolak simpan bila tidak terverifikasi; builder edit tidak pernah **menyebut ulang**
+  sekolah (baris mempertahankan miliknya; hanya baris tanpa sekolah sama sekali yang
+  diperbaiki, dan perbaikan itu pun lewat otoritas yang sama); `duplicate_exam` mewarisi
+  sekolah makalah sumber; `generate_remedial` menyematkan set remedial ke sekolah
+  makalah sumber, bukan ke sekolah pemanggil; `POST /exam/` dan `PUT /exam/<id>` tidak
+  lagi menerima `school_id` sebagai kolom yang bisa ditulis.
+- Pembacaan `GET /exam/` ikut dipersempit ke sekolah request (dan kunci jawaban hanya
+  ikut bila `can_read_exam` mengizinkan), sebab sisi baca yang tetap lintas sekolah akan
+  menyerahkan persis apa yang sisi tulis menolak untuk dibuat.
+- Refresh token menyelesaikan sekolah **lagi** (kedua cabang pembacaan profil) dan
+  memindahkan pilihan sekolah ke token baru — tanpa itu, refresh tiap jam mengembalikan
+  guru lintas sekolah ke sekolah rumahnya, yaitu sekolah tempat makalah berikutnya akan
+  disimpan.
+
+Batas yang jujur: pemilih sekolah (dan alur permintaan bergabung ke NPSN lain) berada di
+cabang `feat/membership-*`, belum di cabang ini. Jadi di sini sekolah aktif = sekolah
+rumah kecuali `set_active_school()` dipanggil (ia hanya dihormati bila baris keanggotaan
+masih `active`, sehingga tulisan tanpa verifikasi tidak bisa memindahkan siapa pun).
+Penjaga: `tests/unit/test_exam_school_authority.py` (33 uji, termasuk **empat uji yang
+menjalankan pintu `POST /exam/`-nya** dan membaca baris yang benar-benar diserahkan ke
+basis data, bukan hanya memastikan rutenya bertanya; `.freebuff/mutate_exam_school.py`
+**29/29 cacat tertangkap**).
