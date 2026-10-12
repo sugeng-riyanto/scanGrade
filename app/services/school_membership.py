@@ -846,6 +846,90 @@ def school_members(supabase, school_id, role) -> dict:
     return {"ok": True, "members": out}
 
 
+def my_schools(supabase, user_id) -> list[dict]:
+    """The schools this account may teach in, for the teacher's own switcher.
+
+    Active memberships only, each with the school's name — and the caller's own, so
+    nothing here is a school's business but the teacher's. `home_school_id` is a
+    field rather than a filter (the reader decides which one is "home" by comparing
+    it with `profiles.school_id`), because a teacher's home school may have no
+    membership row at all: every account created after migration 044 looks like that,
+    and hiding the school they teach in every day would be the wrong half to lose.
+
+    Returns `[]` when the read fails, which the page reports as "cannot be read"
+    rather than as "no schools" — the two are different sentences.
+    """
+    if not user_id:
+        return []
+    rows = memberships_for(supabase, user_id)  # active only, own rows only
+    names = _school_names(supabase, [row.get("school_id") for row in rows])
+    return [{
+        "school_id": _text(row.get("school_id")),
+        "name": names.get(_text(row.get("school_id")), ""),
+        "school_role": _text(row.get("school_role")) or "guru",
+        "joined_at": row.get("joined_at"),
+    } for row in rows if row.get("school_id")]
+
+
+def switchable_schools(user_id, token, active_school_id=None, supabase=None) -> dict:
+    """The header's school switcher: what this account may switch *between*.
+
+    The same choice the membership page offers, put where the answer is visible on
+    every page — because the page a teacher has no reason to open again is exactly
+    where a per-session choice was reachable only, so an accepted teacher kept
+    working in their home NPSN and never learned the acceptance had taken effect.
+
+    Two reads, and neither is new. The membership rows are taken from the **same
+    memoised read** `resolve_for_request` already made for this request (`memo`,
+    keyed by the user), so the header adds no membership query to any page; the
+    names come from the per-school row cache, which is safe because a school's name
+    is identical for everyone in it. A role that cannot hold two memberships reads
+    nothing at all — the partition `is_cross_school_role` draws everywhere else.
+
+    Returns ``{"schools": [{"school_id", "name", "active"}], "away": bool}``, where
+    ``away`` means a per-session choice is in force, so the control also offers the
+    way back to the account's own school. The list is **empty rather than an error**
+    when a read fails, and empty when there is nothing to switch to: a reader with
+    one membership, currently in it, has no second school to choose, and the header
+    is not the place to find that out loudly.
+    """
+    empty = {"schools": [], "away": False}
+    if not user_id:
+        return empty
+    from app.utils.req_cache import memo, school_row
+    away = bool(get_active_school(token))
+    try:
+        rows = memo(f"membership:rows:{user_id}",
+                    lambda: membership_rows(supabase or _client(), user_id))
+    except Exception:
+        logger.debug("switcher membership read failed; the control stays hidden",
+                     exc_info=True)
+        return empty
+    if rows is None:
+        return empty
+    ids = []
+    for row in rows:
+        if str(row.get("status") or "") != STATUS_ACTIVE:
+            continue
+        school_id = _text(row.get("school_id"))
+        if school_id and school_id not in ids:
+            ids.append(school_id)
+    # One school, and it is the one the request is already in: nothing to switch.
+    if not ids or (len(ids) == 1 and not away and ids[0] == _text(active_school_id)):
+        return empty
+    schools = []
+    for school_id in ids:
+        name = ""
+        try:
+            name = _text((school_row(school_id, "name") or {}).get("name"))
+        except Exception:
+            logger.debug("switcher name read failed; showing the id", exc_info=True)
+        schools.append({"school_id": school_id, "name": name,
+                        "active": school_id == _text(active_school_id)})
+    schools.sort(key=lambda s: (s["name"] or s["school_id"]).lower())
+    return {"schools": schools, "away": away}
+
+
 def pending_requests(supabase, school_id, role) -> dict:
     """The destination school's queue, newest first, with the applicant's own details.
 

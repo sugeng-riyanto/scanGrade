@@ -927,6 +927,30 @@ def _register_request_logging(app):
         except (ValueError, TypeError):
             g.tz_offset = DEFAULT_TZ_OFFSET
 
+    def _header_switcher() -> dict:
+        """The header's school switcher payload, for the roles that can have one.
+
+        Empty for everyone else, and computed behind the same role partition every
+        other reader uses (`is_cross_school_role`), so a pupil's and a school admin's
+        page pays nothing for a control they will never see. It never raises: the
+        chrome is on every page, and a membership read that fails must not be the
+        reason one of them does not render — the service behind it returns an empty
+        list for the same reason.
+        """
+        empty = {"schools": [], "away": False}
+        if not g.get("user_id"):
+            return empty
+        try:
+            from app.services.school_membership import (is_cross_school_role,
+                                                        switchable_schools)
+            if not is_cross_school_role(g.get("user_role")):
+                return empty
+            return switchable_schools(g.get("user_id"), g.get("user_token"),
+                                      active_school_id=g.get("user_school_id"))
+        except Exception:
+            app.logger.debug("header switcher unavailable", exc_info=True)
+            return empty
+
     @app.context_processor
     def inject_globals():
         # `ui_prefs` is the theme/language/alert choice the user made on any device,
@@ -936,6 +960,9 @@ def _register_request_logging(app):
         return {
             "tz_offset": g.get("tz_offset", DEFAULT_TZ_OFFSET),
             "ui_prefs": g.get("user_prefs") or {},
+            # The schools a cross-school teacher may switch between, for the header
+            # control. Empty (and free) for every other role — see `_header_switcher`.
+            "school_switcher": _header_switcher(),
         }
 
     @app.after_request

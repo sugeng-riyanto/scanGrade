@@ -743,6 +743,53 @@ window.sgSavePrefs = function (patch) {
                     <span class="text-[10px] font-bold" x-text="darkMode ? t('Terang','Light') : t('Gelap','Dark')"></span>
                 </button>
 
+                {# ── Which NPSN this teacher is working in ─────────────────────────
+                   Every request's school is resolved from the verified active
+                   membership, and until now the only way to *choose* it was
+                   `/teacher/membership` — a page a teacher has no reason to open
+                   again after the day they were accepted. So the choice sits where
+                   its answer is visible: the header, on every page, posting back to
+                   the page it was used from (`next`).
+
+                   Rendered only when there is something to switch to — the context
+                   processor returns an empty list for a single-school reader and
+                   reads nothing at all for a role that cannot hold two memberships
+                   (`_header_switcher`). Hidden on the narrowest screens, where the
+                   topbar already carries the crumb, the language and the menu. #}
+                {% set _switcher = school_switcher|default({}) %}
+                {% set _switch_schools = _switcher.get('schools') or [] %}
+                {% if _switch_schools|length > 1 or _switcher.get('away') %}
+                <form method="POST" action="/teacher/membership/switch" class="hidden sm:block">
+                    <input type="hidden" name="next" value="{{ request.full_path.rstrip('?') }}">
+                    {# The CSRF token is not decoration: `csrf_protect` in
+                       `app/__init__.py` refuses every POST without it, and this control
+                       is a POST from a form, so without this line every switch was
+                       answered 403 — a control that looks right, submits, and silently
+                       does nothing. #}
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                    <label for="sgSchoolSwitcher" class="sr-only"
+                           x-text="t('Sekolah aktif','Active school')"></label>
+                    <select id="sgSchoolSwitcher" name="school_id" onchange="this.form.submit()"
+                            class="text-xs font-bold rounded-lg border border-surface-200 bg-white text-surface-600 px-2 py-2 max-w-[10rem]"
+                            :title="t('Sekolah aktif: kelas, murid dan penilaian mengikuti NPSN ini','Active school: classes, pupils and marks follow this NPSN')">
+                        {% for s in _switch_schools %}
+                        <option value="{{ s.school_id or '' }}" {% if s.active %}selected{% endif %}>{{ s.name or s.school_id }}</option>
+                        {% endfor %}
+                        {% if _switcher.get('away') %}
+                        <option value="home" x-text="t('Sekolah asal saya','My own school')"></option>
+                        {% endif %}
+                    </select>
+                    {# Without JavaScript the `<select>` above cannot submit on its own
+                       (`onchange` is JavaScript) and Alpine is not running either, so
+                       this fallback's label is written in **both languages on
+                       purpose**: a reader with scripting off has no `localStorage`
+                       for the toggle to have been stored in, and a label bound with
+                       `x-text` here would render as an empty button, which is the one
+                       thing a fallback may not do. #}
+                    <noscript><button type="submit" class="text-xs font-bold underline text-surface-500">Pindah / Switch</button></noscript>
+                </form>
+                {% endif %}
+
                 <!-- User dropdown -->
                 <div class="relative" @click.outside="userMenuOpen = false">
                     <button @click="userMenuOpen = !userMenuOpen"
