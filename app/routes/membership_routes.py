@@ -189,7 +189,7 @@ def membership_request_decide(request_id, decision):
 def membership_close(user_id):
     """Tutup keanggotaan seorang guru di sekolah ini — penutupan TOTAL.
 
-    `closed`, bukan `inactive`: sejak migrasi 064 hanya ada SATU nama untuk
+    `closed`, bukan `inactive`: sejak migrasi 066 hanya ada SATU nama untuk
     penutupan, sehingga tidak ada halaman yang bisa menampilkan dua jenis penutupan
     untuk satu peristiwa.
 

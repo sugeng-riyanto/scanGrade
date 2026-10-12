@@ -39,7 +39,7 @@ ACTIVE_SCHOOL_KEY = "active_school:{token}"
 #
 # These four names are the whole of `teacher_school_membership.status`. The column
 # began with three (migration 044) and migration 063 added `closed` without
-# dropping any of them; migration 064 canonicalises every closure onto `closed`
+# dropping any of them; migration 066 canonicalises every closure onto `closed`
 # while deliberately leaving `inactive` legal in the CHECK, so a row that still
 # holds the old name cannot break a migration. The CHECK is the database's copy of
 # this tuple and the two are pinned to each other in both directions by
@@ -61,7 +61,7 @@ ACTIVE_SCHOOL_KEY = "active_school:{token}"
 # to that school".
 #
 # `inactive` is declared and never written: `CLOSED_STATUS` below is the one name a
-# closure is recorded under since migration 064, and the legacy value stays in the
+# closure is recorded under since migration 066, and the legacy value stays in the
 # tuple because a row the database still holds must not be invisible here.
 STATUS_ACTIVE = "active"
 STATUS_INVITED = "invited"
@@ -490,7 +490,7 @@ APPROVER_ROLES = ("admin_sekolah", "principal", "vice_principal")
 #: holds for every caller and not only for the route that remembers a decorator.
 REOPEN_ROLES = ("admin_sekolah",)
 
-#: The single canonical status for ANY closure, since migration 064. The 044 value
+#: The single canonical status for ANY closure, since migration 066. The 044 value
 #: `inactive` is migrated to this and is no longer written by any code path — a
 #: second name for one state is how a page ends up showing two kinds of closure.
 #: It is an alias of the vocabulary's own name rather than a fifth spelling:

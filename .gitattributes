@@ -6,6 +6,17 @@
 *.yml text eol=lf
 *.yaml text eol=lf
 *.json text eol=lf
+# The migration ledger hashes each .sql file's **raw bytes** (`apply_migration.py`
+# compares `sha256(path.read_bytes())` against the record it wrote when the file was
+# applied). Without this line the extension is left to `core.autocrlf`, so a Windows
+# checkout holds CRLF while the Linux box holds LF — one unchanged file with two
+# digests, and the box's `--status` reads **APPLIED, THEN EDITED** for a migration
+# nobody touched. That verdict was measured here on 12 October 2026 for
+# `064_seb_door_refusals.sql` (recorded sha `a0b5f274…` = the same file with LF), which
+# is the same false positive this repository had already written down once for `037`.
+# Pinned like every other extension above, for the same reason: one file, one identity,
+# on every platform that applies it.
+*.sql text eol=lf
 *.md text eol=lf
 *.service text eol=lf
 *.timer text eol=lf

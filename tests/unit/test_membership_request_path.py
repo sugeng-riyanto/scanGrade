@@ -63,7 +63,7 @@ class TestTheChoiceIsNotAWayBackIn:
 
 class TestAFailedReadIsNotAClosure:
     def test_an_unreadable_table_keeps_the_home_school(self, monkeypatch):
-        """The pre-064 box is exactly this box, and it must keep working."""
+        """The pre-066 box is exactly this box, and it must keep working."""
         db = FakeDb(teacher_school_membership=[])
         db.fail.add("teacher_school_membership")
         monkeypatch.setattr(membership, "_client", lambda: db)
