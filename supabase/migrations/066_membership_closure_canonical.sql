@@ -1,5 +1,5 @@
 -- ──────────────────────────────────────────────────────────────
--- Migration 064: 'closed' menjadi SATU-SATUNYA status penutupan
+-- Migration 066: 'closed' menjadi SATU-SATUNYA status penutupan
 -- ──────────────────────────────────────────────────────────────
 -- Jalankan lewat deploy/apply_migration.py (dry run dulu, baru --commit), atau
 -- tempel di Supabase SQL Editor. Dry run wajib: berkas ini mengubah data.
@@ -92,4 +92,4 @@ UPDATE public.teacher_school_membership
  WHERE status = 'inactive';
 
 COMMENT ON COLUMN public.teacher_school_membership.status IS
-    'Status keanggotaan. ''active'' = punya akses; ''invited'' = undangan belum diterima; ''closed'' = SATU-SATUNYA status penutupan (kanonik sejak migrasi 064 — ''inactive'' dari 044 dipindahkan ke sini dan tidak lagi ditulis kode mana pun). Setiap nilai selain ''active'' berarti tanpa akses, jadi penutupan tidak butuh jalan baca kedua.';
+    'Status keanggotaan. ''active'' = punya akses; ''invited'' = undangan belum diterima; ''closed'' = SATU-SATUNYA status penutupan (kanonik sejak migrasi 066 — ''inactive'' dari 044 dipindahkan ke sini dan tidak lagi ditulis kode mana pun). Setiap nilai selain ''active'' berarti tanpa akses, jadi penutupan tidak butuh jalan baca kedua.';

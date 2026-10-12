@@ -481,7 +481,7 @@ Sumber otorisasi guru tetap `app/services/assignments.py`: guru hanya boleh memb
 ujian untuk pasangan yang benar-benar dipegangnya, dan daftar dropdown yang kosong **menutup**
 (admin sekolah & super admin tidak dibatasi per pasangan).
 
-## Keanggotaan lintas sekolah (migration 063 + 064)
+## Keanggotaan lintas sekolah (migration 063 + 066)
 
 Satu akun, banyak sekolah. `teacher_school_membership` memisahkan **identitas** (satu baris
 `profiles`, satu email) dari **keanggotaan** (satu baris per sekolah). Peran yang boleh
@@ -509,7 +509,7 @@ untuk principal/wakilnya ia mengatakan *"Hanya admin sekolah"*.
 
 ### Penutupan itu total, bukan bertahap
 
-`closed` adalah **satu-satunya** status penutupan sejak migrasi 064 (nilai `inactive` dari
+`closed` adalah **satu-satunya** status penutupan sejak migrasi 066 (nilai `inactive` dari
 migrasi 044 dipindahkan ke sana dan tidak ditulis kode mana pun lagi — ditegakkan test).
 Setiap nilai selain `active` berarti **tanpa akses**, jadi penutupan tidak butuh jalan baca
 kedua. Sekolah yang ditutup:

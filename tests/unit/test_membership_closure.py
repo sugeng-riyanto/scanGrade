@@ -3,7 +3,7 @@
 Tiga kontrak yang dijaga berkas ini, dan ketiganya adalah keputusan produk yang
 tidak boleh bisa dibalik tanpa satu uji ini gagal:
 
-* **Satu nama untuk penutupan.** Sejak migrasi 064 hanya ada `closed`; nilai
+* **Satu nama untuk penutupan.** Sejak migrasi 066 hanya ada `closed`; nilai
   `inactive` dari 044 dipindahkan ke sana dan tidak ditulis kode mana pun lagi.
   Dua nama untuk satu keadaan adalah bagaimana sebuah halaman menampilkan dua
   jenis penutupan untuk satu peristiwa.
@@ -30,7 +30,7 @@ from app.services import school_membership as membership
 ROOT = Path(__file__).resolve().parents[2]
 SERVICE = ROOT / "app" / "services" / "school_membership.py"
 ROUTES = ROOT / "app" / "routes" / "membership_routes.py"
-MIGRATION = ROOT / "supabase" / "migrations" / "064_membership_closure_canonical.sql"
+MIGRATION = ROOT / "supabase" / "migrations" / "066_membership_closure_canonical.sql"
 
 
 class _Query:
@@ -112,7 +112,7 @@ class _Sb:
         return [e for e in self.writes() if e[1] == table]
 
     def invariants(self):
-        """The statuses 044 and 064 define, for the closure vocabulary test."""
+        """The statuses 044 and 066 define, for the closure vocabulary test."""
         return ("active", "invited", "inactive", "closed")
 
 
@@ -126,7 +126,7 @@ def test_no_code_path_still_writes_inactive():
     """The canonicalisation only holds if nothing keeps writing the old name.
 
     Counted rather than forbidden outright, because the merge with `main` put the
-    vocabulary in this service: migration 064 keeps `inactive` legal in the CHECK
+    vocabulary in this service: migration 066 keeps `inactive` legal in the CHECK
     (a row that still holds it must not break a migration), so the four names are
     declared here — and a search cannot tell that one declaration from a write. The
     count is the guard: exactly one occurrence, the declaration, and a second one is
@@ -203,7 +203,7 @@ def test_a_missing_table_still_fails_closed_where_access_is_decided():
     This assertion used to read `... is None` for the resolution as well, and the
     change is deliberate: a table the database does not have yet is an *outage*, not
     a closure, and returning `None` for it signed every teacher out of the school
-    their profile names — the pre-064 box was exactly that box. So the two answers
+    their profile names — the pre-066 box was exactly that box. So the two answers
     are kept apart on purpose:
 
     * "is this user an active member of sc-A?" — answered from a read that failed —
