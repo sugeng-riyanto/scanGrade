@@ -19,6 +19,7 @@ that safe rather than merely convenient:
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -198,6 +199,17 @@ class TestTheControlIsInTheChrome:
         assert 'name="next"' in BASE and "request.full_path" in BASE
         assert 'name="school_id"' in BASE and "sgSchoolSwitcher" in BASE
 
+    def test_the_form_carries_the_token_the_global_check_requires(self):
+        """Without it the control submits and the school never changes.
+
+        `csrf_protect` in `app/__init__.py` refuses every POST that arrives without a
+        token, and this control is a POST from a form — so a missing field is not a
+        hardening gap, it is a switch that answers 403 on every use, which on screen
+        looks exactly like nothing having happened.
+        """
+        assert 'name="_csrf_token"' in BASE, (
+            "the switch form must post the token the app's CSRF check demands")
+
     def test_it_is_rendered_only_when_there_is_a_choice_to_make(self):
         assert "{% if _switch_schools|length > 1 or _switcher.get('away') %}" in BASE
 
@@ -240,6 +252,40 @@ class TestTheControlIsInTheChrome:
         assert "SMP Satu" in html and "SMP Dua" in html
         assert html.count('value="home"') == 1, "the way home, once"
         assert 'name="next" value="/teacher/dashboard"' in html
+        # The token has to be *rendered*, not merely present in the template: an empty
+        # value is refused exactly like a missing field.
+        token = re.search(r'name="_csrf_token" value="([^"]*)"', html)
+        assert token and token.group(1), (
+            "a tokenless POST is refused by `csrf_protect`, so the switch would look "
+            "like it did nothing")
+    def test_a_row_with_no_id_renders_an_empty_value_not_the_word_none(self, monkeypatch):
+        """The template's own contract, whatever the payload holds.
+
+        `switchable_schools` skips a row with no id today — which is exactly why a
+        fixture of real rows and a sweep of the source both miss this, and why the
+        template has to promise it itself: an empty payload is not the same promise
+        as a form that can never post `None` as a uuid.
+        """
+        app = create_app("app.config.TestingConfig")
+        monkeypatch.setattr(school_membership, "switchable_schools",
+                            lambda *a, **k: {"schools": [
+                                {"school_id": None, "name": "Tanpa id", "active": False},
+                                {"school_id": OTHER, "name": "SMP Dua", "active": True}],
+                                "away": False})
+        with app.test_request_context("/teacher/dashboard"):
+            g.user_id = TEACHER
+            g.user_role = "guru"
+            g.user_school_id = OTHER
+            g.user_name = "Budi"
+            g.tz_offset = 7
+            html = render_template_string(
+                "{% extends 'base.html' %}{% block content %}x{% endblock %}")
+        select = html.split('id="sgSchoolSwitcher"', 1)[1].split("</select>", 1)[0]
+        assert 'value=""' in select, "a row with no id posts an empty value"
+        assert 'value="None"' not in select, (
+            "a bare interpolation renders the word None, and Postgres refuses it as a "
+            "uuid")
+        assert f'value="{OTHER}"' in select, "the real id is unaffected"
 
     def test_the_region_declares_its_own_language_like_the_rest_of_the_header(self):
         """The chrome follows the toggle, so its strings are pairs, not literals."""
