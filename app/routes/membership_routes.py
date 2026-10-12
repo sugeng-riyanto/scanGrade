@@ -266,6 +266,15 @@ def teacher_membership():
         schools=membership.school_search(
             supabase, q, member_ids=membership.member_school_ids(supabase, g.get("user_id"))),
         my_requests=membership.my_requests(supabase, g.get("user_id")),
+        # Which school this session is *in* right now, and which one the teacher
+        # chose explicitly. Both come from the server: `user_school_id` is the
+        # request's resolved school (the one every page and every write will use),
+        # and the choice is read from the session cache the switcher writes. The page
+        # needs both to say "you are here" without guessing, and to know whether the
+        # "back to my own school" control has anything to undo.
+        my_schools=membership.my_schools(supabase, g.get("user_id")),
+        active_school_id=g.get("user_school_id"),
+        chosen_school_id=membership.get_active_school(g.get("user_token")),
         consent_id=ind,
         consent_en=eng,
         consent_version=membership.CONSENT_DOCUMENT_VERSION,
@@ -298,3 +307,64 @@ def teacher_membership_request():
     outcome = "ok" if out.get("ok") else (out.get("reason") or "failed")
     return redirect(url_for("membership_teacher.teacher_membership",
                             q=request.form.get("q", ""), status=outcome))
+
+
+def _safe_next(raw) -> str:
+    """A local path to return to after a switch, or ``""``.
+
+    The header's switcher posts the page it was used from, so a teacher who changes
+    school while reading their exam list is returned to that list instead of being
+    dropped on the membership page. Only a **single-slash local path** is accepted:
+    `//evil.example` is a protocol-relative URL a browser follows off-site, and an
+    absolute URL would turn a school choice into an open redirect.
+    """
+    value = (raw or "").strip()
+    if not value.startswith("/") or value.startswith("//") or "\\" in value:
+        return ""
+    return value
+
+
+@teacher_membership_bp.route("/membership/switch", methods=["POST"])
+@role_required(*_MEMBERSHIP_ROLES)
+def teacher_membership_switch():
+    """Teach in one of the schools this account is an active member of.
+
+    The keystone the feature was missing. `app.utils.auth` resolves the school of
+    *every* request from the verified active membership
+    (`school_membership.resolve_for_request`), and that resolution honours a
+    per-token choice — which nothing could set. So a teacher the destination school
+    had accepted stayed in their home school: the school could not find them on its
+    roster, could not give them a class, and their lessons, marks and weighting never
+    followed the NPSN they were accepted into. This route is the only writer of that
+    choice.
+
+    Two refusals, both before anything is written. A school the caller is not an
+    **active** member of is refused — so a stale form cannot move a teacher into a
+    school they were removed from, and a closure cannot be walked around by
+    switching back into it. And a request that names no school (or `home`) *clears*
+    the choice rather than setting one: going back to the school one's own profile
+    names has to be possible without knowing which school that is, and it must not be
+    a school id the client can invent. The login door check is the decorator's, so
+    only the three cross-school roles reach any of this.
+    """
+    token = g.get("user_token")
+    # Where the control that posted this was used from. The header's switcher sends
+    # the page it is on; the membership page sends nothing, and keeps its own banner.
+    back = _safe_next(request.form.get("next"))
+    target = (request.form.get("school_id") or request.form.get("school") or "").strip()
+    if not target or target == "home":
+        membership.clear_active_school(token)
+        log_activity("update", "active_school", g.get("user_id"),
+                     new_data={"school_id": None, "choice": "home"},
+                     user_id=g.get("user_id"))
+        return redirect(back or url_for("membership_teacher.teacher_membership",
+                                        status="home"))
+    if not membership.is_active_member(get_supabase(), g.get("user_id"), target):
+        # A school id from a form is only ever a *claim*; the row is the answer.
+        return redirect(url_for("membership_teacher.teacher_membership",
+                                status="not_member"))
+    membership.set_active_school(token, target)
+    log_activity("update", "active_school", g.get("user_id"),
+                 new_data={"school_id": target}, user_id=g.get("user_id"))
+    return redirect(back or url_for("membership_teacher.teacher_membership",
+                                    status="switched"))

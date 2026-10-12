@@ -390,6 +390,10 @@ EXEMPT = {
     "membership_bp /memberships/<user_id>/reopen":
         "reopening is the school admin's own decision about a person, and the way "
         "back from a closure; it touches no mark of any year",
+    "teacher_membership_bp /membership/switch":
+        "which of your own schools you are teaching in during THIS session — the "
+        "choice lives in the session cache and dies with it, so no year is "
+        "touched and no row of any year is read or written",
 }
 
 MUTATING = ("POST", "PUT", "PATCH", "DELETE")
