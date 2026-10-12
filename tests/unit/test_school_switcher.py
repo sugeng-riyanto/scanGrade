@@ -181,6 +181,12 @@ class TestTheWayBackIsLocal:
         ("", ""),
         (None, ""),
         ("/teacher\\..\\x", ""),
+        # A browser strips these three out of a URL *before* parsing it, so this shape
+        # reaches the parser as `//evil.example`: protocol-relative and off-site, past
+        # a check that only ever saw one leading slash.
+        ("/\t/evil.example", ""),
+        ("/\n/evil.example", ""),
+        ("/\r/evil.example", ""),
     ])
     def test_only_a_single_slash_local_path_survives(self, raw, kept):
         assert membership_routes._safe_next(raw) == kept

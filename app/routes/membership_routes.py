@@ -317,9 +317,16 @@ def _safe_next(raw) -> str:
     dropped on the membership page. Only a **single-slash local path** is accepted:
     `//evil.example` is a protocol-relative URL a browser follows off-site, and an
     absolute URL would turn a school choice into an open redirect.
+
+    Tab, carriage return and newline are refused for the same reason, and they are the
+    one shape that looks local and is not: a browser **strips them out of a URL
+    before parsing it**, so `/<TAB>/evil.example` reaches the parser as
+    `//evil.example` — protocol-relative, off-site, past a check that had only ever
+    seen one leading slash.
     """
     value = (raw or "").strip()
-    if not value.startswith("/") or value.startswith("//") or "\\" in value:
+    if (not value.startswith("/") or value.startswith("//") or "\\" in value
+            or any(ch in value for ch in "\t\r\n")):
         return ""
     return value
 
