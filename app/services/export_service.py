@@ -101,6 +101,35 @@ def _get_answer_key(exam, q_idx):
     return ak.get(str(q_idx), "")
 
 
+def _dash(value):
+    """A results cell: the number, or the dash this file already uses for "no value"."""
+    return "-" if value is None else value
+
+
+def _working(row) -> dict:
+    """The formula's parts for one row of an export.
+
+    `final_score.display_parts` is the same reader the printed sheets use, so a
+    spreadsheet and the sheet a school files cannot disagree about the same paper.
+    It is also where the bug this replaces lived: `row.get("final_score",
+    row.get("score", 0))` *reads* as a fallback and is not one — when the column is
+    NULL the key exists and `.get` returns `None`, so the fallback never runs. That
+    is how the results PDF came to print "Final: None" for a paper that had simply
+    not been graded yet, the same shape of bug as "Mata Pelajaran: None".
+
+    A paper with no stored mark has no final to state, and 0 is not it — an ungraded
+    paper did not earn a zero. `None` says "no mark yet" and the sheets render it as
+    a dash; the working beside it is still the mark scheme's own reading of the
+    answers, so the row is not blank.
+    """
+    from app.services.final_score import display_parts
+
+    parts = display_parts(row)
+    if row.get("final_score") is None and row.get("score") is None:
+        parts["final"] = None
+    return parts
+
+
 def export_to_xlsx(submissions: list, exam: dict = None) -> io.BytesIO:
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -122,8 +151,11 @@ def export_to_xlsx(submissions: list, exam: dict = None) -> io.BytesIO:
             q_types = {}
     total_q = exam.get("total_questions", 0)
 
-    # Headers
-    headers = ["No", "Nama Siswa", "NISN / ID", "Skor MCQ", "Penalti", "Nilai Final", "Status", "Waktu"]
+    # Headers. "Skor Mentah" and "Nilai Akhir" are the printed sheet's own words, and
+    # they are the ones that reconcile: an essay is a teacher's mark and never enters
+    # the objective column, so "Skor MCQ - Penalti" was never the final.
+    headers = ["No", "Nama Siswa", "NISN / ID", "Skor Mentah", "Total Penalti",
+               "Pelanggaran (diterapkan/tercatat)", "Nilai Akhir", "Status", "Waktu"]
     for qi in range(total_q):
         # "Not MCQ" is not "essay": the three new objective types are marked by
         # the app, so their columns must not be labelled as written answers.
@@ -150,15 +182,19 @@ def export_to_xlsx(submissions: list, exam: dict = None) -> io.BytesIO:
             except (json.JSONDecodeError, TypeError):
                 answers = {}
 
+        # `or` and not a `.get` default: `profiles` is popped into `student_name`, and a
+        # row whose profile is missing would otherwise print `None` as the pupil's name.
+        parts = _working(s)
         row_data = [
             i,
-            s.get("student_name", s.get("student_id", "")[:12]),
+            s.get("student_name") or s.get("student_id", "")[:12],
             _nisn_val(answers, ""),
-            s.get("score", 0),
-            s.get("penalty", 0),
-            s.get("final_score", s.get("score", 0)),
-            s.get("status", "submitted"),
-            _format_dt(s.get("submitted_at", "")),
+            parts["raw"],
+            parts["penalty"],
+            f"{parts['applied']} / {parts['recorded']}",
+            _dash(parts["final"]),
+            s.get("status") or "submitted",
+            _format_dt(s.get("submitted_at") or ""),
         ]
 
         for qi in range(total_q):
@@ -187,10 +223,10 @@ def export_to_xlsx(submissions: list, exam: dict = None) -> io.BytesIO:
     ws.column_dimensions["A"].width = 5
     ws.column_dimensions["B"].width = 24
     ws.column_dimensions["C"].width = 32
-    for col in range(4, 9):
+    for col in range(4, len(headers) + 1):
         ws.column_dimensions[chr(64 + col)].width = 14
     for qi in range(total_q):
-        col_idx = 9 + qi
+        col_idx = len(headers) + 1 + qi
         if col_idx <= 26:
             ws.column_dimensions[chr(64 + col_idx)].width = 12
         else:
@@ -223,11 +259,9 @@ def export_to_pdf(submissions: list, exam_title: str = "Hasil Ujian", exam: dict
             except (json.JSONDecodeError, TypeError):
                 answers = {}
 
-        student_name = s.get("student_name", s.get("student_id", "")[:12])
+        student_name = s.get("student_name") or s.get("student_id", "")[:12]
         student_nisn = _nisn_val(s.get("answers", ""), "")
-        score = s.get("score", 0)
-        penalty = s.get("penalty", 0)
-        final_score = s.get("final_score", score)
+        parts = _working(s)
 
         # Header
         c.setFont("Helvetica-Bold", 16)
@@ -239,8 +273,14 @@ def export_to_pdf(submissions: list, exam_title: str = "Hasil Ujian", exam: dict
             y_start = 72
         else:
             y_start = 58
-        c.drawString(300, height - y_start, f"Final: {final_score}")
-        c.drawString(450, height - y_start, f"Penalti: {penalty}")
+        # The formula in order, so the line adds up on its face: Nilai Akhir =
+        # maks(0, Skor Mentah - Penalti). Three slots because "Nilai Akhir: 100.0"
+        # would run past the paper's own right margin in a wider one.
+        c.setFont("Helvetica", 9)
+        c.drawString(300, height - y_start, f"Skor Mentah: {parts['raw']}")
+        c.drawString(395, height - y_start, f"Penalti: {parts['penalty']}")
+        c.drawString(470, height - y_start, f"Nilai Akhir: {_dash(parts['final'])}")
+        c.setFont("Helvetica", 10)
         c.line(40, height - y_start - 6, width - 40, height - y_start - 6)
 
         y = height - y_start - 20

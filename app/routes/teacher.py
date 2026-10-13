@@ -4552,7 +4552,13 @@ def export_xlsx():
         return err
     subs = supabase.table("submissions").select("*, profiles(full_name)").eq("exam_id", exam_id).execute().data or []
     for s in subs:
-        s["student_name"] = (s.pop("profiles", None) or {}).get("full_name", s.get("student_id", "")[:12])
+        s["student_name"] = (s.pop("profiles", None) or {}).get("full_name") or s.get("student_id", "")[:12]
+    # Same working as the printed sheet: `raw - penalty = final`, with the
+    # applied/recorded counts behind the penalty. One reader for the whole
+    # sitting, shared with the sheet, so a school's file and its print cannot
+    # disagree about a paper.
+    from app.services import penalty_service
+    penalty_service.working_for_exam(supabase, exam, subs)
     buf = export_to_xlsx(subs, exam)
     return send_file(buf, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                      as_attachment=True, download_name=f"nilai_{exam_id[:8]}.xlsx")
@@ -4568,7 +4574,13 @@ def export_pdf():
         return err
     subs = supabase.table("submissions").select("*, profiles(full_name)").eq("exam_id", exam_id).execute().data or []
     for s in subs:
-        s["student_name"] = (s.pop("profiles", None) or {}).get("full_name", s.get("student_id", "")[:12])
+        s["student_name"] = (s.pop("profiles", None) or {}).get("full_name") or s.get("student_id", "")[:12]
+    # Same working as the printed sheet: `raw - penalty = final`, with the
+    # applied/recorded counts behind the penalty. One reader for the whole
+    # sitting, shared with the sheet, so a school's file and its print cannot
+    # disagree about a paper.
+    from app.services import penalty_service
+    penalty_service.working_for_exam(supabase, exam, subs)
     buf = export_to_pdf(subs, exam.get("title", "Hasil"), exam)
     return send_file(buf, mimetype="application/pdf", as_attachment=True,
                      download_name=f"nilai_{exam_id[:8]}.pdf")

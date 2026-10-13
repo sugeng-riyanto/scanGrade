@@ -296,3 +296,136 @@ def test_display_parts_prefers_a_raw_the_route_attached():
     parts = display_parts({**stored, "raw": 3.0, "applied": 4, "recorded": 4})
     assert parts["raw"] == 3.0, "the mark scheme's own raw wins"
     assert parts["applied"] == 4 and parts["ignored"] == 0
+
+
+# ── the exports: the same working, and never the word `None` ─────────────────
+
+def _export_exam():
+    return {**EXAM, "question_types": {"0": "mcq", "1": "mcq"},
+            "answer_key": {"0": "A", "1": "C"}, "total_questions": 2}
+
+
+def _graded_export_row():
+    """A graded paper, decorated the way `penalty_service.working_for_exam` leaves it."""
+    return {"student_name": "Ahmad", "student_id": "murid-1", "status": "graded",
+            "answers": {"0": "A", "1": "B"}, "submitted_at": "2026-06-01T00:00:00Z",
+            "score": 60.0, "violations": 4, "raw": 68.5, "penalty": 5.0,
+            "applied": 3, "recorded": 4, "final_score": 63.5}
+
+
+def _ungraded_export_row():
+    """A paper the database hands over with NULLs — the row `None` used to escape from."""
+    return {"student_name": "Siti", "student_id": "murid-2", "status": "submitted",
+            "answers": {}, "submitted_at": "2026-06-01T00:00:00Z",
+            "score": None, "violations": None, "penalty": None, "final_score": None}
+
+
+def _pdf_text(rows):
+    import fitz
+    from app.services.export_service import export_to_pdf
+
+    pdf = export_to_pdf(rows, "Ujian Matematika", _export_exam()).getvalue()
+    return "\n".join(page.get_text() for page in fitz.open(stream=pdf, filetype="pdf"))
+
+
+def _xlsx(rows):
+    import openpyxl
+    from app.services.export_service import export_to_xlsx
+
+    sheet = openpyxl.load_workbook(export_to_xlsx(rows, _export_exam())).active
+    header = [c.value for c in sheet[1]]
+    body = [[c.value for c in row] for row in sheet.iter_rows(min_row=2)]
+    return header, body[0]
+
+
+def test_the_pdf_export_states_the_working_that_reconciles():
+    row = _graded_export_row()
+    text = _pdf_text([row])
+
+    assert "None" not in text, "the word `None` reached the exported PDF"
+    # The formula in order, and the final named once.
+    assert "Skor Mentah: 68.5" in text
+    assert "Penalti: 5.0" in text
+    assert "Nilai Akhir: 63.5" in text
+    assert text.count("Nilai Akhir") == 1, "the final is stated twice"
+    assert row["raw"] - row["penalty"] == row["final_score"], "the exported row reconciles"
+
+
+def test_the_spreadsheet_export_names_the_working_and_reconciles():
+    row = _graded_export_row()
+    header, cells = _xlsx([row])
+
+    assert "Skor Mentah" in header, "the column that cannot reconcile is back"
+    assert "Skor MCQ" not in header, "the objective score still stands in for the raw"
+    assert "Total Penalti" in header and "Nilai Akhir" in header
+    assert "Nilai Final" not in header, "one name for the final, app-wide"
+    assert "Pelanggaran (diterapkan/tercatat)" in header, "the applied/recorded counts"
+
+    raw = cells[header.index("Skor Mentah")]
+    penalty = cells[header.index("Total Penalti")]
+    final = cells[header.index("Nilai Akhir")]
+    assert (raw, penalty, final) == (68.5, 5.0, 63.5)
+    assert round(raw - penalty, 2) == final, "the spreadsheet's own columns reconcile"
+    assert cells[header.index("Pelanggaran (diterapkan/tercatat)")] == "3 / 4"
+
+
+def test_an_ungraded_paper_exports_a_dash_rather_than_the_word_None():
+    """`.get("final_score", row.get("score"))` reads as a fallback and is not one.
+
+    When the column is NULL the key exists and `.get` hands back `None`, so the
+    fallback never runs — which is how the results PDF printed "Final: None" for a
+    paper that had simply not been marked yet, the same shape of bug as
+    "Mata Pelajaran: None". A dash says "no mark yet"; 0 would claim the pupil earned
+    nothing.
+    """
+    row = _ungraded_export_row()
+
+    text = _pdf_text([row])
+    assert "None" not in text
+    assert "Nilai Akhir: -" in text, "an unmarked paper states no final, not a zero"
+
+    header, cells = _xlsx([row])
+    assert cells[header.index("Nilai Akhir")] == "-"
+    # Every mark column carries a value, because openpyxl reads a cell nobody wrote
+    # back as `None` — so a blank and "no data" would be the same thing to a reader.
+    for column in ("Skor Mentah", "Total Penalti", "Pelanggaran (diterapkan/tercatat)"):
+        assert cells[header.index(column)] is not None, column
+
+
+def test_the_exports_read_a_row_that_only_has_the_stored_numbers():
+    """The route decorates the sitting, but the export must survive without it."""
+    row = {"student_name": "Ahmad", "student_id": "m", "status": "graded",
+           "answers": {}, "submitted_at": "2026-06-01", "score": 60.0,
+           "violations": 4, "penalty": 5.0, "final_score": 63.5}
+
+    assert "Skor Mentah: 68.5" in _pdf_text([row]), "raw = final + penalty from the row"
+    header, cells = _xlsx([row])
+    assert cells[header.index("Skor Mentah")] == 68.5
+    assert cells[header.index("Pelanggaran (diterapkan/tercatat)")] == "4 / 4"
+
+
+def test_both_export_doors_share_the_reader_the_sheets_use():
+    """The same reader the printed sheet calls, so a file and a print cannot disagree."""
+    src = (APP / "routes" / "teacher.py").read_text(encoding="utf-8")
+    for door in ("def export_xlsx():", "def export_pdf():"):
+        body = src.split(door, 1)[1].split("\n@", 1)[0]
+        assert "working_for_exam(supabase, exam, subs)" in body, f"{door[:-2]} reads nothing"
+
+
+def test_the_export_does_not_reinstate_the_get_default_fallback():
+    """A `.get(key, other)` is not a fallback when the column is NULL — the key exists.
+
+    Read from the parsed code, not the text of the file, because the comment that
+    explains the bug quotes the shape it forbids.
+    """
+    import ast
+
+    src = (APP / "services" / "export_service.py").read_text(encoding="utf-8")
+    offenders = [
+        node for node in ast.walk(ast.parse(src))
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "get" and len(node.args) >= 2
+        and isinstance(node.args[0], ast.Constant) and node.args[0].value in
+        ("final_score", "raw", "penalty")
+    ]
+    assert offenders == [], "a default cannot stand in for a NULL column"

@@ -89,6 +89,20 @@ Skor objektif tidak hilang dari aplikasi: layar koreksi guru
 (`teacher/grade_detail.html`) tetap menampilkannya sebagai `MCQ:`; yang berubah
 hanya lembar cetak, yang harus menjumlahkan.
 
+**Ekspor ikut menyatakan jalan hitung yang sama.** `/teacher/export/xlsx` dan
+`/teacher/export/pdf` memakai pembaca yang sama dengan lembar cetak
+(`penalty_service.working_for_exam`) dan memakai kosakata kolom yang sama —
+**Skor Mentah**, **Total Penalti**, **Pelanggaran (diterapkan/tercatat)**, **Nilai
+Akhir**. Sebelumnya spreadsheet menamai kolomnya `Skor MCQ`/`Nilai Final`, dua nama
+yang tidak rekonsiliasi dengan catatan rumus di lembar mana pun, dan membaca barisnya
+dengan `row.get("final_score", row.get("score", 0))` — bentuk yang *terbaca*
+seperti fallback padahal bukan: bila kolomnya `NULL`, key-nya ada dan `.get`
+mengembalikan `None`, jadi fallback-nya tidak pernah jalan. Itulah asal **"Final:
+None"** di PDF hasil, kelas bug yang sama dengan "Mata Pelajaran: None".
+Kertas yang belum punya nilai kini dicetak sebagai **`-`** di kolom Nilai Akhir —
+bukan `0`, karena kertas yang belum dinilai tidak memperoleh nol — sementara jalan
+hitungnya (hasil mark scheme atas jawabannya) tetap ditampilkan.
+
 ## Kenapa per-posisi, bukan satu angka total
 
 `penalty_breakdown` memberi tiap pelanggaran nilai menurut **posisinya** di tangga
