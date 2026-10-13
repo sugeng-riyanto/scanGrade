@@ -54,6 +54,7 @@ from app.services.anti_cheat_service import (
     calculate_graduated_penalty, count_penalized_violations,
 )
 from app.services.question_types import default_weights, earned_points, objective_result
+from app.services.final_score import breakdown as final_breakdown
 from app.services import attempt_status
 from app.services.submission_service import finish_sitting
 from app.utils.logger import get_logger
@@ -180,7 +181,7 @@ def _closed_payload(supabase, row, exam, ended_at) -> dict:
         "max_score": 100.0,
         "violations": violations,
         "penalty": round(penalty, 2),
-        "final_score": max(0.0, round(earned - penalty, 2)),
+        "final_score": final_breakdown(earned, penalty)["final"],
         "status": "submitted",
         "is_published": exam.get("publish_mode") == "auto",
         # The answers were already here when the clock ran out; calling that

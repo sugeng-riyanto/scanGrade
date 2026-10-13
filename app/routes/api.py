@@ -28,6 +28,10 @@ from app.services.question_types import (
     complete_weights, earned_points, grade_answer, is_objective,
     normalize_answer_map, objective_result,
 )
+# The one arithmetic for a final mark (see app/services/final_score.py). Imported
+# here so this door's write is the same `max(0, min(raw, 100) - penalty)` the
+# printed sheet, the pupil's page and the export all show.
+from app.services.final_score import breakdown as final_breakdown
 from app.services.student_import import create_student_account
 from app.utils.logger import get_logger
 from app.errors import ValidationError, NotFoundError, GradingError, AIProcessingError
@@ -572,7 +576,10 @@ def force_submit():
             viol_count = count_penalized_violations(supabase, g.user_id, exam_id, exam)
             pinfo = calculate_graduated_penalty(viol_count, exam)
             total_penalty = pinfo.get("penalty", 0)
-            final = max(0.0, round(earned - total_penalty, 2))
+            # One arithmetic: the cap and the floor belong to the central
+            # function, so a force-submit cannot store a number any other
+            # surface would compute differently.
+            final = final_breakdown(earned, total_penalty)["final"]
             supabase.table("submissions") \
                 .update({"status": "submitted", "answers": answers, "score": score, "final_score": final, "penalty": total_penalty}) \
                 .eq("id", sub.data[0]["id"]) \
@@ -1480,9 +1487,10 @@ def grade_batch():
                 ew = float(question_weights.get(str(qi), 0))
                 if ew > 0:
                     earned += float(sv) / 100.0 * ew
-        final = round(min(earned, 100), 2)
         penalty = float(sub.get("penalty") or 0)
-        final = max(0, round(final - penalty, 2))
+        # One arithmetic: a recalculation must land on the same number the
+        # report, the dashboard and the export compute.
+        final = final_breakdown(earned, penalty)["final"]
         # The same one rule as every other writer (this route's denominator was
         # already the paper's objective count; it is now the shared function, so
         # the numerator needs a key to be right against and an unkeyed question

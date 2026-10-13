@@ -143,9 +143,12 @@ class TestEveryWriterUsesIt:
 
         `final_score` is the weighted objective total plus the essays minus the
         penalty. Reading the new percentage into it would silently re-scale every
-        existing final mark, so the arithmetic uses `earned` and not `score`.
+        existing final mark, so the arithmetic uses `earned` and not `score`. The
+        subtraction itself now happens in `app/services/final_score.py` (imported as
+        `final_breakdown`), so this guard follows the *input* — that it is still
+        `earned` — rather than the shape of an expression that no longer lives here.
         """
-        assert re.search(r"final_score\s*=\s*max\(0\.0,\s*round\(earned\s*-\s*penalty",
+        assert re.search(r"final_score\s*=\s*final_breakdown\(earned\s*,\s*penalty\)",
                          SUBMIT_BLOCK), (
             "final_score no longer comes from the weighted marks; check whether every "
             "published final mark just changed scale")

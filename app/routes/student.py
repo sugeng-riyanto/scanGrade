@@ -17,6 +17,8 @@ from app.services.question_types import (
     default_weights, earned_points, is_objective, normalize_answer_map,
     objective_result, public_options,
 )
+# The one arithmetic for a final mark (see app/services/final_score.py).
+from app.services.final_score import breakdown as final_breakdown
 from app.services.submission_service import finish_sitting, open_sitting
 from app.services import exam_media
 from app.services import exam_targets
@@ -1246,9 +1248,9 @@ def submit_exam(exam_id):
 
     # `earned`, not `score`: the stored objective score is a percentage of the
     # paper, while the final mark is the weighted total the essay marks are added
-    # to. Keeping the arithmetic here means this route's `final_score` is the value
-    # it has always written.
-    final_score = max(0.0, round(earned - penalty, 2))
+    # to. The arithmetic is the shared one (`app/services/final_score.py`), so the
+    # number stored here is the same one every report and dashboard shows.
+    final_score = final_breakdown(earned, penalty)["final"]
     if flags:
         existing_answers = answers.get("_flags") or []
         if isinstance(existing_answers, list):
@@ -1525,19 +1527,23 @@ def result_detail(submission_id):
     # same tone the anti-cheat dashboard uses: a summary of a decision about a paper,
     # not an accusation. Counts only, so the base the ladder prices with does not
     # enter into it.
+    # The exact picture this page shows — raw, penalty, final and the counts — from
+    # the one reader that prices the ladder, the same one the teacher's review panel
+    # calls. So the pupil's four numbers cannot disagree with the teacher's, and the
+    # working under the headline is the working the marking desk shows.
+    parts = None
     penalty_summary = None
-    if released and (submission.get("violations") or 0):
+    if released:
         from app.services import penalty_service
-        _events = penalty_service.events(supabase, submission["exam_id"],
-                                         submission["student_id"], submission)
-        _part = penalty_service.breakdown_for(submission.get("exam") or {}, _events)
-        penalty_summary = {"recorded": _part["recorded"], "applied": _part["applied"],
-                           "ignored": _part["ignored"]}
+        parts = penalty_service.inspect(supabase, submission)
+        if submission.get("violations") or 0:
+            penalty_summary = {"recorded": parts["recorded"], "applied": parts["applied"],
+                               "ignored": parts["ignored"]}
 
     student_name = g.user_name or g.user_email or ""
     return render_template("student/result_detail.html", submission=submission,
                            student_name=student_name, released=released,
-                           penalty_summary=penalty_summary)
+                           penalty_summary=penalty_summary, parts=parts)
 
 
 @student_bp.route("/results/<submission_id>/print")
@@ -1604,6 +1610,13 @@ def download_result_pdf(submission_id):
         return redirect("/student/results")
 
     student_name = g.user_name or g.user_email or ""
+
+    # The working the printed sheet carries: the same raw, penalty and violation
+    # counts the teacher's panel and the pupil's result page show, from the one
+    # reader that prices the ladder, so the PDF states a number no other surface
+    # would compute differently.
+    from app.services import penalty_service
+    parts = penalty_service.inspect(supabase, submission)
 
     # Fetch teacher & school info
     teacher_name = ""
@@ -1800,6 +1813,7 @@ def download_result_pdf(submission_id):
         teacher_name=teacher_name,
         school_info=school_info,
         merged_pages=merged_pages,
+        parts=parts,
     )
     buf = io.BytesIO()
     pisa_status = pisa.CreatePDF(html_string, dest=buf)

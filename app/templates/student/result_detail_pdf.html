@@ -95,6 +95,12 @@ body { font-family: Helvetica, Arial, sans-serif; color: #1e293b; font-size: 10p
     </div>
 </div>
 
+{# The final mark is stated once — as the headline above. What follows is the
+   working that produced it, in the same words the teacher's review panel uses and
+   the same arithmetic `app/services/final_score.py` applies:
+   Nilai Akhir = maks(0, Skor Mentah - Total Penalti). `parts` is the exact picture
+   the route computed; `score_parts` reads the stored row where it did not. #}
+{% set p = parts if parts is defined and parts else score_parts(submission) %}
 <div class="score-box">
     <div class="score-val">{{ score }}</div>
     <div class="score-label">Nilai Akhir</div>
@@ -102,15 +108,14 @@ body { font-family: Helvetica, Arial, sans-serif; color: #1e293b; font-size: 10p
 
 <table class="score-row">
     <tr>
-        <td class="mcq-cell"><div class="val">{{ submission.score if submission.score is not none else 0 }}</div><div class="lbl">SKOR MCQ</div></td>
-        <td class="penalty-cell"><div class="val">{{ submission.penalty if submission.penalty is not none else 0 }}</div><div class="lbl">PENALTI</div></td>
-        <td class="final-cell"><div class="val">{{ score }}</div><div class="lbl">NILAI AKHIR</div></td>
+        <td class="mcq-cell"><div class="val">{{ p.raw }}</div><div class="lbl">SKOR MENTAH</div></td>
+        <td class="penalty-cell"><div class="val">{{ p.penalty }}</div><div class="lbl">TOTAL PENALTI</div></td>
+        <td class="final-cell"><div class="val">{{ p.applied }} / {{ p.recorded }}</div><div class="lbl">PELANGGARAN DITERAPKAN</div></td>
     </tr>
 </table>
 
 <div style="font-size:8pt; color:#64748b; margin-bottom:12px;">
-    <span>MCQ: {{ submission.score if submission.score is not none else 0 }}</span> |
-    <span>Penalti: {{ submission.penalty if submission.penalty is not none else 0 }}</span> |
+    <span>Nilai Akhir = maks(0, Skor Mentah &minus; Total Penalti)</span> |
     <span>Status: {{ submission.status }}</span>
 </div>
 

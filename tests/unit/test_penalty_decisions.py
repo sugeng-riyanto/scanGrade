@@ -357,8 +357,14 @@ class TestThePupilSeesCountsNotTheLog:
 
     def test_the_route_computes_the_summary_from_the_service(self):
         student = (ROOT / "app" / "routes" / "student.py").read_text(encoding="utf-8")
-        assert "penalty_service.events(" in student
-        assert "penalty_service.breakdown_for(" in student
+        # The route gets raw, penalty, final and the counts from the one reader that
+        # prices the ladder — the same `inspect` the teacher's review panel calls — and
+        # hands that picture straight to the page. It replaced this route's own
+        # `events` + `breakdown_for` pair, which answered the same question in a second
+        # place; what this guard is for (the pupil's summary is the service's, never
+        # assembled at the route) is unchanged.
+        assert "penalty_service.inspect(" in student
+        assert "parts=parts" in student
 
 
 # ── the write route, driven for real: who gets in and who does not ───────────

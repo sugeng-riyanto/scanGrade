@@ -106,6 +106,49 @@ def penalty_breakdown(violations: Iterable[Mapping[str, Any]], *,
     }
 
 
+def _number(value) -> float:
+    """A stored number as a float; anything unreadable is 0, never a crash."""
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def display_parts(submission: Mapping[str, Any] | None) -> dict[str, Any]:
+    """The numbers a result sheet shows, read from a stored submission row.
+
+    A *display* reading. Where a caller already holds the exact picture
+    (`penalty_service.inspect` — the same reader the teacher's panel and the
+    pupil's page use) it passes that instead; this is the fallback for a surface
+    that has only the row, so a report card, a printed PDF and a dashboard cannot
+    each assemble the same facts differently.
+
+    ``raw = final + penalty`` is the exact inverse of the arithmetic above whenever
+    the 0-floor did not bite — i.e. for every paper whose penalty did not exceed
+    its score. `submissions` has no column for a floored paper's raw, and a sheet
+    must not invent one: a paper the floor reached (``final == 0``) reports the
+    penalty it was charged against, which is the bound its mark reflects.
+    """
+    submission = submission or {}
+    penalty = _number(submission.get("penalty"))
+    final = submission.get("final_score")
+    if final is None:
+        final = submission.get("score")
+    final = _number(final)
+    recorded = int(_number(submission.get("violations")))
+    return {
+        "raw": round(final + penalty, 2),
+        "penalty": round(penalty, 2),
+        "final": round(final, 2),
+        "recorded": recorded,
+        # No decision is stored on the row itself, so the default reads as the
+        # historical one: every recorded violation applied. A caller with the real
+        # breakdown passes it and these counts are its own.
+        "applied": recorded,
+        "ignored": 0,
+    }
+
+
 def for_submission(raw: float, applied_penalty: float,
                    violations: Iterable[Mapping[str, Any]] = (), *,
                    base: float = 5.0, enabled: bool = True) -> dict[str, Any]:

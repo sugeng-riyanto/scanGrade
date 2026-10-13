@@ -36,6 +36,35 @@ final_score.penalty_breakdown(events, base=5)   # per-pelanggaran: posisi, nilai
 final_score.for_submission(raw, penalty, events, base=base)
 ```
 
+### Setiap penulis memanggilnya — tidak ada yang menyalin aritmetikanya
+
+Aritmetika ini dulu ditulis ulang di empat tempat: pintu kumpul (force-submit), jalur
+`POST /api/student/submit`, jalur hitung-ulang nilai satu ujian, dan
+`app/services/deadline_service.py` yang menutup kertas setelah jam ujian habis. Tiga di
+antaranya **menghilangkan batas `min(raw, 100)`**, jadi kertas yang "dihitung ulang" bisa
+memunculkan angka yang tidak akan pernah ditampilkan laporan mana pun. Keempatnya kini
+memanggil `final_score.breakdown` (diimpor sebagai `final_breakdown`), dan
+`tests/unit/test_final_score_single_source.py` gagal begitu salah satunya menulis
+aritmetika itu sendiri lagi.
+
+Permukaan yang hanya memegang baris `submissions` (kartu hasil per kelas, dan render apa
+pun yang tidak diberi gambar lengkap) memakai `final_score.display_parts(submission)`
+lewat global Jinja `score_parts`. Ia membalik aritmetika tersimpan
+(`raw = final + penalty`, eksak selama lantai 0 tidak kena) dan **tidak pernah mengarang
+skor mentah** untuk kertas yang lantainya kena — kertas seperti itu melaporkan penalti
+yang dibebankan padanya, batas yang dicerminkan nilainya.
+
+### Nilai akhir disebut **sekali** per lembar
+
+Setiap halaman hasil menyatakan nilai akhir **satu kali**, sebagai angka utama
+(headline); baris di bawahnya menunjukkan **jalan hitungnya** — Skor Mentah, Total
+Penalti, dan jumlah pelanggaran diterapkan/diabaikan — memakai kosakata yang sama dengan
+panel tinjau guru (`teacher/submission_violations.html`). Sebelumnya nilai akhir muncul
+**dua kali** di kartu hasil dan di PDF murid (angka utama *dan* satu sel di baris
+ringkasan), sehingga satu-satunya angka yang diperiksa pembaca justru yang tercetak dua
+kali. `tests/unit/test_final_score_single_source.py` menjaga kedua sisi: labelnya muncul
+sekali, dan jalan hitungnya muncul.
+
 ## Kenapa per-posisi, bukan satu angka total
 
 `penalty_breakdown` memberi tiap pelanggaran nilai menurut **posisinya** di tangga

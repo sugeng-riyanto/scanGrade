@@ -453,6 +453,13 @@ def create_app(env=None):
         label as _subject_label
     app.jinja_env.globals["subject_label"] = _subject_label
     app.jinja_env.globals["subject_name"] = _subject_name
+    # The four numbers a result sheet shows — raw, penalty, final and the violation
+    # counts — from one reading, so a report card, the pupil's PDF and the result
+    # page cannot assemble the same facts differently. A route that holds the exact
+    # picture (`penalty_service.inspect`) passes it in; otherwise the stored row is
+    # read here, and `app/services/final_score.py` documents that reading.
+    from app.services.final_score import display_parts as _score_parts
+    app.jinja_env.globals["score_parts"] = _score_parts
     # A complex multiple choice answer judged statement by statement, for the pupil
     # reviewing a released paper and the teacher reviewing the same paper. One
     # builder for both, so the two screens cannot describe one answer differently.
