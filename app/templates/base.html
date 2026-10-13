@@ -405,6 +405,11 @@ window.sgSavePrefs = function (patch) {
                dashboard, and both officials share this branch — the page names the
                reader. #}
             {% set _official_home = '/principal/dashboard' if g.user_role == 'principal' else '/vice-principal/dashboard' %}
+            {# The messages page, at the reader's own address and written the same way
+               `_official_home` is: the literal prefix per role rather than a
+               `.replace()` on the home path, because a link whose URL only exists at
+               render time is a link the reachability guard cannot see. #}
+            {% set _official_comms = '/principal/comms' if g.user_role == 'principal' else '/vice-principal/comms' %}
             <div class="nav-section-title"><span x-text="t('Utama','Main')"></span></div>
             <a href="{{ _official_home }}" class="nav-item {% if request.path == _official_home %}active{% endif %}"><i class="fas fa-chart-pie"></i><span x-text="t('Dashboard','Dashboard')"></span></a>
             {# The two pages these roles read the school through. Both addresses are
@@ -424,6 +429,12 @@ window.sgSavePrefs = function (patch) {
                `/principal/*` — read-only there is structural, and a guard enforces it.
                The route itself admits all three approver roles. #}
             <a href="/admin-sekolah/membership" class="nav-item {% if request.path == '/admin-sekolah/membership' %}active{% endif %}"><i class="fas fa-id-badge"></i><span x-text="t('Keanggotaan','Membership')"></span></a>
+            {# Messages and announcements, at the reader's own address. The school had
+               no way to write to its head or deputy and they had no way to write at
+               all: the page existed for the other four roles only. The link is here
+               because a page nothing links is a page nobody opens. #}
+            <div class="nav-section-title pt-2"><span x-text="t('Komunikasi','Communication')"></span></div>
+            <a href="{{ _official_comms }}" class="nav-item {% if request.path == _official_comms %}active{% endif %}"><i class="fas fa-comments"></i><span x-text="t('Pesan &amp; Pengumuman','Messages &amp; Announcements')"></span></a>
             <div class="nav-section-title pt-2"><span x-text="t('Panduan','Guide')"></span></div>
             <a href="/guide/skor" class="nav-item {% if request.path == '/guide/skor' %}active{% endif %}"><i class="fas fa-book-open"></i><span x-text="t('Panduan Skor','Scoring Guide')"></span></a>
 
@@ -928,8 +939,10 @@ function linkify(text) {
        and the scoring guide, so a second branch would only repeat it. #}
     {% elif role in ('principal', 'vice_principal') %}
     {% set _official_home = '/principal/dashboard' if role == 'principal' else '/vice-principal/dashboard' %}
+    {% set _official_comms = '/principal/comms' if role == 'principal' else '/vice-principal/comms' %}
     <a href="{{ _official_home }}" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == _official_home %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-chart-pie text-lg mb-0.5"></i><span x-text="t('Dashboard','Dashboard')"></span></a>
     <a href="{{ _official_home.replace('/dashboard', '/progress') }}" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path.endswith('/progress') %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-calendar-days text-lg mb-0.5"></i><span x-text="t('Progres','Progress')"></span></a>
+    <a href="{{ _official_comms }}" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == _official_comms %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-comments text-lg mb-0.5"></i><span x-text="t('Komunikasi','Messages')"></span></a>
     <a href="/guide/skor" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/guide/skor' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-book-open text-lg mb-0.5"></i><span x-text="t('Panduan','Guide')"></span></a>
     {% elif role == 'murid' %}
     <a href="/student/dashboard" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/student/dashboard' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-home text-lg mb-0.5"></i><span x-text="t('Beranda','Home')"></span></a>

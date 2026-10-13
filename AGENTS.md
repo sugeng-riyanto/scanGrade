@@ -114,38 +114,49 @@
 
 Aplikasi punya **6 peran** (`super_admin · admin_sekolah · principal · vice_principal ·
 guru · murid` — lihat `docs/ROLES_CLARIFICATION.md`). Kolom terakhir adalah kedua
-**pejabat sekolah**, yang hanya *membaca* sekolah: mereka tidak pernah punya wewenang
-menulis, dan itu berlaku juga di sini.
+**pejabat sekolah**: mereka hanya *membaca* data sekolah, tetapi pesan bukan data
+sekolah — dan sebelum perubahan ini mereka tidak bisa mengirim apa pun, tidak bisa
+dikirimi apa pun, dan tidak punya halaman untuk membukanya.
 
 | Fitur | super_admin | admin_sekolah | guru | murid | principal / vice_principal |
 |-------|-------------|---------------|------|-------|----------------------------|
-| **Kirim Pengumuman** (broadcast) | ✅ All roles | ✅ Guru & Murid di sekolahnya | ✅ Hanya Murid | ❌ Dilarang | ❌ Daftar penerima kosong (`_get_allowed_recipient_roles`) |
-| **Lihat Pengumuman** | ✅ Semua | ✅ Semua | ✅ Semua | ✅ Semua | ⚠️ Hanya yang `target_role`-nya peran sendiri — dan tidak ada pengirim yang **bisa** menargetkan peran itu, jadi dalam praktik tidak ada |
-| **Kirim Pesan 1-on-1** (Percakapan) | ✅ Siapa saja | ✅ Guru/Murid di sekolahnya | ✅ Murid | ✅ Hanya Guru/Admin (diverifikasi role) | ❌ Daftar penerima kosong |
-| **Lihat Percakapan** | ✅ Semua partisipasi | ✅ Semua partisipasi | ✅ Semua partisipasi | ✅ Hanya dgn Guru/Admin (filter server-side) | ⚠️ Hanya partisipasi sendiri, dan mereka tidak bisa **memulai** percakapan |
-| **Edit/Hapus Broadcast** | ✅ Semua | ✅ Milik sendiri | ✅ Milik sendiri | ❌ | ❌ Tidak pernah punya broadcast untuk disunting |
+| **Kirim Pengumuman** (broadcast) | ✅ Guru, murid, admin sekolah, pejabat | ✅ Super admin, guru, murid, pejabat | ✅ Admin sekolah, guru, murid, pejabat | ❌ Dilarang | ✅ Super admin, admin sekolah, guru, murid, pejabat |
+| **Lihat Pengumuman** | ✅ Semua | ✅ Semua | ✅ Semua | ✅ Semua | ✅ Yang `target_role`-nya peran sendiri, atau yang mereka kirim |
+| **Kirim Pesan 1-on-1** (Percakapan) | ✅ Admin sekolah & pejabat | ✅ Super admin, guru, murid, pejabat | ✅ Admin sekolah, guru, murid, pejabat | ✅ Hanya Guru/Admin (diverifikasi role) | ✅ Super admin, admin sekolah, guru, sesama pejabat |
+| **Lihat Percakapan** | ✅ Semua partisipasi | ✅ Semua partisipasi | ✅ Semua partisipasi | ✅ Hanya dgn Guru/Admin (filter server-side) | ✅ Partisipasi sendiri |
+| **Edit/Hapus Broadcast** | ✅ Semua | ✅ Milik sendiri | ✅ Milik sendiri | ❌ | ✅ Milik sendiri |
 | **Setujui Hapus Akun** | ✅ Semua | ✅ Di sekolahnya | ❌ | ❌ | ❌ (`require_role("admin_sekolah", "super_admin")`) |
 
 **Diverifikasi ke kode pada 2026-10-13** (`app/routes/api.py`,
-`_get_allowed_recipient_roles` — `super_admin → [guru, murid, admin_sekolah, super_admin]`,
-`admin_sekolah → [super_admin, guru, murid]`, `guru → [admin_sekolah, guru, murid]`,
-`murid → [guru, admin_sekolah]`, peran lain → `[]`; `api_create_pengumuman` menolak
-`murid` lebih dulu lalu menuntut `target_role` ada di daftar itu; `api_list_pengumuman`
-tanpa gerbang peran untuk membaca; `api_get_pengumuman` hanya meloloskan pembaca yang
-perannya sama dengan `target_role`, pengirimnya, atau `super_admin`).
+`_ALLOWED_RECIPIENT_ROLES` — `super_admin → [guru, murid, admin_sekolah, principal,
+vice_principal, super_admin]`, `admin_sekolah → [super_admin, guru, murid, principal,
+vice_principal]`, `principal → [super_admin, admin_sekolah, guru, murid, principal,
+vice_principal]`, `vice_principal → [super_admin, admin_sekolah, guru, murid, principal,
+vice_principal]`, `guru → [admin_sekolah, guru, murid, principal, vice_principal]`,
+`murid → [guru, admin_sekolah]`; `api_create_pengumuman` menolak `murid` lebih dulu
+lalu menuntut `target_role` ada di daftar itu, dan mengisi `school_id` dari **sesi**
+untuk setiap peran kecuali `super_admin`; `api_list_pengumuman` tanpa gerbang peran
+untuk membaca; `api_get_pengumuman` hanya meloloskan pembaca yang perannya sama
+dengan `target_role`, pengirimnya, atau `super_admin`).
 
-> **Temuan yang belum diputuskan pemilik produk:** peran pejabat (`principal` /
-> `vice_principal`, migrasi 038) **tidak pernah** diperluas ke sistem pesan — mereka
-> tidak bisa mengirim apa pun, dan tidak ada peran yang daftar penerimanya memuat
-> mereka, sehingga tidak ada pengumuman yang bisa **di-address** ke mereka. Angka di
-> tabel adalah perilaku sekarang, bukan keputusan yang disetujui; memperluasnya adalah
-> keputusan produk, bukan perbaikan teknis. Jangan "memperbaikinya" diam-diam.
+**Tiga hal yang mudah salah dibaca dari tabel itu:**
 
-**Aturan Kunci:**
-- **Tidak ada percakapan atau pengumuman antar-murid (inter-student)** — backend memverifikasi role setiap penerima
-- Murid yang mengirim pesan 1-on-1 (`target_role: "guru"` atau `"admin_sekolah"`) akan diverifikasi: setiap `recipient_id` harus memiliki role guru/admin_sekolah/super_admin
-- Conversations API menyaring (skip) percakapan antar-murid untuk user role `murid` di server-side
-- Broadcast (`target_role`) tidak bisa `"murid"` jika sender `murid` — di-restrict di `api_send_broadcast`
+1. **Daftar itu satu arah, tetapi sebuah percakapan dua arah.**
+   `api_create_percakapan` menuntut entri balikannya juga, jadi pasangan yang tidak
+   timbal balik adalah nama di daftar kontak yang menjawab **403** saat diklik.
+   `_conversation_roles` adalah bacaan yang menyaringnya, dan itulah yang dipakai
+   daftar kontak. Karena itu `super_admin` tidak lagi melihat setiap guru di daftar
+   kontaknya — guru memang tidak pernah bisa membalas (pengecekan balikan sudah
+   menolaknya), jadi yang dihapus hanya nama yang tidak bisa diklik.
+2. **Meng-address peran sendiri berarti *grup*.** Guru yang mengirim pengumuman ke
+   `guru` menulis ke seluruh guru di sekolahnya; itu sebabnya barisnya tetap ada.
+   Satu-satunya peran yang bukan grup adalah `super_admin` (satu akun), dan itu
+   satu-satunya yang tidak ditawarkan ke dirinya sendiri.
+3. **Murid tidak berubah sama sekali.** Daftar `murid` tetap dua kanal
+   (`guru`, `admin_sekolah`), jadi daftar kontak seorang murid tidak melebar karena
+   kepala sekolah mendapat kanal — sementara pejabat **boleh** mengirim pengumuman
+   *ke* murid. Mengumumkan ke sebuah peran dan memegang percakapan 1-on-1 dengan
+   peran itu adalah dua perbuatan berbeda.
 
 ## UU PDP & PSE Kominfo Compliance Checklist
 

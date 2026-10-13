@@ -304,8 +304,19 @@
     },
     get targetRoleOptions() {
         const opts = [];
-        const allowed = {'super_admin':['admin_sekolah','guru','murid'], 'admin_sekolah':['super_admin','guru','murid'], 'guru':['admin_sekolah','guru','murid']};
-        const labels = {'super_admin':'Super Admin', 'admin_sekolah':this.t('Admin Sekolah','School Admin'), 'guru':this.t('Guru','Teacher'), 'murid':this.t('Murid','Student')};
+        // Mirrors `_ALLOWED_RECIPIENT_ROLES` in app/routes/api.py exactly: the server
+        // is the authority and this only draws the list. Addressing your own role is
+        // kept because it means the *group* — every teacher in the school — and the
+        // one role that is a single account rather than a group, the platform
+        // operator, is the only one not offered to itself.
+        const allowed = {
+            'super_admin':['admin_sekolah','guru','murid','principal','vice_principal'],
+            'admin_sekolah':['super_admin','guru','murid','principal','vice_principal'],
+            'principal':['super_admin','admin_sekolah','guru','murid','principal','vice_principal'],
+            'vice_principal':['super_admin','admin_sekolah','guru','murid','principal','vice_principal'],
+            'guru':['admin_sekolah','guru','murid','principal','vice_principal']
+        };
+        const labels = {'super_admin':'Super Admin', 'admin_sekolah':this.t('Admin Sekolah','School Admin'), 'guru':this.t('Guru','Teacher'), 'murid':this.t('Murid','Student'), 'principal':this.t('Kepala Sekolah','Principal'), 'vice_principal':this.t('Wakil Kepala Sekolah','Vice Principal')};
         const targets = allowed[this.userRole] || [];
         targets.forEach(v => opts.push({value:v, label:labels[v] || v}));
         return opts;
@@ -334,11 +345,11 @@
     },
 
     roleColor(role) {
-        const colors = {guru:'bg-blue-500', murid:'bg-emerald-500', admin_sekolah:'bg-purple-500', super_admin:'bg-amber-500'};
+        const colors = {guru:'bg-blue-500', murid:'bg-emerald-500', admin_sekolah:'bg-purple-500', super_admin:'bg-amber-500', principal:'bg-rose-500', vice_principal:'bg-teal-500'};
         return colors[role] || 'bg-surface-400';
     },
     roleLabel(role) {
-        const labels = {guru:this.t('Guru','Teacher'), murid:this.t('Murid','Student'), admin_sekolah:this.t('Admin Sekolah','School Admin'), super_admin:'Super Admin'};
+        const labels = {guru:this.t('Guru','Teacher'), murid:this.t('Murid','Student'), admin_sekolah:this.t('Admin Sekolah','School Admin'), super_admin:'Super Admin', principal:this.t('Kepala Sekolah','Principal'), vice_principal:this.t('Wakil Kepala Sekolah','Vice Principal')};
         return labels[role] || role;
     },
 
@@ -490,7 +501,7 @@
                          :class="selectedPercakapan===c.conversation_id ? 'bg-primary-50' : ''">
                         <div class="relative shrink-0">
                             <div class="w-12 h-12 rounded-full flex items-center justify-center text-white font-bold shadow-sm" :class="roleColor(c.role)" x-text="c.initial"></div>
-                            <span class="absolute -bottom-0.5 -right-0.5 text-[10px] bg-white rounded-full px-1 py-0.5 shadow border border-surface-200 text-surface-500 font-bold leading-none" x-text="c.role==='guru'?'G':c.role==='murid'?'M':c.role==='admin_sekolah'?'A':'SA'"></span>
+                            <span class="absolute -bottom-0.5 -right-0.5 text-[10px] bg-white rounded-full px-1 py-0.5 shadow border border-surface-200 text-surface-500 font-bold leading-none" x-text="c.role==='guru'?'G':c.role==='murid'?'M':c.role==='admin_sekolah'?'A':c.role==='principal'?'P':c.role==='vice_principal'?'VP':'SA'"></span>
                         </div>
                         <div class="flex-1 min-w-0">
                             <div class="flex items-center justify-between">
@@ -498,7 +509,7 @@
                                 <span x-show="c.last_message_at" class="text-[11px] text-surface-400 shrink-0 ml-1" x-text="formatDate(c.last_message_at)"></span>
                             </div>
                             <div class="flex items-center gap-1.5 mt-0.5">
-                                <span class="text-[11px] text-surface-400" x-text="c.role==='guru'?t('Guru','Teacher'):c.role==='murid'?t('Murid','Student'):c.role==='admin_sekolah'?t('Admin','Admin'):'Super Admin'"></span>
+                                <span class="text-[11px] text-surface-400" x-text="c.role==='guru'?t('Guru','Teacher'):c.role==='murid'?t('Murid','Student'):c.role==='admin_sekolah'?t('Admin','Admin'):c.role==='principal'?t('Kepala Sekolah','Principal'):c.role==='vice_principal'?t('Wakil Kepala Sekolah','Vice Principal'):'Super Admin'"></span>
                                 <span x-show="c.last_message" class="text-[13px] text-surface-500 truncate">· <span x-text="c.last_message"></span></span>
                                 <span x-show="!c.conversation_id" class="text-xs text-primary-500 font-medium" x-text="t('Baru','New')"></span>
                             </div>

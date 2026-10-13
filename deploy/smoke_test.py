@@ -249,12 +249,14 @@ ROLE_PAGES: dict[str, list[str]] = {
         "/principal/analytics",
         "/principal/progress",
         "/principal/invigilation",
+        "/principal/comms",
     ],
     "vice_principal": [
         "/vice-principal/dashboard",
         "/vice-principal/analytics",
         "/vice-principal/progress",
         "/vice-principal/invigilation",
+        "/vice-principal/comms",
     ],
     "guru": [
         "/teacher/dashboard",

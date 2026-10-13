@@ -83,26 +83,46 @@ template menampilkan `principal_name` (atau placeholder jujur bila belum diisi).
 
 ---
 
-## 4. Yang **belum** diputuskan: peran pejabat di sistem pesan
+## 4. Peran pejabat di sistem pesan — **sudah diputuskan dan dibangun** (2026-10-13)
 
-Diverifikasi ke kode pada **2026-10-13** (`app/routes/api.py`,
-`_get_allowed_recipient_roles`) — ini **perilaku sekarang**, bukan keputusan yang
-disetujui:
+Kepala sekolah dan wakilnya adalah **staf yang membaca sekolah**, dan pesan bukan
+data sekolah. Karena itu mereka boleh berkomunikasi: mereka bisa memulai percakapan
+dengan staf yang mereka awasi, dengan sesama pejabat, dan dengan admin sekolah;
+sekolah bisa menulis kepada mereka; dan mereka bisa mengirim pengumuman ke sekolah.
+Yang **tidak** berubah: mereka tetap tidak punya satu pun wewenang menulis data
+sekolah (bagian 1), dan halaman komunikasi mereka hanya GET — pesannya sendiri
+ditulis lewat `/api/percakapan` dan `/api/pengumuman`, yang di-scope oleh peran
+pemanggilnya.
 
-| | super_admin | admin_sekolah | guru | murid | principal / vice_principal |
-| --- | --- | --- | --- | --- | --- |
-| bisa **mengirim** ke peran | guru, murid, admin_sekolah, super_admin | super_admin, guru, murid | admin_sekolah, guru, murid | guru, admin_sekolah | **tidak ada** (`[]`) |
-| bisa **di-address** pengumuman | ✅ | ✅ | ✅ | ✅ | **tidak** — tidak ada pengirim yang daftar penerimanya memuat mereka |
+Tabelnya adalah `_ALLOWED_RECIPIENT_ROLES` di `app/routes/api.py` — satu tabel untuk
+percakapan **dan** pengumuman, dan itu sengaja: seorang penerima adalah penerima.
+Tiga hal yang harus dibaca bersama tabel itu:
 
-Artinya kedua peran pejabat **tidak bisa memulai percakapan** dan **tidak bisa
-dikirimi pengumuman**. Mereka hanya bisa membuka percakapan yang sudah memuat mereka
-(mis. sebagai partisipan lama) dan pengumuman yang `target_role`-nya peran mereka —
-dan karena tak ada pengirim yang bisa menargetkan peran itu, yang kedua praktis tidak
-terjadi.
+| | Daftar `_get_allowed_recipient_roles` |
+| --- | --- |
+| `super_admin` | guru, murid, admin sekolah, kepala sekolah, wakil, super admin |
+| `admin_sekolah` | super admin, guru, murid, kepala sekolah, wakil |
+| `principal` / `vice_principal` | super admin, admin sekolah, guru, murid, kepala sekolah, wakil |
+| `guru` | admin sekolah, guru, murid, kepala sekolah, wakil |
+| `murid` | guru, admin sekolah |
 
-**Ini keputusan produk, bukan cacat teknis.** `principal`/`vice_principal` sengaja
-baca-saja (bagian 1), dan memperluas sistem pesan untuk mereka mengubah arti peran itu
-— jadi jangan "memperbaikinya" diam-diam. Bila pemilik produk memutuskan memberi mereka
-pesan, perubahan yang konsisten adalah: menambahkan `principal`/`vice_principal` ke
-daftar penerima peran pengirim **dan** ke daftar peran yang bisa di-address, dengan
-kalimat dwibahasa di ketiga halaman notifikasi, lalu memperbarui matriks di `AGENTS.md`.
+1. **Daftar itu satu arah; percakapan dua arah.** `api_create_percakapan` menuntut
+   entri balikannya juga, jadi pasangan yang tidak timbal balik adalah nama di daftar
+   kontak yang menjawab **403** saat diklik. `_conversation_roles` menyaringnya dan
+   itulah yang dipakai daftar kontak — sebab itu `super_admin` tidak melihat setiap
+   guru lagi: guru memang tidak pernah bisa membalas, jadi yang hilang hanya nama
+   yang tidak bisa diklik.
+2. **Murid tidak berubah.** Daftar `murid` tetap dua kanal, jadi daftar kontak
+   seorang murid tidak melebar; sementara pejabat **boleh** mengirim pengumuman *ke*
+   murid. Mengumumkan ke sebuah peran dan memegang percakapan 1-on-1 dengan peran itu
+   adalah dua perbuatan berbeda, dan itulah sebabnya "pejabat bisa mengumumkan ke
+   murid" tidak berarti "murid bisa chat dengan kepala sekolah".
+3. **Meng-address peran sendiri berarti *grup*** ("semua guru"), kecuali
+   `super_admin` yang satu akun dan satu-satunya peran yang tidak ditawarkan ke
+   dirinya sendiri.
+
+Bukti: `tests/unit/test_official_messaging.py` (tabel menutup keenam peran, pasangan
+timbal balik, murid tidak berubah, rutenya GET dan hanya ada di bawah prefiks
+masing-masing pejabat, chrome menautkan keduanya dengan path literal, dan dropdown di
+`shared/comms.html` sama dengan tabel server) dan `tests/unit/test_role_matrix_docs.py`
+(matriks di `AGENTS.md` mencetak daftar yang sama).

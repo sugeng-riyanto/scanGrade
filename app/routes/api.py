@@ -2455,7 +2455,11 @@ def api_create_pengumuman():
     allowed_targets = _get_allowed_recipient_roles(role)
     if target_role not in allowed_targets:
         return jsonify({"error": f"Anda tidak bisa mengirim pengumuman ke {target_role}"}), 403
-    if role in ("admin_sekolah", "guru"):
+    if role != "super_admin":
+        # Every role but the platform operator announces inside its own school, so
+        # the school is read from the session and never from the request body -- the
+        # pairing is the rule, not an enumeration that a new role can be left out of
+        # (the officials were, and sent nothing until the list above learned them).
         school_id = g.get("user_school_id")
         # Without a school this row would be written with school_id NULL, which no
         # reader's school filter matches -- silently invisible rather than a leak.
@@ -2783,17 +2787,47 @@ def _normalize_pair(uid_a, uid_b):
     return (a, b) if a < b else (b, a)
 
 
+#: Who each role may write to. One table for the 1-on-1 chat and for the
+#: announcement target list, because a recipient is a recipient — but a *pair* is
+#: only real when both sides list each other: `api_create_percakapan` requires the
+#: reverse entry too, so a role listed on one side and not the other is a name in a
+#: dropdown that answers 403. `_conversation_roles` is the reading that drops those.
+#:
+#: The two school officials (migration 038) were missing from this table entirely,
+#: which is why a role that exists in the schema had no way to send — or be sent —
+#: anything. They *read* the school rather than manage it, so they write to the
+#: staff they supervise, to each other, and to the school's pupils.
+#:
+#: `murid` keeps the two channels it has always had: a pupil's contact list does not
+#: widen because the head of school gained one, and the reverse check is what keeps
+#: the officials out of it while they can still announce *to* pupils.
+_ALLOWED_RECIPIENT_ROLES = {
+    "super_admin": ["guru", "murid", "admin_sekolah", "principal", "vice_principal", "super_admin"],
+    "admin_sekolah": ["super_admin", "guru", "murid", "principal", "vice_principal"],
+    "principal": ["super_admin", "admin_sekolah", "guru", "murid", "principal", "vice_principal"],
+    "vice_principal": ["super_admin", "admin_sekolah", "guru", "murid", "principal", "vice_principal"],
+    "guru": ["admin_sekolah", "guru", "murid", "principal", "vice_principal"],
+    "murid": ["guru", "admin_sekolah"],
+}
+
+
 def _get_allowed_recipient_roles(user_role):
     """Return list of roles the user can message (used for chat + broadcast)."""
-    if user_role == "super_admin":
-        return ["guru", "murid", "admin_sekolah", "super_admin"]
-    if user_role == "admin_sekolah":
-        return ["super_admin", "guru", "murid"]
-    if user_role == "guru":
-        return ["admin_sekolah", "guru", "murid"]
-    if user_role == "murid":
-        return ["guru", "admin_sekolah"]
-    return []
+    return list(_ALLOWED_RECIPIENT_ROLES.get(user_role, []))
+
+
+def _conversation_roles(user_role):
+    """The roles a 1-on-1 conversation can actually be *created* with.
+
+    `_get_allowed_recipient_roles` answers "what may this role write to" and is
+    one-directional, while `api_create_percakapan` additionally demands the reverse
+    entry, because a conversation is a two-way object. Handing the one-directional
+    list to a contact list therefore offered names that answer 403 when clicked —
+    `super_admin` was shown every teacher, and no teacher can chat with
+    `super_admin`. This is the list of pairs that work.
+    """
+    allowed = _ALLOWED_RECIPIENT_ROLES.get(user_role, [])
+    return [r for r in allowed if user_role in _ALLOWED_RECIPIENT_ROLES.get(r, [])]
 
 
 @api_bp.route("/percakapan", methods=["GET"])
@@ -3115,7 +3149,7 @@ def api_search_recipients():
     supabase = get_supabase()
     role = g.get("user_role")
     q = request.args.get("q", "").strip()
-    allowed = _get_allowed_recipient_roles(role)
+    allowed = _conversation_roles(role)
     try:
         query = supabase.table("profiles").select("id, full_name, role").in_("role", allowed)
         school_id = g.get("user_school_id")
@@ -3135,7 +3169,7 @@ def api_contacts():
     supabase = get_supabase()
     role = g.get("user_role")
     uid = g.user_id
-    allowed = _get_allowed_recipient_roles(role)
+    allowed = _conversation_roles(role)
     school_id = g.get("user_school_id")
     try:
         query = supabase.table("profiles").select("id, full_name, role").in_("role", allowed)

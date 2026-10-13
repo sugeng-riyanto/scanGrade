@@ -62,6 +62,58 @@ Diukur, bukan disimpulkan — diambil dari repositori & gerbang, bukan dari lapo
 
 ## Changelog
 
+### 13 Oktober 2026 — Kepala Sekolah & Wakilnya Bisa Berkomunikasi
+
+Dilaporkan dan diverifikasi ke kode: `principal` dan `vice_principal` (migrasi 038)
+**tidak pernah** masuk sistem pesan — `_get_allowed_recipient_roles` mengembalikan
+`[]` untuk keduanya, tidak ada halaman komunikasi untuk mereka, dan tidak ada peran
+pun yang daftar penerimanya memuat mereka. Jadi sebuah peran yang ada di skema tidak
+bisa mengirim apa pun, tidak bisa dikirimi apa pun, dan tidak punya pintu untuk
+membukanya.
+
+- **Satu tabel, dan pasangannya harus timbal balik.**
+  `_ALLOWED_RECIPIENT_ROLES` menutup **keenam** peran; pejabat bisa menulis ke staf
+yang mereka awasi, sesama pejabat, dan ke sekolah. `api_create_percakapan` sudah lama
+menuntut entri balikannya juga, jadi pasangan yang tidak timbal balik adalah nama di
+daftar kontak yang menjawab 403 — `_conversation_roles` menyaringnya, dan itulah yang
+kini dipakai daftar kontak serta pencarian penerima. Efek sampingnya jujur:
+`super_admin` tidak lagi melihat setiap guru di daftar kontaknya, karena guru memang
+tidak pernah bisa membalas.
+- **Murid tidak berubah sama sekali.** `murid` tetap `[guru, admin_sekolah]`, jadi
+daftar kontak seorang murid tidak melebar; pejabat tetap **boleh** mengirim
+pengumuman *ke* murid. Mengumumkan ke sebuah peran dan memegang percakapan 1-on-1
+dengan peran itu adalah dua perbuatan berbeda.
+- **Halamannya ada, dan bertautan.** `GET /principal/comms` dan
+  `GET /vice-principal/comms` merender `shared/comms.html` (halaman yang sama dengan
+  empat peran lain); sidebar dan bilah bawah pejabat menautkannya dengan path
+  **literal**, sebab URL yang hanya ada saat render tidak terlihat oleh penjaga
+  keterjangkauan halaman. Keduanya GET karena seluruh prefiks kepala sekolah memang
+  baca-saja — dijaga `tests/unit/test_invigilation.py`.
+- **Dropdown = tabel server.** Peta peran di `shared/comms.html` mencerminkan
+  `_ALLOWED_RECIPIENT_ROLES` persis (kecuali `super_admin`, satu akun, bukan grup),
+  dan penjaga barunya membandingkan keduanya sebagai himpunan.
+- **Satu perbaikan keamanan di jalan yang sama:** `POST /api/pengumuman` kini
+  mengambil `school_id` dari **sesi** untuk setiap peran kecuali `super_admin`
+  (dulu enumerasi `("admin_sekolah", "guru")`, yang meninggalkan pejabat memakai
+  `school_id` dari body permintaan).
+
+**Bukti:** `tests/unit/test_official_messaging.py` (**26 uji**) — tabel menutup keenam
+peran, pasangan timbal balik, murid tidak berubah, rutenya GET dan hanya di prefiks
+masing-masing, chrome menautkan keduanya, dropdown sama dengan server, **kedua
+halaman benar-benar dirender 200** dengan sesi pejabat palsu (dan seorang murid
+ditolak), dan kedua path terdaftar di gerbang smoke deploy
+(`deploy/smoke_test.py:ROLE_PAGES`, sehingga rilis sungguhan membuka halaman itu);
+`tests/unit/test_role_matrix_docs.py` (**11 uji**) memaku matriks `AGENTS.md` pada
+`_get_allowed_recipient_roles`; `tests/unit/test_sidebar_order.py` menyetujui heading
+baru atas nama aturan cabang pejabat (hanya halaman yang bisa dibuka).
+`deploy/theme_gate.sh`: set pytest gerbang **226 lulus**, i18n OK, CSS segar, kontrak
+skema 82 tabel OK (separuh *live-schema* butuh jaringan dan gagal sama seperti HEAD
+— kotak ini, bukan rilis). Seluruh `tests/unit` (327 berkas) dijalankan dalam tiga
+batch: himpunan kegagalan **byte-identik dengan HEAD** untuk node-id yang sama
+(±40 uji lingkungan: tanpa kredensial Supabase). `test_page_reachability` hijau
+(kedua halaman berdaun), dan `test_invigilation` tetap menolak POST di bawah
+`/principal/*`. Tidak ada migrasi.
+
 ### 13 October 2026 — Transparansi Nilai Akhir & Dokumen Sekolah
 
 Dua fitur yang diminta bersama: **`final-score-penalty-transparency`** dan

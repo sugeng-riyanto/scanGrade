@@ -1,26 +1,27 @@
-"""The messaging RBAC matrix must name every role, and list what the code lists.
+"""The messaging matrix must name every role, and list what the code lists.
 
 `AGENTS.md` carried a "Pertukaran Pesan — RBAC Matrix" whose header named **four**
 roles while the application has **six** since migration 038 (`principal` and
 `vice_principal`), and nothing anywhere failed when the two drifted apart: a
 document that speaks of four roles beside a database that accepts six is how a
-reader concludes the officials "do not exist". This file is the guard that keeps
-those two facts in one place.
+reader concludes the officials "do not exist".
 
-It pins three things, and each one is a way the drift happened:
+The matrix now names all six, and the prose beneath it prints the recipient list of
+every role. This file keeps the two honest:
 
 * **every role the app knows is named in the matrix**, read from
   `DASHBOARD_FOR_ROLE` — so adding a seventh role fails here until the table is
   updated, instead of silently going undocumented;
-* **the recipient lists printed in the document are the lists the code returns**
+* **the lists printed in the document are the lists the code returns**
   (`api._get_allowed_recipient_roles`), parsed out of the prose and compared as
   sets — a doc that *describes* the code is the only kind worth having;
-* **the officials' situation is recorded as an open product decision**, not as a
-  silent gap, because `principal`/`vice_principal` cannot send — or be addressed
-  by — anything today and "fixing" that changes what the role means.
+* **the three readings that a table like this invites are written down** — the
+  one-directional list versus the mutual conversation, what addressing your own role
+  means, and the fact that a pupil's channels did not change. A table without those
+  sentences is a table someone will misread.
 
-All three are source-level checks over the same tree the app ships, in the style
-of `tests/unit/test_principal_signature.py`: no database, no request.
+The behaviour itself is pinned in `tests/unit/test_official_messaging.py`; this file
+is the half that fails when the *documentation* drifts from it.
 """
 from __future__ import annotations
 
@@ -35,9 +36,10 @@ ROLES_DOC = ROOT / "docs" / "ROLES_CLARIFICATION.md"
 
 SECTION_HEAD = "## Pertukaran Pesan — RBAC Matrix"
 
-#: The roles that may be *addressed* (`[]` means "nobody"), as the document states
-#: them. Kept here as the reading contract: the parser has to find all four.
-DOCUMENTED_SENDERS = ("super_admin", "admin_sekolah", "guru", "murid")
+#: Every role has a printed `role → [...]` line now: the officials joined the table
+#: rather than being described as absent from it.
+DOCUMENTED_SENDERS = ("super_admin", "admin_sekolah", "principal", "vice_principal",
+                      "guru", "murid")
 
 
 def _text(path: Path) -> str:
@@ -92,7 +94,7 @@ class TestTheMatrixNamesEveryRole:
 
 
 class TestTheListsAreTheCode:
-    def test_the_paragraph_prints_all_four_recipient_lists(self, matrix_section):
+    def test_the_paragraph_prints_all_six_recipient_lists(self, matrix_section):
         documented = _documented_lists(matrix_section)
         missing = [r for r in DOCUMENTED_SENDERS if r not in documented]
         assert not missing, (
@@ -110,39 +112,53 @@ class TestTheListsAreTheCode:
                 f"code says {sorted(allowed(role))}"
             )
 
-    def test_the_officials_recipient_list_is_still_empty(self, matrix_section):
-        """The fact the paragraph exists to record: officials have nobody to write to."""
+    def test_the_officials_are_in_the_documented_table(self, matrix_section):
+        """The fact this table exists to record: the officials have channels."""
         from app.routes.api import _get_allowed_recipient_roles as allowed
 
-        assert allowed("principal") == [] and allowed("vice_principal") == [], (
-            "the officials' messaging was opened — record that decision in the "
-            "matrix and docs/ROLES_CLARIFICATION.md, and delete this pin"
-        )
-        assert "peran lain → `[]`" in matrix_section, (
-            "the paragraph must say the remaining roles have an empty list, which "
-            "is what the two `assert` lines above just proved"
+        assert allowed("principal"), "the officials are back to sending nothing"
+        assert "guru" in allowed("principal") and "principal" in allowed("guru"), (
+            "the head of school and the teachers must reach each other"
         )
 
 
-class TestTheOpenDecisionIsWrittenDown:
-    def test_the_standing_reference_records_it(self):
+class TestTheThreeReadingsAreWrittenDown:
+    """A table invites three mistakes; the section names all three."""
+
+    def test_the_mutual_pair_rule_is_explained(self, matrix_section):
+        assert "_conversation_roles" in matrix_section, (
+            "the one-directional list versus the mutual conversation is the first "
+            "thing a reader gets wrong: print the reading that filters dead contacts"
+        )
+        assert "403" in matrix_section
+
+    def test_addressing_your_own_role_is_explained(self, matrix_section):
+        assert "grup" in matrix_section, (
+            "reaching your own role means the group, which is why the entry stays"
+        )
+
+    def test_the_pupils_channels_are_stated_as_unchanged(self, matrix_section):
+        assert "murid" in matrix_section and "1-on-1" in matrix_section, (
+            "announcing to a role and holding a conversation with it are different "
+            "acts; say so where the pupils' unchanged list is"
+        )
+
+
+class TestTheReferenceDocRecordsTheDecision:
+    def test_the_standing_reference_names_the_function_it_read(self):
+        text = _text(ROLES_DOC)
+        assert "`_ALLOWED_RECIPIENT_ROLES`" in text, (
+            "the reference doc must name the table it read, so a later reader can "
+            "check it rather than trust it"
+        )
+
+    def test_the_officials_section_is_no_longer_an_open_question(self):
         text = _text(ROLES_DOC)
         assert "sistem pesan" in text and "principal" in text, (
             "docs/ROLES_CLARIFICATION.md is the standing reference; the officials' "
-            "messaging gap belongs there, not only in a changelog"
+            "messaging belongs there"
         )
-        assert "keputusan produk" in text, (
-            "the gap must be named as a product decision to make, not as a defect "
-            "someone should quietly repair"
-        )
-
-    def test_both_documents_agree_on_the_recipient_list(self, matrix_section):
-        """The reference doc prints the same `[]` the matrix does."""
-        roles_doc = _text(ROLES_DOC)
-        assert "`_get_allowed_recipient_roles`" in roles_doc, (
-            "the reference doc must name the function it read, so a later reader "
-            "can check it rather than trust it"
-        )
-        assert "**tidak ada** (`[]`)" in roles_doc, (
-            "the reference doc's recipient row for the officials must read `[]`"
+        assert "belum diputuskan" not in text, (
+            "the decision has been made and implemented — a section still calling it "
+            "undecided tells the next session to leave it alone"
         )

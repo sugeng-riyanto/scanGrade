@@ -350,6 +350,33 @@ def vice_principal_progress():
     return _progress("vice_principal")
 
 
+# ── messages and announcements ───────────────────────────────────────────────
+#
+# The officials had no door to `shared/comms.html` at all: the page existed for the
+# other four roles and the roles themselves could not be addressed by it either
+# (see `_ALLOWED_RECIPIENT_ROLES` in `app/routes/api.py`), so a head of school could
+# not be written to, and could not write. The page is the same one every other role
+# opens, at the reader's own address, because the difference between the two
+# officials is who is reading and not what the page holds.
+#
+# Both routes are GET, like every other route in this file: the messages themselves
+# are written through `/api/percakapan` and `/api/pengumuman`, which are scoped by
+# the caller's own role. Read-only here is structural — a guard in
+# `tests/unit/test_invigilation.py` refuses a POST registered under `/principal/*`.
+
+@principal_bp.route("/principal/comms")
+@school_official_required
+def principal_comms():
+    """Kepala sekolah: pesan dan pengumuman sekolahnya."""
+    return render_template("shared/comms.html")
+
+
+@principal_bp.route("/vice-principal/comms")
+@school_official_required
+def vice_principal_comms():
+    return render_template("shared/comms.html")
+
+
 # ── the invigilation schedule ────────────────────────────────────────────────
 #
 # One page for both officials and one function that builds it: the head of school

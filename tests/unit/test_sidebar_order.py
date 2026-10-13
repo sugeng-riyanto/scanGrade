@@ -96,7 +96,12 @@ EXPECTED: dict[str, list[tuple[str, list[str]]]] = {
 
 #: The key `_split` files the shared officials branch under.
 OFFICIAL = "'principal', 'vice_principal'"
-OFFICIAL_HEADINGS = ["Utama", "Panduan"]
+#: The branch stays short on purpose — it lists only pages these roles can actually
+#: open, and a door that refuses is worse than no door. `Komunikasi` was added when
+#: the officials gained their messages page (`/principal/comms`, `/vice-principal/
+#: comms`): a page they can open belongs in here by the branch's own rule. Adding a
+#: *fourth* heading is still a decision, not a slip — this list is what makes it one.
+OFFICIAL_HEADINGS = ["Utama", "Komunikasi", "Panduan"]
 
 TITLE_RE = re.compile(r'nav-section-title[^>]*>\s*<span[^>]*x-text="t\(\'([^\']+)\'')
 LINK_RE = re.compile(r'<a href="([^"]+)"')
