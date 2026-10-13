@@ -50,8 +50,18 @@ PASSING_SCORE = 70
 #: the page to render a paper with more than one kind of control, and all of it
 #: auto-gradable so a demo visitor who submits it gets a score rather than a pile
 #: of unmarked essays.
-QUESTION_TYPES = {"0": "mcq", "1": "mcq", "2": "mcq", "3": "mcq", "4": "true_false"}
-ANSWER_KEY = {"0": "B", "1": "A", "2": "D", "3": "C", "4": "true"}
+#:
+#: Question 2 is the **exception** (the builder's *more than one correct answer*
+#: toggle, stored as `mcq_multi` with the letters of its key as a list). It is on
+#: the fixture rather than only in a test because the deploy's browser gate measures
+#: that question's row on a laid-out page — one option row rather than two, the same
+#: control as the single-answer row beside it, and the "more than one answer" badge
+#: on it and nowhere else — and a gate with no exception question on the paper it
+#: opens can only answer "could not measure". `tests/unit/test_exam_render_gate.py`
+#: holds this file to that: a release that drops the exception from the fixture
+#: loses the subject, which is a finding rather than a quiet skip.
+QUESTION_TYPES = {"0": "mcq", "1": "mcq", "2": "mcq_multi", "3": "mcq", "4": "true_false"}
+ANSWER_KEY = {"0": "B", "1": "A", "2": ["A", "D"], "3": "C", "4": "true"}
 QUESTION_WEIGHTS = {"0": 20, "1": 20, "2": 20, "3": 20, "4": 20}
 
 #: On purpose, and the reason this fixture is part of a *deploy* gate: an exam

@@ -10,6 +10,16 @@ white, because the failure is script *order* in the browser. On 2026-10-03
 browser and asks the rendered DOM. These tests are its guards: the exit contract,
 the finding for a blank page, the could-not-measure for a redirect, and that the
 deploy runner actually runs it. The live render is the gate's own job.
+
+The second half of that reading is the **exception question's row**, and the
+data in this file is measured rather than imagined: the two readings below were
+taken from a real headless Chrome on 2026-10-11 against `/preview/paper` of an
+exam with two exception questions — once from the deployed page (which rendered
+**two** option rows for each of them, the plain row above the exception's) and
+once after the template was fixed (one row each). The numbers in them are the
+browser's: `w=118 h=40`, `font=14px/700`, `pad=8px 20px 8px 20px`,
+`border=2px solid 12px`, one `span` child, no icon. A reading of that shape is what
+`parity_problems` judges, and what a template read cannot see at all.
 """
 from __future__ import annotations
 
@@ -42,10 +52,66 @@ def gate():
     return module
 
 
+#: The question-type blob the paper writes into its own page, shaped exactly as the
+#: template writes it (`type: ({...})[i] || 'mcq'`). Two of the three questions are
+#: the exception.
+SERVED_HTML = (
+    '<script>return {type: ({"0": "mcq_multi", "1": "mcq", "2": "mcq_multi"})[i]'
+    " || 'mcq'};</script>"
+)
+
+
+def _button(letter, pressed=False, w=118, h=40, kids="span", icons=0,
+            pad="8px 20px 8px 20px", font="14px/700", border="2px solid 12px"):
+    """One option button, with the values a real Chrome reported for it."""
+    return {"letter": letter, "pressed": pressed, "w": w, "h": h, "font": font,
+            "pad": pad, "border": border, "display": "block", "kids": kids,
+            "icons": icons}
+
+
+def _row(pressed=False, letters="ABCDE", **overrides):
+    """A five-letter option row; `other` is the `x-for` template Alpine leaves in
+    the row, which is what the browser reports for both rows on this page."""
+    return {"buttons": [_button(letter, pressed=pressed, **overrides)
+                        for letter in letters], "other": "template"}
+
+
+def _block(label, rows, chips):
+    return {"index": 1, "label": label, "chips": chips, "rows": rows}
+
+
+#: The page as it actually rendered **before** the template fix, measured on the
+#: deployed release: each exception question handed the pupil two rows, so the
+#: question appeared twice — once as a row that replaces a letter, once as one that
+#: adds one. The chips read `Terjawab` first because both rows carry their own.
+DOUBLED_PAPER = {"blocks": [
+    _block("Soal 1:", [_row(), _row(pressed=True)],
+           ["Terjawab", "Boleh lebih dari satu", "Terjawab"]),
+    _block("Soal 2:", [_row(), _row(pressed=True)],
+           ["Terjawab", "Boleh lebih dari satu", "Terjawab"]),
+    _block("Soal 3:", [_row()], ["Terjawab"]),
+]}
+
+#: The same page after the fix: one row per question, the badge on the exception and
+#: on nothing else, and the exception's row byte-for-byte the plain row's.
+FIXED_PAPER = {"blocks": [
+    _block("Soal 1:", [_row(pressed=True)], ["Boleh lebih dari satu", "Terjawab"]),
+    _block("Soal 2:", [_row(pressed=True)], ["Boleh lebih dari satu", "Terjawab"]),
+    _block("Soal 3:", [_row()], ["Terjawab"]),
+]}
+
+
 class _FakeSession:
     class _Cookies:
         def get_dict(self):
             return {}
+
+    class _Response:
+        status_code = 200
+        text = SERVED_HTML
+
+    def get(self, url, **kwargs):
+        return self._Response()
 
     cookies = _Cookies()
 
@@ -117,25 +183,38 @@ class TestTheBrowserStartsWhereItCanRun:
 class TestTheRunContract:
     """`run()` maps a rendered page to its exit code, without a browser."""
 
-    def _run(self, monkeypatch, reading, events=(), exam_id=EXAM_ID):
+    def _run(self, monkeypatch, reading, events=(), exam_id=EXAM_ID, session=None):
         g = gate()
 
         async def fake_render(*a, **k):
             return reading, list(events), None
 
         monkeypatch.setattr(g, "locate_browser", lambda *a, **k: "/fake/chrome")
-        monkeypatch.setattr(g, "sign_in", lambda *a, **k: (_FakeSession(), None))
+        monkeypatch.setattr(g, "sign_in",
+                            lambda *a, **k: (session or _FakeSession(), None))
         monkeypatch.setattr(g, "demo_exam_id", lambda *a, **k: exam_id)
         monkeypatch.setattr(g, "_render", fake_render)
         return g, g.run("http://box", "s@example.com:pw")
 
+    @staticmethod
+    def _rendered(**overrides):
+        """A reading of a page that rendered, with its answer rows measured."""
+        reading = {"path": EXAM_PATH, "qbtns": 12, "answers": 12, "xcloak": 0,
+                   "stageH": 664, "bodyText": "Ujian", "paper": FIXED_PAPER}
+        reading.update(overrides)
+        return reading
+
     def test_a_rendered_page_is_zero(self, monkeypatch):
-        g, (code, lines, _) = self._run(
-            monkeypatch,
-            {"path": EXAM_PATH, "qbtns": 12, "answers": 12, "xcloak": 0,
-             "stageH": 664, "bodyText": "Ujian"},
-        )
+        g, (code, lines, _) = self._run(monkeypatch, self._rendered())
         assert code == g.EXIT_OK, lines
+
+    def test_the_ok_line_reports_what_was_measured(self, monkeypatch):
+        """A gate that cannot say what it looked at reads as a pass either way."""
+        g, (code, lines, payload) = self._run(monkeypatch, self._rendered())
+        assert code == g.EXIT_OK, lines
+        assert "2 exception question(s)" in " ".join(lines), lines
+        assert payload["declared_exceptions"] == 2
+        assert payload["paper"], "the rows are not carried into the record"
 
     def test_a_blank_page_is_a_finding_and_names_the_error(self, monkeypatch):
         """The exact regression this gate exists for: no questions, and the throw."""
@@ -174,11 +253,98 @@ class TestTheRunContract:
     def test_no_demo_exam_is_could_not_measure(self, monkeypatch):
         g, (code, lines, _) = self._run(
             monkeypatch,
-            {"path": EXAM_PATH, "qbtns": 12, "answers": 12, "xcloak": 0,
-             "stageH": 664, "bodyText": ""},
+            self._rendered(bodyText=""),
             exam_id=None,
         )
         assert code == g.EXIT_CANNOT_MEASURE, lines
+
+    def test_the_page_that_shows_the_exception_twice_is_a_finding(self, monkeypatch):
+        """The defect this half of the gate was written for, from the real page."""
+        g, (code, lines, payload) = self._run(
+            monkeypatch, self._rendered(paper=DOUBLED_PAPER))
+        assert code == g.EXIT_FINDING, lines
+        assert any("rendered 2 answer rows" in line for line in lines), lines
+        assert any("Soal 1" in line for line in lines), (
+            "the finding must name the question, or an operator has to hunt for it")
+        assert payload["problems"], "a finding must carry its reasons"
+
+    def test_a_served_paper_with_no_exception_is_could_not_measure(self, monkeypatch):
+        """Stale demo data is a box fact: re-seeding is the remedy, not a rollback.
+
+        The *data* is what is read here — the served document's own question types —
+        because that is the fact the box controls. The page rendering no exception
+        row while the data carries one is a finding, and is asserted above.
+        """
+
+        class _NoException(_FakeSession):
+            class _Response:
+                status_code = 200
+                text = 'type: ({"0": "mcq", "1": "mcq"})[i] || \'mcq\''
+
+            def get(self, url, **kwargs):
+                return self._Response()
+
+        g, (code, lines, payload) = self._run(
+            monkeypatch,
+            self._rendered(paper={"blocks": [
+                _block("Soal 1:", [_row()], ["Terjawab"])]}),
+            session=_NoException())
+        assert code == g.EXIT_CANNOT_MEASURE, lines
+        assert "manage.py demo-exam" in " ".join(lines), (
+            "the remedy has to be in the message")
+        assert payload["reason"] == "no-exception-in-the-paper"
+
+    def test_the_data_and_the_render_disagreeing_is_a_finding(self, monkeypatch):
+        """The paper says two exception questions and the page shows neither.
+
+        This is the shape the vocabulary guard exists for: `qIsMulti` comparing
+        against a name the data does not hold renders a plain row for an exception
+        question, and only the two readings together can say so.
+        """
+        g, (code, lines, _) = self._run(
+            monkeypatch,
+            self._rendered(paper={"blocks": [
+                _block("Soal 1:", [_row()], ["Terjawab"]),
+                _block("Soal 2:", [_row()], ["Terjawab"])]}))
+        assert code == g.EXIT_FINDING, lines
+        assert any("rendered 0 of them" in line for line in lines), lines
+
+    def test_a_served_paper_without_its_question_types_is_could_not_measure(
+            self, monkeypatch):
+        class _NoTypes(_FakeSession):
+            class _Response:
+                status_code = 200
+                text = "<html>nothing to read here</html>"
+
+            def get(self, url, **kwargs):
+                return self._Response()
+
+        g, (code, lines, _) = self._run(monkeypatch, self._rendered(),
+                                        session=_NoTypes())
+        assert code == g.EXIT_CANNOT_MEASURE, lines
+        assert "question types" in " ".join(lines)
+
+    def test_a_release_that_lost_the_fixtures_exception_is_a_finding(self, monkeypatch):
+        """The fixture is this release's file: no exception on it, no subject here.
+
+        A finding rather than a quiet skip, for the reason the theme gate refuses a
+        deleted check — the exception's row would stop being measured by anything.
+        """
+        g = gate()
+        stub = type("Spec", (), {"QUESTION_TYPES": {"0": "mcq", "1": "true_false"}})
+        monkeypatch.setattr(g, "fixture_spec", lambda: stub)
+
+        async def fake_render(*a, **k):
+            return self._rendered(), [], None
+
+        monkeypatch.setattr(g, "locate_browser", lambda *a, **k: "/fake/chrome")
+        monkeypatch.setattr(g, "sign_in", lambda *a, **k: (_FakeSession(), None))
+        monkeypatch.setattr(g, "demo_exam_id", lambda *a, **k: EXAM_ID)
+        monkeypatch.setattr(g, "_render", fake_render)
+        code, lines, payload = g.run("http://box", "s@example.com:pw")
+        assert code == g.EXIT_FINDING, lines
+        assert payload["reason"] == "fixture-declares-no-exception"
+        assert any("demo fixture" in line for line in lines), lines
 
 
 # ── reading the page errors out of the CDP stream ────────────────
@@ -327,3 +493,339 @@ class TestItPollsForThePageInsteadOfSleepingOnce:
         assert "d.body && d.body.innerText" in src, (
             "the reading dereferences document.body, which is null until the "
             "parser has built it")
+
+    def test_the_rows_are_read_in_the_same_poll(self):
+        """The option rows come from Alpine's own `x-if`/`x-for`, so a block being
+        in the DOM is not yet a row in it: reading the rows once, outside the poll,
+        is how a slow page reports "no answer row rendered".
+        """
+        src = GATE_PATH.read_text(encoding="utf-8")
+        body = src.split("async def _render(", 1)[1]
+        assert "read_once(c, value)" in body, (
+            "the render does not read the rows through the one poll, so the reading "
+            "depends on the page settling by luck")
+        assert "readiness(value)" in body, "the poll has no readiness test"
+
+
+class TestOnePollReadsThePageAndItsRows:
+    """`read_once` and `readiness`, driven without a browser.
+
+    Both exist so this decision is testable: a reading of the rows that is taken
+    once (outside the poll), or thrown away after being taken, is a gate that
+    reports a correct page as an unmeasured one — and no source assertion caught
+    that, because the line that did the work was still in the file.
+    """
+
+    class _CDP:
+        """A stand-in for `_CDP`: canned answers, keyed by the expression sent."""
+
+        def __init__(self, page, paper):
+            self.page, self.paper = page, paper
+            self.sent = []
+
+        async def send(self, method, **params):
+            self.sent.append(params.get("expression", ""))
+            if params.get("expression") == gate().paper_expression():
+                return self.paper
+            return self.page
+
+    def _drive(self, page, paper):
+        import asyncio
+
+        value = {}
+        cdp = self._CDP(page, paper)
+        threw = asyncio.run(gate().read_once(cdp, value))
+        return threw, value, cdp
+
+    def test_it_adopts_the_page_and_the_rows(self):
+        threw, value, cdp = self._drive(
+            {"result": {"value": {"qbtns": 12, "answers": 12}}},
+            {"result": {"value": {"blocks": [{"label": "Soal 1:", "rows": []}]}}},
+        )
+        assert threw is None
+        assert value["qbtns"] == 12 and value["answers"] == 12
+        assert value["paper"]["blocks"], (
+            "the rows were read and not kept, so the run answers \"could not measure\" "
+            "about a page it has just looked at")
+        assert len(cdp.sent) == 2, "the rows are not read in the same pass as the page"
+
+    def test_a_read_that_threw_is_not_a_verdict(self):
+        threw, value, _ = self._drive({"exceptionDetails": {"text": "Execution context"}},
+                                      {"result": {"value": {"blocks": []}}})
+        assert threw, "a page read that threw was taken as a reading"
+        assert "paper" not in value
+
+    def test_a_row_reading_that_errors_is_named(self):
+        threw, value, _ = self._drive(
+            {"result": {"value": {"qbtns": 12, "answers": 12}}},
+            {"result": {"value": {"error": "no .exam-answers on the page"}}})
+        assert threw is None
+        assert value["paper_error"] == "no .exam-answers on the page", (
+            "an unreadable row reading must be distinguishable from an absent one")
+        assert not value.get("paper")
+
+    def test_readiness_needs_the_rows_too(self):
+        """A page whose blocks are there and whose rows are not is not ready."""
+        g = gate()
+        assert g.readiness({"qbtns": 12, "answers": 12}) is False, (
+            "the poll stops before the rows exist, so a slow page reads as one with "
+            "no option row")
+        assert g.readiness({"qbtns": 1, "answers": 1, "paper": {"blocks": []}}) is True
+        assert g.readiness({"qbtns": 0, "answers": 1, "paper": {"blocks": []}}) is False
+
+
+# ── the exception's row: what a lay-out says that a template cannot ────────
+
+
+class TestTheExceptionRowIsMeasured:
+    """`parity_problems` on readings taken from a real Chrome.
+
+    The two papers at the top of this file are the same exam before and after the
+    fix, and the assertions below are the ones that would have caught it: the
+    pre-fix page renders two rows for one question, and nothing about reading the
+    template shows that.
+    """
+
+    def test_the_shipped_defect_was_a_finding(self):
+        problems = gate().parity_problems(DOUBLED_PAPER, 2)
+        assert len([p for p in problems if "rendered 2 answer rows" in p]) == 2, problems
+        assert any("Soal 1" in p for p in problems) and any("Soal 2" in p for p in problems)
+
+    def test_the_fixed_page_is_clean(self):
+        assert gate().parity_problems(FIXED_PAPER, 2) == []
+
+    def test_the_count_has_to_match_the_papers_own_data(self):
+        problems = gate().parity_problems(FIXED_PAPER, 1)
+        assert any("data carries 1 exception question(s)" in p for p in problems), problems
+
+    def test_a_badge_less_exception_is_a_finding(self):
+        paper = {"blocks": [
+            _block("Soal 1:", [_row(pressed=True)], ["Terjawab"]),
+            _block("Soal 2:", [_row()], ["Terjawab"]),
+        ]}
+        problems = gate().parity_problems(paper, 1)
+        assert any("carries 0 badge(s)" in p for p in problems), problems
+
+    def test_a_badge_on_a_single_answer_question_is_a_finding(self):
+        """The badge's *other* half: it marks the exception and nothing else."""
+        paper = {"blocks": [
+            _block("Soal 1:", [_row(pressed=True)], ["Boleh lebih dari satu", "Terjawab"]),
+            _block("Soal 2:", [_row()], ["Boleh lebih dari satu", "Terjawab"]),
+        ]}
+        problems = gate().parity_problems(paper, 1)
+        assert any("although its data is one answer" in p for p in problems), problems
+
+    def test_the_old_checkbox_control_is_a_finding(self):
+        """The row that first shipped had an icon inside each button."""
+        paper = {"blocks": [
+            _block("Soal 1:", [_row(pressed=True, kids="i,span", icons=1)],
+                   ["Boleh lebih dari satu", "Terjawab"]),
+            _block("Soal 2:", [_row()], ["Terjawab"]),
+        ]}
+        problems = gate().parity_problems(paper, 1)
+        assert any("icon/control element(s)" in p for p in problems), problems
+        assert any("kids" in p for p in problems), (
+            "a different child list is the same finding, and must be named")
+
+    def test_a_different_control_size_is_a_finding_when_both_are_on_screen(self):
+        paper = {"blocks": [
+            _block("Soal 1:", [_row(pressed=True, w=132, h=44)],
+                   ["Boleh lebih dari satu", "Terjawab"]),
+            _block("Soal 2:", [_row()], ["Terjawab"]),
+        ]}
+        problems = gate().parity_problems(paper, 1)
+        assert any("differs from the single-answer row's in w, h" in p for p in problems), problems
+
+    def test_a_hidden_row_is_not_a_size_finding(self):
+        """The false positive this reading was corrected for.
+
+        This paper lays out **one question at a time**, so every other row measures
+        0x0 while its computed font, padding, border and children are intact. The
+        first version compared those zeroes and reported five size findings per
+        exception question on a page that was correct.
+        """
+        paper = {"blocks": [
+            _block("Soal 1:", [_row(pressed=True, w=118, h=40)],
+                   ["Boleh lebih dari satu", "Terjawab"]),
+            _block("Soal 2:", [_row(w=0, h=0)], ["Terjawab"]),
+        ]}
+        assert gate().parity_problems(paper, 1) == [], (
+            "a row that is not laid out has no size to compare, and comparing its "
+            "zeroes reports a defect that is not there")
+
+    def test_two_sizes_inside_one_row_is_a_finding(self):
+        """On screen, the row's own buttons must agree about their size."""
+        buttons = [_button(letter, pressed=True, w=118) for letter in "ABCD"]
+        buttons.append(_button("E", pressed=True, w=90))
+        paper = {"blocks": [
+            _block("Soal 1:", [{"buttons": buttons, "other": "template"}],
+                   ["Boleh lebih dari satu", "Terjawab"]),
+            _block("Soal 2:", [_row()], ["Terjawab"]),
+        ]}
+        problems = gate().parity_problems(paper, 1)
+        assert any("not one size" in p for p in problems), problems
+
+    def test_the_two_rows_have_to_be_numbered_alike(self):
+        paper = {"blocks": [
+            _block("Question 1:", [_row(pressed=True)],
+                   ["Boleh lebih dari satu", "Terjawab"]),
+            _block("Soal 2:", [_row()], ["Terjawab"]),
+        ]}
+        problems = gate().parity_problems(paper, 1)
+        assert any("number label does not read like" in p for p in problems), problems
+
+    def test_a_page_with_no_option_row_at_all_is_a_finding(self):
+        assert gate().parity_problems({"blocks": []}, 1), (
+            "a page with no row is not a page whose row is fine")
+
+
+# ── the data: what the paper says it carries ────────────────────────────────
+
+
+class TestThePapersOwnData:
+    def test_it_reads_the_types_out_of_the_served_document(self):
+        assert gate().declared_exceptions(SERVED_HTML) == 2
+
+    def test_a_document_without_the_types_is_not_a_zero(self):
+        """``None`` and ``0`` are different answers, and the caller runs them
+        differently: no exception on the paper is "could not measure", no question
+        types in the document is also "could not measure" but for another reason.
+        """
+        assert gate().declared_exceptions("<html></html>") is None
+        assert gate().declared_exceptions('<script>type: (not json)[i]</script>') is None
+        assert gate().declared_exceptions('type: ({"0": "mcq"})[i]') == 0
+        # A blob of another shape is a page this gate does not recognise — not a
+        # paper with no exception question on it, which is what `0` would say.
+        assert gate().declared_exceptions('type: (["A", "B"])[i]') is None
+        assert gate().declared_exceptions('type: ("mcq_multi")[i]') is None
+
+    def test_it_counts_the_stored_name_and_not_an_alias(self):
+        assert gate().declared_exceptions('type: ({"0": "mcq_multi"})[i]') == 1
+        assert gate().declared_exceptions('type: ({"0": "mcq"})[i]') == 0
+
+
+class TestTheExceptionIsOneNameInThreePlaces:
+    """The type on the fixture, in the app and in this gate are one string.
+
+    A gate that looks for the wrong spelling answers "this paper has no exception
+    question" about a paper with two — the same shape as the class of defect the
+    template's own `SG_QT.multi` exists to prevent.
+    """
+
+    def test_the_gate_looks_for_the_type_the_app_stores(self):
+        from app.services import question_types
+
+        assert gate().MULTI_TYPE == question_types.MCQ_MULTI
+        # `q_vocabulary` is the same object under the name the template calls
+        # (app/__init__.py registers it as a Jinja global), which is what the page's
+        # `SG_QT.multi` — and so `qIsMulti` — is built from.
+        assert question_types.vocabulary()["multi"] == gate().MULTI_TYPE
+
+    def test_the_fixture_declares_one_and_the_gate_can_see_it(self):
+        spec = gate().fixture_spec()
+        assert spec is not None, "the demo fixture is not loadable by the gate"
+        assert gate().declares_exception(spec.QUESTION_TYPES) == 1, (
+            "the fixture must carry exactly one exception question, or the gate has "
+            "nothing measurable on the paper it opens")
+        keys = [key for key, value in spec.ANSWER_KEY.items()
+                if value == ["A", "D"]]
+        assert keys == ["2"], (
+            "the exception's key is a list of the letters that are right")
+        assert str(spec.QUESTION_TYPES["2"]).lower() == gate().MULTI_TYPE
+
+
+# ── the gate measures the paper the fixture describes ──────────────────────
+
+
+class TestItOpensTheFixturePaper:
+    """Not merely the first exam on the pupil's list.
+
+    A pupil's list can legitimately offer a teacher's paper first, and one with no
+    exception question on it would read as "could not measure" while a perfectly
+    measurable paper sat below it.
+    """
+
+    class _Listing:
+        status_code = 200
+
+        def __init__(self, html):
+            self.text = html
+
+    def _session(self, *cards):
+        html = "".join(
+            f'<div class="card"><h3>{title}</h3>'
+            f'<a href="/student/exams/{exam_id}">Mulai</a></div>'
+            for exam_id, title in cards)
+
+        class _S(_FakeSession):
+            def get(self, url, **kwargs):
+                return TestItOpensTheFixturePaper._Listing(html)
+
+        return _S()
+
+    def test_it_prefers_the_fixture_card(self):
+        g = gate()
+        spec = g.fixture_spec()
+        other = "11111111-1111-1111-1111-111111111111"
+        fixture = "22222222-2222-2222-2222-222222222222"
+        session = self._session((other, "Ulangan Harian Biologi"), (fixture, spec.TITLE))
+        assert g.demo_exam_id(session, "http://box") == fixture, (
+            "the gate measured whichever paper came first, so a teacher's exam "
+            "without the exception made the row unmeasurable")
+
+    def test_it_still_opens_the_first_card_when_the_fixture_is_absent(self):
+        g = gate()
+        other = "11111111-1111-1111-1111-111111111111"
+        session = self._session((other, "Ulangan Harian Biologi"))
+        assert g.demo_exam_id(session, "http://box") == other
+
+    def test_a_list_with_no_card_is_no_exam(self):
+        session = self._session()
+        assert gate().demo_exam_id(session, "http://box") is None
+
+
+# ── the gate and the templates beat in step ────────────────────────────────
+
+
+class TestTheGateAndTheTemplates:
+    """What the gate asserts is what the template renders, held where it is written.
+
+    The badge's two halves and the exception's exclusion are literals in two files;
+    these are the assertions that fail when one of them moves without the other.
+    """
+
+    TEMPLATE = (ROOT / "app" / "templates" / "student" / "take_exam.html").read_text(
+        encoding="utf-8")
+
+    def test_the_badge_is_the_pair_the_template_renders(self):
+        g = gate()
+        lines = [line for line in self.TEMPLATE.splitlines() if g.BADGE_COPY[0] in line]
+        assert len(lines) == 1, (
+            f"expected exactly one line carrying the badge's Indonesian half, found "
+            f"{len(lines)} — the gate's copy and the page's have drifted")
+        assert f"t('{g.BADGE_COPY[0]}','{g.BADGE_COPY[1]}')" in lines[0], (
+            "the badge's English half is not the one this gate looks for, so a "
+            "translated page would read as a page with no badge")
+
+    def test_the_plain_row_excludes_the_exception(self):
+        """The fast half of the duplicate-row guard; the browser is the real one.
+
+        Two sibling `x-if` templates whose conditions both match rendered the same
+        question twice, and `qKind` is `'choice'` for the exception — so the plain
+        row's condition has to name the exception it is not.
+        """
+        assert 'x-if="qKind(i) === \'choice\' && !qIsMulti(i)"' in self.TEMPLATE, (
+            "the single-answer row does not exclude the exception, so an exception "
+            "question renders both rows — one question, two answers")
+
+    def test_the_pupil_door_declares_the_preview_flag_before_it_is_read(self):
+        """The three page errors the pupil door carried, and why they mattered.
+
+        `previewMode` was only ever *assigned*, in the preview's own branch, while
+        the submit button reads it — so on a real sitting all three reads threw
+        `ReferenceError`, the button's label and `:disabled` binding were left
+        unbound, and the exception gate (which reads page errors) could not pass.
+        """
+        assert "previewMode: false" in self.TEMPLATE, (
+            "the flag the template reads is not declared in the component's state, "
+            "so the pupil's door throws on every load")
