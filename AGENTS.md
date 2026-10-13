@@ -112,14 +112,34 @@
 
 ## Pertukaran Pesan — RBAC Matrix
 
-| Fitur | super_admin | admin_sekolah | guru | murid |
-|-------|-------------|---------------|------|-------|
-| **Kirim Pengumuman** (broadcast) | ✅ All roles | ✅ Guru & Murid di sekolahnya | ✅ Hanya Murid | ❌ Dilarang |
-| **Lihat Pengumuman** | ✅ Semua | ✅ Semua | ✅ Semua | ✅ Semua |
-| **Kirim Pesan 1-on-1** (Percakapan) | ✅ Siapa saja | ✅ Guru/Murid di sekolahnya | ✅ Murid | ✅ Hanya Guru/Admin (diverifikasi role) |
-| **Lihat Percakapan** | ✅ Semua partisipasi | ✅ Semua partisipasi | ✅ Semua partisipasi | ✅ Hanya dgn Guru/Admin (filter server-side) |
-| **Edit/Hapus Broadcast** | ✅ Semua | ✅ Milik sendiri | ✅ Milik sendiri | ❌ |
-| **Setujui Hapus Akun** | ✅ Semua | ✅ Di sekolahnya | ❌ | ❌ |
+Aplikasi punya **6 peran** (`super_admin · admin_sekolah · principal · vice_principal ·
+guru · murid` — lihat `docs/ROLES_CLARIFICATION.md`). Kolom terakhir adalah kedua
+**pejabat sekolah**, yang hanya *membaca* sekolah: mereka tidak pernah punya wewenang
+menulis, dan itu berlaku juga di sini.
+
+| Fitur | super_admin | admin_sekolah | guru | murid | principal / vice_principal |
+|-------|-------------|---------------|------|-------|----------------------------|
+| **Kirim Pengumuman** (broadcast) | ✅ All roles | ✅ Guru & Murid di sekolahnya | ✅ Hanya Murid | ❌ Dilarang | ❌ Daftar penerima kosong (`_get_allowed_recipient_roles`) |
+| **Lihat Pengumuman** | ✅ Semua | ✅ Semua | ✅ Semua | ✅ Semua | ⚠️ Hanya yang `target_role`-nya peran sendiri — dan tidak ada pengirim yang **bisa** menargetkan peran itu, jadi dalam praktik tidak ada |
+| **Kirim Pesan 1-on-1** (Percakapan) | ✅ Siapa saja | ✅ Guru/Murid di sekolahnya | ✅ Murid | ✅ Hanya Guru/Admin (diverifikasi role) | ❌ Daftar penerima kosong |
+| **Lihat Percakapan** | ✅ Semua partisipasi | ✅ Semua partisipasi | ✅ Semua partisipasi | ✅ Hanya dgn Guru/Admin (filter server-side) | ⚠️ Hanya partisipasi sendiri, dan mereka tidak bisa **memulai** percakapan |
+| **Edit/Hapus Broadcast** | ✅ Semua | ✅ Milik sendiri | ✅ Milik sendiri | ❌ | ❌ Tidak pernah punya broadcast untuk disunting |
+| **Setujui Hapus Akun** | ✅ Semua | ✅ Di sekolahnya | ❌ | ❌ | ❌ (`require_role("admin_sekolah", "super_admin")`) |
+
+**Diverifikasi ke kode pada 2026-10-13** (`app/routes/api.py`,
+`_get_allowed_recipient_roles` — `super_admin → [guru, murid, admin_sekolah, super_admin]`,
+`admin_sekolah → [super_admin, guru, murid]`, `guru → [admin_sekolah, guru, murid]`,
+`murid → [guru, admin_sekolah]`, peran lain → `[]`; `api_create_pengumuman` menolak
+`murid` lebih dulu lalu menuntut `target_role` ada di daftar itu; `api_list_pengumuman`
+tanpa gerbang peran untuk membaca; `api_get_pengumuman` hanya meloloskan pembaca yang
+perannya sama dengan `target_role`, pengirimnya, atau `super_admin`).
+
+> **Temuan yang belum diputuskan pemilik produk:** peran pejabat (`principal` /
+> `vice_principal`, migrasi 038) **tidak pernah** diperluas ke sistem pesan — mereka
+> tidak bisa mengirim apa pun, dan tidak ada peran yang daftar penerimanya memuat
+> mereka, sehingga tidak ada pengumuman yang bisa **di-address** ke mereka. Angka di
+> tabel adalah perilaku sekarang, bukan keputusan yang disetujui; memperluasnya adalah
+> keputusan produk, bukan perbaikan teknis. Jangan "memperbaikinya" diam-diam.
 
 **Aturan Kunci:**
 - **Tidak ada percakapan atau pengumuman antar-murid (inter-student)** — backend memverifikasi role setiap penerima
@@ -711,7 +731,7 @@
 - Violation `sendBeacon` Blob: `new Blob([JSON.stringify([{...}])], {type: 'application/json'})` — must have correct bracket nesting
 - Grade detail form: pressing Enter in score/comment inputs submits the HTML `<form>` and reloads page — `@keydown.enter.prevent=""` added to both inputs
 - NISN: jika < 10 digit, isi dari kiri (most significant digit pertama), trailing cells kosong
-- `final_score` dihitung sebagai `max(0, score - penalty)` saat submit; untuk submission lama di-backfill via script
+- `final_score` dihitung di **satu** tempat: `app/services/final_score.py` (`breakdown(raw, penalty)` → `max(0, min(raw,100) - penalty)`). Setiap penulis memanggilnya (submit, force-submit, hitung-ulang, `deadline_service`, `penalty_service.recompute`); permukaan yang hanya memegang baris memakai `final_score.display_parts` lewat global Jinja `score_parts`, dan lembar cetak/ekspor memakai `penalty_service.working_for_exam`. **Jangan tulis ulang aritmetikanya** — `tests/unit/test_final_score_single_source.py` gagal begitu ada salinan baru. Lihat `docs/features/FINAL_SCORE.md`
 - Jawaban guru untuk komentar: mulai dari huruf besar setelah titik dan spasi — `calcFinal()` panggil 50ms setelah input berubah
 - `_saveCurrentPage()` dan `getAnswersLight()`/`getAnswersWithCanvas()` sudah diupdate untuk MCQ — canvas di `ec-canvas-{i}` di-init melalui `initEcCanvas(i)`
 - Essay section's SVG overlay drag/rotate handles: use `startToolRotate(i,'ruler',$event)` — 3-arg form (was `startToolRotate('ruler',$event)` broken)

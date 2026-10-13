@@ -80,3 +80,29 @@ pernah** muncul seberapa pun lengkapnya data sekolah. Diperparah: query sekolah 
 
 Perbaikan (commit yang menyertakan dokumen ini): kedua kolom ikut dibaca, dan kedua
 template menampilkan `principal_name` (atau placeholder jujur bila belum diisi).
+
+---
+
+## 4. Yang **belum** diputuskan: peran pejabat di sistem pesan
+
+Diverifikasi ke kode pada **2026-10-13** (`app/routes/api.py`,
+`_get_allowed_recipient_roles`) — ini **perilaku sekarang**, bukan keputusan yang
+disetujui:
+
+| | super_admin | admin_sekolah | guru | murid | principal / vice_principal |
+| --- | --- | --- | --- | --- | --- |
+| bisa **mengirim** ke peran | guru, murid, admin_sekolah, super_admin | super_admin, guru, murid | admin_sekolah, guru, murid | guru, admin_sekolah | **tidak ada** (`[]`) |
+| bisa **di-address** pengumuman | ✅ | ✅ | ✅ | ✅ | **tidak** — tidak ada pengirim yang daftar penerimanya memuat mereka |
+
+Artinya kedua peran pejabat **tidak bisa memulai percakapan** dan **tidak bisa
+dikirimi pengumuman**. Mereka hanya bisa membuka percakapan yang sudah memuat mereka
+(mis. sebagai partisipan lama) dan pengumuman yang `target_role`-nya peran mereka —
+dan karena tak ada pengirim yang bisa menargetkan peran itu, yang kedua praktis tidak
+terjadi.
+
+**Ini keputusan produk, bukan cacat teknis.** `principal`/`vice_principal` sengaja
+baca-saja (bagian 1), dan memperluas sistem pesan untuk mereka mengubah arti peran itu
+— jadi jangan "memperbaikinya" diam-diam. Bila pemilik produk memutuskan memberi mereka
+pesan, perubahan yang konsisten adalah: menambahkan `principal`/`vice_principal` ke
+daftar penerima peran pengirim **dan** ke daftar peran yang bisa di-address, dengan
+kalimat dwibahasa di ketiga halaman notifikasi, lalu memperbarui matriks di `AGENTS.md`.

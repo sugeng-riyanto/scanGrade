@@ -1,6 +1,6 @@
 # ScanGrade — Tracking Progress
 
-**Last Updated:** 8 June 2026
+**Last Updated:** 13 October 2026
 
 ---
 
@@ -12,24 +12,40 @@
 
 | Area | Progress | Status |
 |------|----------|--------|
-| Backend (Flask routes) | 98% | ✅ Stable |
-| Frontend (templates + JS) | 95% | ✅ Stable |
+| Backend (Flask routes) | 99% | ✅ Stable |
+| Frontend (templates + JS) | 97% | ✅ Stable |
 | Database (Supabase schema) | 100% | ✅ Complete |
 | RLS (Row Level Security) | 100% | ✅ Complete |
-| Auth & Roles | 98% | ✅ Stable |
+| Auth & Roles (6 peran) | 100% | ✅ Stable |
 | Exam Builder | 100% | ✅ Complete |
-| Student Exam | 95% | ✅ Stable |
+| Student Exam | 97% | ✅ Stable |
 | Drawing Tools | 100% | ✅ Stable |
 | Measurement Tools | 100% | ✅ Stable |
 | Scientific Calculator | 100% | ✅ Stable |
-| Grading | 95% | ✅ Stable |
-| Analytics | 90% | ✅ Working |
-| Export | 95% | ✅ Stable |
-| Anti-Cheat | 95% | ✅ Stable |
+| Grading | 98% | ✅ Stable |
+| Analytics | 92% | ✅ Working |
+| Export (XLSX/PDF/CSV) | 97% | ✅ Stable |
+| Anti-Cheat | 97% | ✅ Stable |
 | Subscription & Payment | 95% | ✅ Working |
 | AI Essay Grading | 90% | ✅ Service + UI + 11 Prompts |
-| Multi-School | 85% | ⚠️ Needs routes |
-| OMR Scanning | 70% | ⚠️ Camera works |
+| Multi-School & Membership | 90% | ✅ Routes + halaman |
+| OMR Scanning | 75% | ⚠️ Camera + LJK jalan, tuning manual |
+
+### Verifikasi terkini (13 Oktober 2026)
+
+Diukur, bukan disimpulkan — diambil dari repositori & gerbang, bukan dari laporan lama:
+
+| Fakta | Nilai | Sumber |
+|-------|-------|--------|
+| Peran yang sah | **6** — `super_admin · admin_sekolah · principal · vice_principal · guru · murid` | `app/utils/auth.py:DASHBOARD_FOR_ROLE`, `deploy/schema_contract.py` ("6 role(s) in the CHECK constraint") |
+| Tabel di migrasi | **82** (0 policy/view terbuka ke PUBLIC, 0 statement pada tabel yang tak diciptakan) | `python deploy/schema_contract.py` |
+| Berkas migrasi | 75 (`supabase/migrations/`) | filesystem |
+| Template | 147 (`app/templates/**/*.html`) | filesystem |
+| Berkas uji | 328 (`tests/**/test_*.py`) | filesystem |
+
+> **Catatan peran.** README lama menyebut 4 peran dan itu **tidak** benar; sejak commit `49b801a`
+> README sudah diperbarui dan kontradiksinya ditutup dengan bukti di
+> `docs/ROLES_CLARIFICATION.md`. Jangan pakai daftar peran dari laporan sebelum itu.
 
 ---
 
@@ -37,13 +53,65 @@
 
 | Issue | Priority | Status |
 |-------|----------|--------|
-| Exam access codes belum di-enforce | Low | 🔴 Open |
-| Multi-worker rate limiter (non-Redis) | Low | 🟡 Memory only |
-| OMR tuning | Low | 🟡 Works basic |
+| Kode pemulihan ujian bersifat informatif (dibandingkan pengawas), bukan gerbang masuk | — | ⚪ Sesuai desain — lihat `app/services/exam_codes.py` |
+| Multi-worker rate limiter (non-Redis) | Low | 🟡 Redis bila dikonfigurasi, jika tidak memory |
+| OMR tuning (confidence < 0.6 → `needs_review`) | Low | 🟡 Jalan, tuning per-sekolah manual |
+| Migrasi terbaru belum diterapkan ke produksi dari kotak kerja | — | 🟡 Butuh `DIRECT_URL` (lihat `docs/AUTO_DEPLOY.md`) |
 
 ---
 
 ## Changelog
+
+### 13 October 2026 — Transparansi Nilai Akhir & Dokumen Sekolah
+
+Dua fitur yang diminta bersama: **`final-score-penalty-transparency`** dan
+**`document-verification`**. Fase 0 menemukan sebagian besar sudah mendarat; yang
+dikerjakan sesi ini adalah sisa gap nyata, semuanya diverifikasi ke kode (bukan README):
+
+- **Satu aritmetika untuk Nilai Akhir.** Empat tempat menghitung ulang
+  `max(0, earned - penalty)` sendiri — `api.py` (force-submit + hitung-ulang satu ujian),
+  `student.py`, dan `deadline_service.py` — dan **tiga di antaranya menghilangkan batas
+  `min(raw, 100)`**. Semuanya kini memanggil `app/services/final_score.breakdown`, jadi
+  kertas yang "dihitung ulang" tidak bisa memunculkan angka yang tak akan pernah
+  ditampilkan laporan mana pun. (`2513af9`)
+- **Nilai Akhir disebut sekali per lembar**, dengan jalan hitungnya di bawahnya:
+  Skor Mentah / Total Penalti / Pelanggaran diterapkan–diabaikan — kosakata yang sama
+  dengan panel tinjau guru. Sebelumnya PDF murid, kartu hasil, dan halaman hasil
+  mencetak nilai akhir **dua kali**. (`2513af9`)
+- **Lembar cetak rekonsiliasi.** Lembar hasil ujian mencetak catatan rumusnya sendiri,
+  jadi setiap baris harus menjumlah; kolomnya dulu memuat skor objektif (`score`) yang
+  **tidak pernah** rekonsiliasi pada ujian campuran. Kolom itu kini **Skor Mentah** dari
+  mark scheme, satu pembaca (`penalty_service.working_for_exam`) melayani seluruh angkatan
+  dalam tiga query. (`8eb9c6a`)
+- **Ekspor memakai jalan hitung yang sama**, dan tidak lagi bisa mencetak kata `None`:
+  `/teacher/export/xlsx` dan `/teacher/export/pdf` menyebut kolomnya **Skor Mentah /
+  Total Penalti / Pelanggaran (diterapkan-tercatat) / Nilai Akhir**, dan kertas yang belum
+  dinilai dicetak `-` (bukan `0`). Akar bug-nya kelas yang sama dengan "Mata Pelajaran:
+  None": `row.get("final_score", row.get("score", 0))` terbaca seperti fallback padahal
+  bukan — bila kolomnya NULL, key-nya ada dan `.get` mengembalikan `None`. (`21a0eaf`)
+- **Dokumen sekolah mencetak nama kepala sekolah.** Baris "Mengetahui, Kepala Sekolah"
+  pada laporan hasil dan kartu hasil dulu **garis titik-titik hardcoded**, dan query
+  sekolah tidak memilih `principal_name` sama sekali. Kini keduanya membaca
+  `schools.principal_name` / `principal_nip` (field teks, **bukan** akun `principal`),
+  dengan placeholder jujur bila belum diisi. Klarifikasi peran ditulis di
+  `docs/ROLES_CLARIFICATION.md`. (`bd00d5f`)
+- **Keputusan penalti per pelanggaran + audit.** Pelanggaran tidak lagi hanya satu angka
+  agregat: keputusan guru disimpan per-`violation_id` di
+  `submissions.answers["_violation_decisions"]`, penalti selalu **diturunkan** dari daftar
+  itu (`penalty_service.recompute`), panel `/teacher/submission/<id>/violations` menampilkan
+  alasan tiap keputusan, dan banding disatukan lewat `set_all`. Ketidakadaan baris =
+  `applied`, jadi **tidak ada migrasi dan tidak ada backfill** — nilai historis tidak
+  bergeser. (`b4990f5`)
+- **Konsistensi lintas peran.** Guru pemilik + `admin_sekolah` boleh menulis
+  (`can_manage_exam`, admin non-pemilik tercatat "atas nama guru" di `audit_logs`);
+  `principal`/`vice_principal` **baca-saja** (`can_read_exam`).
+
+**Bukti:** `tests/unit/test_final_score_single_source.py` (**28 uji**) — enam di antaranya
+**gagal di HEAD** (dibuktikan dengan me-revert rute + service) dan lulus sesudahnya; teks
+PDF diekstrak lalu diuji rekonsiliasi (`Skor Mentah − Penalti = Nilai Akhir`), kolom
+spreadsheet diuji menjumlah, kertas belum-dinilai diuji mencetak `-` bukan `None`. Dua
+gerbang deploy (`deploy/css_freshness.py`, `deploy/schema_contract.py` offline) **OK**;
+226 uji gerbang lulus; tidak ada perubahan skema dan tidak ada migrasi.
 
 ### 7 July 2026 — Essay Text Display & Final Verification
 - **Essay text answer display**: Student's paragraph answer now visible in result detail page and PDF download
