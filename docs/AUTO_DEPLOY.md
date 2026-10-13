@@ -885,6 +885,7 @@ because the others can be explained away without it:
 | **C5** | the honest JavaScript claim | the admission: 200 with `ok: true`. A handshake that refuses the exam's own value locks out every iPad and every modern macOS client, and nothing else on the box would say so |
 | **C5b** | the paper with **no header at all** | the whole point: a client that proved itself through the client's own API opens the paper. This is the only way a WKWebView client ever sits a gated paper |
 | **C6** | the handshake page itself, in a real headless browser with no `SafeExamBrowser` API | **the page half of C4–C5.** C4 composes its own POSTs, so a page whose own script never fires one is invisible to all of it — and that page is the entire population the refusal path exists for. The page's own state must end `refused` with the refusal panel laid out, its script must POST the refusal **once per page load** (reason `no_client`, carrying the CSRF token the route reads), the route must take it, the live database must hold **as many rows carrying this run's browser marker as the page made reports** — every marked row this pupil's, so a count of rows cannot be read as this page's evidence — and the paper must hand that same browser the handshake again |
+| **C7** | the refusal panel's **retry control**, **pressed** with a real mouse event at the centre of its own box | a control that exists is not a control that works. The gate hands the page a client that **answers** (its API is there, its `configKey` is not populated yet — `CLIENT_STUB`, a state of the *client* and never of the page), presses the button, and refuses the release on any of three findings: **dead** — the press neither ran the page's ask nor put a request on the wire; **unfiled** — the second ask ran and nothing reached the refusal route (or the route answered non-200, or the reason it carried was not `no_key`); **navigates away** — the press loaded a document instead of re-asking in the page the pupil is on. Read from both the navigation count and the landing, because a control that sails to the paper and is bounced back by the door lands on the handshake page again and would pass a path-only check with its ask never made |
 
 The three JavaScript refusals **run before the honest claim**, because a claim is
 kept in the signed session: posted first, it would open the paper for every later
@@ -908,10 +909,33 @@ cannot be read as this page having reported. It closes by sending that same brow
 back to the paper, which must hand it the handshake again: a report that opened
 anything is a finding.
 
+C7 is the only step that **presses** anything, which is why it needs a client that
+answers: this page carries two buttons wired to the same handler, and the one pressed
+is the button inside the **refusal panel** — the only control a turned-away pupil has.
+It is addressed through its panel rather than by its label (the label is a `t()` pair,
+so it is two strings in two languages) and through its box
+(`getBoundingClientRect`) — a control that is not laid out, or is covered by
+something, cannot be pressed by a pupil and must not be pressed by the gate. What
+separates **dead** from **unfiled** is the **client's own count of the asks**
+(`window.__sgAsks`, in the stub the gate hands over): the page sets its state
+synchronously, so a press that ran the ask and one that never did look identical from
+the outside a moment later — and calling the second "dead" sends its reader to the
+template when the defect is the page's report call. `no_key` is the reason this press
+must file precisely because it is **different** from the first load's `no_client`: the
+page guards one row per reason per visit, so a press that repeats the old reason (and
+is therefore swallowed by that guard) reads as a control that did nothing. One press
+is one act, so its verdict is one sentence — the first thing that went wrong — rather
+than three for one broken control. Both verdicts over this reading (the box's, which
+also counts the rows, and the CI gate's, which has no database) read the same three
+derived properties, so the words live in two places and the *meaning* in one.
+
 Both halves of a browser visit are on the wire at slightly different moments — the
 page reports from the same handler that sets the state — so the reading is polled
 with a deadline rather than slept through, and the *first* load is the one the page's
-own state is read from.
+own state is read from. That scope is load-bearing now that a visit carries a third
+report: the press's own report is in `reports_total` (enough rows for every report,
+which is what C6c compares) and deliberately **not** in `reason`, `token` or
+`status`, which describe the first load's answer and would otherwise be the press's.
 
 **The rows are attributed by marker, and compared against reports — and the first
 version of this check was wrong on a live database, twice.** It asked for *one* row
@@ -940,7 +964,7 @@ something the gate deletes rather than something a school has to find.
 | Result | Outcome |
 |---|---|
 | the door holds every way (exit 0) | log one line |
-| a plain browser opened a gated paper, an honest client was refused on either transport, another key's value was admitted, a claim that must be refused was not — or was refused while still opening the paper — or the handshake road is missing (exit 3), `SEB_ENFORCE=true` | roll back, quoting the findings |
+| a plain browser opened a gated paper, an honest client was refused on either transport, another key's value was admitted, a claim that must be refused was not — or was refused while still opening the paper — the handshake road is missing, or the refusal panel's retry is dead, filed nothing or navigates away (exit 3), `SEB_ENFORCE=true` | roll back, quoting the findings |
 | the same (exit 3), not armed | keep the release, but say so |
 | no credentials, no fixture to clone, the app unreachable, **a release that predates the door**, no browser to drive, or a database older than the refusal record (exit 2) | keep the release, and say loudly it was **not measured** |
 
@@ -1059,6 +1083,64 @@ Two consequences worth stating, because both bit a real box:
   unable to arrive because the fix is a release. The block is the *reading*, not the
   box — see "One file, one verdict" above for the three states and why only `absent`
   disarms.
+
+### The two readings are compared, and a disagreement is refused
+
+That three-state read makes the checker *safe* for a caller that cannot read a conf,
+but it does not make the callers agree — and a box whose armament depends on who asks
+is armed by luck, not checked. So the preflight takes **both readings**, before
+anything is fetched and before any release is staged:
+
+```bash
+bash "$REPO/deploy/arm-auto-deploy.sh" --check                      # as root
+runuser -u "$OWNER" -- bash "$REPO/deploy/arm-auto-deploy.sh" --check   # as the app sees it
+```
+
+The second is the caller the app's own construct probe reads it as, so this is one
+question asked twice rather than two implementations of one question. What is
+compared is the **verdict each caller reached**, not the report: a root-only conf
+reads `present — enforcement on` to root and `present (cannot read it)` to the service
+user, which is the three-state read working as designed, and comparing the reports
+would refuse every release on every correctly-configured box. A test holds exactly
+that case, because it is the false positive this check would otherwise ship with.
+
+When the two verdicts differ, the run is refused with the same exit 15 as an unarmed
+box — nothing fetched, nothing reloaded, nothing quarantined — and the refusal names
+both readings:
+
+```
+TWO READINGS — REFUSING TO DEPLOY: the armament checker answers differently
+    for the two callers on this box, so whether this box is armed depends on
+    who asks.
+        as root (uid 0): ARMED — every gate has what it needs.
+        as scangrade: NOT ARMED — see the lines above. Arm it with:
+    Nothing was merged and nothing was reloaded. Both reports are in
+        /var/lib/scangrade-deploy/unarmed
+```
+
+That file is what `/super-admin/deploy-status` shows, and it carries both reports,
+each under the caller that took it, plus the line saying they disagree — "which of the
+two said so" is the first question anyone asks of it. Nothing picks a side: which of
+two readings of "is this box armed" is the true one is not a question the runner can
+answer, and answering it is how a box gets armed by luck in the first place.
+
+**A reading that could not be taken is not a disagreement.** A missing `runuser`, a
+user that cannot execute the checker, a hand-run as somebody who is not root: there is
+no second verdict, so there is nothing to compare, and the run is judged as root with a
+line saying so. Refusing there would take the deploy down on a box whose only fault is
+the tool it would use to ask a second time — and the box that needs the check most is
+the one where the two *do* answer differently, not the one where `as_owner` is absent.
+
+**Why here as well as in the app.** The app's construct probe already refuses a
+release when *its* reading is unarmed ("The same checker, read before it refuses"), but
+by then the release has been merged, constructed and rolled back — and it reports one
+side of the disagreement. The preflight refuses before anything moves and prints both,
+which is the difference between "the app refused" and "this box answers differently
+depending on who asks". The limit is the same as the mechanism: the two readings are
+the two callers a root runner can reach, so a box where `runuser` is unavailable
+compares nothing and says so rather than assuming agreement. Guard:
+`tests/unit/test_caller_armament.py`, mutation-checked **15/15**
+(`.freebuff/mutate_caller_armament.py`).
 
 ### Seeing it without a shell
 
@@ -2608,6 +2690,30 @@ the recovery point for `064`, which had been applied at 03:44Z — a restore tha
 have left the migration exactly where it was. When the box holds no archive for that
 migration, the record names none, says why in `recovery_point_basis`, and prints the
 `--adopt <archive>` line to run with the archive from the machine that has it.
+
+**And a snapshot taken after the migration was already in place cannot undo it, however
+well it is named.** The stem is evidence about *which* migration an archive belongs to,
+not about what is inside it: a file applied twice earns two archives carrying its stem,
+and only the earlier one — the one whose manifest does not yet list the table the file
+creates — is a way back. This box is the example. `064_seb_door_refusals.sql` was
+applied on 10 October at 03:43Z and applied again on the 12th, and
+`/var/backups/scangrade` holds three archives with its stem: `...-20261010T034327Z-064…`
+and two from the 12th. The 12 October ones already carry `seb_door_refusal`, so a restore
+of either leaves the migration exactly where it was — and the newest-by-name rule picked
+one of them, overwriting a record that had named the right archive. Each candidate is
+now judged by its own `manifest.json` (`can_undo`, read through `db_snapshot.describe`,
+the one reader of that file), `own_archive` returns the newest that *can* undo the file,
+and a later snapshot can no longer displace what a record already names: re-running that
+same re-apply keeps `scangrade-db-20261010T034327Z-064_seb_door_refusals.tar.gz` rather
+than adopting the archive the run just took, because a snapshot of a schema that already
+has the table is evidence about the box, not a way back from the change. Only a **table**
+is decidable — a manifest lists tables and says nothing about columns, indexes or
+policies, so a file that creates no table has no answer here — and a manifest that
+**cannot be read** (a hand-made archive, the wrong file) is *cannot say*, not *cannot
+undo*, so the newest name still stands for it. That fallback is deliberate: refusing on
+an unreadable manifest would turn away the archive an operator was told to hand over.
+When *every* archive carrying a stem was taken after the file ran, the record names none
+and prints each candidate with the reason, which is the same honesty `MISSING` gets.
 
 ### A migration pasted in by hand is invisible to that check
 

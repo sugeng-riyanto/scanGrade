@@ -2414,6 +2414,18 @@ fi
 # operator gets from the console — so the deploy cannot disagree with the tool
 # they arm the box with. Its output *is* the record: filtering it here would put a
 # second, weaker copy of the same judgement in this file.
+# It is asked **twice, by different callers**, because the answer has been known
+# to depend on who asks. The gate confs are mode 0600 root:root and the app's own
+# construct probe reads this same checker through `as_owner`, so a reading that
+# changes with the caller exists on real boxes: one of them read a *present*
+# `SMOKE_MURID` as missing, reported a fully armed box as unarmed, and refused every
+# tick of every release — while the console, running this file as root in the same
+# minute, said ARMED. Two callers, one file, two verdicts: the box is held by that,
+# not by the gate.
+#
+# So both readings are taken here, before anything is fetched, and a disagreement
+# is its own refusal with both answers in the record — a box whose armament depends
+# on the caller is armed by luck, and the next release would be judged by it.
 armament_preflight() {
   local checker="$REPO/deploy/arm-auto-deploy.sh"
   [ -f "$checker" ] || {
@@ -2421,28 +2433,122 @@ armament_preflight() {
 it arrives with the installer, and until it is there this box cannot say what is armed"
     return 1
   }
+  # Reading 1: the caller the timer runs as. This is the one that decides when the
+  # two agree, and the one the record's first report is taken from.
   ARMAMENT_OUT=$(bash "$checker" --check 2>&1)
+  local root_rc=$?
+  # Reading 2: the same file, the same flag, the service user — the caller the
+  # app's own construct probe reads it as (`as_owner`), so these are one question
+  # asked twice rather than two implementations of one question.
+  #
+  # The *reports* are deliberately not compared. The confs are 0600 root:root, so
+  # the service user reads "present (cannot read it)" where root reads "present —
+  # enforcement on"; that is the checker's designed three-state read, both callers
+  # are armed, and refusing it would stop every release on every correctly-configured
+  # box. What is compared is the verdict each caller reached.
+  ARMAMENT_OWNER_OUT=$(as_owner bash "$checker" --check 2>&1)
+  local owner_rc=$?
+
+  ARMAMENT_VERDICT=$(armament_verdict "$ARMAMENT_OUT" "exited $root_rc with no verdict line")
+  ARMAMENT_OWNER_VERDICT=$(armament_verdict "$ARMAMENT_OWNER_OUT" "")
+
+  # A caller that produced no verdict at all did not take the reading — a missing
+  # `runuser`, a user that cannot execute the checker, a hand-run as someone who is
+  # not root. That is "we could not tell", and it is not a disagreement: refusing on
+  # it would take the deploy down on a box whose only fault is the tool it would use
+  # to answer a question it already has an answer to. It is said out loud instead,
+  # and the run is judged as root.
+  if [ -z "$ARMAMENT_OWNER_VERDICT" ]; then
+    ARMAMENT_OWNER_MISSING=1
+    return "$root_rc"
+  fi
+  if [ "$root_rc" != "$owner_rc" ]; then
+    ARMAMENT_DISAGREE=1
+    return 1
+  fi
+  return "$root_rc"
+}
+
+#: The checker's own verdict — its last `ARMED` / `NOT ARMED` line, or `$2` when this
+#: caller's report holds none. Read rather than restated: the two verdicts printed by
+#: the refusal below are the checker's words, so a reader can trust them the way they
+#: trust the report itself.
+armament_verdict() {
+  local line
+  line=$(printf '%s\n' "${1:-}" | grep -m1 -E '^(NOT )?ARMED')
+  [ -n "$line" ] || line="${2:-}"
+  printf '%s' "$line"
 }
 
 RUN_STEP="armament"
 ARMAMENT_OUT=""
+ARMAMENT_OWNER_OUT=""
+ARMAMENT_VERDICT=""
+ARMAMENT_OWNER_VERDICT=""
+ARMAMENT_OWNER_MISSING=""
+ARMAMENT_DISAGREE=""
 if ! armament_preflight; then
-  log "UNARMED — REFUSING TO DEPLOY: this box is not set up to check a release"
-  printf '%s\n' "$ARMAMENT_OUT" | sed 's/^/    /'
-  log "    Nothing was merged and nothing was reloaded. Deploying from this state"
-  log "    would ship code that no gate has looked at."
-  log "    arm it once, as root:  bash $REPO/deploy/arm-auto-deploy.sh"
+  if [ "$ARMAMENT_DISAGREE" = "1" ]; then
+    # Two readings of one box, and nothing here can say which is true — so neither is
+    # picked. Naming both is the whole value of the refusal: the operator sees at once
+    # that the app about to be reloaded will answer differently from the runner.
+    log "TWO READINGS — REFUSING TO DEPLOY: the armament checker answers differently"
+    log "    for the two callers on this box, so whether this box is armed depends on"
+    log "    who asks."
+    log "        as $(id -un) (uid $(id -u)): $ARMAMENT_VERDICT"
+    log "        as $OWNER: $ARMAMENT_OWNER_VERDICT"
+    log "    Nothing was merged and nothing was reloaded. Both reports are in"
+    log "        $UNARMED_FILE"
+    log "    Reproduce both readings, then arm it:"
+    log "        bash $REPO/deploy/arm-auto-deploy.sh --check   # as root"
+    log "        runuser -u $OWNER -- bash $REPO/deploy/arm-auto-deploy.sh --check"
+    log "        bash $REPO/deploy/arm-auto-deploy.sh"
+  else
+    log "UNARMED — REFUSING TO DEPLOY: this box is not set up to check a release"
+    printf '%s\n' "$ARMAMENT_OUT" | sed 's/^/    /'
+    log "    Nothing was merged and nothing was reloaded. Deploying from this state"
+    log "    would ship code that no gate has looked at."
+    log "    arm it once, as root:  bash $REPO/deploy/arm-auto-deploy.sh"
+  fi
+  if [ "$ARMAMENT_OWNER_MISSING" = "1" ]; then
+    # The refusal stands on the root reading; this says which half is missing, because
+    # a record that silently carried one reading would read as agreement.
+    log "    the second reading could not be taken as $OWNER (this run is $(id -un))"
+  fi
   # The branch is read before this refusal, so the lever can still reach a box that
   # cannot release. See branch-first-logic.
   branch_read_refs
   mkdir -p "$STATE_DIR" 2>/dev/null || true
   {
     date -Is
+    # Both readings, each under the caller that took it — the page shows this file as
+    # it stands, and "which of the two said so" is the first question it is asked.
+    printf 'as %s (uid %s): %s\n' "$(id -un)" "$(id -u)" "$ARMAMENT_VERDICT"
+    if [ "$ARMAMENT_OWNER_MISSING" = "1" ]; then
+      printf 'as %s: no verdict line — the reading could not be taken from here\n' "$OWNER"
+    else
+      printf 'as %s: %s\n' "$OWNER" "$ARMAMENT_OWNER_VERDICT"
+    fi
+    if [ "$ARMAMENT_DISAGREE" = "1" ]; then
+      printf '%s\n' "the two readings disagree — this box's armament depends on the caller"
+    fi
+    printf '%s\n' "--- as $(id -un) ---"
     printf '%s\n' "$ARMAMENT_OUT"
+    if [ "$ARMAMENT_OWNER_MISSING" != "1" ]; then
+      printf '%s\n' "--- as $OWNER ---"
+      printf '%s\n' "$ARMAMENT_OWNER_OUT"
+    fi
   } > "$UNARMED_FILE" 2>/dev/null || true
   # Readable by the app (the status page shows this) and owned by root.
   chmod 0644 "$UNARMED_FILE" 2>/dev/null || true
   exit 15
+fi
+if [ "$ARMAMENT_OWNER_MISSING" = "1" ]; then
+  # Armed on the root reading, and the comparison this block exists for could not be
+  # made — said once per run rather than recorded, because nothing was refused.
+  log "armed as root; the second reading could not be taken as $OWNER (this run is $(id -un))"
+else
+  log "armed — checked as root and as $OWNER: $ARMAMENT_VERDICT"
 fi
 # Armed. The record of a previous refusal must not outlive the state it describes.
 rm -f "$UNARMED_FILE" 2>/dev/null || true
@@ -3495,15 +3601,22 @@ if [ "$HEALTHY" = "1" ] && [ -f "$SMOKE_CONF" ]; then
     0)
       log "$(printf '%s\n' "$RENDER_OUT" | grep -m1 '^exam render gate: OK' || echo 'exam render gate: OK')" ;;
     2)
+      # Includes the box's own demo data: a fixture that was never re-seeded carries
+      # no exception question, so the row and its badge could not be measured. Said
+      # rather than passed off as a pass, and never a rollback.
       log "exam render gate could not measure (exit 2) — this release's pupil exam"
-      log "    page was NOT rendered in a browser:"
-      printf '%s\n' "$RENDER_OUT" | grep -E '^    ' | head -3 | sed 's/^/  /' ;;
+      log "    page was NOT rendered in a browser, or it carries no exception question:"
+      printf '%s\n' "$RENDER_OUT" | grep -E '^    ' | head -4 | sed 's/^/  /' ;;
     *)
       if [ "${RENDER_ENFORCE:-false}" = "true" ]; then
-        log "exam render gate FAILED — the pupil's exam page did not render:"
+        # Both halves of that gate land here: a page that did not render, and a page
+        # that rendered with the exception question's row wrong (shown twice, without
+        # its badge, or as a different control). "Did not render" sent the reader to
+        # the wrong half of the page for the second one.
+        log "exam render gate FAILED — the pupil's exam page did not render correctly:"
         printf '%s\n' "$RENDER_OUT" | grep -E '^exam render gate|^    - ' | head -8 | sed 's/^/    /'
         HEALTHY=0
-        FAIL_REASON="exam render gate (the pupil's exam page did not render)"
+        FAIL_REASON="exam render gate (the pupil's exam page did not render correctly)"
         FAIL_DETAIL=$(printf '%s\n' "$RENDER_OUT" | grep -E '^exam render gate: FAILED|^    - ')
       else
         log "exam render gate FAILED but RENDER_ENFORCE is not 'true' — keeping the release:"
