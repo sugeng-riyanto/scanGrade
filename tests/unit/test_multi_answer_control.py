@@ -75,7 +75,14 @@ SG_KIND = r"function sgKind\(type\) \{[^\n]*\}"
 #: whole-file search — a `fa-square` anywhere else must not satisfy a rule about
 #: this branch. Each runs to the comment that introduces the next branch, which is
 #: the marker that survives a change inside either one.
-SINGLE_BRANCH = r"<template x-if=\"qKind\(i\) === 'choice'\">(.*?)<!-- The exception:"
+#: The plain row's branch. `!qIsMulti(i)` is load-bearing rather than decoration:
+#: `qKind` is 'choice' for the exception as well, so without it both this branch and
+#: the one below match an exception question and the pupil is shown the question
+#: **twice** — a row that replaces a letter above a row that adds one. That shipped,
+#: and was measured in a real Chrome on the deployed page by
+#: `tests/unit/test_exam_render_gate.py`, which counts the rows the page laid out;
+#: this is the same fact read cheaply.
+SINGLE_BRANCH = r"<template x-if=\"qKind\(i\) === 'choice' && !qIsMulti\(i\)\">(.*?)<!-- The exception:"
 MULTI_BRANCH = r"<template x-if=\"qKind\(i\) === 'choice' && qIsMulti\(i\)\">(.*?)<!-- True / False"
 #: The three methods the tick control is made of, and the two they lean on.
 Q_IS_MULTI = r"qIsMulti\(i\) \{[^\n]*\}"
@@ -229,8 +236,10 @@ class TestTheControlIsWiredToTheTypeNotToAFlag:
         assert '<template x-if="qKind(i) === \'choice\' && qIsMulti(i)">' in page, (
             "there is no branch for the exception, so a multi-answer question is "
             "drawn by whichever branch comes first")
-        assert '<template x-if="qKind(i) === \'choice\'">' in page, (
-            "the single-answer branch was replaced rather than added to")
+        assert '<template x-if="qKind(i) === \'choice\' && !qIsMulti(i)">' in page, (
+            "the plain row's branch does not exclude the exception, so an exception "
+            "question matches both branches and is drawn twice — one question, two "
+            "answer rows, which is what the deployed page did")
         assert "@click=\"toggleOption(i, opt)\"" in page
         assert "@click=\"markAnswered(i, opt)\"" in page, (
             "the single-answer row no longer records a tap the way it always did")

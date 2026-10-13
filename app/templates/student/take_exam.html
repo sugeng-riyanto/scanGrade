@@ -1587,7 +1587,16 @@ body.sg-exam .sidebar-overlay { display: none !important; }
                         </div>
                     </template>
 
-                    <template x-if="qKind(i) === 'choice'">
+                    <!-- The plain row, and the exception's exclusion is the whole
+                         reason this condition is not just `choice`: both templates
+                         used to match an exception question at once — `qKind` is
+                         'choice' for the exception too — so the pupil was shown the
+                         question **twice**, a row that replaces a letter above a row
+                         that adds one. `!qIsMulti(i)` is what makes the two rows
+                         alternatives; the browser gate measures this as "one option
+                         row per question", because nothing in a template read can
+                         see a second row appear. -->
+                    <template x-if="qKind(i) === 'choice' && !qIsMulti(i)">
                         <div class="">
                             <div class="flex items-center gap-3 flex-wrap">
                                 <span class="text-sm font-extrabold shrink-0 text-stone-700" x-text="t('Soal ','Question ') + (i + 1) + ':'"></span>
@@ -2299,6 +2308,14 @@ function examApp(duration, totalQ) {
         pages: {{ (exam.pdf_page_urls or []) | tojson | safe }},
         currentQ: 0,
         totalQ: totalQ,
+        // Declared, not just assigned. The submit button reads this *before*
+        // `init()` runs, and on the pupil's door nothing ever assigned it — so all
+        // three reads of it threw `ReferenceError: previewMode is not defined` on
+        // every real sitting, which left the button's label and its `:disabled`
+        // binding unbound. The exception gate in the deploy reads page errors, so
+        // this is a page error a release cannot ship. The preview's own branch in
+        // `init()` is still what turns it on for the preview door.
+        previewMode: false,
         answered: {},
         answersText: {},
         paragraphs: {},       // { i: [{id, text, html, order}] } per question

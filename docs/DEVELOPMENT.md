@@ -76,6 +76,40 @@ pytest tests/test_error_handling.py -v
 pytest tests/ --cov=app --cov-report=term-missing
 ```
 
+### Measuring the pages in a browser
+
+The pages a teacher and a pupil actually use are measured by a headless browser on
+**every push** (`.github/workflows/browser-gate.yml`), and the same command runs on a
+laptop with no database, no `.env` and no deploy box:
+
+```bash
+python deploy/browser_gate.py                 # all three parts, from this checkout
+python deploy/browser_gate.py --only touch    # the exam builder's 44px finger floor
+python deploy/browser_gate.py --only render   # the pupil's exam page
+python deploy/browser_gate.py --only seb      # the SEB handshake page's own script
+python deploy/browser_gate.py --json-out reading.json
+```
+
+`deploy/fixture_app.py` serves *this checkout's* app — the real `create_app`, the real
+routes, templates and static assets — on `127.0.0.1`, with exactly two things replaced:
+the Supabase service client and the GoTrue client, by in-memory stand-ins seeded from
+deploy/demo_exam_fixture.py. Sign-in is the app's own `/auth/login-user` POST, so a
+gate cannot measure a page it reached some other way. `SG_CHROME` points all of them at
+one browser (see `deploy/touch_gate.py`).
+
+Exit codes, the same three the gates use: **0** measured and clean, **1** a finding,
+**2** nothing could be measured (no browser, a page that would not render, a server that
+would not answer). A part whose subject this release does not ship — a branch with no
+SEB door has no handshake page — is reported by name and left out of the verdict. The
+workflow fails a job on exit 2 as well: on the box a release it could not measure is kept
+loudly, but a CI run that cannot look must not go green for it.
+
+Aim it at a running app instead of the fixture with `--base-url`, `--teacher`,
+`--student` and `--seb-exam` — useful against a dev server, and what the deploy box's own
+gates already do against the served release. A green fixture is **not** evidence about
+the box's database, accounts or TLS: `deploy/touch_gate.py`, `deploy/exam_render_gate.py`
+and `deploy/seb_door_gate.py` still run in the deploy runner.
+
 ### When the checkout is too dirty to build
 
 `app/utils/checkout_integrity.py` refuses to construct the app once a checkout holds
