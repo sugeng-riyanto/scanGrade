@@ -2830,6 +2830,44 @@ def _conversation_roles(user_role):
     return [r for r in allowed if user_role in _ALLOWED_RECIPIENT_ROLES.get(r, [])]
 
 
+def _unread_count(supabase, percakapan_id, uid):
+    """Unread messages **for `uid`** in one conversation — the badge's own rule.
+
+    One function because the two surfaces that draw a badge disagreed about it: the
+    conversation list excluded a deleted message and the contact list did not, so
+    `hapus` on an unread message left a red dot that never cleared while the
+    conversation it stands for showed nothing left to read. An unread message is one
+    that arrived, has not been read, and has not been deleted — the same three
+    clauses wherever the number is shown.
+    """
+    try:
+        uc = supabase.table("pesan").select("id", count="exact") \
+            .eq("percakapan_id", percakapan_id).neq("sender_id", uid) \
+            .eq("is_read", False).eq("is_deleted", False).execute()
+        return uc.count or 0
+    except Exception:
+        return 0
+
+
+def _conversation_for(supabase, percakapan_id, uid):
+    """`(row, refusal)` — the conversation if `uid` is a participant, else the answer.
+
+    Every conversation endpoint wrote this check out by hand, and the one endpoint
+    that did not — the unread badge — answered any signed-in account that could name
+    a conversation uuid. The rule is one sentence, *you are user_a or user_b*, so it
+    lives in one function and every reader of a conversation goes through it. A
+    conversation you are not in is 404, not 403: the caller learns nothing from the
+    answer either way.
+    """
+    c = supabase.table("percakapan").select("id, user_a_id, user_b_id") \
+        .eq("id", percakapan_id).single().execute().data
+    if not c:
+        return None, (jsonify({"error": "Percakapan tidak ditemukan"}), 404)
+    if uid != c["user_a_id"] and uid != c["user_b_id"]:
+        return None, (jsonify({"error": "Bukan peserta percakapan"}), 403)
+    return c, None
+
+
 @api_bp.route("/percakapan", methods=["GET"])
 @login_required
 def api_list_percakapan():
@@ -2887,12 +2925,7 @@ def api_list_percakapan():
                     last_msg = m.get("content", "")[:80]
         except Exception:
             pass
-        unread = 0
-        try:
-            uc = supabase.table("pesan").select("id", count="exact").eq("percakapan_id", c["id"]).neq("sender_id", uid).eq("is_read", False).eq("is_deleted", False).execute()
-            unread = uc.count or 0
-        except Exception:
-            pass
+        unread = _unread_count(supabase, c["id"], uid)
         result.append({
             "id": c["id"],
             "other_id": other_id,
@@ -2969,11 +3002,9 @@ def api_update_percakapan(percakapan_id):
     uid = g.user_id
     is_archived = request.json.get("is_archived", True)
     try:
-        c = supabase.table("percakapan").select("id, user_a_id, user_b_id").eq("id", percakapan_id).single().execute().data
-        if not c:
-            return jsonify({"error": "Percakapan tidak ditemukan"}), 404
-        if uid != c["user_a_id"] and uid != c["user_b_id"]:
-            return jsonify({"error": "Bukan peserta percakapan"}), 403
+        _c, refusal = _conversation_for(supabase, percakapan_id, uid)
+        if refusal:
+            return refusal
         supabase.table("percakapan").update({"is_archived": is_archived}).eq("id", percakapan_id).execute()
         return jsonify({"success": True})
     except Exception as e:
@@ -3011,11 +3042,9 @@ def api_send_pesan(percakapan_id):
     percakapan_id = str(percakapan_id)
 
     try:
-        c = supabase.table("percakapan").select("id, user_a_id, user_b_id").eq("id", percakapan_id).single().execute().data
-        if not c:
-            return jsonify({"error": "Percakapan tidak ditemukan"}), 404
-        if uid != c["user_a_id"] and uid != c["user_b_id"]:
-            return jsonify({"error": "Bukan peserta percakapan"}), 403
+        c, refusal = _conversation_for(supabase, percakapan_id, uid)
+        if refusal:
+            return refusal
         role = g.get("user_role")
         other_id = c["user_b_id"] if uid == c["user_a_id"] else c["user_a_id"]
         # Verify role pair still valid
@@ -3048,11 +3077,9 @@ def api_list_pesan(percakapan_id):
     offset = int(request.args.get("offset", 0))
 
     try:
-        c = supabase.table("percakapan").select("id, user_a_id, user_b_id").eq("id", percakapan_id).single().execute().data
-        if not c:
-            return jsonify({"error": "Percakapan tidak ditemukan"}), 404
-        if uid != c["user_a_id"] and uid != c["user_b_id"]:
-            return jsonify({"error": "Bukan peserta percakapan"}), 403
+        _c, refusal = _conversation_for(supabase, percakapan_id, uid)
+        if refusal:
+            return refusal
 
         # Auto-mark messages as read
         try:
@@ -3078,13 +3105,22 @@ def api_list_pesan(percakapan_id):
 @api_bp.route("/percakapan/<uuid:percakapan_id>/unread-count", methods=["GET"])
 @login_required
 def api_percakapan_unread_count(percakapan_id):
-    """Get unread message count for a conversation."""
+    """Get unread message count for a conversation **the caller is part of**.
+
+    This is the badge's own endpoint, and it was the one conversation route that never
+    asked who was calling: it answered any signed-in account for any uuid, so the
+    unread count of a conversation between two other people was readable by naming it.
+    A conversation you are not in answers like one that does not exist, because a
+    count of somebody else's unread mail is not something this app hands out.
+    """
     supabase = get_supabase()
     uid = g.user_id
     percakapan_id = str(percakapan_id)
     try:
-        uc = supabase.table("pesan").select("id", count="exact").eq("percakapan_id", percakapan_id).neq("sender_id", uid).eq("is_read", False).eq("is_deleted", False).execute()
-        return jsonify({"unread_count": uc.count or 0})
+        _c, refusal = _conversation_for(supabase, percakapan_id, uid)
+        if refusal:
+            return refusal
+        return jsonify({"unread_count": _unread_count(supabase, percakapan_id, uid)})
     except Exception as e:
         return jsonify({"error": str(e)[:100], "unread_count": 0}), 500
 
@@ -3196,8 +3232,7 @@ def api_contacts():
                     if ms:
                         m = ms[0]
                         last_msg = "[Pesan dihapus]" if m.get("is_deleted") else (m.get("content","")[:80])
-                    uc = supabase.table("pesan").select("id", count="exact").eq("percakapan_id", conv["id"]).neq("sender_id", uid).eq("is_read", False).execute()
-                    unread = uc.count or 0
+                    unread = _unread_count(supabase, conv["id"], uid)
                 except Exception:
                     pass
             contacts.append({
@@ -3210,7 +3245,13 @@ def api_contacts():
                 "unread_count": unread,
                 "last_message_at": conv["last_message_at"] if conv else None,
             })
-        contacts.sort(key=lambda x: (0 if x["last_message_at"] else 1, x.get("last_message_at") or ""), reverse=True)
+        # Newest thread first, and the people you have never messaged below them.
+        # The key used to be `(0 if last_message_at else 1, ...)` with `reverse=True`,
+        # which reverses the *whole* tuple — so every contact with no thread at all
+        # sorted above the ones with one, and the chat you were just in sat at the
+        # bottom of the list. An empty stamp is the lowest value, so one ordering
+        # gives both halves.
+        contacts.sort(key=lambda x: x.get("last_message_at") or "", reverse=True)
         return jsonify({"contacts": contacts})
     except Exception as e:
         return jsonify({"error": str(e)[:100], "contacts": []}), 500

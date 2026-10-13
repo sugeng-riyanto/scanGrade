@@ -36,6 +36,7 @@
     selectedPercakapan: null,
     pesanList: [],
     newMessage: '',
+    editingPesanId: null,
 
     sending: false,
     loading: false,
@@ -341,6 +342,8 @@
     },
     openPercakapan(id) {
         this.selectedPercakapan = id;
+        this.editingPesanId = null;
+        this.newMessage = '';
         this.fetchPesan(id);
     },
 
@@ -412,6 +415,36 @@
                 }
             })
             .catch(() => {});
+    },
+
+    // Edit is the half of the CRUD the page never had: `PUT /api/pesan/<id>` has
+    // existed since the endpoint was written, but nothing reached it, so a sender
+    // could delete a message and never correct one. Same rule as the server — your
+    // own message, and not one already deleted.
+    startEditPesan(msg) {
+        this.editingPesanId = msg.id;
+        this.newMessage = msg.content;
+    },
+    cancelEditPesan() {
+        this.editingPesanId = null;
+        this.newMessage = '';
+    },
+    saveEditPesan() {
+        const content = this.newMessage.trim();
+        const id = this.editingPesanId;
+        if (!content || !id) return;
+        this.sending = true;
+        fetch('/api/pesan/' + id, {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({content})})
+            .then(r => r.json())
+            .then(d => {
+                if (d.error) { alert(this.t('Gagal: ','Failed: ')+d.error); return; }
+                const idx = this.pesanList.findIndex(m => m.id === id);
+                if (idx >= 0) { this.pesanList[idx].content = content; this.pesanList[idx].is_edited = true; }
+                this.editingPesanId = null;
+                this.newMessage = '';
+            })
+            .catch(() => {})
+            .finally(() => { this.sending = false; });
     },
 
     toggleMute() {
@@ -564,6 +597,7 @@
                                     <template x-if="msg.sender_id === userId">
                                         <i class="text-[11px] fa-regular fa-circle-check" :class="msg.is_read ? 'text-[#53bdeb]' : 'text-[#8696a0]'"></i>
                                     </template>
+                                    <button x-show="msg.sender_id === userId && !msg.is_deleted" @click="startEditPesan(msg)" class="text-[11px] text-surface-300 hover:text-primary-500 ml-1" :title="t('Edit pesan','Edit message')"><i class="fas fa-pen text-[10px]"></i></button>
                                     <button x-show="msg.sender_id === userId && !msg.is_deleted" @click="deletePesan(msg.id)" class="text-[11px] text-surface-300 hover:text-red-400 ml-1">&times;</button>
                                 </div>
                             </div>
@@ -572,11 +606,15 @@
                 </div>
                 <!-- Input -->
                 <div class="px-4 py-3 border-t border-surface-200 bg-surface-50">
+                    <div x-show="editingPesanId" class="flex items-center justify-between mb-2 px-3 py-2 bg-primary-50 border border-primary-200 rounded-lg text-xs text-primary-700">
+                        <span><i class="fas fa-pen mr-1"></i><span x-text="t('Mengedit pesan','Editing message')"></span></span>
+                        <button type="button" @click="cancelEditPesan()" class="font-bold hover:underline" x-text="t('Batal','Cancel')"></button>
+                    </div>
                     <div class="flex items-end gap-2 bg-white rounded-xl border border-surface-200 px-3 py-2">
-                        <textarea x-model="newMessage" rows="1" class="flex-1 border-0 focus:ring-0 text-surface-800 text-sm resize-none outline-none max-h-24 bg-transparent" :placeholder="t('Ketik pesan...','Type a message...')" @keydown.enter.prevent="sendMessage()"></textarea>
-                        <button @click="sendMessage()" :disabled="sending||!newMessage.trim()" class="shrink-0 w-10 h-10 rounded-full flex items-center justify-center transition-all"
+                        <textarea x-model="newMessage" rows="1" class="flex-1 border-0 focus:ring-0 text-surface-800 text-sm resize-none outline-none max-h-24 bg-transparent" :placeholder="t('Ketik pesan...','Type a message...')" @keydown.enter.prevent="editingPesanId ? saveEditPesan() : sendMessage()"></textarea>
+                        <button @click="editingPesanId ? saveEditPesan() : sendMessage()" :disabled="sending||!newMessage.trim()" class="shrink-0 w-10 h-10 rounded-full flex items-center justify-center transition-all"
                                 :class="newMessage.trim() ? 'bg-primary-600 text-white shadow-md' : 'bg-surface-100 text-surface-400'">
-                            <i class="fas fa-paper-plane text-sm"></i>
+                            <i :class="editingPesanId ? 'fas fa-check text-sm' : 'fas fa-paper-plane text-sm'"></i>
                         </button>
                     </div>
                 </div>

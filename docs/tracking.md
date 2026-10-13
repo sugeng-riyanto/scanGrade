@@ -41,7 +41,7 @@ Diukur, bukan disimpulkan — diambil dari repositori & gerbang, bukan dari lapo
 | Tabel di migrasi | **82** (0 policy/view terbuka ke PUBLIC, 0 statement pada tabel yang tak diciptakan) | `python deploy/schema_contract.py` |
 | Berkas migrasi | 75 (`supabase/migrations/`) | filesystem |
 | Template | 147 (`app/templates/**/*.html`) | filesystem |
-| Berkas uji | 328 (`tests/**/test_*.py`) | filesystem |
+| Berkas uji | 331 (`tests/**/test_*.py`) | filesystem |
 
 > **Catatan peran.** README lama menyebut 4 peran dan itu **tidak** benar; sejak commit `49b801a`
 > README sudah diperbarui dan kontradiksinya ditutup dengan bukti di
@@ -61,6 +61,54 @@ Diukur, bukan disimpulkan — diambil dari repositori & gerbang, bukan dari lapo
 ---
 
 ## Changelog
+
+### 13 Oktober 2026 — CRUD Pesan Diverifikasi untuk Keenam Peran (tiga cacat ditutup)
+
+*Next Steps* #3 di `AGENTS.md` berbunyi *verify all 4 RBAC* untuk messaging —
+contacts list, direct chat, edit, unsend, sembunyikan, hapus, badge read state —
+dan **tidak satu pun punya uji**. Endpointnya ditulis untuk empat peran, dua
+pejabat masuk ke tabelnya di rilis setelahnya, dan tidak ada apa pun yang memaku
+apa yang boleh dilakukan keenam peran. Verifikasinya menemukan **tiga cacat**,
+dan ketiganya bertahan tanpa suara:
+
+1. **Otorisasi badge.** `GET /api/percakapan/<id>/unread-count` menjawab tanpa
+   memeriksa peserta — hitungan belum-dibaca percakapan dua orang lain bisa
+   dibaca dengan menyebut uuid-nya, sementara tiga rute saudaranya sudah
+   memeriksanya. Kini keempatnya lewat **satu** fungsi `_conversation_for`
+   (404 untuk percakapan tak ada/asing kecuali peserta).
+2. **Dua badge, dua aturan.** Daftar percakapan mengecualikan pesan terhapus,
+   daftar kontak tidak — `hapus` pada pesan yang belum dibaca meninggalkan titik
+   merah yang tidak bisa hilang. Satu aritmetika `_unread_count` (masuk, belum
+   dibaca, belum dihapus) dipakai ketiga permukaan.
+3. **Urutan daftar kontak.** Kunci `(0 if last_message_at else 1, …)` dengan
+   `reverse=True` membalik **seluruh** tuple, jadi kontak yang belum pernah
+   dihubungi naik ke atas percakapan yang sedang berjalan dan chat terbaru duduk
+   di bawah. Satu kunci (`last_message_at or ""`) memberi urutan yang benar.
+
+Di jalan yang sama, **edit** pesan akhirnya terjangkau dari halaman: `PUT
+/api/pesan/<id>` sudah ada sejak endpointnya ditulis dan tidak ada yang
+memanggilnya. Tiap gelembung milik sendiri kini punya pensil, banner *Mengedit
+pesan*, dan tombol simpan (meninggalkan percakapan membatalkan edit yang belum
+selesai).
+
+**Bukti:** `tests/unit/test_messaging_rbac_matrix.py` (**67 uji**; fake Supabase
+lokal yang benar-benar menyaring, termasuk `or_()` dan `rpc("mark_pesan_read")`)
+memaku matriks harfiah per peran, penolakan 403 tiap pasangan yang tidak timbal
+balik, non-peserta di kirim/baca/arsip/badge, edit hanya penulisnya, hapus
+penulisnya atau `super_admin`, badge tidak menghitung pesan terhapus, membaca
+mengosongkan badge di ketiga permukaan, urutan kontak, dan sweep literal
+`/api/...` halaman terhadap `app.url_map`.
+`.freebuff/mutate_messaging_rbac.py` **4/4 tertangkap**.
+`deploy/theme_gate.sh` set pytest **226 lulus**; i18n coverage OK (143 template,
+76.0%); CSS segar (121090 byte, kompilasi ulang byte-identik); kontrak skema sisi
+repo OK (82 tabel / 10521 referensi). Batch 314 uji sekitar hijau. Tidak ada
+migrasi dan tidak ada perubahan skema.
+
+**Batas jujur:** `unsend` = hapus-untuk-semua (`pesan.is_deleted`); **tidak ada**
+`sembunyikan` per pembaca (migrasi 021 `message_hides` menempel pada tabel
+`notifications` yang pensiun) dan tidak ada jendela waktu untuk edit. Separuh
+*live-schema* `deploy/schema_contract.py --require-applied` gagal di kotak ini
+karena DNS `test.supabase.co` — sama seperti HEAD, kotak ini, bukan rilis.
 
 ### 13 Oktober 2026 — Kepala Sekolah & Wakilnya Bisa Berkomunikasi
 
