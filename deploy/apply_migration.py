@@ -116,6 +116,7 @@ import re
 import shutil
 import socket
 import sys
+import tarfile
 import textwrap
 from datetime import datetime, timezone
 from pathlib import Path
@@ -131,6 +132,15 @@ from psycopg2.extensions import TRANSACTION_STATUS_INTRANS  # noqa: E402
 DEFAULT_LEDGER = "/var/lib/scangrade-migrations"
 NOT_IN_A_TRANSACTION = "25001"          # cannot run inside a transaction block
 PLACEHOLDER = "[YOUR-PASSWORD]"
+
+#: The extension a migration is written in, and the one this ledger identifies
+#: files by. Named once, because it is also a rule about the repository: a file
+#: whose bytes this tool hashes has to be pinned in `.gitattributes`, or which
+#: bytes it gets depends on the machine that checked it out — the false
+#: `APPLIED, THEN EDITED` this repository has now paid for twice. The guard in
+#: `tests/unit/test_apply_migration.py` reads every extension this module globs
+#: over `migrations` and fails if the repository leaves one to `core.autocrlf`.
+MIGRATION_SUFFIX = ".sql"
 #: The UTC stamp a snapshot's own filename carries — `scangrade-db-20261009T112233Z-
 #: 062_x.tar.gz`. It is the closest thing to a witnessed "when" for a recovery
 #: point, so an adopted record uses it rather than the day somebody filed the entry.
@@ -378,9 +388,45 @@ def connect(url: str):
     return conn
 
 
+# ── one file, one identity, on every platform ────────────────────────────────
+#
+# A migration is identified by its bytes, and those bytes differ between the
+# machine that wrote it and the box that applies it for a reason that is not an
+# edit: `core.autocrlf=true` — which is how the Windows checkouts here are
+# configured — materialises a committed LF file as CRLF, while the Linux box
+# holds the LF the blob stores. Hashing the file as it lies therefore gives **one
+# unchanged file two digests**, and the box's `--status` answers `APPLIED, THEN
+# EDITED` for a migration nobody touched. Measured on this repository twice: for
+# `037`, and for `064_seb_door_refusals.sql`, whose record was found to hold
+# exactly the sha of the same file with LF inserted.
+#
+# So the digest is taken over **canonical** bytes: CRLF folded to LF, which is the
+# one conversion a checkout applies and the `text` attribute reverses. Only CRLF
+# is folded — a lone CR is not a line ending this repository can produce, and
+# folding it would let the identity function rewrite a byte inside a SQL string
+# literal. Folding is a **no-op on an LF file**, which is why every sha already on
+# record stays valid: a box that hashes an LF file computes the same value before
+# and after this change, and a Windows checkout now computes that value too.
+
+def canonical_bytes(raw: bytes) -> bytes:
+    """The bytes an identity is computed over: CRLF folded to LF, nothing else."""
+    return raw.replace(b"\r\n", b"\n")
+
+
+def digest_of(raw: bytes) -> str:
+    """The identity of a migration's bytes — the only definition of it here."""
+    return hashlib.sha256(canonical_bytes(raw)).hexdigest()
+
+
+def file_digest(path: Path) -> str:
+    """The identity of a migration file, wherever the checkout happens to hold it."""
+    return digest_of(path.read_bytes())
+
+
 def describe_file(path: Path) -> tuple[str, str]:
+    """The text to execute and the identity to record, from one read of the file."""
     raw = path.read_bytes()
-    return raw.decode("utf-8-sig"), hashlib.sha256(raw).hexdigest()
+    return raw.decode("utf-8-sig"), digest_of(raw)
 
 
 def dry_run(url: str, sql: str, require_idempotent: bool) -> list[str]:
@@ -659,6 +705,12 @@ def recovery_line(entry_path: Path) -> str | None:
     rather than folded into the record note, because a record reading "applied"
     looks complete without them, and that is how a box ends up with a migration it
     can no longer undo.
+
+    The third line is the record's own reason, when it gave one. A record naming an
+    archive *older* than the run beside it — a re-apply that kept the archive from the
+    run that applied the file first — reads like a mistake without it, and the reason
+    may as well not be written if nobody prints it: `recovery_basis` had no caller at
+    all before this line.
     """
     try:
         entry = json.loads(entry_path.read_text(encoding="utf-8"))
@@ -666,26 +718,29 @@ def recovery_line(entry_path: Path) -> str | None:
         return None
     point = entry.get("recovery_point")
     if not point:
-        return "recovery point: none recorded"
-    archive = Path(str(point))
-    if not archive.is_file():
-        return f"recovery point: MISSING — {archive}"
-    pinned = archive.name in db_snapshot.read_pins(archive.parent)
-    verdict = "pinned" if pinned else "NOT PINNED — rotation will delete it"
-    return f"recovery point: {archive} ({verdict})"
+        line = "recovery point: none recorded"
+    elif not Path(str(point)).is_file():
+        line = f"recovery point: MISSING — {point}"
+    else:
+        archive = Path(str(point))
+        pinned = archive.name in db_snapshot.read_pins(archive.parent)
+        verdict = "pinned" if pinned else "NOT PINNED — rotation will delete it"
+        line = f"recovery point: {archive} ({verdict})"
+    why = recovery_basis(entry_path)
+    return f"{line}\n      why: {why}" if why else line
 
 
 def status(ledger: Path, migrations: Path) -> int:
-    files = sorted(migrations.glob("*.sql"))
+    files = sorted(migrations.glob(f"*{MIGRATION_SUFFIX}"))
     if not files:
-        print(f"no .sql files in {migrations}")
+        print(f"no {MIGRATION_SUFFIX} files in {migrations}")
         return 0
 
     print(f"{'file':<58} {'record':<30} sha256")
     print("-" * 100)
     unrecorded = 0
     for path in files:
-        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        digest = file_digest(path)
         entry_path = ledger / f"{path.stem}.json"
         note = ledger_note(entry_path, digest)
         if note == "no record":
@@ -755,14 +810,145 @@ def stamp_of(archive) -> str | None:
 # containing the change. Restoring it would have left the migration exactly where it
 # was, under a record calling it the way back. A deploy's own snapshot is labelled
 # with the commit it was taken for, so it never matches a stem either.
+#
+# **And the stem is not enough on its own, which is what this box then showed.** A
+# file applied twice carries its stem on two archives: the one the first run took
+# before the schema changed, and the one an *idempotent re-run* took over a schema
+# that already had the change. `064_seb_door_refusals.sql` is exactly that — applied
+# on 10 October, applied again on 12 October — so `/var/backups/scangrade` held
+# three archives with its stem and the newest of them could not undo anything:
+# restoring it leaves `seb_door_refusal` exactly where it is, under a record calling
+# it the way back. Newest-by-name is therefore newest-**that-can-undo-it**, and
+# "can" is read out of the archive rather than out of its name (`can_undo`, from
+# the snapshot's own manifest).
 
-def own_archive(out_dir: Path, path: Path) -> Path | None:
-    """The newest archive taken for this migration, if this box still has one."""
-    if not out_dir.is_dir():
+def snapshot_tables(archive) -> set[str] | None:
+    """The tables a snapshot's own manifest carries — None when it cannot say.
+
+    `db_snapshot.describe` is the one reader of `manifest.json`, so this asks it rather
+    than opening the archive a second way. A hand-made archive, a truncated one, a file
+    that is not a snapshot at all, or a manifest with no table list has no answer here,
+    and a manifest that lists no tables is not a manifest that said there were none —
+    the difference matters, because reading the second as the first would make every
+    such archive qualify as a recovery point. `None` is "cannot say", which is not a
+    refusal: the caller then falls back to the name, exactly as this tool always did.
+    """
+    try:
+        manifest = db_snapshot.describe(Path(archive))
+    except (OSError, RuntimeError, ValueError, tarfile.TarError):
         return None
-    matches = sorted(out_dir.glob(f"{db_snapshot.ARCHIVE_PREFIX}*-{path.stem}.tar.gz"),
-                     key=lambda candidate: candidate.name)
-    return matches[-1] if matches else None
+    tables = manifest.get("tables")
+    if not isinstance(tables, dict):
+        return None
+    return {dequote(str(name)) for name in tables}
+
+
+def can_undo(archive, declared) -> bool | None:
+    """Whether a snapshot can undo the objects `declared` creates.
+
+    `declared` is `declared_objects`' reading of the migration file. Only a **table**
+    is decidable: a snapshot's manifest lists the tables it carries and says nothing
+    about columns, indexes or policies, so a file that creates no table has no answer
+    here. What it does settle is the case that was wrong — a snapshot taken *after* the
+    file ran still carries the table the file creates, and no restoration of that
+    archive removes it, so it cannot be the way back from this migration. `False` is
+    proved unable, `True` proved able, `None` no opinion.
+    """
+    wanted = {dequote(bare_name(key)) for kind, key, _index in declared
+              if kind == "table"}
+    if not wanted:
+        return None
+    tables = snapshot_tables(archive)
+    if tables is None:
+        return None
+    return not (wanted & tables)
+
+
+def stem_archives(out_dir: Path, path: Path) -> list[Path]:
+    """Every archive in `out_dir` carrying this migration's stem, oldest name first."""
+    if not out_dir.is_dir():
+        return []
+    return sorted(out_dir.glob(f"{db_snapshot.ARCHIVE_PREFIX}*-{path.stem}.tar.gz"),
+                  key=lambda candidate: candidate.name)
+
+
+def own_archive(out_dir: Path, path: Path, declared=None) -> Path | None:
+    """The newest archive carrying this migration's stem **that can undo it**.
+
+    A version of this function returned the newest by name, and on this box that was the
+    one archive that could not undo the migration it was named for: the 12 October
+    re-run of `064_seb_door_refusals.sql` left a snapshot with `seb_door_refusal`
+    already in it, and the 10 October archive — taken before the table existed — was the
+    only one a restore could go back to. `can_undo` decides between the candidates now
+    and an archive proved unable is passed over; when no candidate can say (a manifest
+    that cannot be read, or a file that creates no table) the newest name still stands,
+    exactly as before.
+    """
+    matches = stem_archives(out_dir, path)
+    if declared is None:
+        return matches[-1] if matches else None
+    verdicts = {candidate: can_undo(candidate, declared) for candidate in matches}
+    able = [candidate for candidate in matches if verdicts[candidate] is True]
+    if able:
+        return able[-1]
+    silent = [candidate for candidate in matches if verdicts[candidate] is None]
+    return silent[-1] if silent else None
+
+
+def recorded_recovery_point(entry_path: Path) -> str | None:
+    """The recovery point a record already names, if it names one."""
+    try:
+        entry = json.loads(entry_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    point = entry.get("recovery_point")
+    return str(point) if point else None
+
+
+def archive_basis(archive: Path, declared) -> str:
+    """Why an archive is named, in the words of whatever proved it."""
+    if can_undo(archive, declared) is True:
+        return (f"its own manifest: `{archive.name}` does not carry the table(s) this "
+                "file creates, so it was taken before they existed")
+    return (f"its own name: `{archive.name}` — what the run that applied this "
+            "migration took for it, immediately before it ran")
+
+
+def decide_recovery_point(out_dir: Path, path: Path, declared, taken,
+                          on_record: str | None = None, story: str = "",
+                          ) -> tuple[str | None, str | None]:
+    """Which archive a record should name, and why when it is not the obvious one.
+
+    `taken` is the archive the caller brought: the snapshot a `--commit` run just took,
+    or the one `--adopt` was handed. It is the right answer unless its own manifest
+    proves it cannot undo the file — which is what a *second* run of a migration that is
+    already applied produces, because its snapshot covers a schema that already has the
+    change. Then the record keeps an archive that can: the one it already names, if that
+    is still here and still able, else the file's own archive from the run that applied
+    it first. When this box holds neither, the record names **none** and says why — an
+    empty path is honest, and a wrong one is what a recovery gets spent on.
+    """
+    if taken is None:
+        return None, None
+    if can_undo(taken, declared) is not False:
+        return str(taken), None
+    carried = sorted({dequote(bare_name(key)) for kind, key, _index in declared
+                      if kind == "table"} & (snapshot_tables(taken) or set()))
+    why = (f"{story or 'the archive'} already carries {', '.join(carried)} — this "
+           f"migration was in the schema before it was taken, so restoring it would "
+           f"not undo {path.name}")
+    if on_record:
+        existing = Path(on_record)
+        if existing.is_file() and can_undo(existing, declared) is not False:
+            return str(existing), (f"{why}; the record keeps `{existing.name}`, which "
+                                   "it already named and which does not")
+    own = own_archive(out_dir, path, declared)
+    if own is not None:
+        return str(own), (f"{why}; `{own.name}` is the archive taken before it, and "
+                          "this box still holds it")
+    return None, f"{why}, and this box holds no archive that can — none is named"
+
+
 
 
 def durable_copy(archive: Path, out_dir: Path, prune_source: bool = False):
@@ -842,9 +1028,20 @@ def adopt(ledger: Path, out_dir: Path, path: Path, archive: Path | None,
     if hidden:
         print(f"   note: {hidden} DO body/bodies hide DDL this cannot read")
 
+    # Which archive this record may name is settled *before* anything is moved: an
+    # archive that already carries what the file creates cannot undo the migration, and
+    # moving and pinning one like that would put the box's protection on an archive that
+    # is not a way back from anything.
+    point, why = decide_recovery_point(
+        out_dir, path, declared, archive,
+        on_record=recorded_recovery_point(ledger / f"{path.stem}.json"),
+        story="the archive given to --adopt")
+    if basis and not why:
+        why = basis
+
     durable: Path | None = None
     source: str | None = None
-    if archive is not None:
+    if archive is not None and point is not None and Path(point) == Path(archive):
         try:
             durable, source = durable_copy(archive, out_dir, prune_source)
         except (OSError, RuntimeError) as exc:
@@ -861,19 +1058,27 @@ def adopt(ledger: Path, out_dir: Path, path: Path, archive: Path | None,
         else:
             print(f"   recovery point already in place: {durable}")
         pin_recovery_point(durable)
-    else:
+        point = str(durable)
+    elif archive is not None:
+        print("   recovery point: NOT the archive this mode was handed — it cannot "
+              "undo the migration")
+        for line in textwrap.wrap(why or "", 66):
+            print(f"      {line}")
+        print(f"      left where it is, and not pinned: {archive}")
+        if point is not None:
+            pin_recovery_point(point)
+    if point is None:
         print("   recovery point: none — no archive on this box can undo this")
         print("   migration, and naming one taken afterwards would claim a restoration")
         print("   it cannot perform. The record says so"
-              + (f" ({basis})" if basis else "") + ".")
+              + (f" ({why})" if why else "") + ".")
 
-    when = applied_at or stamp_of(durable)
+    when = applied_at or stamp_of(point or archive)
     adopted_from = source or (str(archive) if archive is not None
-                              else (basis or "the live schema — no archive here"))
+                              else (why or "the live schema — no archive here"))
     entry = record(ledger, path, digest, [f"+ {key}" for key in present],
-                   str(durable) if durable is not None else None,
-                   adopted_from=adopted_from, applied_at=when,
-                   recovery_point_basis=basis)
+                   point, adopted_from=adopted_from, applied_at=when,
+                   recovery_point_basis=why)
     written = json.loads(entry.read_text(encoding="utf-8"))["applied_at"]
     print(f"   recorded in {entry}")
     print(f"      applied_at {written}"
@@ -1149,9 +1354,9 @@ def read_declarations(files: list[Path]):
 
 def verify(ledger: Path, migrations: Path, cur) -> int:
     """Report every file's declared objects against the live catalogue."""
-    files = sorted(migrations.glob("*.sql"))
+    files = sorted(migrations.glob(f"*{MIGRATION_SUFFIX}"))
     if not files:
-        print(f"no .sql files in {migrations}")
+        print(f"no {MIGRATION_SUFFIX} files in {migrations}")
         return 0
 
     # `storage` is included because the app owns policies on storage.objects, and
@@ -1171,7 +1376,7 @@ def verify(ledger: Path, migrations: Path, cur) -> int:
 
     for path in files:
         hidden, declared, dropped = prepared[path.name]
-        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        digest = file_digest(path)
         present, explained, gap, superseded = judge(path.name, declared, dropped,
                                                    droppers, live)
         named_superseded.extend((path.name, key, reason)
@@ -1265,9 +1470,9 @@ def verify(ledger: Path, migrations: Path, cur) -> int:
 def reconcile(ledger: Path, out_dir: Path, migrations: Path,
               live: dict[str, str]) -> int:
     """Record what the live schema carries and this ledger has never recorded."""
-    files = sorted(migrations.glob("*.sql"))
+    files = sorted(migrations.glob(f"*{MIGRATION_SUFFIX}"))
     if not files:
-        print(f"no .sql files in {migrations}")
+        print(f"no {MIGRATION_SUFFIX} files in {migrations}")
         return 0
 
     # Only the sha256 of each file is read here: an already-recorded migration is
@@ -1277,7 +1482,7 @@ def reconcile(ledger: Path, out_dir: Path, migrations: Path,
     recorded = 0
     pending: list[Path] = []
     for path in files:
-        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        digest = file_digest(path)
         if ledger_note(ledger / f"{path.stem}.json", digest) == "no record":
             pending.append(path)
         else:
@@ -1311,21 +1516,34 @@ def reconcile(ledger: Path, out_dir: Path, migrations: Path,
                                   [text for _kind, text in gap], explained))
             continue
 
-        archive = own_archive(out_dir, path)
-        basis = None
-        if archive is not None:
-            basis = (f"its own name: `{archive.name}` — what the run that applied "
-                     "this migration took for it, immediately before it ran")
-        else:
+        archive = own_archive(out_dir, path, declared)
+        basis = archive_basis(archive, declared) if archive is not None else None
+        if archive is None:
+            candidates = stem_archives(out_dir, path)
             print(f"\n   {path.name}")
-            print(f"      no `{db_snapshot.ARCHIVE_PREFIX}*-{path.stem}.tar.gz` in "
-                  f"{out_dir}")
-            print("      the archive that can undo this migration is the one the run that"
-                  " applied it took,")
-            print("      and that run was on another machine — recording it without a"
-                  " recovery point:")
-            print("      `--adopt <archive>` names it here, moves it into "
-                  f"{out_dir} and pins it")
+            if candidates:
+                print(f"      {len(candidates)} archive(s) carrying its stem are here, "
+                      "and every one of them was taken after this file ran:")
+                for candidate in candidates:
+                    print(f"         {candidate.name}")
+                print("      a snapshot that already holds the table cannot undo the "
+                      "migration that created it, so none is named — the archive that "
+                      "can is the one from before it, and this box does not have it")
+                basis = ("no archive here can undo this migration: every `"
+                         f"{db_snapshot.ARCHIVE_PREFIX}*-{path.stem}.tar.gz` was taken "
+                         "after it ran, and a snapshot that already carries the change "
+                         "is not a way back from it")
+            else:
+                print(f"      no `{db_snapshot.ARCHIVE_PREFIX}*-{path.stem}.tar.gz` in "
+                      f"{out_dir}")
+                print("      the archive that can undo this migration is the one the run"
+                      " that applied it took,")
+                print("      and that run was on another machine — recording it without"
+                      " a recovery point:")
+                print("      `--adopt <archive>` names it here, moves it into "
+                      f"{out_dir} and pins it")
+                basis = ("no archive of this migration's own is here — the run that "
+                         "applied it was on another machine")
             unproved += 1
 
         if adopt(ledger, out_dir, path, archive, live, basis=basis) == 0:
@@ -1519,7 +1737,22 @@ def main() -> int:
     print("   schema after:")
     print("\n".join(delta) if delta else "      (no schema change detected)")
 
-    entry = record(ledger, path, digest, delta, archive)
+    # What is written down is the archive that can undo this migration, which is not
+    # always the one this run took: see `decide_recovery_point`. A migration applied
+    # again snaps a schema that already has it.
+    declared = declared_objects(mask_do_bodies(strip_sql_comments(sql))[0])
+    entry_path = ledger / f"{path.stem}.json"
+    point, why = decide_recovery_point(Path(args.out), path, declared, archive,
+                                       on_record=recorded_recovery_point(entry_path),
+                                       story="the snapshot this run took")
+    if why:
+        print()
+        print("   NOT naming the snapshot this run took:")
+        for line in textwrap.wrap(why, 66):
+            print(f"      {line}")
+        print(f"      recovery point recorded: {point or 'none'}")
+
+    entry = record(ledger, path, digest, delta, point, recovery_point_basis=why)
     print(f"   recorded in {entry}")
     return 0
 
