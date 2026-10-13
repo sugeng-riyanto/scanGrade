@@ -24,6 +24,7 @@ from app.services.student_import import create_student_account
 from app.utils.req_cache import (invalidate_class, invalidate_school,
                                  invalidate_teacher_assignments)
 from app.services import teacher_assignments as ta_service
+from app.services import school_membership as membership_service
 from app.services.teacher_import import create_teacher_account
 from app.services import school_officials as officials_service
 from app.services.subject_service import (subject_usage, usage_confirmation_needed,
@@ -144,6 +145,66 @@ def _per_page_arg(raw) -> int:
 
 def _sort_dir(raw) -> str:
     return "desc" if str(raw or "").strip().lower() == "desc" else "asc"
+
+
+# ── the activation filter: who still holds the password the school issued ────
+#
+# "Belum aktivasi" has no column of its own, and deliberately: it is
+# `profiles.must_change_password`, the flag every school-made account starts with
+# and loses the first time its owner replaces the password. That is also the number
+# the three list pages already print beside their title, so the filter, the count
+# and the pie are one fact read three ways rather than three definitions that can
+# drift apart — which is why nothing here recomputes "activated" for itself.
+ACTIVATED = "activated"
+PENDING_ACTIVATION = "pending"
+_ACTIVATION_CHOICES = (ACTIVATED, PENDING_ACTIVATION)
+
+
+def _activation_arg(raw) -> str:
+    """The requested activation filter, or `""` for both.
+
+    An unknown word is *both*, not a refusal: a hand-edited query string must not
+    empty a roster, and there is no third state to show.
+    """
+    value = str(raw or "").strip().lower()
+    return value if value in _ACTIVATION_CHOICES else ""
+
+
+def _is_activated(row) -> bool:
+    """Whether the account's owner has replaced the password the school issued."""
+    return not bool((row or {}).get("must_change_password"))
+
+
+def _split_by_activation(rows) -> dict:
+    """``{"activated": n, "pending": n}`` over the roster these filters describe.
+
+    Counted from the list the page already loaded — one pass, no extra read — and
+    taken **before** the activation filter narrows it, so the pie always describes
+    every learner the search and the class filter selected while the table below
+    follows the filter. A pie that changed shape with its own filter would be a
+    picture of the filter rather than of the school.
+    """
+    activated = sum(1 for row in rows if row.get("activated"))
+    return {ACTIVATED: activated, PENDING_ACTIVATION: len(rows) - activated}
+
+
+def _matches_search(row, needle) -> bool:
+    """Name, and whichever number or address identifies this kind of person.
+
+    The search used to be a `ilike` on one column: NISN for learners, the employee
+    number for teachers. A school looking for *a person* had to know which of the
+    three identifiers the list happened to be keyed on, and a name matched nothing
+    at all. One predicate over the fields a row actually carries is the same rule
+    for all three lists — and it is applied to the whole roster rather than to the
+    page, because a filter that only sees the first page answers the wrong
+    question.
+    """
+    needle = (needle or "").strip().lower()
+    if not needle:
+        return True
+    fields = (row.get("name"), row.get("employee_number"), row.get("nisn"),
+              row.get("email"))
+    return any(needle in str(field or "").lower() for field in fields)
 
 
 def _filter_qs(**params) -> str:
@@ -351,7 +412,16 @@ def _teacher_in_school(supabase, teacher_id, sid) -> bool:
     rows = (supabase.table("profiles").select("id")
             .eq("id", teacher_id).eq("role", "guru").eq("school_id", sid)
             .limit(1).execute().data or [])
-    return bool(rows)
+    if rows:
+        return True
+    # ...and the teachers who joined from another NPSN, so the homeroom column and
+    # the assignment matrix are drawn from ONE staff list. A member's profile names
+    # their own school — that is what the membership table is for — so a predicate
+    # that compared `profiles.school_id` refused them a class they are entitled to
+    # teach. The `guru` role check above stays exactly as it was: it is about the
+    # account this school created, which is a narrower question than membership.
+    from app.services import school_membership
+    return school_membership.is_active_member(supabase, teacher_id, sid)
 
 
 def _year_in_school(supabase, year_id, sid) -> bool:
@@ -2486,6 +2556,7 @@ def teachers():
     subject_id = request.args.get("subject_id", "").strip()
     sort = request.args.get("sort", "employee_id")
     direction = _sort_dir(request.args.get("dir"))
+    activation = _activation_arg(request.args.get("activation"))
     per_page = _per_page_arg(request.args.get("per_page", "50"))
     try:
         page = max(1, int(request.args.get("page", 1)))
@@ -2499,10 +2570,8 @@ def teachers():
                .eq("school_id", sid).order("name").execute().data or [])
 
     data_q = supabase.table("teachers").select(
-        "*, profiles!inner(id, full_name, phone), subjects(name)"
+        "*, profiles!inner(id, full_name, phone, must_change_password), subjects(name)"
     ).eq("school_id", sid)
-    if q:
-        data_q = data_q.ilike("employee_id", f"%{q}%")
     if subject_id:
         data_q = data_q.eq("subject_id", subject_id)
     teachers_raw = data_q.execute().data or []
@@ -2535,6 +2604,8 @@ def teachers():
             # /admin-sekolah/officials, where their two-role vocabulary lives.
             "role": "guru",
             "is_official": False,
+            "is_member": False,
+            "activated": _is_activated(prof),
         })
 
     # ── the school's officials, on the same roster ──────────────────────────
@@ -2572,7 +2643,71 @@ def teachers():
                 "phone": o.get("phone", "") or "",
                 "role": o.get("role"),
                 "is_official": True,
+                "is_member": False,
+                # `list_officials` reads migration 040's columns (`email`,
+                # `must_change_password`) ahead of the rest, so an official's
+                # activation state is on the row that named them.
+                "activated": _is_activated(o),
             })
+
+    # ── and the teachers who joined this NPSN from somewhere else ───────────
+    #
+    # An approved membership is a real teacher of this school — the school accepted
+    # them and can assign them classes — so a roster read from the `teachers` table
+    # alone reported the acceptance as not having happened. They are not created as
+    # `teachers` rows instead: that table is this school's *employment* record
+    # (`employee_id`, `subject_id`, `nuptk` — unique per person), while the
+    # membership table is the many-schools model migration 044 introduced, and a
+    # second employment row would be a second answer about the same person.
+    #
+    # The badge names membership and never the other school: migration 063's rule is
+    # that the destination school learns name, email and account status only, so no
+    # column read here can say where else this teacher works.
+    #
+    # Skipped under a subject filter, like the officials: that filter matches the
+    # legacy `teachers.subject_id`, which a member has no row to carry.
+    if not subject_id:
+        already = {str(t.get("id")) for t in teachers_list}
+        needle = q.lower()
+        for m in membership_service.active_members(supabase, sid):
+            uid = m.get("user_id")
+            if not uid or str(uid) in already:
+                continue
+            name = m.get("name") or "-"
+            email = m.get("email") or _email_map.get(uid, "")
+            # A membership row with no readable profile still belongs on the roster:
+            # the school can see whom it accepted even when the name cannot be read.
+            if needle and needle not in name.lower() and needle not in (email or "").lower():
+                continue
+            teachers_list.append({
+                "id": uid,
+                "name": name,
+                "employee_number": "",
+                "email": email,
+                "subject_name": "-",
+                "subject_id": None,
+                "phone": "",
+                "role": "guru",
+                "is_official": False,
+                # The template reads this to offer the actions that make sense for
+                # someone whose account this school does not own: the assignment
+                # matrix yes, account deletion and password reset no.
+                "is_member": True,
+                # A member's account lives at their own school, so this is *their*
+                # flag read from their own profile — the same row the roster's
+                # name came from, never a second copy.
+                "activated": _is_activated(m),
+            })
+
+    # The search runs over the whole roster — the guru rows, the officials and the
+    # members together — because a name is not a column on one of them. Then the
+    # pie describes what the filters selected, and only the table follows the
+    # activation filter (the same order `/students` uses).
+    teachers_list = [row for row in teachers_list if _matches_search(row, q)]
+    activation_chart = _split_by_activation(teachers_list)
+    if activation:
+        teachers_list = [row for row in teachers_list
+                         if row["activated"] == (activation == ACTIVATED)]
 
     page_rows, total, total_pages, page = _apply_sort_page(
         teachers_list, sort=sort, direction=direction, page=page, per_page=per_page,
@@ -2583,6 +2718,7 @@ def teachers():
         })
 
     base_qs = _filter_qs(q=q, subject_id=subject_id, sort=sort, dir=direction,
+                         activation=activation,
                          per_page=("all" if not per_page else per_page))
     # `pending_activation` rides along so THIS page answers "who has not activated
     # yet" — the question the admin is already asking while looking at the roster.
@@ -2618,10 +2754,16 @@ def teachers():
     return render_template("admin_sekolah/teachers.html", teachers=page_rows, subjects=subjects,
                            classes=classes,
                            q=q, subject_id=subject_id, sort=sort, dir=direction,
+                           activation=activation, activation_chart=activation_chart,
                            page=page, total=total, total_pages=total_pages, per_page=per_page,
                            base_qs=base_qs, page_sizes=_PAGE_SIZES,
                            pending_activation=_pending_activation(supabase, sid),
-                           teacher_ids=[t["id"] for t in page_rows],
+                           # Select-all must not reach a member: the bulk routes delete an
+                           # account and reset a password, and this school owns neither for
+                           # somebody whose identity lives at their own school. They are on
+                           # the roster to be *given work*, which the row's own controls do.
+                           teacher_ids=[t["id"] for t in page_rows
+                                        if not t.get("is_member")],
                            active_year=year)
 
 
@@ -2846,8 +2988,14 @@ def delete_teacher(teacher_id):
 def reset_teacher_password(teacher_id):
     supabase = get_supabase()
     # Same staff rule as the edit: an official on this roster is reset from here
-    # too, and `teacher_in_school` is what keeps it inside the school.
-    if not ta_service.teacher_in_school(supabase, _school_id(), teacher_id):
+    # too — and the rule is the *account* one, not `teacher_in_school`. A teacher
+    # who joined from another NPSN teaches here but is not this school's account:
+    # this button would change the password of a login that works at their school
+    # too, so it stays with the school whose roster created it (the bulk reset
+    # makes the same per-id check on `profiles.school_id`). The roster hides the
+    # control for a member, and this refusal is what makes the hidden button a
+    # fact rather than a hope.
+    if not ta_service.account_of_this_school(supabase, _school_id(), teacher_id):
         return jsonify({"error": "Guru tidak ditemukan di sekolah ini"}), 404
     password = request.form.get("password", "").strip() or _gen_password()
     try:
@@ -2856,6 +3004,36 @@ def reset_teacher_password(teacher_id):
         return jsonify({"success": True, "password": password})
     except Exception as e:
         return jsonify({"error": failure.sentence(e)}), 400
+
+
+@admin_sekolah_bp.route("/teachers/<teacher_id>/remove-member", methods=["POST"])
+@subscription_write_required
+@admin_sekolah_required
+def remove_teacher_membership(teacher_id):
+    """Remove a teacher who joined this NPSN from elsewhere — from THIS school only.
+
+    The roster's delete control removes an *account*, and reaching for it here would
+    be the worst kind of wrong: the person teaches at their own school every day and
+    this school does not own that account. So what a member gets is the action the
+    product already has for leaving a school — `school_membership.close`, which
+    writes the closure and its author onto the membership row and leaves the
+    profile, the auth user and every other school untouched.
+
+    Narrower than the membership page's own close route on purpose: this is the
+    school *admin's* roster, and the page renders the control for that reader alone,
+    so the decorator is `admin_sekolah_required` rather than the three approving
+    roles. A caller who is not an active member of this school is refused by the
+    guarded write (the closure moves from a state, it is not an assignment), so a
+    stale form cannot close somebody else's membership twice or close one that was
+    already closed.
+    """
+    sid = _school_id()
+    row = membership_service.close(get_supabase(), sid, teacher_id, by=g.user_id)
+    if not row.get("user_id"):
+        return jsonify({"error": "Keanggotaan tidak ditemukan atau sudah ditutup"}), 409
+    log_activity("close", "teacher_membership", teacher_id,
+                 new_data={"school_id": sid}, user_id=g.user_id)
+    return jsonify({"success": True})
 
 
 # ─── PEJABAT SEKOLAH (kepala sekolah & wakil kepala sekolah) ──────
@@ -2870,12 +3048,30 @@ def officials():
     """The two official accounts, as a page the school admin owns."""
     sid = _school_id()
     supabase = get_supabase()
+    q = request.args.get("q", "").strip()
+    direction = _sort_dir(request.args.get("dir"))
+    activation = _activation_arg(request.args.get("activation"))
     rows = officials_service.list_officials(supabase, sid)
     try:
         email_map = _get_email_map(supabase)
     except Exception:
         email_map = {}
-    listed = [{**row, "email": email_map.get(row["id"], "")} for row in rows]
+    # The same three facts every other roster row carries — a name to search, an
+    # activation flag (`list_officials` already reads migration 040's columns) and
+    # an address — built through the same helpers, so this page cannot answer
+    # "who has not activated" differently from `/teachers` about the same person.
+    listed = [{**row, "email": email_map.get(row["id"], ""),
+               "name": row.get("full_name") or "-",
+               "activated": _is_activated(row)} for row in rows]
+    listed = [row for row in listed if _matches_search(row, q)]
+    activation_chart = _split_by_activation(listed)
+    if activation:
+        listed = [row for row in listed
+                  if row["activated"] == (activation == ACTIVATED)]
+    # Two accounts, so no pagination: the ordering is the whole of the sort, and
+    # A–Z / Z–A is the one axis a reader of a two-row list has.
+    listed = sorted(listed, key=lambda row: row["name"].lower(),
+                    reverse=(direction == "desc"))
     school = {}
     try:
         school = (supabase.table("schools").select("name, npsn")
@@ -2883,6 +3079,9 @@ def officials():
     except Exception:
         pass
     return render_template("admin_sekolah/officials.html", officials=listed,
+                           q=q, dir=direction, activation=activation,
+                           activation_chart=activation_chart,
+                           base_qs=_filter_qs(q=q, dir=direction, activation=activation),
                            school=school)
 
 
@@ -2976,6 +3175,7 @@ def students():
     class_id = request.args.get("class_id", "").strip()
     sort = request.args.get("sort", "class")
     direction = _sort_dir(request.args.get("dir", "asc"))
+    activation = _activation_arg(request.args.get("activation"))
     per_page = _per_page_arg(request.args.get("per_page", "50"))
     try:
         page = max(1, int(request.args.get("page", 1)))
@@ -2984,11 +3184,12 @@ def students():
 
     classes_list = supabase.table("classes").select("*").eq("school_id", sid).order("name").execute().data or []
 
+    # `must_change_password` rides on the read the page already makes: it is the
+    # same column `_pending_activation` counts (and the same one migration 040
+    # adds), so the badge, the pie and the filter cannot disagree about a learner.
     data_q = supabase.table("students").select(
-        "*, profiles!inner(id, full_name, phone), classes(name)"
+        "*, profiles!inner(id, full_name, phone, must_change_password), classes(name)"
     ).eq("school_id", sid)
-    if q:
-        data_q = data_q.ilike("nisn", f"%{q}%")
     if class_id:
         data_q = data_q.eq("class_id", class_id)
     students_raw = data_q.execute().data or []
@@ -3012,7 +3213,16 @@ def students():
             "class_id": s.get("class_id"),
             "phone": prof.get("phone", ""),
             "email": _email_map.get(uid, ""),
+            "activated": _is_activated(prof),
         })
+
+    students_list = [row for row in students_list if _matches_search(row, q)]
+    # The pie describes the roster the filters selected; the table then follows the
+    # activation filter. (`/teachers` and `/officials` make the same split.)
+    activation_chart = _split_by_activation(students_list)
+    if activation:
+        students_list = [row for row in students_list
+                         if row["activated"] == (activation == ACTIVATED)]
 
     # Default is the class order, ascending: a school's roster reads class by class,
     # and this is the same order the downloadable login-card sheet uses (see
@@ -3026,11 +3236,13 @@ def students():
         })
 
     base_qs = _filter_qs(q=q, class_id=class_id, sort=sort, dir=direction,
+                         activation=activation,
                          per_page=("all" if not per_page else per_page))
     # Same as `/teachers`: the "who has not activated" count belongs on the page
     # that lists the people, not two clicks away on `/accounts`.
     return render_template("admin_sekolah/students.html", students=page_rows, classes=classes_list,
                            q=q, class_id=class_id, sort=sort, dir=direction,
+                           activation=activation, activation_chart=activation_chart,
                            page=page, total=total, total_pages=total_pages, per_page=per_page,
                            pending_activation=_pending_activation(supabase, sid),
                            base_qs=base_qs, page_sizes=_PAGE_SIZES)

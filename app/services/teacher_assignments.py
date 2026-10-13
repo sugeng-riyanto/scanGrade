@@ -280,8 +280,45 @@ def disabled_pairs(supabase, school_id, pairs) -> set:
 
 
 def teacher_in_school(supabase, school_id, teacher_id) -> bool:
+    """Whether this person teaches at this school — on its roster, or by membership.
+
+    Two ways in, and the second one used to be reachable nowhere. A `profiles` row
+    that names this school is the account the school created; an **active
+    membership** is a teacher another NPSN accepted, whose identity (and whose
+    `profiles.school_id`) stays at their own school by design (migration 044).
+    Comparing only `profiles.school_id` made that second teacher real in the
+    database and absent from every door that needs this predicate: the assignment
+    matrix and the password reset both answer 404, so the school that accepted them
+    could not give them a class — which is the same as not having accepted them.
+
+    The membership is read fresh, because a closure is what changes this answer and
+    the next request has to see it; a read that fails answers `False` rather than
+    guessing, the same rule the closure resolution follows (an outage narrows
+    nothing there, and here nothing is granted on a maybe).
+    """
     rows = (supabase.table("profiles").select("id, role")
             .eq("id", teacher_id).eq("school_id", school_id)
+            .in_("role", list(ASSIGNABLE_ROLES)).limit(1).execute().data or [])
+    if rows:
+        return True
+    from app.services import school_membership
+    return school_membership.is_active_member(supabase, teacher_id, school_id)
+
+
+def account_of_this_school(supabase, school_id, user_id) -> bool:
+    """Whether this school owns the *account* — a profile row that names it.
+
+    Deliberately narrower than `teacher_in_school`, and the two are asked about
+    different things: a membership is about **teaching here** (the matrix, the
+    classes, the marks), while this one is about the **credentials** and the profile
+    behind them. A teacher who joined from another NPSN teaches here and does not
+    stop being their own school's account, so the door that hands out a new password
+    — and the bulk reset, which makes the same check per id — stays with the school
+    whose rosters created it. Otherwise one school could lock a teacher out of every
+    school at once with a button whose label promises a password.
+    """
+    rows = (supabase.table("profiles").select("id, role")
+            .eq("id", user_id).eq("school_id", school_id)
             .in_("role", list(ASSIGNABLE_ROLES)).limit(1).execute().data or [])
     return bool(rows)
 

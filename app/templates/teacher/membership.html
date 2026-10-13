@@ -27,6 +27,9 @@
     'bad_target': ('Sekolah tujuannya tidak ditemukan.', 'That destination school was not found.'),
     'read_failed': ('Datanya belum bisa dibaca sekarang. Coba lagi sebentar lagi.', 'The data could not be read just now. Try again shortly.'),
     'failed': ('Pengajuan tidak tersimpan.', 'The request was not saved.'),
+    'switched': ('Sekolah aktif diganti. Halaman guru, kelas, dan penilaian sekarang memakai NPSN ini.', 'Your active school was switched. The teacher pages, classes and marks now use this NPSN.'),
+    'home': ('Kembali ke sekolah asal akun Anda.', 'Back to your account’s own school.'),
+    'not_member': ('Anda bukan anggota aktif sekolah itu, jadi tidak bisa dipilih.', 'You are not an active member of that school, so it cannot be selected.'),
 } %}
 {% set STATUS_PAIRS = {
     'pending': ('Menunggu', 'Pending'),
@@ -39,9 +42,14 @@
 
     {% if status_code %}
     {% set pair = REFUSALS.get(status_code) or REFUSALS['failed'] %}
-    <div class="rounded-2xl border-2 {% if status_code == 'ok' %}border-emerald-200 bg-emerald-50{% else %}border-amber-200 bg-amber-50{% endif %} p-4 flex items-start gap-3">
-        <i class="fas {% if status_code == 'ok' %}fa-circle-check text-emerald-600{% else %}fa-circle-exclamation text-amber-600{% endif %} mt-0.5"></i>
-        <p class="text-sm font-semibold {% if status_code == 'ok' %}text-emerald-800{% else %}text-amber-800{% endif %}"
+    {# Three outcomes are good news and the banner says so: a request sent, a switch
+       made, and a switch undone. Written as comparisons rather than a set of codes
+       because a bare list of string literals here reads to the i18n sweep like an
+       `(['id','en'])` pair and turns a page-level check into noise. #}
+    {% set ok_status = status_code == 'ok' or status_code == 'switched' or status_code == 'home' %}
+    <div class="rounded-2xl border-2 {% if ok_status %}border-emerald-200 bg-emerald-50{% else %}border-amber-200 bg-amber-50{% endif %} p-4 flex items-start gap-3">
+        <i class="fas {% if ok_status %}fa-circle-check text-emerald-600{% else %}fa-circle-exclamation text-amber-600{% endif %} mt-0.5"></i>
+        <p class="text-sm font-semibold {% if ok_status %}text-emerald-800{% else %}text-amber-800{% endif %}"
            x-text="t('{{ pair[0] }}','{{ pair[1] }}')"></p>
     </div>
     {% endif %}
@@ -51,6 +59,68 @@
         <p class="text-sm text-slate-500 font-medium mt-0.5"
            x-text="t('Cari sekolah tujuan, lalu ajukan diri. Sekolah itu hanya menerima nama, email dan status akun Anda — bukan daftar sekolah tempat Anda mengajar.','Search for a destination school, then apply. That school receives your name, your email and your account status only — never the list of schools you teach in.')"></p>
     </div>
+
+    {#
+       The half the feature was missing: an accepted membership is access, but the
+       school a request is *for* only becomes the school a request *acts in* when the
+       teacher says so. `app/utils/auth.py` resolves every request's school from the
+       verified active membership, and that resolution honours a per-token choice —
+       which, until this card existed, nothing could set. So an accepted teacher kept
+       working in their home NPSN, and the school that accepted them could not give
+       them a class, a pupil or a mark.
+
+       Every row here is a membership the server confirmed; nothing on this page can
+       name a school the account is not an active member of (the POST re-checks
+       anyway, because a form is a claim and the row is the answer). "Back to my own
+       school" clears a choice instead of setting one — the teacher does not have to
+       know, and must not be able to type, which school that is.
+    #}
+    {% if my_schools %}
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+        <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+                <h3 class="text-sm font-extrabold text-slate-700"
+                    x-text="t('Sekolah tempat saya mengajar','Schools I teach at')"></h3>
+                <p class="text-xs text-slate-500 font-medium mt-0.5"
+                   x-text="t('Sekolah yang dipilih di sini menentukan NPSN mana yang berlaku: kelas, murid, bobot nilai dan ujian mengikuti sekolah itu.','The school chosen here decides which NPSN applies: classes, pupils, weighting and exams all follow that school.')"></p>
+            </div>
+            {% if chosen_school_id %}
+            <form method="POST" action="{{ url_for('membership_teacher.teacher_membership_switch') }}">
+                <input type="hidden" name="school_id" value="home">
+                <button type="submit"
+                        class="tap-44 shrink-0 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold text-xs transition"
+                        x-text="t('Kembali ke sekolah asal','Back to my own school')"></button>
+            </form>
+            {% endif %}
+        </div>
+        <ul class="mt-4 space-y-2">
+            {% for s in my_schools %}
+            <li class="flex items-center justify-between gap-3 rounded-xl border border-slate-200 px-3 py-2">
+                <span class="min-w-0">
+                    <span class="block text-sm font-bold text-slate-700 truncate">{{ s.name or s.school_id }}</span>
+                    <span class="block text-[11px] font-semibold text-slate-400">{{ s.school_role }}</span>
+                </span>
+                {% if s.school_id == active_school_id %}
+                <span class="shrink-0 inline-flex items-center gap-1 text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-full">
+                    <i class="fas fa-circle-check text-emerald-600"></i>
+                    <span x-text="t('Sedang aktif','Active now')"></span>
+                </span>
+                {% else %}
+                <form method="POST" action="{{ url_for('membership_teacher.teacher_membership_switch') }}" class="shrink-0">
+                    {# `or ''`, never the bare expression: a membership row whose column is
+                       missing would post the *word* `None`, which Postgres refuses as a
+                       uuid — the same silent 500 the id-field guard exists for. #}
+                    <input type="hidden" name="school_id" value="{{ s.school_id or '' }}">
+                    <button type="submit"
+                            class="tap-44 px-3 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-xl font-bold text-xs transition"
+                            x-text="t('Ajar di sini','Teach here')"></button>
+                </form>
+                {% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
 
     <form method="GET" class="flex flex-col sm:flex-row gap-3">
         <input type="text" name="q" value="{{ q }}" maxlength="120"

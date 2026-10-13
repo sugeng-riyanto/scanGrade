@@ -43,6 +43,8 @@ sebelum satu baris pun berubah.
 """
 from __future__ import annotations
 
+from urllib.parse import urlencode
+
 from flask import Blueprint, g, jsonify, redirect, render_template, request, url_for
 
 from app.services.audit_service import log_activity
@@ -122,14 +124,39 @@ def membership_home():
         return redirect(login_door_for(g.get("user_role"), request.path))
     supabase = get_supabase()
     role = g.get("user_role")
+    # A name filter and an A–Z / Z–A order, applied to both lists on the page — the
+    # queue of people asking to join and the members who already have — because both
+    # are read by name and a school's roster grows past one screen. Filtering here
+    # rather than in a query is deliberate: `pending_requests` and `school_members`
+    # are the *only* readers of those rows (their own rule), so a second, narrower
+    # query here would be a second answer about who works at this school.
+    needle = (request.args.get("q") or "").strip().lower()
+    direction = "desc" if (request.args.get("dir") or "").strip().lower() == "desc" else "asc"
+
+    def matches(row) -> bool:
+        if not needle:
+            return True
+        return any(needle in str(row.get(field) or "").lower()
+                   for field in ("name", "full_name", "email"))
+
     queue = membership.pending_requests(supabase, sid, role)
     members = membership.school_members(supabase, sid, role)
+    requests_shown = [row for row in (queue.get("requests") or []) if matches(row)]
+    members_shown = [row for row in (members.get("members") or []) if matches(row)]
+    members_shown.sort(key=lambda row: str(row.get("full_name") or row.get("name")
+                                           or "").lower(),
+                       reverse=(direction == "desc"))
     return render_template(
         "admin_sekolah/membership.html",
-        join_requests=queue.get("requests") or [],
-        members=members.get("members") or [],
+        join_requests=requests_shown,
+        members=members_shown,
         may_reopen=membership.may_reopen(role),
         may_approve=membership.may_approve(role),
+        q=request.args.get("q", "").strip(),
+        dir=direction,
+        base_qs=urlencode({k: v for k, v in (("q", request.args.get("q", "").strip()),
+                                             ("dir", direction))
+                           if v and not (k == "dir" and v == "asc")}),
         status_code=(request.args.get("status") or "").strip(),
     )
 

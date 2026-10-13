@@ -105,7 +105,7 @@
             <form method="GET" action="/admin-sekolah/teachers" class="flex flex-wrap items-center gap-2">
                 <div class="relative">
                     <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 text-sm"></i>
-                    <input type="text" name="q" value="{{ q or '' }}" placeholder="Cari Nomor Pegawai..." class="pl-9 pr-4 py-2.5 border border-stone-200 rounded-xl text-sm w-48 focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition">
+                    <input type="text" name="q" value="{{ q or '' }}" placeholder="Cari nama atau nomor pegawai..." class="pl-9 pr-4 py-2.5 border border-stone-200 rounded-xl text-sm w-48 focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition">
                 </div>
                 <select name="subject_id" class="px-3 py-2.5 border border-stone-200 rounded-xl text-sm font-medium bg-white focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition">
                     <option value="">Semua Mapel</option>
@@ -122,6 +122,15 @@
                     <option value="asc" {% if dir == 'asc' %}selected{% endif %}>A → Z</option>
                     <option value="desc" {% if dir == 'desc' %}selected{% endif %}>Z → A</option>
                 </select>
+                {# Satu pilihan, tiga keadaan: keduanya, hanya yang sudah aktivasi,
+                   hanya yang belum. Pertanyaannya muncul saat membaca daftar ini,
+                   dan jawabannya dulu hanya ada di `/accounts` — satu halaman
+                   jauh dari nama-nama yang ditanyakannya. #}
+                <select name="activation" class="px-3 py-2.5 border border-stone-200 rounded-xl text-sm font-medium bg-white focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition">
+                    <option value="" {% if not activation %}selected{% endif %}>Semua status akun</option>
+                    <option value="activated" {% if activation == 'activated' %}selected{% endif %}>Sudah aktivasi</option>
+                    <option value="pending" {% if activation == 'pending' %}selected{% endif %}>Belum aktivasi</option>
+                </select>
                 <select name="per_page" class="px-3 py-2.5 border border-stone-200 rounded-xl text-sm font-medium bg-white focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition">
                     <option value="20" {% if per_page == 20 %}selected{% endif %}>20 / hal</option>
                     <option value="50" {% if per_page == 50 %}selected{% endif %}>50 / hal</option>
@@ -131,7 +140,7 @@
                 <button type="submit" class="px-4 py-2.5 bg-orange-500 text-white rounded-xl text-sm font-bold hover:bg-orange-600 transition">
                     <i class="fas fa-filter mr-1"></i>Terapkan
                 </button>
-                {% if q or subject_id %}
+                {% if q or subject_id or activation %}
                 <a href="/admin-sekolah/teachers" class="px-3 py-2.5 text-stone-400 hover:text-stone-600" title="Reset filter"><i class="fas fa-times"></i></a>
                 {% endif %}
             </form>
@@ -192,6 +201,44 @@
     {# A selection, because the download below needs one — and because the teacher
        bulk-reset route has existed without any way to reach it: the page offered a
        per-row reset and "Hapus Semua", and nothing in between. #}
+    {# Fakta yang sama dengan lencana "Belum aktivasi", digambar: siapa di antara
+       daftar yang dipilih filter di atas yang masih memakai password terbitan
+       sekolah. Angkanya dihitung server dari baris yang halaman ini sudah baca
+       (`activation_chart`), jadi gambarnya tidak bisa menyimpang dari tabelnya. #}
+    <div class="card p-4">
+        <div class="flex items-center justify-between gap-4">
+            <h3 class="font-extrabold text-stone-800 text-sm">Status Aktivasi Akun</h3>
+            <span class="text-xs font-bold text-stone-400">{{ activation_chart.activated + activation_chart.pending }} akun</span>
+        </div>
+        <div class="mt-3 h-56"><canvas id="sgActivation"></canvas></div>
+    </div>
+    <script>
+    document.addEventListener('DOMContentLoaded', function () {
+        var el = document.getElementById('sgActivation');
+        if (!el || !window.Chart) return;
+        var counts = {{ activation_chart|tojson }};
+        // Pushed one at a time on purpose, and the two colours named apart: this
+        // page is pinned to Indonesian, and a two-literal array in here reads to
+        // the i18n sweep as a bilingual pair — a pair on a page that cannot switch,
+        // which the coverage gate refuses as a page that just froze its copy.
+        var labels = [];
+        labels.push('Sudah aktivasi');
+        labels.push('Belum aktivasi');
+        var activatedColour = '#10b981';
+        var pendingColour = '#f59e0b';
+        new Chart(el, {
+            type: 'doughnut',
+            data: {
+                labels: labels,
+                datasets: [{ data: [counts.activated, counts.pending],
+                             backgroundColor: [activatedColour, pendingColour], borderWidth: 0 }],
+            },
+            options: { responsive: true, maintainAspectRatio: false, cutout: '58%',
+                       plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, boxHeight: 10 } } } },
+        });
+    });
+    </script>
+
     <div class="card overflow-hidden" x-data="{ selected: [], selectAll: false }">
         <div x-show="selected.length > 0" class="px-4 py-3 bg-amber-50 border-b border-amber-200 flex items-center gap-3 text-sm flex-wrap">
             {# No `t()` here, unlike the pupils' page: this page pins its language
@@ -237,9 +284,30 @@
                 {% for t in teachers %}
                 <tbody class="divide-y divide-stone-50" x-data="{ editing: false }">
                     <tr class="hover:bg-stone-50 transition" :class="selected.includes('{{ t.id }}') ? 'bg-amber-50/50' : ''">
-                        <td class="px-2 py-3"><input type="checkbox" :checked="selected.includes('{{ t.id }}')" @click="selected.includes('{{ t.id }}') ? selected = selected.filter(x => x !== '{{ t.id }}') : selected.push('{{ t.id }}')" class="w-4 h-4"></td>
+                        {# A member is not selectable for the bulk actions: those delete an
+                           account and reset its password, and neither is this school's to
+                           do for somebody whose account lives at their own school. The
+                           row's own controls below are what a member is here for. #}
+                        <td class="px-2 py-3">
+                            {% if t.is_member %}
+                            <i class="fas fa-user-check text-stone-300" title="Anggota dari NPSN lain"></i>
+                            {% else %}
+                            <input type="checkbox" :checked="selected.includes('{{ t.id }}')" @click="selected.includes('{{ t.id }}') ? selected = selected.filter(x => x !== '{{ t.id }}') : selected.push('{{ t.id }}')" class="w-4 h-4">
+                            {% endif %}
+                        </td>
                         <td class="px-4 py-3 font-bold text-stone-700">
                             {{ t.name }}
+                            {# A teacher the school accepted from another NPSN — the badge
+                               names the membership and never the other school, which is
+                               migration 063's privacy rule: a destination school learns
+                               the name, the email and the account status, nothing about
+                               where else that teacher works. #}
+                            {% if t.is_member %}
+                            <span class="ml-1 badge bg-teal-50 text-teal-700 border border-teal-200"
+                                  title="Guru yang bergabung dari NPSN lain dan sudah disetujui di sekolah ini">
+                                Anggota NPSN
+                            </span>
+                            {% endif %}
                             {# A head of school or their deputy teaches here as a subject
                                teacher; naming the role keeps the admin from mistaking them
                                for a guru on a roster that now holds both. #}
@@ -287,6 +355,7 @@
                                         @click="$dispatch('open-assign', { who: '{{ t.id }}', label: '{{ t.name|e }}' })"
                                         title="Kelola Penugasan (kelas &amp; mapel)"
                                         class="px-2.5 py-1.5 text-xs font-bold bg-indigo-50 text-indigo-700 rounded-lg hover:bg-indigo-100 transition border border-indigo-200"><i class="fas fa-table-cells"></i></button>
+                                {% if not t.is_member %}
                                 <button @click="editing=!editing" class="px-2.5 py-1.5 text-xs font-bold bg-amber-50 text-amber-700 rounded-lg hover:bg-amber-100 transition border border-amber-200"><i class="fas fa-edit"></i></button>
                                 {# `fetch`, not htmx: the route answers JSON, and a JSON body swapped
                                    into a button is a button-shaped error message. `fetch` is already
@@ -294,6 +363,7 @@
                                 <button type="button"
                                         @click="fetch('/admin-sekolah/teachers/{{ t.id }}/reset-password',{method:'POST'}).then(r=>r.json()).then(d=>{ if(d.password){ generatedPassword=d.password; pwTitle='Password baru'; pwNote='Berikan password ini ke guru.'; showPassword=true } else { alert(d.error || 'Gagal mereset password') } }).catch(()=>alert('Gagal mereset password'))"
                                         class="px-2.5 py-1.5 text-xs font-bold bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition border border-blue-200">Reset PW</button>
+                                {% endif %}
                                 {# An official is deleted from /admin-sekolah/officials, where the
                                    two-role vocabulary and its guards live — the delete route here
                                    is for a `teachers` row. Point the admin there instead. #}
@@ -301,6 +371,16 @@
                                 <a href="/admin-sekolah/officials"
                                    title="Kelola akun pejabat sekolah"
                                    class="px-2.5 py-1.5 text-xs font-bold bg-stone-100 text-stone-600 rounded-lg hover:bg-stone-50 transition border border-stone-200">Pejabat</a>
+                                {% elif t.is_member %}
+                                {# The account is theirs, not this school's: the same person
+                                   teaches at their own school tomorrow. So the action here is
+                                   leaving THIS school — the closure the membership module owns
+                                   — and never `delete`, which would take their identity and
+                                   every other school with it. #}
+                                <button type="button"
+                                        @click="if(confirm('Keluarkan {{ t.name }} dari sekolah ini? Akun dan sekolah asalnya tidak berubah.')) fetch('/admin-sekolah/teachers/{{ t.id }}/remove-member',{method:'POST'}).then(r=>{ if(r.ok) location.reload(); else alert('Gagal mengeluarkan anggota') }).catch(()=>alert('Gagal mengeluarkan anggota'))"
+                                        title="Tutup keanggotaan di sekolah ini (akun tidak dihapus)"
+                                        class="px-2.5 py-1.5 text-xs font-bold bg-amber-50 text-amber-700 rounded-lg hover:bg-amber-100 transition border border-amber-200">Keluarkan</button>
                                 {% else %}
                                 <button type="button"
                                         @click="if(confirm('Hapus guru {{ t.name }}?')) fetch('/admin-sekolah/teachers/{{ t.id }}/delete',{method:'POST'}).then(r=>{ if(r.ok) location.reload(); else alert('Gagal menghapus') }).catch(()=>alert('Gagal menghapus'))"
@@ -310,7 +390,12 @@
                         </td>
                     </tr>
                     {# The edit form on its own row: full width, so the assignment picker
-                       has room to be read and used. #}
+                       has room to be read and used. A **member** gets none: the form
+                       writes this school's `teachers` row and the profile behind it, and
+                       neither is where a membership lives. Their work here is arranged by
+                       the assignment matrix, which the row above offers — so the toggle
+                       that opens this has nothing to open. #}
+                    {% if not t.is_member %}
                     <tr x-show="editing" x-cloak class="bg-stone-50">
                         <td colspan="7" class="px-4 pb-4 text-left">
                             <form method="POST" action="/admin-sekolah/teachers/{{ t.id }}/edit" class="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4 bg-white border border-stone-200 rounded-xl">
@@ -326,6 +411,7 @@
                             </form>
                         </td>
                     </tr>
+                    {% endif %}
                 </tbody>
                 {% else %}
                 <tbody>

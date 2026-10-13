@@ -57,6 +57,35 @@
         </button>
     </div>
 
+    {# Cari nama, urut A–Z / Z–A, dan status aktivasi akun. Dua akun pun menjawab
+       pertanyaan yang sama dengan daftar guru dan murid, dan jawabannya harus ada
+       di halaman yang sedang dibaca — bukan di `/accounts`, satu halaman jauh. #}
+    <div class="card p-4">
+        <form method="GET" action="/admin-sekolah/officials" class="flex flex-wrap items-center gap-2">
+            <div class="relative flex-1 min-w-[12rem]">
+                <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 text-sm"></i>
+                <input type="text" name="q" value="{{ q or '' }}"
+                       :placeholder="t('Cari nama atau email...','Search name or email...')"
+                       class="w-full pl-9 pr-4 py-2.5 border border-stone-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition">
+            </div>
+            <select name="dir" class="px-3 py-2.5 border border-stone-200 rounded-xl text-sm font-medium bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition">
+                <option value="asc" {% if dir == 'asc' %}selected{% endif %} x-text="t('A → Z (menaik)','A → Z (ascending)')"></option>
+                <option value="desc" {% if dir == 'desc' %}selected{% endif %} x-text="t('Z → A (menurun)','Z → A (descending)')"></option>
+            </select>
+            <select name="activation" class="px-3 py-2.5 border border-stone-200 rounded-xl text-sm font-medium bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition">
+                <option value="" {% if not activation %}selected{% endif %} x-text="t('Semua status akun','All account states')"></option>
+                <option value="activated" {% if activation == 'activated' %}selected{% endif %} x-text="t('Sudah aktivasi','Activated')"></option>
+                <option value="pending" {% if activation == 'pending' %}selected{% endif %} x-text="t('Belum aktivasi','Not activated')"></option>
+            </select>
+            <button type="submit" class="px-4 py-2.5 bg-indigo-600 text-white rounded-xl text-sm font-bold hover:bg-indigo-700 transition">
+                <i class="fas fa-filter mr-1"></i><span x-text="t('Terapkan','Apply')"></span>
+            </button>
+            {% if q or activation or dir == 'desc' %}
+            <a href="/admin-sekolah/officials" class="px-3 py-2.5 text-stone-400 hover:text-stone-600" title="Reset filter"><i class="fas fa-times"></i></a>
+            {% endif %}
+        </form>
+    </div>
+
     <div x-show="showForm" x-collapse class="card p-6 border border-indigo-200">
         <form method="POST" action="/admin-sekolah/officials/create" class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
@@ -103,6 +132,38 @@
                     x-text="t('Unduh kartu login','Download login cards')"></button>
         </form>
     </div>
+
+    {# Siapa yang sudah aktivasi dan siapa yang belum, digambar: faktanya sama dengan
+       lencana di kolom email tiap baris, dan angkanya dihitung server dari baris yang
+       halaman ini sudah baca — jadi gambarnya tidak bisa menyimpang dari tabelnya. #}
+    <div class="card p-4">
+        <div class="flex items-center justify-between gap-4">
+            <h3 class="font-extrabold text-stone-800 text-sm" x-text="t('Status Aktivasi Akun','Account Activation')"></h3>
+            <span class="text-xs font-bold text-stone-400">{{ activation_chart.activated + activation_chart.pending }} <span x-text="t('akun','accounts')"></span></span>
+        </div>
+        <div class="mt-3 h-56"><canvas id="sgActivation"></canvas></div>
+    </div>
+    <script>
+    document.addEventListener('DOMContentLoaded', function () {
+        var el = document.getElementById('sgActivation');
+        if (!el || !window.Chart) return;
+        var counts = {{ activation_chart|tojson }};
+        // The two colours are named apart rather than written as a two-string array,
+        // which the i18n sweep would read as a bilingual pair of copy.
+        var activatedColour = '#10b981';
+        var pendingColour = '#f59e0b';
+        new Chart(el, {
+            type: 'doughnut',
+            data: {
+                labels: [window.sgT('Sudah aktivasi','Activated'), window.sgT('Belum aktivasi','Not activated')],
+                datasets: [{ data: [counts.activated, counts.pending],
+                             backgroundColor: [activatedColour, pendingColour], borderWidth: 0 }],
+            },
+            options: { responsive: true, maintainAspectRatio: false, cutout: '58%',
+                       plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, boxHeight: 10 } } } },
+        });
+    });
+    </script>
 
     <div class="card overflow-x-auto">
         {% if officials %}

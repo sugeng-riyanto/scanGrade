@@ -96,11 +96,44 @@
         </form>
     </div>
 
+    {# The same fact as the "Belum aktivasi" badge, drawn: who among the roster
+       these filters selected still holds the password the school issued. The
+       payload is counted server-side (`activation_chart`) from the rows the page
+       already read, so the picture cannot disagree with the table below it. #}
+    <div class="card p-4">
+        <div class="flex items-center justify-between gap-4">
+            <h3 class="font-extrabold text-stone-800 text-sm" x-text="t('Status Aktivasi Akun','Account Activation')"></h3>
+            <span class="text-xs font-bold text-stone-400">{{ activation_chart.activated + activation_chart.pending }} <span x-text="t('akun','accounts')"></span></span>
+        </div>
+        <div class="mt-3 h-56"><canvas id="sgActivation"></canvas></div>
+    </div>
+    <script>
+    document.addEventListener('DOMContentLoaded', function () {
+        var el = document.getElementById('sgActivation');
+        if (!el || !window.Chart) return;
+        var counts = {{ activation_chart|tojson }};
+        // The two colours are named apart rather than written as a two-string array:
+        // a literal array of two strings reads to the i18n sweep as a bilingual pair.
+        var activatedColour = '#10b981';
+        var pendingColour = '#f59e0b';
+        new Chart(el, {
+            type: 'doughnut',
+            data: {
+                labels: [window.sgT('Sudah aktivasi','Activated'), window.sgT('Belum aktivasi','Not activated')],
+                datasets: [{ data: [counts.activated, counts.pending],
+                             backgroundColor: [activatedColour, pendingColour], borderWidth: 0 }],
+            },
+            options: { responsive: true, maintainAspectRatio: false, cutout: '58%',
+                       plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, boxHeight: 10 } } } },
+        });
+    });
+    </script>
+
     <div class="card p-4">
         <form method="GET" action="/admin-sekolah/students" class="flex flex-wrap gap-2">
             <div class="relative flex-1 min-w-[12rem]">
                 <i class="fas fa-search absolute left-4 top-1/2 -translate-y-1/2 text-stone-400"></i>
-                <input type="text" name="q" value="{{ q }}" :placeholder="t('Cari NISN...','Search NISN...')" class="w-full pl-10 pr-4 py-3 border border-stone-200 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-stone-700 font-medium transition">
+                <input type="text" name="q" value="{{ q }}" :placeholder="t('Cari nama atau NISN...','Search name or NISN...')" class="w-full pl-10 pr-4 py-3 border border-stone-200 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-stone-700 font-medium transition">
             </div>
             <select name="class_id" class="px-3 py-3 border border-stone-200 rounded-xl text-sm font-medium bg-white focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition">
                 <option value="" x-text="t('Semua Kelas','All Classes')"></option>
@@ -117,6 +150,15 @@
                 <option value="asc" {% if dir == 'asc' %}selected{% endif %} x-text="t('A → Z (menaik)','A → Z (ascending)')"></option>
                 <option value="desc" {% if dir == 'desc' %}selected{% endif %} x-text="t('Z → A (menurun)','Z → A (descending)')"></option>
             </select>
+            {# Who has activated their account and who has not. One choice, three
+               states: both, only activated, only not-yet — because a school asks
+               both questions while looking at this roster, and the answer used to
+               live on `/accounts`, a page away from the names it is about. #}
+            <select name="activation" class="px-3 py-3 border border-stone-200 rounded-xl text-sm font-medium bg-white focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition">
+                <option value="" {% if not activation %}selected{% endif %} x-text="t('Semua status akun','All account states')"></option>
+                <option value="activated" {% if activation == 'activated' %}selected{% endif %} x-text="t('Sudah aktivasi','Activated')"></option>
+                <option value="pending" {% if activation == 'pending' %}selected{% endif %} x-text="t('Belum aktivasi','Not activated')"></option>
+            </select>
             <select name="per_page" class="px-3 py-3 border border-stone-200 rounded-xl text-sm font-medium bg-white focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition">
                 <option value="20" {% if per_page == 20 %}selected{% endif %}>20</option>
                 <option value="50" {% if per_page == 50 %}selected{% endif %}>50</option>
@@ -126,7 +168,7 @@
             <button type="submit" class="px-5 py-3 bg-orange-500 text-white rounded-xl font-bold hover:bg-orange-600 transition">
                 <i class="fas fa-filter"></i>
             </button>
-            {% if q or class_id %}
+            {% if q or class_id or activation %}
             <a href="/admin-sekolah/students" class="px-5 py-3 border border-stone-200 text-stone-500 rounded-xl font-bold hover:bg-stone-50 transition">
                 <i class="fas fa-times"></i>
             </a>

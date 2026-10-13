@@ -785,9 +785,15 @@ def _teachers_by_id(supabase, ids) -> dict:
     wanted = [str(i) for i in dict.fromkeys(str(i) for i in (ids or []) if i)]
     if not wanted:
         return {}
+    # `must_change_password` is read here with `status`, and it is the same class of
+    # fact the queue already reports: whether this account still uses the password
+    # its own school handed it. It is the *account's* state, not a membership's, and
+    # the destination school needs it to answer "who here has not activated yet"
+    # about a teacher it accepted — the question the roster's activation filter and
+    # pie ask. Where else that teacher works stays unread, as before.
     try:
         rows = (supabase.table("profiles")
-                .select("id,full_name,email,status").in_("id", wanted)
+                .select("id,full_name,email,status,must_change_password").in_("id", wanted)
                 .execute().data or [])
     except Exception:
         logger.debug("teacher read failed; the queue keeps its rows", exc_info=True)
@@ -844,6 +850,59 @@ def school_members(supabase, school_id, role) -> dict:
             "closed": _text(row.get("status")) == CLOSED_STATUS,
         })
     return {"ok": True, "members": out}
+
+
+def active_members(supabase, school_id) -> list[dict]:
+    """This school's ACTIVE members, as the roster needs them.
+
+    The third read of the membership table, and it exists because two other readers
+    answer different questions: `school_members` is the *display* read behind
+    `/admin-sekolah/membership` (all statuses, so a closed row can be reopened), and
+    `is_active_member` answers about one person at a time. This one answers "who
+    works here", for the page a school actually manages its teachers on —
+    `/admin-sekolah/teachers` — which until now read the `teachers` table alone and
+    therefore did not know a teacher it had accepted existed.
+
+    Deliberately narrow, and the narrowness is the privacy rule from migration 063:
+    only what this school may know about a teacher who joined from elsewhere — name,
+    email, role, and when they joined. There is no column here naming another
+    membership, because one that is not read cannot leak.
+
+    A failed read returns `[]`, which fails **closed** for the *page* (the roster
+    simply does not grow) — this is never an access decision, unlike
+    `is_active_member`, which fails closed for access.
+    """
+    school = _text(school_id)
+    if not school:
+        return []
+    try:
+        rows = (supabase.table(MEMBERSHIPS_TABLE)
+                .select("user_id,school_role,status,joined_at")
+                .eq("school_id", school).eq("status", STATUS_ACTIVE)
+                .execute().data or [])
+    except Exception:
+        logger.debug("member read failed; the roster does not grow", exc_info=True)
+        return []
+    people = _teachers_by_id(supabase, [row.get("user_id") for row in rows])
+    out = []
+    for row in rows:
+        uid = _text(row.get("user_id"))
+        if not uid:
+            continue
+        person = people.get(uid) or {}
+        out.append({
+            "user_id": uid,
+            "name": _text(person.get("full_name")),
+            "email": _text(person.get("email")),
+            "school_role": _text(row.get("school_role")) or "guru",
+            "joined_at": row.get("joined_at"),
+            # The flag is the account's own (`profiles.must_change_password`), read
+            # from the row the name came from; a profile that cannot be read leaves
+            # it missing, which the caller reports as "cannot be read" rather than
+            # counting a teacher as activated on no evidence.
+            "must_change_password": person.get("must_change_password"),
+        })
+    return out
 
 
 def my_schools(supabase, user_id) -> list[dict]:

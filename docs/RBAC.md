@@ -535,3 +535,41 @@ dibuat setelah migrasi 044 memang tidak punya baris keanggotaan.
   dan SHA-256 teks yang ditampilkan. Halaman mencetak teks itu dari service yang sama yang
   menghitung hash-nya, jadi bukti yang tersimpan benar-benar tentang teks yang dibaca guru;
   versi/hash yang tidak cocok ditolak (`consent_required`) sebelum baris apa pun ditulis.
+
+### Sekolah tujuan: siapa yang dianggap guru di sana
+
+Persetujuan membuat seseorang **anggota**, dan itu dulu berhenti di situ: barisnya ada di
+`teacher_school_membership`, sementara `/admin-sekolah/teachers` membaca tabel `teachers`
+saja dan `teacher_assignments.teacher_in_school` membandingkan `profiles.school_id` — kolom
+yang justru tidak lagi jadi satu-satunya jawaban sejak migrasi 044. Akibatnya laporan
+dari produksi: guru disetujui, lalu tidak muncul di daftar guru sekolah itu, tidak bisa
+diberi kelas (404 dari matriks penugasan), dan tidak bisa direset dari daftar itu.
+
+Satu predikat sekarang menjawab "apakah orang ini guru di sini": `teacher_in_school` —
+baris `profiles` yang menyebut sekolah ini, **atau** keanggotaan `active` di sekolah ini.
+Dibaca segar tiap kali (penutupan harus terlihat pada request berikutnya) dan **gagal
+tertutup**: pembacaan yang gagal menjawab *tidak*. Guru anggota muncul di daftar dengan
+badge yang menyebut keanggotaan — dan tidak pernah menyebut sekolah lain — plus tombol
+matriks penugasan (pekerjaannya di sini adalah kelas dan mapel) dan tombol **Keluarkan**
+yang menutup keanggotaan (`school_membership.close`, lengkap dengan siapa dan kapan)
+tanpa menghapus akun, profil, atau keanggotaan lain. Anggota yang sudah ditutup hilang
+dari daftar pada pembacaan berikutnya, dan daftar itu tidak merender formulir edit untuk
+mereka: formulir itu menulis baris `teachers` milik sekolah ini, bukan keanggotaan.
+
+Batas yang disengaja antara **keanggotaan** dan **akun**:
+
+| Pintu | Pertanyaannya | Guru anggota |
+|---|---|---|
+| Daftar guru, matriks penugasan | "apakah ia mengajar di sini?" | boleh |
+| Edit profil & `employee_id` | "apakah baris `teachers` ini milik sekolah ini?" | tidak (404) — catatan kepegawaiannya milik sekolah asalnya |
+| Hapus akun | "apakah akun ini milik sekolah ini?" | tidak (404) |
+| Reset password | "apakah kredensial ini milik sekolah ini?" | **tidak** (404) — password baru dari sekolah mana pun tempat ia mengajar akan mengunci dia dari semua sekolah itu |
+| Pilih akun massal (select-all) | "boleh dihapus/direset borongan?" | tidak pernah ikut terpilih |
+
+Sekolah aktifnya dipilih guru sendiri lewat `POST /teacher/membership/switch`
+(`role_required` tiga peran lintas sekolah). Rute itu menolak sekolah yang bukan
+keanggotaan **active** milik pemanggil — formulir basi tidak bisa masuk kembali ke
+keanggotaan yang sudah ditutup — dan memperlakukan `home` sebagai *hapus pilihan*, bukan
+sebagai id sekolah yang bisa dikarang klien. Setelah dipilih, resolusi per-request di
+`app/utils/auth.py` membuat kelas, murid, bobot nilai, KKM dan ujian mengikuti NPSN itu;
+penutupan keanggotaan mencabutnya pada request berikutnya, bukan setelah cache kedaluwarsa.

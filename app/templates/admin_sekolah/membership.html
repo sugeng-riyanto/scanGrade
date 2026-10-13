@@ -53,6 +53,30 @@
            x-text="t('Permintaan bergabung dari guru sekolah lain, dan keanggotaan yang sudah tercatat di sekolah ini.','Join requests from teachers at other schools, and the memberships already recorded at this school.')"></p>
     </div>
 
+    {# Satu kotak cari untuk kedua daftar di halaman ini, karena keduanya dibaca
+       dengan nama yang sama: siapa yang menunggu keputusan, dan siapa yang sudah
+       menjadi anggota. Urutannya A–Z / Z–A pada daftar anggota. #}
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
+        <form method="GET" action="/admin-sekolah/membership" class="flex flex-wrap items-center gap-2">
+            <div class="relative flex-1 min-w-[12rem]">
+                <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
+                <input type="text" name="q" value="{{ q or '' }}"
+                       :placeholder="t('Cari nama atau email...','Search name or email...')"
+                       class="w-full pl-9 pr-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition">
+            </div>
+            <select name="dir" class="px-3 py-2.5 border border-slate-200 rounded-xl text-sm font-medium bg-white focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition">
+                <option value="asc" {% if dir == 'asc' %}selected{% endif %} x-text="t('A → Z (menaik)','A → Z (ascending)')"></option>
+                <option value="desc" {% if dir == 'desc' %}selected{% endif %} x-text="t('Z → A (menurun)','Z → A (descending)')"></option>
+            </select>
+            <button type="submit" class="px-4 py-2.5 bg-primary-600 text-white rounded-xl text-sm font-bold hover:bg-primary-700 transition">
+                <i class="fas fa-filter mr-1"></i><span x-text="t('Terapkan','Apply')"></span>
+            </button>
+            {% if q or dir == 'desc' %}
+            <a href="/admin-sekolah/membership" class="px-3 py-2.5 text-slate-400 hover:text-slate-600" title="Reset filter"><i class="fas fa-times"></i></a>
+            {% endif %}
+        </form>
+    </div>
+
     <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
         <div class="px-4 py-3 border-b border-slate-100">
             <h3 class="text-sm font-extrabold text-slate-700" x-text="t('Menunggu keputusan','Awaiting a decision')"></h3>
@@ -104,9 +128,14 @@
                 </tbody>
             </table>
         </div>
+        {# Dua kalimat yang berbeda untuk dua keadaan yang berbeda: tidak ada
+           permintaan sama sekali, atau ada tapi tersaring oleh kotak cari. Satu
+           kalimat untuk keduanya akan memberi tahu sekolah bahwa tidak ada yang
+           menunggu padahal satu permintaan baru saja disembunyikan filter —
+           halaman kosong yang berbohong. #}
         {% if not join_requests %}
         <p class="px-4 py-6 text-sm text-slate-500 font-medium text-center"
-           x-text="t('Tidak ada permintaan yang menunggu.','No request is waiting.')"></p>
+           x-text="{% if q %}t('Tidak ada permintaan yang cocok dengan pencarian itu.','No request matches that search.'){% else %}t('Tidak ada permintaan yang menunggu.','No request is waiting.'){% endif %}"></p>
         {% endif %}
     </div>
 
@@ -172,7 +201,7 @@
         </div>
         {% if not members %}
         <p class="px-4 py-6 text-sm text-slate-500 font-medium text-center"
-           x-text="t('Belum ada keanggotaan tercatat di sekolah ini.','No membership is recorded at this school yet.')"></p>
+           x-text="{% if q %}t('Tidak ada anggota yang cocok dengan pencarian itu.','No member matches that search.'){% else %}t('Belum ada keanggotaan tercatat di sekolah ini.','No membership is recorded at this school yet.'){% endif %}"></p>
         {% endif %}
     </div>
 </div>
