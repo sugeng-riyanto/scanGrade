@@ -47,8 +47,30 @@
         <h1 class="text-2xl font-extrabold text-surface-900"
             x-text="t('Ujian ini hanya bisa dibuka lewat Safe Exam Browser','This exam can only be opened in Safe Exam Browser')"></h1>
         <p class="text-surface-500"
-           x-text="t('Buka berkas .seb dari sekolah Anda, bukan tautan ini. Bila Anda sudah membukanya dari SEB dan tetap melihat halaman ini, panggil pengawas.','Open the .seb file from your school, not this link. If you already opened it in SEB and still see this page, call your invigilator.')"></p>
+           x-text="t('Buka berkas .seb dari sekolah Anda, bukan tautan ini. Bila Anda sudah membukanya di SEB lalu kembali ke halaman ini, tekan Periksa lagi. Bila tetap tidak bisa, panggil pengawas.','Open the .seb file from your school, not this link. If you opened it in SEB and came back to this page, press Check again. If it still does not work, call your invigilator.')"></p>
         <div class="pt-2 flex flex-wrap gap-3 justify-center">
+            {# The retry a returning pupil needs.
+
+               Two of the three ends of this handshake are *asks that can succeed on a
+               second try*: a client whose `configKey` is not populated yet (SEB 3.0
+               populates it inside `updateKeys`, and this page asks at `x-init`), and a
+               pupil who left for SEB and came back to this tab. Both used to be told
+               to call an invigilator — correct advice and a dead end, because the one
+               action that unsticks them is asking the client again, and the only way
+               to do that was to reload or to find the exam link again.
+
+               It re-runs the check **in this document**: no navigation, no reload, and
+               the pupil keeps their place. A button rather than a timer on purpose —
+               an automatic re-ask on every focus change would re-post claims and
+               re-report refusals for a pupil who is merely reading the page, and the
+               report the teacher's panel counts is one per visit.
+
+               `h-11`, like every other control on this row: a thumb's target. #}
+            <button type="button" @click="ask()"
+                    class="h-11 px-4 rounded-xl bg-primary-600 hover:bg-primary-700 text-white transition text-sm font-bold inline-flex items-center gap-2">
+                <i class="fas fa-rotate-right"></i>
+                <span x-text="t('Periksa lagi','Check again')"></span>
+            </button>
             {# The pupil's own file, offered at the moment the page tells them to open
                one. Both refusals this panel shows are fixed by that file — an ordinary
                browser has none, and a stale one carries a key this exam no longer
@@ -105,6 +127,9 @@
     function sebClaim() {
         return {
             state: 'checking',
+            //: The reasons this visit has already told the server about. See
+            //: `report()`: one visit is one row, however many times the pupil asks.
+            reported: {},
             claimUrl: {{ url_for('seb.js_claim', exam_id=exam.id)|tojson }},
             refusalUrl: {{ url_for('seb.refusal_report', exam_id=exam.id)|tojson }},
             examUrl: {{ exam_url|tojson }},
@@ -148,7 +173,19 @@
             // Fire-and-forget on purpose: the sentence on screen is decided by
             // `state`, so the pupil does not wait on the network to be told what to
             // do, and a report that fails costs a row rather than a page.
+            //
+            // **Once per reason per visit, and that guard is load-bearing now that
+            // the page has a retry.** A pupil who presses "Check again" five times in
+            // an ordinary browser finds the same absent API five times, and five rows
+            // would make the teacher's table say five pupils were turned away; the row
+            // answers "this pupil was turned away, and why", and the retry exists so
+            // they can get *in*, not so they can file more records. The guard is per
+            // reason rather than one-shot: a client that had no API at all and then
+            // answers with an empty key is a *different* finding (`no_key`), and
+            // dropping it would hide the one refusal a second look actually diagnosed.
             report(reason) {
+                if (this.reported[reason]) { return; }
+                this.reported[reason] = true;
                 var meta = document.querySelector('meta[name="csrf-token"]');
                 fetch(this.refusalUrl, {
                     method: 'POST',

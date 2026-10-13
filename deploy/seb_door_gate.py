@@ -59,6 +59,21 @@ toggle reading ON and every WKWebView client locked out, with no symptom on the 
   measured** rather than passed: exit 0 is a claim about both transports and both
   halves of the client, and a gate that says otherwise is the silent symptom this
   whole file exists to remove.
+* **C7 — the retry the refusal panel offers, pressed.** The refusal panel's "Check
+  again" is the one thing on this page a pupil can *act* with, and it exists because
+  two of the three ends of this handshake are asks that can succeed on a second try:
+  SEB populates `security.configKey` inside `updateKeys` while the page has already
+  asked at `x-init`, and a pupil who left for the file and came back is looking at an
+  answer that is now stale. So the gate hands the page a client whose own API answers
+  with nothing (`CLIENT_STUB` — an empty `configKey`, which is the *client's* state,
+  never the page's) and presses the control with a real mouse event at the centre of
+  its own box. Three facts are then read, each a different defect with a different
+  remedy: **dead** — the press put no request on the wire at all, so the pupil whose
+  key is now available is never admitted; **unfiled** — the press asked but nothing
+  reached the record the teacher's panel counts (no report, a route that answered
+  non-200, or the wrong reason); and **navigates away** — the press loaded a document
+  instead of re-asking in the page the pupil is on. One press is one act, so its
+  verdict is one sentence: the first of the three that went wrong.
 
 Why this runs over HTTP against the served app, and not in a test client
 -----------------------------------------------------------------------
@@ -97,8 +112,9 @@ Exit codes
   3  **not enforced**: a plain browser opened a gated paper, a matching header was
      refused, a foreign header opened it, the handshake road is missing, a
      JavaScript claim that must be refused was not, a refused claim still opened the
-     paper, or an honest claim was refused and the paper stayed shut. A property of
-     the release: the caller refuses it.
+     paper, an honest claim was refused and the paper stayed shut, or the refusal
+     panel's retry is dead, filed nothing or navigates away. A property of the
+     release: the caller refuses it.
   2  could not measure — no credentials, no such pupil, no fixture paper to clone, the
      control did not open, the box cannot reach the app, **this release carries no
      SEB door at all** (the paper opened and the claim route does not exist), or the
@@ -170,6 +186,14 @@ REFUSAL_SUFFIX = CLAIM_SUFFIX + "/refused"
 #: Asserted against the page's own script and against the record module.
 NO_CLIENT_REASON = "no_client"
 
+#: The path every request this page's own script makes lives under, taken from
+#: `PAPER_PATH` rather than spelled again. Requests under it are the press's footprint:
+#: a favicon the browser asks for lazily, or an asset that arrives late, is the
+#: browser's traffic and not the control's, and counting one would make a dead retry
+#: read as a live one. A *document* load counts wherever it goes — that is the press
+#: leaving, and the page it leaves for need not be under this exam at all.
+EXAM_PATH = PAPER_PATH.split("{")[0]
+
 #: The marker this run puts in the browser's `User-Agent`. It is how the row that
 #: comes back is known to be *this* browser's page, and not something else that
 #: happened to report a refusal for the same paper — the one property a count of
@@ -186,6 +210,40 @@ POLL_EVERY = 0.5
 #: The two states the handshake page's own script settles into. `checking` is where it
 #: starts and is not an answer: a page still there has not finished asking the client.
 SETTLED_STATES = ("refused", "error")
+
+#: The panel whose retry the gate presses, as the page's own `x-show` spells it. The
+#: control is addressed *through its panel* rather than by its label, and that is not
+#: tidiness: the label is a `t()` pair, so it is two strings in two languages, and a
+#: retry found by one of them would press nothing for a reader who had switched the
+#: toggle — the one pupil population this page is bilingual for.
+RETRY_PANEL = "refused"
+
+#: The client the gate hands the page before it presses, installed in the page's own
+#: window the way a returning tab has one. `configKey` is **empty** on purpose: the
+#: press then ends in `no_key`, which is a *second, different* answer rather than the
+#: `no_client` the first load already filed — so the press has something to file and
+#: something to be judged by, and the reading exercises the page's own rule that a
+#: repeat reason is not re-filed while a new one is. Nothing here touches the page's
+#: state: if the template never lays the refusal panel out, or never wires its button,
+#: that is the finding, not this file's problem to paper over.
+#: It also *counts its own asks*, and that counter is what tells a dead control
+#: apart from one that asked and filed nothing: the page's "is this client useable"
+#: step calls `updateKeys`, so "the press did not even ask" is a fact only the client
+#: can see — and with the page setting its state synchronously, "did the ask happen"
+#: is invisible to every other reading. The stub is the client here, so the count is
+#: the client's own observation, not an inspection of the page's internals.
+CLIENT_STUB = ('window.__sgAsks = 0; '
+               'window.SafeExamBrowser = {security: {configKey: "", '
+               'updateKeys: function (cb) { window.__sgAsks += 1; cb(); }}};')
+
+#: The client's own counter, read back after the press.
+CLIENT_ASK_COUNTER = "window.__sgAsks || 0"
+
+#: The reason the press must leave on the wire — the page's own second answer, for a
+#: client that answers with an empty key. Asserted against the page's script and the
+#: record module, like `NO_CLIENT_REASON`: the verdict reads this value, so a reworded
+#: reason has to be a red test rather than a reading that silently never matches.
+NO_KEY_REASON = "no_key"
 
 #: The throwaway row's title. It *is* the sweep's key, so a run that is killed leaves
 #: something the next run deletes rather than something a school has to find.
@@ -248,6 +306,22 @@ class Seen:
     client_rows_foreign: int = 0         # ...marked rows that are not this pupil's
     client_relocked: bool = False        # the paper still sends that browser to the handshake
     client_record_missing: bool = False  # this database has no refusal table yet
+    # ── C7: the refusal panel's retry, pressed with a real mouse event ───────
+    #
+    # The three judgements are *derived* on the reading (`ClientReading.retry_dead`
+    # and its two neighbours) and copied here, the way `relocked` is: one place
+    # decides what "dead" means, and this table only decides how it reads.
+    retry_control: bool = False          # the panel's control was found, laid out, pressed
+    retry_asks: int = 0                  # times the press made the page ask its client
+    retry_requests: int = 0              # requests the press put on the wire, of any kind
+    retry_posts: int = 0                 # ...of which reports to the refusal route
+    retry_reason: str = ""               # the reason that report carried
+    retry_status: int = 0                # what the refusal route answered it
+    retry_navigations: int = 0           # documents the press loaded
+    retry_landed: str = ""               # where the browser was when it settled
+    retry_dead: bool = False             # the press asked nothing at all
+    retry_unfiled: bool = False          # ...or asked and left no record
+    retry_away: bool = False             # ...or left the page instead of re-asking
 
 
 def _client_verdict(seen: Seen, lines: list[str]) -> None:
@@ -380,6 +454,63 @@ def _client_verdict(seen: Seen, lines: list[str]) -> None:
             "seb door: FAILED — a browser that reported a refusal was then admitted "
             "to the paper: the report opened something, which is exactly what a "
             "refusal must never do."
+        )
+
+    # ── C7: the retry the refusal panel offers, pressed ───────────────────────
+    #
+    # One press, three facts, and a chain rather than a list: a single act that went
+    # wrong is one defect with one remedy, and printing "dead", "unfiled" and "left
+    # the page" for one broken control would send the reader looking for three. The
+    # order is the order the pupil's own experience has: a control that does nothing,
+    # then one that leaves, then one that answers without a record.
+    if not seen.retry_control:
+        lines.append(
+            "seb door: FAILED — the handshake page's refusal panel offers no retry "
+            "the gate could press: either the control is not in the panel the page "
+            "lays out for a refused client, or it is not visible in it. The two "
+            "commonest refusals in this school — SEB 3.0 populating `configKey` after "
+            "the page has already asked, and a pupil returning from the file — are "
+            "asks that succeed on a second try, and the only thing that takes them is "
+            "this control: without it a pupil is told to call an invigilator for "
+            "something one press would have fixed."
+        )
+    elif seen.retry_dead:
+        lines.append(
+            f"seb door: FAILED — the retry control is dead: pressing it neither ran "
+            f"the page's ask (the client was consulted {seen.retry_asks} time(s)) nor "
+            f"put a request on the wire, in {CLIENT_BUDGET:.0f}s. A pupil whose key is "
+            f"available now stays on the refusal panel however many times they press."
+        )
+    elif seen.retry_away:
+        lines.append(
+            f"seb door: FAILED — the retry control navigates away: pressing it loaded "
+            f"{seen.retry_navigations} document(s) and left the pupil on "
+            f"{seen.retry_landed or '(nowhere)'}. The retry the panel offers is an ask "
+            f"*in* the page the pupil is on — one that leaves has made a different "
+            f"journey, and the ask it should have made never happens."
+        )
+    elif seen.retry_unfiled:
+        # The ask comes first, because it is the cause of whatever is missing after
+        # it: a press that never ran the page's ask cannot have produced a report, and
+        # naming the missing report would send the reader looking for the record when
+        # the defect is the control.
+        if seen.retry_asks < 1:
+            detail = (f"the page never asked its client at all, so there was no second "
+                      f"answer to file")
+        elif seen.retry_posts != 1:
+            detail = (f"it sent {seen.retry_posts} report(s) to {REFUSAL_SUFFIX} where "
+                      f"exactly one answer must arrive")
+        elif seen.retry_status != 200:
+            detail = (f"the refusal route answered HTTP {seen.retry_status} to the "
+                      f"report it did send, so nothing was recorded")
+        else:
+            detail = (f"the report it sent carried {seen.retry_reason!r} where a "
+                      f"client answering with an empty key is {NO_KEY_REASON!r}, so "
+                      f"the second finding is recorded as the first one")
+        lines.append(
+            f"seb door: FAILED — the retry filed nothing: {detail}. The row is what "
+            f"the teacher's panel counts, and a press that leaves none means the "
+            f"second answer a pupil gave is invisible to the room."
         )
 
 
@@ -725,6 +856,20 @@ class ClientReading:
     claims: int = 0                  # POSTs to the claim route (must be none)
     status: int = 0                  # what the refusal route answered
     landed: str = ""                 # where the paper sent that browser afterwards
+    #: C7: the refusal panel's retry, pressed with a real mouse event at its own
+    #: centre. The control is looked for *in the panel the page lays out for a refused
+    #: client* and pressed there, and the facts below are the press's own footprint:
+    #: what it put on the wire, what the route answered, and whether it stayed in this
+    #: document. Nothing is read out of the page's state to judge it, because the
+    #: whole point of the press is what a pupil cannot see.
+    retry_control: bool = False      # the control was found, laid out and pressed
+    retry_asks: int = 0              # times the press made the page ask its client
+    retry_requests: int = 0          # requests the press put on the wire, of any kind
+    retry_posts: int = 0             # ...of which reports to the refusal route
+    retry_reason: str = ""           # the reason that report carried
+    retry_status: int = 0            # what the refusal route answered it
+    retry_navigations: int = 0       # documents the press loaded
+    retry_landed: str = ""           # where the browser was when the press settled
 
     @property
     def relocked(self) -> bool:
@@ -734,6 +879,60 @@ class ClientReading:
         parked on `/seb-claim/refused` is not a browser that was let into the paper.
         """
         return self.landed.endswith(CLAIM_SUFFIX)
+
+    # ── what a press that went wrong is, said once ────────────────────────────
+    #
+    # Both verdicts over this reading — the box's (`_client_verdict`) and the CI
+    # gate's (`deploy/browser_gate.py`, which judges the same visit without a database)
+    # — read these three, so the *meaning* of a dead, unfiled or wandering retry lives
+    # in one place and only the sentences live in two. Each is defined for a press that
+    # happened: a control the gate could not find or could not lay a finger on is its
+    # own finding (`retry_control`), not a dead one.
+
+    @property
+    def retry_dead(self) -> bool:
+        """The press did nothing at all: it neither asked the client nor reached the wire.
+
+        Both halves are needed. A control whose handler was renamed never runs the
+        page's ask *and* never posts, so it is dead; a control that asks and files
+        nothing is a different defect (`retry_unfiled`, below), and one that leaves the
+        page posts a document without asking — which is `retry_away`. Reading only the
+        wire would call the second of those dead, which is the sentence that sends its
+        reader to the wrong file.
+        """
+        return (bool(self.retry_control) and not self.retry_asks
+                and not self.retry_requests)
+
+    @property
+    def retry_away(self) -> bool:
+        """The press left this document instead of re-asking in it.
+
+        A navigation is counted as well as the landing, and that is not double
+        counting: a control that navigates to the paper and is bounced back by the
+        door lands on the handshake page again, so a path-only check would call a
+        journey that never made its ask "the pupil stayed put".
+        """
+        if not self.retry_control:
+            return False
+        if self.retry_navigations > 0:
+            return True
+        landing = str(self.retry_landed or "")
+        # A landing nobody could read is not a journey: the press is judged by what was
+        # seen, and "could not tell where it went" is not "it went somewhere".
+        return bool(landing) and not landing.endswith(CLAIM_SUFFIX)
+
+    @property
+    def retry_unfiled(self) -> bool:
+        """The press asked and left no record the teacher's panel is built from.
+
+        Only the *filing* half is judged here, because "dead" and "away" already
+        answer for the other two: a press that asked the client nothing, and one that
+        left the page, are different findings with different remedies.
+        """
+        if not self.retry_control or self.retry_dead or self.retry_away:
+            return False
+        return (self.retry_asks < 1 or self.retry_posts != 1
+                or self.retry_status != 200 or self.retry_reason != NO_KEY_REASON)
 
 
 def client_expression() -> str:
@@ -765,6 +964,11 @@ def client_expression() -> str:
     `seb` is the gate's own honesty check about its population: an empty
     `SafeExamBrowser` object would mean this is not the client the `no_client` branch
     exists for, and the reading would be about something else.
+
+    `retry` is where the refusal panel's own control is, in viewport coordinates, or
+    `null` when the panel carries none the gate can press — the reading C7 is built
+    on, and a box rather than a boolean because the press has to be a real one, at the
+    centre of the control the pupil would touch.
     """
     return (
         "(() => {"
@@ -782,17 +986,37 @@ def client_expression() -> str:
         "    }"
         "  }"
         "  const panels = {};"
+        "  let retry = null;"
         "  for (const el of (owner ? owner.querySelectorAll('[x-show]') : [])) {"
         "    const attr = el.getAttribute('x-show') || '';"
         "    const shown = getComputedStyle(el).display !== 'none';"
         "    for (const name of names) {"
-        "      if (attr.indexOf(name) !== -1) panels[name] = shown;"
+        "      if (attr.indexOf(name) !== -1) {"
+        "        panels[name] = shown;"
+        # The retry is *inside* its panel, and that containment is the address: the
+        # page carries two buttons wired to the same handler (the refusal panel's
+        # "Check again" and the error panel's "Try again"), so a page-wide search for
+        # a pressable button would press whichever came first in the document — which
+        # is a measurement of a different control than the one a refused pupil has.
+        # Only a control that is laid out and has a box is offered, because a press at
+        # the centre of a `display: none` element is a press on whatever is behind it.
+        f"        if (name === {json.dumps(RETRY_PANEL)} && shown) {{"
+        "          const button = el.querySelector('button');"
+        "          if (button && getComputedStyle(button).display !== 'none') {"
+        "            const box = button.getBoundingClientRect();"
+        "            if (box.width > 0 && box.height > 0) {"
+        "              retry = {x: box.left + box.width / 2, y: box.top + box.height / 2};"
+        "            }"
+        "          }"
+        "        }"
+        "      }"
         "    }"
         "  }"
         "  return {"
         "    path: location.pathname,"
         "    state: state,"
         "    panels: panels,"
+        "    retry: retry,"
         # Alpine's own witness that it has been through this element: it removes
         # `x-cloak` from what it initializes, and the card carries `x-cloak` until it
         # does. `owner` is the stronger of the two (a scope with `state` cannot exist
@@ -841,7 +1065,8 @@ def settled(value: dict, posts: int, *, want_reports: int = 1) -> bool:
     return posts >= want_reports
 
 
-def _client_from(value: dict, landed: str, events: list, first_load: int) -> ClientReading:
+def _client_from(value: dict, landed: str, events: list, first_load: int,
+                 press: dict | None = None) -> ClientReading:
     """The browser's own account of the visit, out of the events `send` kept.
 
     `Network.requestWillBeSent` is the page's request **as the browser made it**,
@@ -853,6 +1078,12 @@ def _client_from(value: dict, landed: str, events: list, first_load: int) -> Cli
     Two counts, because the visit has two loads and they answer different questions:
     `reports` is the first load's ("one locked-out visit reports once") and
     `reports_total` is both ("one row per report", which is what C6c checks).
+
+    `press` is the C7 phase: `{"box": …, "index": …, "landed": …}`, where `index` is
+    where the event stream was cut when the mouse went down. Everything after that cut
+    is the press's footprint and nothing else's — which is the one attribution this
+    reading depends on, since the first load, the paper's bounce-back and the press
+    all leave reports on the same route.
     """
     value = value or {}
     panels = value.get("panels") or {}
@@ -866,7 +1097,47 @@ def _client_from(value: dict, landed: str, events: list, first_load: int) -> Cli
         seb_api=bool(value.get("seb")),
         landed=landed or str(value.get("path") or ""),
     )
+    # ── the first load's own reading: `reason`, `token`, `status`, `reports` ──
+    #
+    # Scoped to `events[:first_load]` — the index `_drive_client` cut the phase at —
+    # and that scope is load-bearing now that the visit carries a third report (C7's
+    # press). These fields describe the page's *first* answer, which is the one the
+    # refusal panel the verdict reads is about; read over the whole stream they would
+    # describe whichever answer happened last, and the C6 verdict would then be
+    # judging the press's reason as if the first load had produced it.
     reports: dict = {}
+    for ev in events[:first_load]:
+        if ev.get("method") != "Network.requestWillBeSent":
+            continue
+        params = ev.get("params") or {}
+        request = params.get("request") or {}
+        if str(request.get("method") or "").upper() != "POST":
+            continue
+        if not str(request.get("url") or "").endswith(REFUSAL_SUFFIX):
+            continue
+        reading.reports += 1
+        reports[params.get("requestId")] = True
+        try:
+            body = json.loads(request.get("postData") or "") or {}
+        except ValueError:
+            body = {}
+        reading.reason = str(body.get("reason") or "")
+        headers = {str(k).lower(): v
+                   for k, v in (request.get("headers") or {}).items()}
+        reading.token = bool(headers.get(CSRF_HEADER.lower()))
+    for ev in events[:first_load]:
+        if ev.get("method") != "Network.responseReceived":
+            continue
+        params = ev.get("params") or {}
+        if params.get("requestId") in reports:
+            reading.status = int((params.get("response") or {}).get("status") or 0)
+    # ── the whole visit's counts: `reports_total` and `claims` ────────────────
+    #
+    # `reports_total` is what C6c compares against the rows the server holds, so the
+    # press's report has to be in it: the row the press leaves is then required by the
+    # same equality the first two are. `claims` is over the whole visit for the reason
+    # the check exists — no phase of this visit may ask for a claim without a client to
+    # prove itself with.
     for ev in events:
         if ev.get("method") != "Network.requestWillBeSent":
             continue
@@ -877,33 +1148,52 @@ def _client_from(value: dict, landed: str, events: list, first_load: int) -> Cli
         url = str(request.get("url") or "")
         if url.endswith(REFUSAL_SUFFIX):
             reading.reports_total += 1
-            reports[params.get("requestId")] = True
+        elif url.endswith(CLAIM_SUFFIX):
+            reading.claims += 1
+
+    # ── C7: what the press did, from the same events ──────────────────────────
+    press = press or {}
+    reading.retry_control = bool(press.get("box"))
+    reading.retry_asks = int(press.get("asks") or 0)
+    reading.retry_landed = str(press.get("landed") or "")
+    if press:
+        at = int(press.get("index") or 0)
+        retried: dict = {}
+        for ev in events[at:]:
+            if ev.get("method") != "Network.requestWillBeSent":
+                continue
+            params = ev.get("params") or {}
+            request = params.get("request") or {}
+            url = str(request.get("url") or "")
+            # A document load is the press *leaving*: the panel's control re-asks in
+            # the page the pupil is on, and a navigation is a different journey. It is
+            # counted wherever it goes, because where a wandering control goes is not
+            # this exam's business — and it is counted as traffic, or a press that
+            # navigated to a page outside the exam's path would read as one that did
+            # nothing at all.
+            document = str(params.get("type") or "") == "Document"
+            if document:
+                reading.retry_navigations += 1
+            if not document and EXAM_PATH not in url:
+                continue
+            reading.retry_requests += 1
+            if (str(request.get("method") or "").upper() != "POST"
+                    or not url.endswith(REFUSAL_SUFFIX)):
+                continue
+            reading.retry_posts += 1
+            retried[params.get("requestId")] = True
             try:
                 body = json.loads(request.get("postData") or "") or {}
             except ValueError:
                 body = {}
-            reading.reason = str(body.get("reason") or "")
-            headers = {str(k).lower(): v
-                       for k, v in (request.get("headers") or {}).items()}
-            reading.token = bool(headers.get(CSRF_HEADER.lower()))
-        elif url.endswith(CLAIM_SUFFIX):
-            reading.claims += 1
-    for ev in events:
-        if ev.get("method") != "Network.responseReceived":
-            continue
-        params = ev.get("params") or {}
-        if params.get("requestId") in reports:
-            reading.status = int((params.get("response") or {}).get("status") or 0)
-    # The first load's share, counted from the same events: `first_load` is the index
-    # `_drive_client` cut the phase at, and the paper navigation comes after it.
-    for ev in events[:first_load]:
-        if ev.get("method") != "Network.requestWillBeSent":
-            continue
-        params = ev.get("params") or {}
-        request = params.get("request") or {}
-        if (str(request.get("method") or "").upper() == "POST"
-                and str(request.get("url") or "").endswith(REFUSAL_SUFFIX)):
-            reading.reports += 1
+            reading.retry_reason = str(body.get("reason") or "")
+        for ev in events[at:]:
+            if ev.get("method") != "Network.responseReceived":
+                continue
+            params = ev.get("params") or {}
+            if params.get("requestId") in retried:
+                reading.retry_status = int(
+                    (params.get("response") or {}).get("status") or 0)
     return reading
 
 
@@ -1022,7 +1312,62 @@ async def _drive_client(base_url, browser, cookies, claim_url, paper, insecure):
                     break
                 if time.time() >= deadline:
                     break
-        return _client_from(value, landed, events, first_load), None
+
+            # ── C7: the refusal panel's retry, pressed ────────────────────────
+            #
+            # The pupil's own panel offers one control, and it is the only thing on
+            # this page a person can *do*: the two commonest refusals here — SEB 3.0
+            # answering after the page has already asked, and a pupil returning from
+            # the file — are asks that succeed on a second try. So the gate presses it
+            # and measures the press, rather than trusting the panel to carry a button.
+            #
+            # The client is handed over *here* and not earlier, which is the whole
+            # reason C6 is judged before this runs: the reading above is about an
+            # ordinary browser with no API at all, and a stub installed before it
+            # would have made that reading be about a client that answers.
+            press = {"box": None, "asks": 0, "index": len(events), "landed": landed}
+            value = await read_page()
+            press["box"] = value.get("retry")
+            # The cut goes as late as it can: the paper's bounce-back is a second load
+            # whose report may still be in flight, and it is not the press's.
+            press["index"] = len(events)
+            if press["box"]:
+                await c.send("Runtime.evaluate", expression=CLIENT_STUB)
+                # A real press, at the centre of the box the page's own layout
+                # reported: a control that is not laid out, or is covered by
+                # something, is not pressed here at all — which is the difference
+                # between measuring the control and measuring the idea of it.
+                for kind in ("mousePressed", "mouseReleased"):
+                    await c.send("Input.dispatchMouseEvent", type=kind,
+                                 x=press["box"].get("x"), y=press["box"].get("y"),
+                                 button="left", clickCount=1)
+                deadline = time.time() + CLIENT_BUDGET
+                while True:
+                    await c.pump(POLL_EVERY)
+                    out = await c.send("Runtime.evaluate", expression="location.pathname",
+                                       returnByValue=True)
+                    if not out.get("exceptionDetails"):
+                        here = str((out.get("result") or {}).get("value") or "").strip()
+                        press["landed"] = here or press["landed"]
+                    # The client's own count of the times this press asked it, read from
+                    # the stub the gate handed over. It is the only witness to "the
+                    # control ran the page's ask" — the page sets its state
+                    # synchronously, so a live press and a dead one look identical from
+                    # the outside a moment later.
+                    asked = await c.send("Runtime.evaluate", expression=CLIENT_ASK_COUNTER,
+                                         returnByValue=True)
+                    if not asked.get("exceptionDetails"):
+                        press["asks"] = int(
+                            (asked.get("result") or {}).get("value") or 0)
+                    # The press's own report is the ending worth waiting for. A press
+                    # that filed nothing is a finding, and the budget is exactly what
+                    # tells a finding from a slow box — so the wait is spent, not
+                    # shortened, on the runs that are about to be refused.
+                    if refusal_posts(events[press["index"]:]) >= 1:
+                        break
+                    if time.time() >= deadline:
+                        break
+        return _client_from(value, landed, events, first_load, press), None
     finally:
         proc.terminate()
         try:
@@ -1269,6 +1614,25 @@ def main(argv: list[str] | None = None) -> int:
                   f"reports={reading.reports} of {reading.reports_total} "
                   f"({reading.reason!r}) claims={reading.claims} -> "
                   f"HTTP {reading.status} (landed on {reading.landed or '(nowhere)'})")
+            seen.retry_control = reading.retry_control
+            seen.retry_asks = reading.retry_asks
+            seen.retry_requests = reading.retry_requests
+            seen.retry_posts = reading.retry_posts
+            seen.retry_reason = reading.retry_reason
+            seen.retry_status = reading.retry_status
+            seen.retry_navigations = reading.retry_navigations
+            seen.retry_landed = reading.retry_landed
+            # Derived on the reading, so the box's three sentences and the CI gate's
+            # are about the same three facts rather than two readings of one press.
+            seen.retry_dead = reading.retry_dead
+            seen.retry_unfiled = reading.retry_unfiled
+            seen.retry_away = reading.retry_away
+            print(f"   C7  retry pressed         -> control={reading.retry_control} "
+                  f"asks={reading.retry_asks} requests={reading.retry_requests} "
+                  f"reports={reading.retry_posts} "
+                  f"({reading.retry_reason!r}) -> HTTP {reading.retry_status} "
+                  f"navigations={reading.retry_navigations} "
+                  f"(landed on {reading.retry_landed or '(nowhere)'})")
             step = "C6c, what the server recorded for that page's report"
             rows = rest.refusals(exam_id)
             if rows is None:

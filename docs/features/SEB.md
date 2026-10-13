@@ -310,6 +310,24 @@ biasa; ia diberi pesan apa yang harus dibuka dan tautan `/panduan/seb`.
    `open_sitting`, dan satu uji menuntut tidak ada baris `submissions` yang
    tertinggal setelah penolakan.
 
+**Pintu kedua: halaman handshake, dan tombol yang mengulang pemeriksaannya.** Klien
+WKWebView (SEB macOS/iOS) tidak bisa mengirim header sama sekali, jadi ia tidak
+ditolak — ia diarahkan ke `/student/exams/<id>/seb-claim`, dan halaman itu yang
+menanyakan `security.configKey` lewat API kliennya sendiri. Tiga akhirnya: nilai
+cocok (klaim masuk sesi, kertas terbuka), nilai tidak cocok, dan "tidak ada yang bisa
+dijawab". Dua yang terakhir dulu hanya menyuruh murid memanggil pengawas — nasihat
+yang benar dan jalan buntu, karena dua keadaan yang paling sering terjadi di sana
+justru bisa berhasil pada percobaan **kedua**: klien yang `configKey`-nya belum
+terisi saat halaman bertanya (SEB 3.0 mengisinya di dalam callback `updateKeys`,
+dan halaman ini bertanya di `x-init`), dan murid yang pergi membuka SEB lalu kembali
+ke tab itu. Karena itu panel penolakan punya **Periksa lagi / Check again**: ia
+menjalankan ulang pemeriksaan klien **di dokumen yang sama** — tanpa navigasi, tanpa
+muat ulang — jadi murid tidak perlu mencari tautan ujiannya lagi, dan klaim yang
+dikirim adalah nilai yang dilaporkan pemeriksaan *kedua*. Itu tombol, bukan timer,
+dan pilihannya disengaja: pemeriksaan otomatis pada setiap perubahan fokus akan
+mengirim klaim dan melaporkan penolakan untuk murid yang sekadar membaca halaman,
+sedangkan angka guru adalah satu baris per kunjungan.
+
 
 ### Apakah pintu itu benar-benar menahan? Diukur setiap rilis, bukan diklaim
 
@@ -344,6 +362,7 @@ bukan dilewatkan:
 | **C5** | klaim JavaScript yang jujur | penerimaannya: 200 dengan `ok: true`. Handshake yang menolak nilai kertasnya sendiri mengunci setiap iPad dan setiap klien macOS modern, dan tidak ada apa pun lain di kotak itu yang akan mengatakannya |
 | **C5b** | kertas itu **tanpa header sama sekali** | intinya: klien yang membuktikan diri lewat API milik klien itu membuka kertasnya. Hanya lewat jalan ini klien WKWebView bisa mengerjakan kertas bergerbang |
 | **C6** | halaman handshake itu sendiri, di browser headless sungguhan yang **tidak punya API `SafeExamBrowser`** | **paruh halaman dari C4–C5.** C4 menyusun POST-nya sendiri, jadi halaman yang skripnya tidak pernah mengirim apa pun tidak terlihat oleh semua langkah di atas — padahal halaman itulah seluruh populasi yang dilayani jalur penolakan ini. Keadaan halaman harus berakhir `refused` dengan panel penolakan yang benar-benar tertata, skripnya harus mengirim penolakan **sekali per pemuatan halaman** (alasan `no_client`, membawa token CSRF yang dibaca rutenya), rutenya harus menerimanya, database hidup harus memegang **sebanyak baris berpenanda browser dari jalan ini sebanyak laporan yang dikirim halamannya** — tiap baris berpenanda itu milik murid ini, supaya hitungan baris tidak bisa dibaca sebagai bukti halaman ini — dan kertasnya harus mengembalikan browser yang sama ke handshake |
+| **C7** | tombol **Periksa lagi** di panel penolakan itu, **ditekan** dengan kejadian mouse sungguhan di tengah kotak kontrol itu sendiri | kontrol yang ada bukan berarti kontrol yang bekerja. Gate menyerahkan klien yang **menjawab** (API-nya ada, `configKey`-nya belum terisi: `CLIENT_STUB` — keadaan *klien*, bukan keadaan halaman), menekan tombolnya, lalu membaca tiga hal dan menolak rilisnya bila salah satu terjadi: **mati** — penekanannya tidak menjalankan pemeriksaan halaman itu *dan* tidak menaruh satu pun permintaan di jaringan; **tidak terarsip** — pemeriksaan keduanya berjalan tetapi tidak ada yang sampai ke rute penolakan (atau rutenya menjawab bukan 200, atau alasan yang dibawanya bukan `no_key`); dan **meninggalkan halaman** — penekanannya memuat dokumen alih-alih bertanya lagi di halaman tempat murid berada, dan itu dihitung dari navigasinya maupun dari tempat akhirnya, karena penekanan yang berlayar ke kertas lalu dipantulkan kembali oleh pintunya akan lolos dari pemeriksaan alamat saja |
 
 Ketiga penolakan JavaScript berjalan **sebelum** klaim jujur, karena klaimnya hidup
 di sesi yang ditandatangani: kalau dikirim lebih dulu, ia akan membuka kertasnya untuk
@@ -367,6 +386,25 @@ yang dipegang database hidup — **tepat satu, milik murid ini, membawa penanda
 orang lain tidak bisa dibaca sebagai halaman ini yang melaporkannya. Ia ditutup dengan
 mengirim browser yang sama kembali ke kertasnya, yang harus mengembalikannya ke
 handshake lagi: laporan yang membuka apa pun adalah temuan.
+
+C7 adalah satu-satunya langkah yang **menekan** sesuatu, dan karena itu satu-satunya
+yang butuh klien yang menjawab: halaman ini memang punya dua tombol yang memanggil
+handler yang sama, dan yang ditekan adalah tombol di dalam **panel penolakan** — satu-satunya
+yang dihadapi murid yang ditolak. Kontrolnya dicari lewat panelnya, bukan lewat
+labelnya, karena label itu pasangan `t()` alias dua bahasa, dan lewat kotaknya
+(`getBoundingClientRect`) — kontrol yang tidak tertata atau tertutup sesuatu memang
+tidak bisa ditekan murid, jadi tidak boleh ditekan gate. Yang membedakan **mati** dari
+**tidak terarsip** adalah hitungan **klien itu sendiri** (`window.__sgAsks`, dari stub
+yang gate serahkan): halaman menetapkan keadaannya secara sinkron, jadi sesaat kemudian
+penekanan yang menjalankan pemeriksaan dan yang tidak sama sekali terlihat identik dari
+luar — dan salah menamai yang kedua "mati" berarti mengirim pembacanya ke berkas
+template, padahal cacatnya ada di pemanggilan laporannya. Alasannya `no_key` dipilih
+justru karena ia **berbeda** dari `no_client` milik pemuatan pertama: penjaga "sekali
+per alasan per kunjungan" di halaman itu berarti penekanan ini punya sesuatu yang baru
+untuk diarsipkan, dan penekanan yang mengulang alasan lama (yang penjaganya tahan)
+akan terbaca sebagai kontrol yang tidak melakukan apa-apa. Satu penekanan adalah satu
+perbuatan, jadi putusannya satu kalimat — yang pertama kali salah — bukan tiga untuk
+satu kontrol yang rusak.
 
 Kedua paruh satu kunjungan browser berada di jaringan pada saat yang sedikit berbeda —
 halamannya melapor dari handler yang sama yang menetapkan keadaannya — jadi
@@ -525,6 +563,16 @@ Handshake-lah yang memutuskan, dan ia punya tiga akhir:
 | nilai tidak cocok | berkas `.seb` lama / kunci salah | `POST …/seb-claim` → `config_key_mismatch` |
 | tidak ada yang bisa dijawab | browser biasa (`no_client`), atau SEB terbuka tetapi kunci belum siap (`no_key`) | `POST …/seb-claim/refused`, dikirim halaman itu sendiri |
 
+Tombol **Periksa lagi** tidak mengubah angka itu: laporan halaman dijaga **sekali per
+alasan per kunjungan** (`reported` di skripnya), jadi murid yang menekan lima kali di
+browser biasa tetap satu baris — lima baris akan terbaca guru sebagai lima murid.
+Penjagaannya per *alasan*, bukan sekali seumur kunjungan: klien tanpa API sama sekali
+lalu menjawab tanpa kunci adalah temuan yang berbeda (`no_key`), dan justru temuan
+kedua itu yang membuat percobaan kedua berguna. Yang tetap boleh bertambah adalah
+**klaim**: tiap penekanan tombol adalah satu percobaan verifikasi, dan rute klaim
+mencatat percobaan yang ditolaknya seperti biasa — itulah angka "jumlah percobaan"
+di panel, yang memang berbeda dari "jumlah murid".
+
 Satu kunjungan yang terkunci = satu baris. **Halaman itu satu-satunya saksi** untuk
 `no_client` — klien tanpa API SEB tidak pernah mengirim klaim apa pun, jadi tanpa
 laporan dari halaman, cara paling umum sebuah kelas terkunci justru satu-satunya
@@ -599,8 +647,10 @@ terkunci."
 **Untuk PENGAWAS** — "Selama kamu bertugas mengawasi, kamu bisa melihat kata sandi
 keluar SEB untuk ujian di ruanganmu. Setelah tugasmu selesai, akses ini otomatis
 tertutup."**Untuk MURID** — "Kamu cukup buka berkas yang diberikan guru/pengawas, ujian akan
-terbuka otomatis dan terkunci. Kalau ada masalah, panggil pengawas — merekalah yang
-punya kata sandinya, bukan kamu."
+terbuka otomatis dan terkunci. Kalau kamu sudah membuka SEB lalu kembali ke halaman
+**Buka dengan SEB** dan masih melihat pesan yang sama, tekan **Periksa lagi** di
+halaman itu — kamu tidak perlu mencari tautan ujiannya lagi. Kalau tetap tidak bisa,
+panggil pengawas — merekalah yang punya kata sandinya, bukan kamu."
 
 Kalau berkasnya belum sampai (atau berkas lama sudah tidak cocok karena guru
 mengubah pengaturan), halaman **Buka dengan SEB** menawarkan **Unduh berkas .seb

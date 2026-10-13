@@ -574,7 +574,7 @@ def test_the_page_does_not_assemble_its_copy_in_javascript(app):
     html = _render_page(app)
     script = _page_script(html)
     for phrase in ("Memeriksa", "Ujian ini hanya bisa", "berkas .seb dari sekolah",
-                   "Tidak bisa menghubungi server", "Coba lagi"):
+                   "Tidak bisa menghubungi server", "Coba lagi", "Periksa lagi"):
         assert phrase not in script, f"copy is written inside the script: {phrase!r}"
 
 
@@ -601,6 +601,10 @@ const script = fs.readFileSync(process.argv[3], 'utf8');
 // caller hands the value in so the chain tests can report an honest one, another
 // key's, and one from before a re-issue.
 const reported = process.argv[4] || 'SEB-KEY';
+// What the pupil's *second* look finds, if the caller asked for one. `still-nothing`
+// is the same ordinary browser again; `fresh-key` is the client they went and opened
+// while this tab sat still; `empty-key` is a client that answers without a key yet.
+const retry = process.argv[5] || '';
 const seen = { fetches: [], replaced: null, updateKeysCalls: 0 };
 global.document = { querySelector: () => ({ getAttribute: () => 'CSRF-TOKEN' }) };
 global.fetch = (url, options) => {
@@ -623,24 +627,35 @@ if (mode !== 'no-api') {
 }
 (0, eval)(script);
 const vm = sebClaim();
+const read = () => JSON.stringify({ state: vm.state, first: vm.first, seen: seen,
+                                    claimUrl: vm.claimUrl, examUrl: vm.examUrl });
 vm.start();
-setTimeout(() => console.log(JSON.stringify({ state: vm.state, seen: seen,
-                                              claimUrl: vm.claimUrl, examUrl: vm.examUrl })), 30);
+setTimeout(() => {
+  vm.first = vm.state;
+  if (!retry) { console.log(read()); return; }
+  if (retry !== 'still-nothing') {
+    window.SafeExamBrowser = { security: { configKey: retry === 'empty-key' ? '' : 'FROM-SEB' } };
+  }
+  vm.ask();
+  setTimeout(() => console.log(read()), 30);
+}, 30);
 """
 
 
-def _run_handshake(app, tmp_path: Path, mode: str, value: str = "SEB-KEY") -> dict:
+def _run_handshake(app, tmp_path: Path, mode: str, value: str = "SEB-KEY",
+                   retry: str = "") -> dict:
     """Run the page's own script under node; return what it did.
 
     The script comes from the rendered page, so this measures the bytes a client is
     served — not the template's raw text, which still carries Jinja and would not
-    even parse.
+    even parse. `retry` presses the page's own retry once the first check has
+    settled, and is `""` when the caller wants a single look.
     """
     script = tmp_path / "seb_claim.js"
     script.write_text(_page_script(_render_page(app)), encoding="utf-8")
     driver = tmp_path / "driver.js"
     driver.write_text(DRIVER, encoding="utf-8")
-    done = subprocess.run([NODE or "node", str(driver), mode, str(script), value],
+    done = subprocess.run([NODE or "node", str(driver), mode, str(script), value, retry],
                           capture_output=True, text=True, timeout=60)
     assert done.returncode == 0, done.stderr
     return json.loads(done.stdout.strip().splitlines()[-1])
@@ -704,6 +719,90 @@ def test_a_refused_claim_never_opens_the_paper(app, tmp_path):
     # refusal, so a second row would overstate how many pupils were turned away.
     assert [f["url"] for f in out["seen"]["fetches"]] == [f"/student/exams/{EXAM_ID}/seb-claim"], (
         "the mismatch was reported twice")
+
+
+def test_the_refusal_panel_offers_a_retry_that_rechecks_in_place(app):
+    """The control the returning pupil needs, in the panel they are looking at.
+
+    Read off the panel rather than the page: the error panel already carried a
+    retry-shaped button, so a page-wide search would be satisfied by the button that
+    was there before this change.
+    """
+    html = _render_page(app)
+    refused = html.split("state === 'refused'", 1)[1].split("state === 'error'", 1)[0]
+    assert '@click="ask()"' in refused, (
+        "the refusal panel has no way to ask the client again")
+    # And the panel has to *say* to press it. A button nobody is told about is the
+    # state this change exists to leave: the pupil's other two options are to call an
+    # invigilator or to find the exam link again.
+    assert "tekan Periksa lagi" in refused and "press Check again" in refused, (
+        "the refusal copy never tells the pupil the retry exists")
+    # The whole opening tag, from its `<button` to its `>`: the class attribute comes
+    # after the click binding, so a slice that stops at the binding reads only the
+    # attributes before it and asserts nothing about the floor.
+    start = refused.rindex("<button", 0, refused.index('@click="ask()"'))
+    button = refused[start:refused.index("</button>", start) + len("</button>")]
+    # The pair on the *button*, not merely somewhere in the panel: asserted over the
+    # panel, a button hard-coded to Indonesian passed while the paragraph's own
+    # "press Check again" supplied the English half.
+    assert "t('Periksa lagi','Check again')" in button, (
+        "the retry's label is not a bilingual pair on the control itself")
+    assert "h-11" in button, (
+        "the retry is not a thumb's target; every other control on this row is h-11")
+    assert 'type="button"' in button, (
+        "a retry outside any form is still typed on purpose — an untyped control is a "
+        "submit control, and this one must not be read as one")
+
+
+@needs_node
+def test_the_retry_rechecks_the_client_and_lets_a_pupil_in(app, tmp_path):
+    """The whole point: a pupil who opened SEB and came back, in one press.
+
+    The client appears *after* this page loaded — that is the situation, since the
+    pupil went and opened SEB while the tab sat still — so nothing about a reload or
+    a cached reading can produce this. The claim must carry the value the *second*
+    look reported, and the paper must open.
+    """
+    out = _run_handshake(app, tmp_path, "no-api", retry="fresh-key")
+    assert out["first"] == "refused", out
+    fetches = out["seen"]["fetches"]
+    assert len(fetches) == 2, fetches
+    assert json.loads(fetches[1]["body"]) == {"config_key": "FROM-SEB"}, (
+        "the retry did not claim the value the client reported on the second look")
+    assert fetches[1]["url"] == out["claimUrl"]
+    assert out["seen"]["replaced"] == out["examUrl"], (
+        "a pupil who opened SEB and pressed Check again was not let in")
+
+
+@needs_node
+def test_a_retry_that_finds_nothing_new_files_no_second_refusal(app, tmp_path):
+    """One visit is one row, however many times the pupil presses.
+
+    The teacher's panel counts *pupils turned away* from these rows: five presses in
+    an ordinary browser would read as five pupils, and the pupil learned nothing new
+    from any of them.
+    """
+    out = _run_handshake(app, tmp_path, "no-api", retry="still-nothing")
+    assert out["state"] == "refused"
+    assert [f["url"] for f in out["seen"]["fetches"]] == [
+        f"/student/exams/{EXAM_ID}/seb-claim/refused"], (
+        f"a second look filed a second refusal: {out['seen']['fetches']}")
+    assert out["seen"]["replaced"] is None
+
+
+@needs_node
+def test_a_second_look_that_finds_a_different_reason_is_still_recorded(app, tmp_path):
+    """The guard is per reason, not one report per visit and no more.
+
+    This is the state the retry actually diagnoses: no API at all on the first look
+    (an ordinary browser), then a client that is present but has no key yet. Dropping
+    the second finding would hide the one refusal a second look explained.
+    """
+    out = _run_handshake(app, tmp_path, "no-api", retry="empty-key")
+    assert out["state"] == "refused"
+    reasons = [json.loads(f["body"])["reason"] for f in out["seen"]["fetches"]]
+    assert reasons == ["no_client", "no_key"], reasons
+    assert out["seen"]["replaced"] is None, "an unproven client was sent to the paper"
 
 
 def test_the_handshake_script_parses_as_javascript(app, tmp_path):

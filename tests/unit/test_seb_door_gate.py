@@ -136,12 +136,21 @@ def _seen(**overrides) -> "gate.Seen":
                   client_reason="no_client", client_token=True, client_claims=0,
                   client_status=200, client_reports_total=2, client_rows_total=5,
                   client_rows_marked=2, client_rows_foreign=0, client_relocked=True,
-                  client_record_missing=False)
+                  client_record_missing=False,
+                  # The retry the refusal panel offers, pressed: the control was there
+                  # and laid out, the press put one report on the refusal route, the
+                  # route took it (200), it carried the page's own second reason, and
+                  # the pupil was still on the handshake page afterwards.
+                  retry_control=True, retry_asks=1, retry_requests=1, retry_posts=1,
+                  retry_reason="no_key", retry_status=200, retry_navigations=0,
+                  retry_dead=False, retry_unfiled=False, retry_away=False)
     fields.update(overrides)
     if not fields.get("gated_location"):
         fields["gated_location"] = f"/student/exams/x{gate.CLAIM_SUFFIX}"
     if not fields.get("js_closed_location"):
         fields["js_closed_location"] = f"/student/exams/x{gate.CLAIM_SUFFIX}"
+    if not fields.get("retry_landed"):
+        fields["retry_landed"] = f"/student/exams/x{gate.CLAIM_SUFFIX}"
     return gate.Seen(**fields)
 
 
@@ -924,6 +933,349 @@ class TestTheClientHalfIsJudged:
         assert any(line.startswith("seb door: FAILED") for line in lines), lines
 
 
+# ── C7: the retry the refusal panel offers, pressed ──────────────────────────
+
+
+def _request(url, *, method="GET", kind="Fetch", request_id="r1", body=None,
+             headers=None):
+    """One `Network.requestWillBeSent`, shaped the way the browser emits it."""
+    return {"method": "Network.requestWillBeSent",
+            "params": {"requestId": request_id, "type": kind,
+                       "request": {"url": url, "method": method,
+                                   "postData": body, "headers": headers or {}}}}
+
+
+def _answered(request_id="r1", status=200):
+    """The reply to one of the above, matched by `requestId`."""
+    return {"method": "Network.responseReceived",
+            "params": {"requestId": request_id, "response": {"status": status}}}
+
+
+class TestTheRetryTheRefusalPanelOffers:
+    """The panel's own control, and the three ways pressing it can be useless.
+
+    A control is not a feature. It can be missing from the panel a refused pupil
+    actually gets; it can be there and ask nothing; it can ask the client and file
+    nothing; and it can leave the page instead of re-asking in it. Each is a
+    different defect with a different remedy — a template defect, a wiring defect, a
+    record defect and a navigation defect — so each is its own sentence, the clean
+    press is asserted to be clean (a verdict that fires on everything is a verdict
+    nobody reads), and one broken press is asserted to be *one* sentence rather than
+    three for the same act.
+    """
+
+    def test_an_enforced_run_presses_the_retry_and_is_clean(self):
+        code, lines = gate.judge(_seen())
+        assert code == gate.EXIT_OK, lines
+        assert not [line for line in lines if "retry" in line], lines
+
+    def test_a_refusal_panel_with_no_retry_to_press_is_the_finding(self):
+        code, lines = gate.judge(_seen(retry_control=False))
+        assert code == gate.EXIT_NOT_ENFORCED
+        assert any("no retry" in line for line in lines), lines
+
+    def test_a_dead_retry_is_the_finding(self):
+        """Nothing at all: the page did not ask its client and did not reach the wire,
+        so a pupil whose key is available now is never admitted, however often they
+        press — and the sentence says which of the two it saw, because *that* is what
+        separates a dead control from one that asked and filed nothing."""
+        code, lines = gate.judge(_seen(retry_dead=True, retry_asks=0, retry_requests=0,
+                                       retry_posts=0, retry_status=0,
+                                       retry_reason=""))
+        assert code == gate.EXIT_NOT_ENFORCED
+        assert any("dead" in line and "consulted 0 time" in line for line in lines), lines
+
+    def test_a_retry_that_navigates_away_is_the_finding(self):
+        code, lines = gate.judge(_seen(retry_away=True, retry_navigations=1,
+                                       retry_landed="/student/exams/x"))
+        assert code == gate.EXIT_NOT_ENFORCED
+        assert any("navigates away" in line for line in lines), lines
+
+    @pytest.mark.parametrize("override,needle", [
+        ({"retry_posts": 0}, "sent 0 report"),
+        ({"retry_posts": 2}, "sent 2 report"),
+        ({"retry_status": 403}, "HTTP 403"),
+        ({"retry_reason": "no_client"}, "'no_client'"),
+        # The client was never asked at all, yet something left the page: the ask is
+        # what the panel's control is *for*, and a press that skipped it cannot have
+        # produced a second answer to file.
+        ({"retry_asks": 0, "retry_posts": 0}, "never asked its client"),
+    ], ids=["no-report", "two-reports", "route-refused", "wrong-reason",
+            "never-asked"])
+    def test_a_retry_that_files_nothing_is_the_finding(self, override, needle):
+        """Four causes, one word: the press left no row the panel counts. The sentence
+        has to name *which* one, because the remedies are in four different files."""
+        code, lines = gate.judge(_seen(retry_unfiled=True, **override))
+        assert code == gate.EXIT_NOT_ENFORCED
+        assert any("filed nothing" in line and needle in line for line in lines), lines
+
+    def test_one_press_is_one_sentence(self):
+        """Three symptoms of one act would send the reader to three files."""
+        code, lines = gate.judge(_seen(retry_dead=True, retry_unfiled=True,
+                                       retry_away=True, retry_asks=0,
+                                       retry_requests=0))
+        assert code == gate.EXIT_NOT_ENFORCED
+        retry_lines = [line for line in lines if "retry" in line.lower()]
+        assert len(retry_lines) == 1, lines
+
+    @pytest.mark.parametrize("fields,expected", [
+        # No press was taken at all: the words say nothing rather than "dead".
+        ({}, (False, False, False)),
+        ({"retry_control": False}, (False, False, False)),
+        # Pressed, and nothing at all happened: not an ask, not a request.
+        ({"retry_control": True}, (True, False, False)),
+        # The ask happened and nothing was filed — the defect that must *not* read as
+        # "dead", because the remedy is in a different file (the page's own report
+        # call). This is the reading a mutation of the page produced on purpose.
+        ({"retry_control": True, "retry_asks": 1, "retry_requests": 0,
+          "retry_landed": "/student/exams/x" + gate.CLAIM_SUFFIX},
+         (False, False, True)),
+        # Asked, and a request left the page that is not a report: still unfiled, and
+        # still not dead — something did happen.
+        ({"retry_control": True, "retry_asks": 1, "retry_requests": 1,
+          "retry_landed": "/student/exams/x" + gate.CLAIM_SUFFIX},
+         (False, False, True)),
+        # A request left the page and the client was never asked: the press skipped the
+        # ask, which is exactly what the panel's control is for.
+        ({"retry_control": True, "retry_asks": 0, "retry_requests": 1,
+          "retry_landed": "/student/exams/x" + gate.CLAIM_SUFFIX},
+         (False, False, True)),
+        # A landing nobody could read is not a journey: the ask is judged by what it
+        # filed (nothing), and "could not tell where it went" is not "it went away".
+        ({"retry_control": True, "retry_asks": 1, "retry_requests": 1,
+          "retry_landed": ""}, (False, False, True)),
+        # The clean press, as a real run produces it.
+        ({"retry_control": True, "retry_asks": 1, "retry_requests": 1,
+          "retry_posts": 1, "retry_status": 200, "retry_reason": "no_key",
+          "retry_landed": "/student/exams/x" + gate.CLAIM_SUFFIX},
+         (False, False, False)),
+        # A document load, and a landing that is not this page: away.
+        ({"retry_control": True, "retry_requests": 1, "retry_navigations": 1,
+          "retry_landed": "/student/exams/x"}, (False, True, False)),
+        # Navigated and bounced back: without the document count the landing would
+        # explain it away, which is why both are read.
+        ({"retry_control": True, "retry_requests": 1, "retry_navigations": 1,
+          "retry_landed": "/student/exams/x" + gate.CLAIM_SUFFIX},
+         (False, True, False)),
+        ({"retry_control": True, "retry_asks": 1, "retry_requests": 1,
+          "retry_posts": 1, "retry_status": 200, "retry_reason": "no_client",
+          "retry_landed": "/student/exams/x" + gate.CLAIM_SUFFIX},
+         (False, False, True)),
+        ({"retry_control": True, "retry_asks": 1, "retry_requests": 1,
+          "retry_posts": 0, "retry_landed": "/student/exams/x" + gate.CLAIM_SUFFIX},
+         (False, False, True)),
+    ], ids=["no-press", "control-absent", "nothing-at-all", "asked-filed-nothing",
+            "asked-a-request-without-a-report", "a-request-without-an-ask",
+            "no-landing", "clean", "loaded-a-document", "bounced-back",
+            "wrong-reason", "asked-but-filed-nothing"])
+    def test_the_three_words_are_derived_in_one_place(self, fields, expected):
+        """Both verdicts read these properties, so their *meaning* lives here."""
+        reading = gate.ClientReading(**fields)
+        assert (reading.retry_dead, reading.retry_away,
+                reading.retry_unfiled) == expected
+
+
+class TestThePressIsReadFromTheBrowsersOwnEvents:
+    """The press's footprint is `events[press_index:]` and nothing else.
+
+    One visit puts three reports on the same route — the first load's, the paper's
+    bounce-back, and the press's — so a reading that counted the whole stream would
+    answer "the retry filed one" for a run whose retry filed none. The cut is the
+    whole attribution, which is why it is asserted on real event shapes rather than
+    trusted.
+    """
+
+    RAIL = "/student/exams/aaa"
+    CLAIM = RAIL + gate.CLAIM_SUFFIX
+    REFUSAL = RAIL + gate.REFUSAL_SUFFIX
+
+    def _two_loads(self) -> list:
+        """The first load and the paper's bounce-back, as the browser emits them."""
+        return [
+            _request(self.CLAIM, kind="Document"),
+            _request(self.REFUSAL, method="POST", request_id="load1",
+                     body=json.dumps({"reason": "no_client"})),
+            _answered("load1", 200),
+            _request(self.CLAIM, kind="Document"),
+            _request(self.REFUSAL, method="POST", request_id="load2",
+                     body=json.dumps({"reason": "no_client"})),
+            _answered("load2", 200),
+        ]
+
+    def test_a_press_that_filed_is_counted_from_the_press_forward(self):
+        events = self._two_loads()
+        press_at = len(events)
+        events += [
+            # The favicon a browser asks for lazily: the browser's traffic, not the
+            # control's, and counting it would make a dead retry read as a live one.
+            _request("/favicon.ico"),
+            _request(self.REFUSAL, method="POST", request_id="press",
+                     body=json.dumps({"reason": gate.NO_KEY_REASON})),
+            _answered("press", 200),
+        ]
+        reading = gate._client_from(
+            {}, self.CLAIM, events, first_load=2,
+            press={"box": {"x": 1, "y": 2}, "asks": 1, "index": press_at,
+                   "landed": self.CLAIM})
+        assert reading.retry_control is True
+        assert reading.retry_asks == 1, "the client's own count was not read back"
+        assert reading.retry_requests == 1, "the favicon was counted as the press's"
+        assert reading.retry_posts == 1
+        assert reading.retry_reason == gate.NO_KEY_REASON
+        assert reading.retry_status == 200
+        assert reading.retry_navigations == 0
+        assert (reading.retry_dead, reading.retry_away, reading.retry_unfiled) == (
+            False, False, False)
+        # ...and the two loads above are still read exactly as C6 reads them, with the
+        # press's own report added to the visit's total. That is not an accident of
+        # counting: C6c demands as many rows as this visit made reports, so the press's
+        # row is required by the same equality the first two rows are.
+        assert reading.reports_total == 3 and reading.reports == 1
+        assert reading.reason == "no_client"
+
+    def test_a_press_that_asked_nothing_is_dead(self):
+        events = self._two_loads()
+        press_at = len(events)
+        reading = gate._client_from(
+            {}, self.CLAIM, events, first_load=2,
+            press={"box": {"x": 1, "y": 2}, "asks": 0, "index": press_at,
+                   "landed": self.CLAIM})
+        assert reading.retry_requests == 0 and reading.retry_dead is True
+        assert reading.reports_total == 2, (
+            "the two loads were read as the press's traffic")
+
+    def test_a_press_that_asked_and_filed_nothing_is_not_dead(self):
+        """The client's own count is what tells the two apart, and it is the only
+        witness: the page sets its state synchronously, so a press that ran the ask
+        and one that never did look the same from the outside a moment later."""
+        events = self._two_loads()
+        press_at = len(events)
+        reading = gate._client_from(
+            {}, self.CLAIM, events, first_load=2,
+            press={"box": {"x": 1, "y": 2}, "asks": 1, "index": press_at,
+                   "landed": self.CLAIM})
+        assert reading.retry_asks == 1 and reading.retry_requests == 0
+        assert reading.retry_dead is False, (
+            "a press that ran the page's ask was reported as a control that did "
+            "nothing, which sends its reader to the template instead of to the "
+            "report call")
+        assert reading.retry_unfiled is True
+
+    def test_a_press_that_navigated_is_a_document_load_and_a_landing(self):
+        events = self._two_loads()
+        press_at = len(events)
+        events += [
+            _request("/student/exams", kind="Document"),
+            _request("/student/exams", kind="Document"),
+        ]
+        reading = gate._client_from(
+            {}, "/student/exams", events, first_load=2,
+            press={"box": {"x": 1, "y": 2}, "index": press_at,
+                   "landed": "/student/exams"})
+        assert reading.retry_requests == 2
+        assert reading.retry_navigations == 2, "a document load is the press leaving"
+        assert reading.retry_away is True
+        assert reading.retry_unfiled is False, "one act, one word"
+
+    def test_a_control_the_gate_could_not_find_is_not_a_press(self):
+        events = self._two_loads()
+        reading = gate._client_from(
+            {}, self.CLAIM, events, first_load=2,
+            press={"box": None, "index": len(events), "landed": self.CLAIM})
+        assert reading.retry_control is False
+        assert (reading.retry_dead, reading.retry_away, reading.retry_unfiled) == (
+            False, False, False), "a press that never happened is not a defect of it"
+
+    def test_the_press_the_gate_drove_is_the_one_the_reading_judges(self):
+        """The half being driven and the half being judged are the same one."""
+        code = _code(_source(GATE))
+        assert 'press["box"] = value.get("retry")' in code, (
+            "the press does not use the control the page's own layout reported")
+        assert "expression=CLIENT_ASK_COUNTER" in code, (
+            "the press never reads the client's own count of the times it was asked")
+        assert "_client_from(value, landed, events, first_load, press)" in code, (
+            "the press is driven and never handed to the reading")
+        assert "seen.retry_dead = reading.retry_dead" in code, (
+            "the box's verdict is not given the press's own judgement")
+        assert "seen.retry_control = reading.retry_control" in code
+
+
+class TestThePressIsARealOne:
+    """The control, the client and the press, as the driver writes them.
+
+    A press that is a `Runtime.evaluate` of `control.click()` would pass every verdict
+    above while pressing something no pupil could press — an invisible control, a
+    control covered by an overlay, a control off the bottom of the screen. So the
+    input is asserted to be real input, aimed at the box the layout reported.
+    """
+
+    CLAIM_PAGE = ROOT / "app" / "templates" / "student" / "seb_claim.html"
+
+    def test_the_press_is_a_mouse_event_at_the_box_the_page_reported(self):
+        code = _code(_source(GATE))
+        assert 'Input.dispatchMouseEvent' in code
+        assert '"mousePressed"' in code and '"mouseReleased"' in code
+        assert 'x=press["box"].get("x")' in code and 'y=press["box"].get("y")' in code, (
+            "the press is not aimed at the control's own box")
+        assert "button=\"left\"" in code, "the press is not a left click"
+
+    def test_the_control_is_read_out_of_the_panel_a_refused_pupil_gets(self):
+        """Two buttons share one handler on this page; the refused panel's is the one
+        a turned-away pupil has, and a page-wide search would press whichever came
+        first in the document."""
+        expression = gate.client_expression()
+        assert f"name === {json.dumps(gate.RETRY_PANEL)} && shown" in expression, (
+            "the control is not looked for inside the panel that is laid out")
+        assert "el.querySelector('button')" in expression
+        assert "getBoundingClientRect" in expression, (
+            "the control's own box is not read, so an invisible one would be pressed")
+        assert "retry: retry" in expression
+        assert f"state === '{gate.RETRY_PANEL}'" in _source(self.CLAIM_PAGE), (
+            "the panel the gate presses in is not the page's own refusal panel")
+
+    def test_the_pages_own_refusal_panel_is_the_one_that_carries_the_retry(self):
+        page = _source(self.CLAIM_PAGE)
+        start = page.index(f"state === '{gate.RETRY_PANEL}'")
+        end = page.index("state === 'error'", start)
+        assert '@click="ask()"' in page[start:end], (
+            "the refusal panel's control is not wired to the page's own ask")
+
+    def test_the_client_the_gate_hands_over_is_one_that_answers_with_nothing(self):
+        """`no_key` is the page's own second answer, and the gate's stub is what makes
+        it reachable: an API that is there, whose key is not populated yet."""
+        assert 'configKey: ""' in gate.CLIENT_STUB
+        assert "SafeExamBrowser" in gate.CLIENT_STUB
+        assert "__sgAsks += 1" in gate.CLIENT_STUB, (
+            "the client the gate hands over does not count the page's asks, so a dead "
+            "control and one that asked and filed nothing cannot be told apart")
+        assert gate.CLIENT_ASK_COUNTER.startswith("window.__sgAsks")
+        from app.services import seb_door_log
+        assert gate.NO_KEY_REASON in seb_door_log.CLIENT_REASONS, (
+            "the reason the gate waits for is one the route would answer 400 to")
+        assert f"report('{gate.NO_KEY_REASON}')" in _source(self.CLAIM_PAGE), (
+            "the page does not report the reason this gate waits for")
+
+    def test_the_stub_arrives_after_the_reading_it_must_not_change(self):
+        """C6 is about an ordinary browser with no SEB API at all: a stub installed
+        before it would have made that reading be about a client that answers."""
+        code = _code(_source(GATE))
+        stub = code.index("expression=CLIENT_STUB")
+        assert code.index("first_load = len(events)") < stub
+        assert code.index('await c.send("Page.navigate", url=paper)') < stub
+
+    def test_the_wait_is_for_the_press_s_own_report_and_not_for_the_loads(self):
+        """The bounce-back's report may still be in flight when the mouse goes down,
+        and it is not the press's: the wait counts the stream from the cut."""
+        code = _code(_source(GATE))
+        assert 'press["index"] = len(events)' in code
+        assert 'refusal_posts(events[press["index"]:]) >= 1' in code
+
+    def test_the_path_the_press_is_counted_under_is_the_paper_s_own(self):
+        """Derived from `PAPER_PATH`, which the app's url_map already pins."""
+        assert gate.EXAM_PATH == gate.PAPER_PATH.split("{")[0]
+        assert gate.EXAM_PATH.endswith("/")
+
+
 class TestTheClientHalfIsDrivenTheWayTheOtherGatesDrive:
     """Driven, and driven the way this box already drives a browser: one locator
     (`SG_CHROME`), one CDP client in the tree, and the page's own contract read rather
@@ -1102,9 +1454,17 @@ const scenario = process.argv[3];
 // of its questions — and answers the *page-wide* one with the shell's own panels
 // included, which is the point: `x-show="toast.type==='error'"` is in the app chrome
 // on every page, and a scan that believes it reads this page's error panel.
-const panel = (xShow, visible) => ({
+// A control inside a panel: its own display, and its own box. `getComputedStyle` of a
+// child of a `display: none` parent still answers 'block', so a box of 0x0 is what
+// says "a pupil cannot touch this" — which is the reading the press depends on.
+const control = (left, top, width, height) => ({
+  display: 'block',
+  getBoundingClientRect: () => ({ left, top, width, height }),
+});
+const panel = (xShow, visible, control) => ({
   getAttribute: (name) => (name === 'x-show' ? xShow : null),
   display: visible ? 'block' : 'none',
+  querySelector: (sel) => (sel === 'button' && control ? control : null),
 });
 const scopeEl = (state, cloaked, panels) => ({
   _x_dataStack: state === null ? [] : [{ state }],
@@ -1114,18 +1474,27 @@ const scopeEl = (state, cloaked, panels) => ({
 // The card, as the server renders it: all three panels are in the DOM, and before
 // Alpine runs none of them carries `display: none` — an unprocessed `x-show` *reads as
 // shown*, which is why the layout can never be the proof that the script ran.
-const card = (state, cloaked) => scopeEl(state, cloaked, [
+const card = (state, cloaked, refused, error) => scopeEl(state, cloaked, [
   panel("state === 'checking'", state === null || state === 'checking'),
-  panel("state === 'refused'", state === null || state === 'refused'),
-  panel("state === 'error'", state === null || state === 'error'),
+  panel("state === 'refused'", state === null || state === 'refused', refused),
+  panel("state === 'error'", state === null || state === 'error', error),
 ]);
 const shell = scopeEl(null, false, []);
 const toast = panel("toast.type==='error'", true);
 
+// The two controls the real page carries: the refusal panel's "Check again" and the
+// error panel's "Try again". They are deliberately far apart, so a reading that took
+// the first pressable button on the page is a different set of coordinates.
+const REFUSED_RETRY = control(10, 20, 100, 40);
+const ERROR_RETRY = control(500, 600, 90, 30);
+
 const layouts = {
   'before-the-script-runs': { elements: [shell, card(null, true)], panels: [toast] },
-  'settled-refused': { elements: [shell, card('refused', false)], panels: [toast] },
-  'still-checking': { elements: [shell, card('checking', false)], panels: [toast] },
+  'settled-refused': { elements: [shell, card('refused', false, REFUSED_RETRY, ERROR_RETRY)], panels: [toast] },
+  'still-checking': { elements: [shell, card('checking', false, null, ERROR_RETRY)], panels: [toast] },
+  'refused-without-a-control': { elements: [shell, card('refused', false, null, ERROR_RETRY)], panels: [toast] },
+  'error-panel-only': { elements: [shell, card('error', false, REFUSED_RETRY, ERROR_RETRY)], panels: [toast] },
+  'refused-control-collapsed': { elements: [shell, card('refused', false, control(10, 20, 0, 0), ERROR_RETRY)], panels: [toast] },
 };
 const layout = layouts[scenario];
 const all = layout.elements.concat(layout.panels);
@@ -1228,3 +1597,41 @@ class TestTheReadingCannotBeFooledByAPageThatHasNotRun:
         assert gate.settled({"state": "error"}, 1) is True, (
             "a page that settled into its error state is settled, and the verdict is "
             "what says which state it ended on")
+
+
+class TestTheRetryIsReadOffThePanelARefusedPupilIsShown:
+    """The reading C7 presses on, run against a DOM shaped like the real page.
+
+    The page carries *two* controls wired to the same handler — the refusal panel's
+    "Check again" and the error panel's "Try again" — so "the first button on the
+    page" is a measurement of a different control than the one a turned-away pupil
+    has. The coordinates are the proof: a reading that took the page's first button
+    would hand the press the error panel's centre, several hundred pixels away.
+    """
+
+    def test_a_refused_panel_lays_its_retry_out_at_its_own_centre(self, tmp_path):
+        value = _read_page(tmp_path, "settled-refused")
+        assert value["retry"] == {"x": 60, "y": 40}, value["retry"]
+
+    def test_the_error_panels_control_is_not_the_one_a_refused_pupil_has(self, tmp_path):
+        value = _read_page(tmp_path, "settled-refused")
+        assert value["retry"] != {"x": 545, "y": 615}, (
+            "the reading pressed the error panel's button, not the refusal panel's")
+
+    @pytest.mark.parametrize("scenario", [
+        # The refusal panel is not the one on screen: a `checking` page, or an `error`
+        # page, has its own control and neither is a refused pupil's.
+        "still-checking",
+        "error-panel-only",
+        # The panel is on screen and carries no button at all.
+        "refused-without-a-control",
+        # The panel is on screen and its button has a zero box — a `display: none`
+        # control, or one collapsed out of reach. `getComputedStyle` of a child of a
+        # hidden parent still answers 'block', so the box is what says so.
+        "refused-control-collapsed",
+    ])
+    def test_nothing_to_press_is_reported_as_nothing_to_press(self, tmp_path,
+                                                             scenario):
+        value = _read_page(tmp_path, scenario)
+        assert value["retry"] is None, (
+            f"the reading offered a press on {scenario}, which has none to offer")
