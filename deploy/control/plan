@@ -7,5 +7,5 @@
 # Obeyed once per exact content: the `issued` stamp below is what makes a
 # re-issued command a new plan rather than one already obeyed.
 command: recover
-issued: 2026-10-10T06:57:07Z
-note: the reconcile is on main now: run the lever so the box records the migrations its schema already carries (064 among them) and then lands the release
+issued: 2026-10-13T11:02:10Z
+note: the pipeline asks the box to run its recovery lever: arm it if the armament preflight wrote unarmed, apply any migration its schema is missing, and land the release
