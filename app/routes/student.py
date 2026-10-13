@@ -1471,7 +1471,7 @@ def result_detail(submission_id):
     supabase = get_supabase()
     try:
         res = supabase.table("submissions") \
-            .select("id, exam_id, student_id, answers, score, max_score, violations, penalty, final_score, status, is_published, started_at, submitted_at, graded_at, teacher_feedback, exams(id, title, subject, answer_key, question_types, question_scoring, total_questions, pdf_page_urls)") \
+            .select("id, exam_id, student_id, answers, score, max_score, violations, penalty, final_score, status, is_published, started_at, submitted_at, graded_at, teacher_feedback, exams(id, title, subject, subject_id, answer_key, question_types, question_scoring, total_questions, pdf_page_urls, anti_cheat_enabled, penalty_per_violation)") \
             .eq("id", submission_id) \
             .eq("student_id", g.user_id) \
             .single() \
@@ -1484,6 +1484,10 @@ def result_detail(submission_id):
     if submission.get("exams"):
         submission["exam"] = submission.pop("exams")
     submission.setdefault("is_hidden", False)
+    # The subject is behind `subject_id`, not the legacy text column: resolve
+    # it once here so the sheet never prints the Python word for "no value".
+    from app.services.subject_lookup import annotate as annotate_subject
+    annotate_subject(supabase, submission.get("exam") or {})
     # Parse JSON strings
     for field in ("teacher_feedback", "answers"):
         val = submission.get(field)
@@ -1515,9 +1519,25 @@ def result_detail(submission_id):
         submission.get("exam", {}).pop("answer_key", None)
     submission["released"] = released
 
+    # The pupil's own reading of the penalty — how many violations were *recorded*
+    # and how many were *applied* — never the per-event log, which is the teacher's
+    # and the invigilator's. The wording is deliberately neutral and descriptive, the
+    # same tone the anti-cheat dashboard uses: a summary of a decision about a paper,
+    # not an accusation. Counts only, so the base the ladder prices with does not
+    # enter into it.
+    penalty_summary = None
+    if released and (submission.get("violations") or 0):
+        from app.services import penalty_service
+        _events = penalty_service.events(supabase, submission["exam_id"],
+                                         submission["student_id"], submission)
+        _part = penalty_service.breakdown_for(submission.get("exam") or {}, _events)
+        penalty_summary = {"recorded": _part["recorded"], "applied": _part["applied"],
+                           "ignored": _part["ignored"]}
+
     student_name = g.user_name or g.user_email or ""
     return render_template("student/result_detail.html", submission=submission,
-                           student_name=student_name, released=released)
+                           student_name=student_name, released=released,
+                           penalty_summary=penalty_summary)
 
 
 @student_bp.route("/results/<submission_id>/print")
@@ -1559,7 +1579,7 @@ def download_result_pdf(submission_id):
     supabase = get_supabase()
     try:
         res = supabase.table("submissions") \
-            .select("id, exam_id, student_id, answers, score, max_score, violations, penalty, final_score, status, is_published, started_at, submitted_at, graded_at, teacher_feedback, exams(id, title, subject, answer_key, question_types, question_scoring, total_questions, pdf_page_urls)") \
+            .select("id, exam_id, student_id, answers, score, max_score, violations, penalty, final_score, status, is_published, started_at, submitted_at, graded_at, teacher_feedback, exams(id, title, subject, subject_id, answer_key, question_types, question_scoring, total_questions, pdf_page_urls)") \
             .eq("id", submission_id) \
             .eq("student_id", g.user_id) \
             .single() \
@@ -1572,6 +1592,10 @@ def download_result_pdf(submission_id):
     if submission.get("exams"):
         submission["exam"] = submission.pop("exams")
     submission.setdefault("is_hidden", False)
+    # The subject is behind `subject_id`, not the legacy text column: resolve
+    # it once here so the sheet never prints the Python word for "no value".
+    from app.services.subject_lookup import annotate as annotate_subject
+    annotate_subject(supabase, submission.get("exam") or {})
 
     # The PDF prints the answer key and per-question marks, so it follows the
     # same release rule as the on-screen view.

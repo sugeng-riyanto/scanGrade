@@ -444,6 +444,15 @@ def create_app(env=None):
     app.jinja_env.globals["q_kind"] = question_kind
     app.jinja_env.globals["q_answer_text"] = describe_answer
     app.jinja_env.globals["q_public_options"] = public_options
+    # The subject a paper is for. `exams.subject` is a legacy text column the
+    # builder no longer writes, so a sheet that read `exam.get('subject', '-')`
+    # printed the literal word `None` — `.get`'s default only covers an absent
+    # key, and the key is present with a null value. One resolver, so the exam
+    # sheet, the report card and the pupil's PDF cannot disagree.
+    from app.services.subject_lookup import display_name as _subject_name, \
+        label as _subject_label
+    app.jinja_env.globals["subject_label"] = _subject_label
+    app.jinja_env.globals["subject_name"] = _subject_name
     # A complex multiple choice answer judged statement by statement, for the pupil
     # reviewing a released paper and the teacher reviewing the same paper. One
     # builder for both, so the two screens cannot describe one answer differently.

@@ -184,6 +184,8 @@ def _as_event(row: dict) -> dict:
             meta = {}
     kind = row.get("violation_type") or "unknown"
     return {
+        # The stable name a penalty decision is written against.
+        "id": row.get("id"),
         "user_id": row.get("user_id"),
         "kind": kind,
         # A kind this release does not know about is still shown — recording an
@@ -210,7 +212,11 @@ def _rows(query) -> list[dict]:
     return [_as_event(row) for row in (query.order("created_at").execute().data or [])]
 
 
-EVENT_COLUMNS = "user_id, violation_type, created_at, metadata"
+#: ``id`` rides along because the *decision* a teacher makes about a violation
+#: is keyed by it (see `app/services/penalty_service.py`): an event with no
+#: stable name cannot be ignored and un-ignored without re-finding it by
+#: position, which shifts as later events arrive.
+EVENT_COLUMNS = "id, user_id, violation_type, created_at, metadata"
 
 
 def events_for_exam(supabase, exam_id: str) -> list[dict]:

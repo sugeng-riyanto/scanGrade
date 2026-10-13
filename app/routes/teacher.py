@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from flask import Blueprint, jsonify, render_template, request, redirect, url_for, flash, g, send_file, current_app
 from app.utils.auth import (teacher_or_admin_required, teacher_required, get_supabase,
                             login_required, role_required, subscription_write_required,
-                            login_door_for)
+                            login_door_for, filing_school_for_request)
 from app.utils.cache import cache_get, cache_set, cache_delete
 from app.utils import failure
 from app.utils.helpers import read_with_retry, row_or_none
@@ -16,7 +16,7 @@ from app.decorators.security import require_school_access
 from app.decorators.year_lock import open_year_required
 from app.decorators.subscription import require_subscription
 from app.utils.exam_access import (
-    can_manage_exam, exam_class_ids,
+    can_manage_exam, can_read_exam, exam_class_ids,
     managed_exam, EXAM_OK, EXAM_MISSING, EXAM_UNVERIFIABLE,
 )
 from app.services.export_service import export_to_xlsx, export_to_pdf
@@ -1353,13 +1353,25 @@ def exam_form():
 
     grade_component_id = _resolve_grade_component(
         supabase, g.get("user_school_id"), request.form.get("grade_component_type_id"))
+    # ── the school this paper is filed under ───────────────────────────────────
+    # A create is a tenant decision, so it goes through the authority rather than
+    # through whatever `g.user_school_id` happens to hold: the answer is the school
+    # this request is *verified* in, or a refusal. Before this, the row was written
+    # with `g.user_school_id`, which for a teacher whose active NPSN is not the one
+    # their profile names meant the paper — and the weighting and results that follow
+    # its `school_id` — landed in the home school. See
+    # `app/services/school_membership.py::filing_school`.
+    school_id, _school_error = filing_school_for_request(
+        requested_school_id=request.form.get("school_id"))
+    if _school_error:
+        return _exam_save_refused(autosave, _school_error)
     # Date the paper to the running year, so the pupil dashboard can scope scores to
     # the class a pupil is in this year, and a closed year stays read-only.
     active_year_id = (ta_service.active_school_year(
         supabase, g.get("user_school_id")) or {}).get("id")
     data = {
         "teacher_id": g.user_id,
-        "school_id": g.get("user_school_id"),
+        "school_id": school_id,
         "title": title,
         "subject": subject,
         "subject_id": subject_id,
@@ -1758,13 +1770,24 @@ def exam_detail(exam_id):
     publication = _publication_state(exam_row, action)
     grade_component_id = _resolve_grade_component(
         supabase, g.get("user_school_id"), request.form.get("grade_component_type_id"))
+    # ── the school this paper is filed under ───────────────────────────────────
+    # A paper's school is a fact about the paper, and a save may not restate it: the
+    # row keeps what it has, so editing a paper can never move it into another
+    # school's weighting and results (which is exactly what writing the caller's own
+    # school into every save used to do). The one exception is a row that has no
+    # school at all — a paper written before the column was filled — and repairing it
+    # is a write, so it goes through the same verified authority as a create.
+    filing_school_id = None
+    if not exam_row.get("school_id"):
+        filing_school_id, _school_error = filing_school_for_request()
+        if _school_error:
+            return _exam_save_refused(autosave, _school_error)
     # Date the paper to the running year, so the pupil dashboard can scope scores to
     # the class a pupil is in this year, and a closed year stays read-only.
     active_year_id = (ta_service.active_school_year(
         supabase, g.get("user_school_id")) or {}).get("id")
     data = {
         "teacher_id": g.user_id,
-        "school_id": g.get("user_school_id"),
         "title": title,
         "subject": subject,
         "subject_id": subject_id,
@@ -1807,6 +1830,10 @@ def exam_detail(exam_id):
         "grade_component_type_id": grade_component_id,
         "school_year_id": active_year_id,
     }
+    if filing_school_id:
+        # A row that had no school gets one now, and it is the school this request
+        # was verified in — the only repair an edit is allowed to make.
+        data["school_id"] = filing_school_id
     try:
         supabase.table("exams").update(data).eq("id", exam_id).execute()
     except Exception:
@@ -2282,6 +2309,12 @@ def duplicate_exam(exam_id):
         new_data["is_published"] = False
         new_data["is_template"] = False
         new_data["source_exam_id"] = exam_id
+        # `new_data` carries the *source's* `school_id`, and that is the point: the
+        # copy belongs to the school the original belongs to, which `_guard_exam`
+        # has already proven is the school this request is acting in. A copy filed
+        # under the caller's own school instead would be a cross-school copy — the
+        # paper the teacher may not even open, duplicated into a school that never
+        # set it.
         # A copy is this year's paper, not the year it was copied from.
         new_data["school_year_id"] = (ta_service.active_school_year(
             supabase, g.get("user_school_id")) or {}).get("id")
@@ -2859,6 +2892,9 @@ def results_print():
                             redirect_to="/teacher/results")
     if err:
         return err
+
+    from app.services.subject_lookup import annotate as annotate_subject
+    annotate_subject(supabase, exam)
 
     subs, scan_subs, online_subs, stats = _exam_results(supabase, exam_id)
     roster = sorted(subs, key=_final_score, reverse=True)
@@ -4182,8 +4218,10 @@ def api_penalty_appeal_handle(submission_id):
         return _gsb_err
     data = request.get_json(silent=True) or {}
     action = data.get("action")
-    reduction_type = data.get("reduction_type")
-    reduction_value = data.get("reduction_value")
+    # No reduction fields any more: an approved appeal ignores the charges rather
+    # than subtracting an amount, so there is no delta to parse. Kept out rather
+    # than accepted-and-ignored, because a control the server reads and drops is a
+    # promise the page makes and the write does not keep.
     response_msg = str(data.get("response", "")).strip()
 
     if action not in ("approve", "reject"):
@@ -4206,23 +4244,22 @@ def api_penalty_appeal_handle(submission_id):
     penalty_reduction = 0
 
     if action == "approve":
-        if reduction_type == "all":
-            penalty_reduction = current_penalty
-        elif reduction_type == "fixed":
-            penalty_reduction = min(float(reduction_value or 0), current_penalty)
-        elif reduction_type == "percent":
-            pct = min(float(reduction_value or 0), 100)
-            penalty_reduction = round(current_penalty * pct / 100, 2)
-        else:
-            return jsonify({"error": "reduction_type harus fixed/percent/all"}), 400
-        penalty_reduction = max(0, min(penalty_reduction, current_penalty))
-        new_penalty = round(current_penalty - penalty_reduction, 2)
-        current_final = float(sub.get("final_score") or 0)
-        new_final = round(current_final + penalty_reduction, 2)
-        supabase.table("submissions").update({
-            "penalty": new_penalty,
-            "final_score": new_final,
-        }).eq("id", submission_id).execute()
+        # Approving an appeal **is** ignoring the charges it is about, and it goes
+        # through the one writer so the number and the decisions cannot disagree —
+        # the appeal used to subtract a delta from the stored total, which left a
+        # penalty no per-violation reader could re-derive. No delta is written here
+        # any more: the violations are marked ignored, and the ladder recomputes.
+        # A teacher who means to forgive only *some* charges does that with the
+        # per-violation switches on this same page before approving.
+        from app.services import penalty_service
+        picture, _facts = penalty_service.set_all(
+            supabase, submission_id, "ignored",
+            reason=response_msg or "Banding penalti disetujui",
+            decided_by=g.get("user_id"),
+        )
+        if picture is None:
+            return jsonify({"error": "Gagal menghitung ulang penalti"}), 400
+        penalty_reduction = round(max(0.0, current_penalty - picture["penalty"]), 2)
 
     appeal["status"] = "approved" if action == "approve" else "rejected"
     appeal["responded_at"] = datetime.now(timezone.utc).isoformat()
@@ -4232,6 +4269,176 @@ def api_penalty_appeal_handle(submission_id):
     supabase.table("submissions").update({"answers": json.dumps(answers)}).eq("id", submission_id).execute()
 
     return jsonify({"success": True, "message": "Banding " + ("disetujui" if action == "approve" else "ditolak")})
+
+
+# --- Per-violation penalty decisions -----------------------------------------
+#
+# The banding page and the review panel both live on this one mechanism: a teacher
+# marks each recorded violation `applied` or `ignored`, and the mark is re-derived
+# from that list by `penalty_service` — never moved by a delta. The read door is
+# wider than the write door on purpose: a head of school and their deputy oversee
+# the school (`can_read_exam`) but do not touch a colleague's marks
+# (`can_manage_exam`), which is the line `exam_access` draws everywhere else.
+
+
+def _guard_submission_read(supabase, submission_id, redirect_to="/teacher/results"):
+    """Like `_guard_submission`, but for a reader — officials included."""
+    try:
+        sub = row_or_none(
+            supabase.table("submissions")
+            .select("id,exam_id,student_id,answers,penalty,final_score,violations,"
+                    "profiles(full_name),exams(id,title,teacher_id,school_id)")
+            .eq("id", submission_id).maybe_single().execute()
+        )
+    except Exception:
+        logger.exception("Read check failed for submission %s", submission_id)
+        flash("Tidak dapat memverifikasi akses ke submission ini", "error")
+        return None, redirect(redirect_to)
+    if not sub:
+        flash("Submission tidak ditemukan", "error")
+        return None, redirect(redirect_to)
+    exam = sub.get("exams") or {}
+    if not can_read_exam(g.user_id, g.get("user_role"), g.get("user_school_id"), exam):
+        logger.warning("Denied read of submission %s: user=%s", submission_id, g.user_id)
+        flash(NO_SUBMISSION_ACCESS, "error")
+        return None, redirect(redirect_to)
+    sub["_exam"] = exam
+    return sub, None
+
+
+def _penalty_exam_settings(supabase, exam_id):
+    """The exam row the ladder reads, in one select."""
+    try:
+        return (supabase.table("exams")
+                .select("id, teacher_id, school_id, anti_cheat_enabled,"
+                        " penalty_per_violation, max_violations,"
+                        " question_types, answer_key, question_weights,"
+                        " total_questions, question_scoring")
+                .eq("id", exam_id).maybe_single().execute().data) or {}
+    except Exception:
+        logger.exception("Could not read exam %s for the penalty panel", exam_id)
+        return {}
+
+
+def _acting_on_behalf(sub, exam):
+    """Who to name in the audit line when the caller is not the paper's owner.
+
+    An admin of the school may correct a colleague's marks; the entry then says
+    whose marks they were, because "kepala sekolah mengubah penalti" without the
+    paper's owner is a record nobody can follow. `None` when the caller *is* the
+    owner, so the ordinary case writes no name it does not need — and the owner's
+    name is looked up only when it is actually needed, rather than embedded in every
+    read.
+    """
+    owner_id = (exam or {}).get("teacher_id")
+    if not owner_id or str(owner_id) == str(g.user_id):
+        return None
+    try:
+        owner = row_or_none(get_supabase().table("profiles").select("full_name")
+                            .eq("id", owner_id).maybe_single().execute())
+    except Exception:
+        owner = None
+    return (owner or {}).get("full_name") or str(owner_id)
+
+
+@teacher_bp.route("/submission/<submission_id>/violations")
+@teacher_or_admin_required
+@open_year_required("submission_id")
+def submission_violations(submission_id):
+    """Every recorded violation of one paper, each with its decision and impact."""
+    from app.services import penalty_service
+    supabase = get_supabase()
+    sub, err = _guard_submission_read(supabase, submission_id,
+                                      redirect_to="/teacher/penalty-appeals")
+    if err:
+        return err
+    exam = _penalty_exam_settings(supabase, sub["exam_id"])
+    # One read: `inspect` pairs each charged event with its decision *and* the
+    # display fields (moment, kind label, absence length), so the panel does not
+    # re-read the log to decorate rows it already has.
+    picture = penalty_service.inspect(supabase, sub, exam)
+    can_edit = can_manage_exam(g.user_id, g.get("user_role"), g.get("user_school_id"),
+                               sub.get("_exam"))
+    return render_template("teacher/submission_violations.html", submission=sub,
+                           exam=exam, picture=picture, rows=picture["rows"],
+                           can_edit=can_edit,
+                           on_behalf_of=_acting_on_behalf(sub, exam))
+
+
+@teacher_bp.route("/api/submission/<submission_id>/violations", methods=["POST"])
+@teacher_or_admin_required
+@require_school_access("submissions", "submission_id", ("exam_id", "exams"))
+@open_year_required("submission_id")
+def api_submission_violation_set(submission_id):
+    """Set one violation's status and recompute the paper's mark."""
+    from app.services import penalty_service
+    supabase = get_supabase()
+    sub, err = _guard_submission(supabase, submission_id, as_json=True)
+    if err:
+        return err
+    data = request.get_json(silent=True) or {}
+    violation_id = str(data.get("violation_id") or "")
+    status = data.get("status")
+    reason = str(data.get("reason") or "").strip() or None
+    if not violation_id:
+        return jsonify({"error": "violation_id wajib diisi"}), 400
+    if status not in penalty_service.STATUSES:
+        return jsonify({"error": "status harus applied atau ignored"}), 400
+
+    picture, facts = penalty_service.set_decision(
+        supabase, submission_id, violation_id, status, reason, g.user_id)
+    if picture is None:
+        msg = "Violation tidak ditemukan" if facts.get("error") == "missing" else \
+              "Gagal menghitung ulang penalti"
+        return jsonify({"error": msg}), 400
+
+    exam = _penalty_exam_settings(supabase, sub["exam_id"])
+    log_activity("update", "violation", violation_id,
+                 old_data={"status": facts.get("old_status")},
+                 new_data={"status": status, "reason": reason,
+                           "submission_id": submission_id,
+                           "on_behalf_of": _acting_on_behalf(sub, exam)},
+                 user_id=g.user_id)
+    return jsonify({"success": True, "penalty": picture["penalty"],
+                    "final": picture["final"], "raw": picture["raw"],
+                    "applied": picture["applied"], "ignored": picture["ignored"]})
+
+
+@teacher_bp.route("/api/submission/<submission_id>/violations/all",
+                  methods=["POST"])
+@teacher_or_admin_required
+@require_school_access("submissions", "submission_id", ("exam_id", "exams"))
+@open_year_required("submission_id")
+def api_submission_violations_all(submission_id):
+    """Apply or ignore every charged violation of one paper at once."""
+    from app.services import penalty_service
+    supabase = get_supabase()
+    sub, err = _guard_submission(supabase, submission_id, as_json=True)
+    if err:
+        return err
+    data = request.get_json(silent=True) or {}
+    status = data.get("status")
+    reason = str(data.get("reason") or "").strip() or None
+    if status not in penalty_service.STATUSES:
+        return jsonify({"error": "status harus applied atau ignored"}), 400
+
+    picture, facts = penalty_service.set_all(supabase, submission_id, status, reason,
+                                             g.user_id)
+    if picture is None:
+        return jsonify({"error": "Gagal menghitung ulang penalti"}), 400
+
+    exam = _penalty_exam_settings(supabase, sub["exam_id"])
+    log_activity("update", "violation", submission_id,
+                 old_data={"scope": "all"},
+                 new_data={"status": status, "reason": reason,
+                           "changed": facts.get("changed"),
+                           "submission_id": submission_id,
+                           "on_behalf_of": _acting_on_behalf(sub, exam)},
+                 user_id=g.user_id)
+    return jsonify({"success": True, "changed": facts.get("changed"),
+                    "penalty": picture["penalty"], "final": picture["final"],
+                    "raw": picture["raw"], "applied": picture["applied"],
+                    "ignored": picture["ignored"]})
 
 
 @teacher_bp.route("/publish/<exam_id>", methods=["GET", "POST"])
@@ -5625,7 +5832,12 @@ def generate_remedial(exam_id):
     total_new = len(questions)
     new_exam = {
         "teacher_id": g.user_id,
-        "school_id": g.get("user_school_id"),
+        # The remedial set of a paper belongs to the paper's own school — the school
+        # `require_school_access` just checked this caller against — and not to the
+        # caller's profile. Written as `g.get("user_school_id")` it followed whichever
+        # school the request had resolved, which for a teacher working at a second
+        # NPSN is not the school the source paper (and its results) live in.
+        "school_id": exam.get("school_id") or g.get("user_school_id"),
         "title": title,
         "subject": exam.get("subject", ""),
         "class_ids": exam.get("class_ids", []),

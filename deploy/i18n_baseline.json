@@ -92,7 +92,7 @@
       "frozen": false
     },
     "admin_sekolah/grade_weights.html": {
-      "pairs": 95,
+      "pairs": 103,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": true
@@ -104,7 +104,7 @@
       "frozen": false
     },
     "admin_sekolah/invigilation_matrix.html": {
-      "pairs": 59,
+      "pairs": 62,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -224,7 +224,7 @@
       "frozen": false
     },
     "auth/login.html": {
-      "pairs": 18,
+      "pairs": 21,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -272,7 +272,7 @@
       "frozen": false
     },
     "base.html": {
-      "pairs": 178,
+      "pairs": 181,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -416,9 +416,9 @@
       "frozen": false
     },
     "student/result_detail.html": {
-      "pairs": 40,
+      "pairs": 43,
       "leftovers": 28,
-      "coverage": 58.8,
+      "coverage": 60.6,
       "frozen": true
     },
     "student/results.html": {
@@ -428,7 +428,7 @@
       "frozen": false
     },
     "student/seb_claim.html": {
-      "pairs": 11,
+      "pairs": 12,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -440,7 +440,7 @@
       "frozen": false
     },
     "student/take_exam.html": {
-      "pairs": 344,
+      "pairs": 347,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -464,7 +464,7 @@
       "frozen": false
     },
     "super_admin/dashboard.html": {
-      "pairs": 108,
+      "pairs": 120,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -476,7 +476,7 @@
       "frozen": false
     },
     "super_admin/deploy_status.html": {
-      "pairs": 471,
+      "pairs": 474,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -650,13 +650,13 @@
       "frozen": false
     },
     "teacher/dashboard.html": {
-      "pairs": 65,
+      "pairs": 71,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
     },
     "teacher/exam_form.html": {
-      "pairs": 256,
+      "pairs": 273,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -668,9 +668,9 @@
       "frozen": false
     },
     "teacher/exams.html": {
-      "pairs": 21,
+      "pairs": 23,
       "leftovers": 5,
-      "coverage": 80.8,
+      "coverage": 82.1,
       "frozen": true
     },
     "teacher/grade_detail.html": {
@@ -704,7 +704,7 @@
       "frozen": false
     },
     "teacher/invigilation.html": {
-      "pairs": 40,
+      "pairs": 49,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -717,7 +717,7 @@
     },
     "teacher/penalty_appeals.html": {
       "pairs": 0,
-      "leftovers": 9,
+      "leftovers": 8,
       "coverage": 0.0,
       "frozen": false
     },
@@ -785,6 +785,12 @@
       "pairs": 13,
       "leftovers": 0,
       "coverage": 100.0,
+      "frozen": false
+    },
+    "teacher/submission_violations.html": {
+      "pairs": 0,
+      "leftovers": 17,
+      "coverage": 0.0,
       "frozen": false
     },
     "teacher/templates.html": {

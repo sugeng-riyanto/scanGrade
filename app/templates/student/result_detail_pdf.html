@@ -85,9 +85,9 @@ body { font-family: Helvetica, Arial, sans-serif; color: #1e293b; font-size: 10p
     </div>
     <div style="clear:both; height:4px;"></div>
     <div style="font-size:10pt; margin-top:4px;">
-        <div><strong>Subject:</strong> {{ exam.get('subject', '-') }}</div>
+        <div><strong>Subject:</strong> {{ subject_label(exam, 'Subject not set') }}</div>
         <div><strong>Nama Siswa:</strong> {{ student_name }}</div>
-        <div><strong>Mata Pelajaran:</strong> {{ exam.get('subject', '-') }}</div>
+        <div><strong>Mata Pelajaran:</strong> {{ subject_label(exam) }}</div>
         <div><strong>Nama Guru:</strong> {{ teacher_name or '-' }}</div>
         <div><strong>Nama Ujian:</strong> {{ exam.get('title', 'Ujian') }}</div>
         <div><strong>Tgl:</strong> {{ (submission.submitted_at[:10] if submission.submitted_at else '-') }}</div>

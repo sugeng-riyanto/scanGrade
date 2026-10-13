@@ -98,7 +98,7 @@
         <h1>{{ exam.get('title', 'Ujian') }}</h1>
         <div class="meta">
             <span><strong>Siswa:</strong> {{ student_name }}</span>
-            <span><strong>Mata Pelajaran:</strong> {{ exam.get('subject', '-') }}</span>
+            <span><strong>Mata Pelajaran:</strong> {{ subject_label(exam) }}</span>
             <span><strong>Soal:</strong> {{ total_q }} butir</span>
         </div>
         <div class="meta" style="margin-top:4px;">
@@ -127,7 +127,7 @@
                         <span class="badge bg-slate-200 text-slate-500"><i class="fas fa-eye-slash mr-0.5"></i><span x-text="lang==='en'?'Hidden':'Tersembunyi'"></span></span>
                         {% endif %}
                     </div>
-                    <p class="text-sm font-bold text-slate-500 mt-1">{{ exam.get('subject', '-') }} &middot; {{ total_q or 0 }} soal</p>
+                    <p class="text-sm font-bold text-slate-500 mt-1">{{ subject_label(exam) }} &middot; {{ total_q or 0 }} soal</p>
                     <p class="text-sm text-slate-400 font-medium mt-0.5">Dikumpulkan: {{ submission.submitted_at|tz if submission.submitted_at else '-' }}</p>
                 </div>
                 <div class="text-right">
@@ -185,6 +185,18 @@
                     <p class="text-orange-600 font-bold">Final</p>
                 </div>
             </div>
+            <p class="mt-3 text-xs text-surface-500 leading-relaxed" :lang="lang" x-text="t('Nilai akhir = skor jawaban dikurangi penalti anti-cheat, tidak pernah kurang dari 0. Penalti hanya mengikuti pelanggaran yang tercatat, dan bisa ditinjau lewat banding. Bila tidak ada pelanggaran, penalti 0 dan nilai akhir sama dengan skor jawaban.','Final mark = answer score minus the anti-cheat penalty, never below 0. A penalty only follows a recorded violation, and can be reviewed through an appeal. With no violation the penalty is 0 and the final mark equals the answer score.')"></p>
+            {# The pupil's own summary of the penalty: counts, never the per-event log
+               — that belongs to the teacher and the invigilator. Neutral and
+               descriptive, the same tone the anti-cheat dashboard uses. #}
+            {% if penalty_summary and penalty_summary.recorded %}
+            <p class="mt-1 text-xs text-surface-500 leading-relaxed" :lang="lang"
+               x-text="t('Penalti diterapkan untuk {{ penalty_summary.applied }} dari {{ penalty_summary.recorded }} pelanggaran yang tercatat.','A penalty applies to {{ penalty_summary.applied }} of {{ penalty_summary.recorded }} recorded violations.')"></p>
+            {% if penalty_summary.ignored %}
+            <p class="text-xs text-surface-500 leading-relaxed" :lang="lang"
+               x-text="t('{{ penalty_summary.ignored }} pelanggaran telah ditinjau dan tidak lagi mengurangi nilai.','{{ penalty_summary.ignored }} violations have been reviewed and no longer reduce the mark.')"></p>
+            {% endif %}
+            {% endif %}
             {% endif %}
             {% set appeal = (submission.answers or {}).get('_penalty_appeal', {}) %}
             {# An appeal argues against a released penalty. Before release there is no

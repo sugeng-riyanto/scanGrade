@@ -6,13 +6,11 @@
 <script>
 function appealAction(submissionId, action) {
     const row = document.getElementById('appeal-' + submissionId);
-    const reductionType = row ? row.querySelector('.reduction-type').value : 'fixed';
-    const reductionValue = row ? row.querySelector('.reduction-value').value : '0';
     const response = row ? row.querySelector('.appeal-response').value : '';
     fetch('/teacher/api/penalty-appeal/' + submissionId, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({action, reduction_type: reductionType, reduction_value: reductionValue, response})
+        body: JSON.stringify({action, response})
     })
     .then(r => r.json())
     .then(d => {
@@ -44,24 +42,24 @@ function appealAction(submissionId, action) {
                 <p class="text-sm text-slate-700 whitespace-pre-wrap">{{ (s.appeal or {}).get('reason', '') }}</p>
                 <p class="text-[10px] text-slate-400 mt-1">Diajukan: {{ (s.appeal or {}).get('requested_at', '')|tz }}</p>
             </div>
-            <div class="grid grid-cols-3 gap-2 mb-3">
-                <div>
-                    <label class="text-[10px] font-bold text-slate-500 block mb-0.5">Jenis Pengurangan</label>
-                    <select class="reduction-type w-full text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white">
-                        <option value="fixed">Nominal tetap</option>
-                        <option value="percent">Persentase (%)</option>
-                        <option value="all">Semua penalti</option>
-                    </select>
-                </div>
-                <div>
-                    <label class="text-[10px] font-bold text-slate-500 block mb-0.5">Nilai Pengurangan</label>
-                    <input type="number" class="reduction-value w-full text-xs border border-slate-200 rounded-lg px-2 py-1.5" value="5" min="0" step="1">
-                </div>
+            <div class="grid grid-cols-2 gap-2 mb-3">
                 <div>
                     <label class="text-[10px] font-bold text-slate-500 block mb-0.5">Catatan</label>
                     <input type="text" class="appeal-response w-full text-xs border border-slate-200 rounded-lg px-2 py-1.5" placeholder="Opsional...">
                 </div>
+                <div class="flex items-end">
+                    <a href="/teacher/submission/{{ s.id }}/violations"
+                       class="w-full text-center px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-bold transition">
+                        <i class="fas fa-list-ul"></i> Tinjau per pelanggaran
+                    </a>
+                </div>
             </div>
+            <p class="text-[10px] text-slate-500 mb-3">
+                <b>Setujui</b> berarti mengabaikan seluruh pelanggaran kertas ini — angka
+                penalti dihitung ulang dari keputusan itu, bukan dari pengurangan manual.
+                Ingin mengabulkan sebagian saja? Abaikan pelanggaran tertentu di panel
+                tinjau, lalu setujui.
+            </p>
             <div class="flex gap-2">
                 <button onclick="appealAction('{{ s.id }}', 'approve')" class="flex-1 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition">Setujui</button>
                 <button onclick="appealAction('{{ s.id }}', 'reject')" class="flex-1 px-3 py-2 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg text-xs font-bold transition">Tolak</button>

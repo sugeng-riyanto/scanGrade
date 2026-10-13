@@ -435,11 +435,27 @@ def log_violation():
             # is the ladder's total, not another increment.
             try:
                 sub = supabase.table("submissions").select(
-                    "id,status,started_at,resume_limit,resume_count_used"
+                    "id,status,started_at,resume_limit,resume_count_used,answers"
                 ).eq("exam_id", exam_id).eq("student_id", g.user_id).order(
                     "created_at", desc=True).limit(1).execute()
                 if sub.data:
-                    supabase.table("submissions").update({"violations": total_count, "penalty": penalty_info["penalty"]}).eq("id", sub.data[0]["id"]).execute()
+                    # The stored total is the ladder summed over the *applied*
+                    # violations, never the raw count: a teacher may already have
+                    # ignored an earlier charge, and re-charging it here would make
+                    # the number on the paper disagree with the decisions behind it.
+                    # With no decision recorded — the ordinary case, since nobody has
+                    # reviewed a sitting still in progress — the ladder's own total
+                    # already is that sum, so the extra log read is skipped.
+                    from app.services import penalty_service
+                    row = sub.data[0]
+                    if penalty_service.decisions(row):
+                        applied = penalty_service.applied_penalty(
+                            exam, penalty_service.events(supabase, exam_id, g.user_id, row))
+                    else:
+                        applied = penalty_info["penalty"]
+                    supabase.table("submissions").update({
+                        "violations": total_count, "penalty": applied,
+                    }).eq("id", row["id"]).execute()
             except Exception:
                 current_app.logger.exception("Could not sync penalty for exam %s", exam_id)
                 sub = None

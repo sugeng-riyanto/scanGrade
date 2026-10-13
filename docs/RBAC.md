@@ -1,5 +1,11 @@
 # ScanGrade — Role-Based Access Control (RBAC) & Interaction Flows
 
+> **Daftar peran yang definitif: 6 — `super_admin`, `admin_sekolah`, `principal`,
+> `vice_principal`, `guru`, `murid`** (README lama menyebut 4; sudah usang).
+> Dan hati-hati: **"Kepala Sekolah" adalah dua hal berbeda** — peran login `principal`
+> (pengawasan, baca-saja) versus **field teks `schools.principal_name`** yang tercetak
+> di dokumen. Rujukan tetap lengkap beserta buktinya: **`docs/ROLES_CLARIFICATION.md`**.
+
 ## 1. Role Hierarchy
 
 ```
@@ -573,3 +579,65 @@ keanggotaan yang sudah ditutup — dan memperlakukan `home` sebagai *hapus pilih
 sebagai id sekolah yang bisa dikarang klien. Setelah dipilih, resolusi per-request di
 `app/utils/auth.py` membuat kelas, murid, bobot nilai, KKM dan ujian mengikuti NPSN itu;
 penutupan keanggotaan mencabutnya pada request berikutnya, bukan setelah cache kedaluwarsa.
+## Pintu tulis ujian: sekolah mana yang menyimpan sebuah ujian (guru anggota dua NPSN)
+
+`exams.school_id` adalah satu-satunya kolom yang menentukan **sekolah mana yang menimbang**
+sebuah ujian, **murid siapa** yang boleh mengerjakannya, **nilai siapa** yang muncul di
+bawahnya, dan **laporan siapa** yang menghitungnya. Sisi **baca** sudah benar di cabang ini
+(`school_membership.resolve_for_request`, dipanggil `app/utils/auth.py::_resolved_school`).
+Yang belum ada adalah sisi **tulis**: setiap pintu yang menulis kolom itu menjawab dengan
+caranya sendiri.
+
+- Dua arah, dua fungsi, dan perbedaannya disengaja (`app/services/school_membership.py`):
+  - **membaca** — `resolve_for_request`: pilihan sekolah di sesi (disimpan di server, per
+    token, tidak pernah di cookie) dihormati **hanya bila masih ada baris `active`**;
+    pilihan yang barisnya hilang dibuang; dan **tabel yang tidak terbaca mengembalikan
+    sekolah rumah** — gangguan basis data tidak boleh mengambil sekolah seseorang di
+    tengah halaman.
+  - **menulis** — `filing_school`: sekolah yang **tidak dapat dipastikan justru ditolak**,
+    karena gangguan basis data yang diam-diam menjadi sekolah rumah adalah tepat kebocoran
+    yang aturan ini ada untuk mencegah. Dipanggil lewat
+    `app.utils.auth::filing_school_for_request` (satu pembaca `g`, seperti
+    `check_subscription_write`).
+- Satu tabel yang **tidak ada sama sekali** (migrasi 044 belum dijalankan) bukan gangguan:
+  itu `[]`, dan di sana `profiles.school_id` adalah seluruh kebenarannya — kalau tidak,
+  setiap simpan ujian ditolak di kotak yang tidak pernah punya fitur ini.
+- `g.user_home_school_id` = `profiles.school_id`; `g.user_school_id` = sekolah yang
+  **diresolusi** untuk request ini. Keduanya disimpan karena aturannya harus membedakan
+  keduanya (sekolah rumah adalah siapa guru itu di atas kertas; sekolah aktif adalah tempat
+  ia bekerja sekarang).
+- **Nama sekolah di dalam body bukan otoritas.** Body yang menyebut sekolah lain ditolak
+  (400), bukan dituruti dan bukan pula diam-diam ditimpa.
+- Pintu tulis: `POST /exam/` dan `PUT /exam/<id>` tidak lagi menerima `school_id` sebagai
+  kolom yang bisa ditulis; builder create (`/teacher/exams/new`) memakai jawaban otoritas dan
+  menolak simpan bila tidak terverifikasi; builder edit tidak pernah **menyebut ulang**
+  sekolah (baris mempertahankan miliknya; hanya baris tanpa sekolah sama sekali yang
+  diperbaiki, dan perbaikan itu pun lewat otoritas yang sama); `duplicate_exam` mewarisi
+  sekolah makalah sumber; `generate_remedial` menyematkan set remedial ke sekolah makalah
+  sumber, bukan ke sekolah pemanggil.
+- Pembacaan `GET /exam/` ikut dipersempit ke sekolah request (dan kunci jawaban hanya ikut
+  bila `can_read_exam` mengizinkan), sebab sisi baca yang tetap lintas sekolah akan
+  menyerahkan persis apa yang sisi tulis menolak untuk dibuat.
+- Refresh token menyelesaikan sekolah **lagi** (kedua cabang pembacaan profil) dan
+  memindahkan pilihan sekolah ke token baru **sebelum** resolusi pertama — tanpa itu, refresh
+  tiap jam mengembalikan guru lintas sekolah ke sekolah rumahnya, yaitu sekolah tempat
+  makalah berikutnya akan disimpan.
+
+Batas yang jujur: **pemilih sekolah tidak ada di cabang ini** — tidak ada pemanggil
+`set_active_school()` selain alur bergabung dan pengujian, jadi sekolah aktif = sekolah rumah
+kecuali ada yang memanggilnya (dan panggilan itu hanya dihormati bila baris `active` masih
+memberikannya). Yang dijamin: setiap pintu penulis ujian bertanya ke satu otoritas itu, dan
+body request tidak bisa menjawabnya.
+
+Penjaga: `tests/unit/test_exam_school_authority.py` (37 uji, termasuk **delapan uji yang
+menjalankan pintunya** — empat menjalankan `POST /exam/` dan empat menjalankan simpan milik
+builder (`/teacher/exams/new` dan `/teacher/exams/<id>`) — lalu membaca baris yang
+benar-benar diserahkan ke basis data, bukan hanya memastikan rutenya bertanya;
+`.freebuff/mutate_exam_school.py` **29/29 cacat tertangkap**).
+
+Di pintu create builder, jawaban otoritas **sama** dengan sekolah hasil resolusi sesi
+(`filing_school` selalu menjawab dengan sekolah yang ditanyakan bila ia menjawab), jadi yang
+melindungi sebuah simpan adalah **penolakannya** — pintu berhenti sebelum baris dibentuk.
+Karena itu empat ujinya yang menentukan adalah posting tangan yang menyebut sekolah rumah dan
+keanggotaan yang tidak terbaca, keduanya diperiksa **tidak menulis apa pun**; kolomnya sendiri
+dipin di pintu JSON, tempat nilainya memang bisa berbeda dari yang disebut body.
