@@ -46,16 +46,61 @@ me-level-ulang pelanggaran lain yang tidak disentuh guru. Dengan semua pelanggar
 `applied`, jumlahnya persis sama dengan `calculate_graduated_penalty` — jadi angka
 historis tidak bergeser.
 
+## Keputusan per-pelanggaran — siapa yang mengubah angka itu
+
+Sampai perubahan ini pelanggaran hanya punya satu angka agregat (`submissions.penalty`),
+jadi guru tidak bisa meninjau pelanggaran satu per satu dan angka penalti tidak bisa
+diturunkan ulang dari apa pun. Sekarang keputusan guru disimpan **per pelanggaran**
+dan penalti selalu **diturunkan** dari daftar itu oleh
+`app/services/penalty_service.py`:
+
+```
+penalti = Σ nilai_tangga(posisi) untuk setiap pelanggaran berstatus "applied"
+```
+
+- **Tempat penyimpanannya** adalah `submissions.answers["_violation_decisions"]`,
+  sebuah peta `{violation_id: {status, reason, decided_by, decided_at, previous}}` —
+  kontainer yang **sama** dengan `_penalty_appeal`, sehingga tidak ada dua wadah yang
+  bisa tidak sinkron. Tidak ada tabel/kolom baru, jadi tidak ada migrasi.
+- **Ketiadaan baris = `applied`.** Percobaan lama tidak punya peta keputusan sama
+  sekali, dan membacanya sebagai *semua diterapkan* mempertahankan angka historisnya
+  persis. Tidak ada backfill karena tidak ada yang perlu di-backfill.
+- **Hanya dua status**: `applied` / `ignored`. Pengurangan sebagian diungkapkan dengan
+  mengabaikan *sebagian* pelanggaran, bukan dengan angka kedua — sebab delta tidak
+  bisa dihitung ulang oleh tangga, dan satu angka yang tidak bisa diturunkan ulang
+  adalah asal mula dua kebenaran.
+- **`penalty_service.recompute(submission_id)`** adalah satu-satunya penulis: ia
+  membaca event + keputusan, menghitung ulang *skor mentah* lewat `exam_scoring.rescore`
+  (dengan penalti dinolkan), lalu menulis `penalty`, `violations`, dan `final_score`.
+  Karena `rescore` memakai `final_score.breakdown`, menampilkan dan menyimpan tidak bisa
+  berbeda.
+- **`penalty_service.inspect()`** mengembalikan gambar yang sama **tanpa menulis**,
+  dipakai panel guru dan setiap permukaan yang menampilkan jalan hitungnya.
+
+Siapa yang boleh mengubah: **guru pemilik ujian** dan **admin_sekolah** sekolahnya
+(`can_manage_exam`) — admin yang bukan pemilik tercatat "atas nama guru [X]" di
+`audit_logs`. **Kepala sekolah & wakil kepala sekolah hanya membaca**
+(`can_read_exam`): pengawasan mereka adalah membaca, dan memberi mereka wewenang
+menimpa nilai guru lain akan melanggar garis yang sudah ditetapkan `exam_access`.
+
 ## Riwayat tidak berubah tanpa tindakan
 
 Perubahan status penalti adalah **tindakan sadar** guru/admin. Tidak ada migrasi atau
 perilisan yang menghitung ulang nilai percobaan yang sudah ada atas inisiatifnya
 sendiri; sebuah nilai hanya bergerak ketika seseorang memutuskan sesuatu tentang
-pelanggarannya.
+pelanggarannya. Karena ketiadaan keputusan berarti *diterapkan*, perilisan ini pun
+tidak menggerakkan satu pun nilai lama.
 
-## Alur banding
+## Alur banding menyatu dengan keputusan
 
-Murid dapat mengajukan banding (`POST /api/student/penalty-appeal`) yang disimpan di
+Murid mengajukan banding (`POST /api/student/penalty-appeal`) yang disimpan di
 `submissions.answers["_penalty_appeal"]` (`status`: `pending` → `approved`/`rejected`,
-`penalty_reduction`), dan guru menanganinya di `/teacher/penalty-appeals`. Keputusan
-banding memakai aritmetika `final_score` yang sama saat nilai dihitung ulang.
+`penalty_reduction`), dan guru menanganinya di `/teacher/penalty-appeals`, dengan tautan
+ke panel tinjau per pelanggaran (`/teacher/submission/<id>/violations`).
+
+**Menyetujui banding = mengabaikan seluruh pelanggaran kertas itu**, dan itu dijalankan
+oleh `penalty_service.set_all(…, "ignored")` — bukan lagi dengan mengurangi angka
+penalti secara manual. Dengan begitu angka yang dibayar murid selalu bisa diturunkan
+ulang dari daftar keputusan, dan tidak ada delta tersembunyi. Guru yang ingin
+mengabulkan sebagian saja mengabaikan pelanggaran tertentu di panel tinjau, lalu
+menyetujui banding.

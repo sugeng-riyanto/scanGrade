@@ -186,6 +186,17 @@
                 </div>
             </div>
             <p class="mt-3 text-xs text-surface-500 leading-relaxed" :lang="lang" x-text="t('Nilai akhir = skor jawaban dikurangi penalti anti-cheat, tidak pernah kurang dari 0. Penalti hanya mengikuti pelanggaran yang tercatat, dan bisa ditinjau lewat banding. Bila tidak ada pelanggaran, penalti 0 dan nilai akhir sama dengan skor jawaban.','Final mark = answer score minus the anti-cheat penalty, never below 0. A penalty only follows a recorded violation, and can be reviewed through an appeal. With no violation the penalty is 0 and the final mark equals the answer score.')"></p>
+            {# The pupil's own summary of the penalty: counts, never the per-event log
+               — that belongs to the teacher and the invigilator. Neutral and
+               descriptive, the same tone the anti-cheat dashboard uses. #}
+            {% if penalty_summary and penalty_summary.recorded %}
+            <p class="mt-1 text-xs text-surface-500 leading-relaxed" :lang="lang"
+               x-text="t('Penalti diterapkan untuk {{ penalty_summary.applied }} dari {{ penalty_summary.recorded }} pelanggaran yang tercatat.','A penalty applies to {{ penalty_summary.applied }} of {{ penalty_summary.recorded }} recorded violations.')"></p>
+            {% if penalty_summary.ignored %}
+            <p class="text-xs text-surface-500 leading-relaxed" :lang="lang"
+               x-text="t('{{ penalty_summary.ignored }} pelanggaran telah ditinjau dan tidak lagi mengurangi nilai.','{{ penalty_summary.ignored }} violations have been reviewed and no longer reduce the mark.')"></p>
+            {% endif %}
+            {% endif %}
             {% endif %}
             {% set appeal = (submission.answers or {}).get('_penalty_appeal', {}) %}
             {# An appeal argues against a released penalty. Before release there is no

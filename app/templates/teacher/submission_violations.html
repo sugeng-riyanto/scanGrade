@@ -1,0 +1,178 @@
+{% set content_lang = 'id' %}
+{% extends "base.html" %}
+{% block title %}Rincian Penalti - ScanGrade{% endblock %}
+{% block page_title %}Rincian Penalti{% endblock %}
+{% block head_extra %}
+<script>
+// One switch, one writer. Every change posts the single violation's status and the
+// server re-derives the mark from the whole decision list — so the numbers on this
+// page are never a local total the teacher has to trust, they are the server's own
+// answer read back. A failed write leaves the row where it was and says so.
+function setViolation(submissionId, violationId, status) {
+    const row = document.getElementById('v-' + violationId);
+    const reason = row ? (row.querySelector('.v-reason')?.value || '') : '';
+    return fetch('/teacher/api/submission/' + submissionId + '/violations', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({violation_id: violationId, status, reason})
+    }).then(function (r) { return r.json().then(function (d) { return {ok: r.ok, d}; }); })
+      .then(function (res) {
+        if (!res.ok) { alert('Gagal: ' + (res.d.error || '')); return; }
+        applyPicture(res.d);
+      })
+      .catch(function () { alert('Gagal menyimpan keputusan.'); });
+}
+
+function setAll(submissionId, status) {
+    const reason = document.getElementById('bulk-reason')?.value || '';
+    fetch('/teacher/api/submission/' + submissionId + '/violations/all', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({status, reason})
+    }).then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d.error) { alert('Gagal: ' + d.error); return; }
+        location.reload();
+      })
+      .catch(function () { alert('Gagal.'); });
+}
+
+// The summary bar follows the server: raw, penalty and final are replaced by the
+// values the recompute returned, so the panel and the stored mark cannot disagree.
+function applyPicture(d) {
+    const set = function (id, v) { const el = document.getElementById(id); if (el) el.textContent = v; };
+    set('sum-raw', d.raw);
+    set('sum-penalty', d.penalty);
+    set('sum-final', d.final);
+    set('sum-applied', d.applied);
+    set('sum-ignored', d.ignored);
+}
+</script>
+{% endblock %}
+{% block content %}
+{% set r = picture %}
+<div class="space-y-4 max-w-4xl">
+    <a href="/teacher/penalty-appeals" class="text-xs font-bold text-primary-600 hover:underline inline-flex items-center gap-1">
+        <i class="fas fa-arrow-left"></i> <span>Kembali ke Banding Penalti</span>
+    </a>
+
+    {% if on_behalf_of %}
+    <div class="bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-3 text-xs font-semibold">
+        Anda mengubah penalti atas nama guru {{ on_behalf_of }}. Perubahan tercatat di log audit.
+    </div>
+    {% endif %}
+
+    <div class="card p-5">
+        <h3 class="font-bold text-slate-800">{{ (submission.get('exams') or {}).get('title', '-') }}</h3>
+        <p class="text-xs text-slate-500 font-medium">{{ (submission.get('profiles') or {}).get('full_name', '-') }}</p>
+        <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mt-4">
+            <div class="bg-slate-50 rounded-xl p-3">
+                <p class="text-[10px] font-bold text-slate-500 uppercase">Skor Mentah</p>
+                <p id="sum-raw" class="text-xl font-extrabold text-slate-800">{{ r.raw }}</p>
+            </div>
+            <div class="bg-red-50 rounded-xl p-3">
+                <p class="text-[10px] font-bold text-red-500 uppercase">Total Penalti</p>
+                <p id="sum-penalty" class="text-xl font-extrabold text-red-600">{{ r.penalty }}</p>
+            </div>
+            <div class="bg-emerald-50 rounded-xl p-3">
+                <p class="text-[10px] font-bold text-emerald-600 uppercase">Nilai Akhir</p>
+                <p id="sum-final" class="text-xl font-extrabold text-emerald-700">{{ r.final }}</p>
+            </div>
+            <div class="bg-slate-50 rounded-xl p-3">
+                <p class="text-[10px] font-bold text-slate-500 uppercase">Diterapkan</p>
+                <p id="sum-applied" class="text-xl font-extrabold text-slate-800">{{ r.applied }}</p>
+            </div>
+            <div class="bg-slate-50 rounded-xl p-3">
+                <p class="text-[10px] font-bold text-slate-500 uppercase">Diabaikan</p>
+                <p id="sum-ignored" class="text-xl font-extrabold text-slate-800">{{ r.ignored }}</p>
+            </div>
+        </div>
+        <p class="text-[11px] text-slate-500 mt-3">
+            Nilai Akhir = MAX(0, Skor Mentah - Total Penalti). Total Penalti hanya menjumlahkan
+            pelanggaran berstatus <b>diterapkan</b>; pelanggaran yang diabaikan tetap tercatat
+            tetapi tidak lagi mengurangi nilai.
+        </p>
+    </div>
+
+    <div class="card p-5">
+        <div class="flex items-center justify-between flex-wrap gap-2 mb-3">
+            <h4 class="font-bold text-slate-800 text-sm">Daftar Pelanggaran</h4>
+            {% if can_edit %}
+            <div class="flex items-center gap-2">
+                <input id="bulk-reason" type="text" placeholder="Alasan (opsional)"
+                       class="text-xs border border-slate-200 rounded-lg px-2 py-1.5 w-40">
+                <button onclick="setAll('{{ submission.id }}', 'applied')"
+                        class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-bold transition">Terapkan semua</button>
+                <button onclick="setAll('{{ submission.id }}', 'ignored')"
+                        class="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded-lg text-xs font-bold transition">Abaikan semua</button>
+            </div>
+            {% endif %}
+        </div>
+
+        {% if rows %}
+        <div class="overflow-x-auto">
+            <table class="w-full text-xs min-w-[720px]">
+                <thead>
+                    <tr class="text-left text-slate-500 border-b border-slate-100">
+                        <th class="py-2 pr-2 font-bold">#</th>
+                        <th class="py-2 pr-2 font-bold">Waktu</th>
+                        <th class="py-2 pr-2 font-bold">Jenis</th>
+                        <th class="py-2 pr-2 font-bold">Durasi</th>
+                        <th class="py-2 pr-2 font-bold">Nilai</th>
+                        <th class="py-2 pr-2 font-bold">Status</th>
+                        <th class="py-2 pr-2 font-bold">Alasan</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for v in rows %}
+                    <tr id="v-{{ v.id }}" class="border-b border-slate-50 align-top">
+                        <td class="py-2 pr-2 font-bold text-slate-400">{{ v.position }}</td>
+                        <td class="py-2 pr-2 text-slate-600">{{ v.at|tz if v.at else '-' }}</td>
+                        <td class="py-2 pr-2 font-semibold text-slate-700">
+                            {{ v.label[0] if v.label else v.violation_type }}
+                        </td>
+                        <td class="py-2 pr-2 text-slate-500">
+                            {% if v.away_seconds is not none %}{{ v.away_seconds }} detik{% else %}-{% endif %}
+                        </td>
+                        <td class="py-2 pr-2 font-bold text-red-500">-{{ v.value }}</td>
+                        <td class="py-2 pr-2">
+                            {% if can_edit %}
+                            <select onchange="setViolation('{{ submission.id }}', '{{ v.id }}', this.value)"
+                                    class="text-xs border border-slate-200 rounded-lg px-2 py-1 bg-white">
+                                <option value="applied" {% if v.status == 'applied' %}selected{% endif %}>Diterapkan</option>
+                                <option value="ignored" {% if v.status == 'ignored' %}selected{% endif %}>Diabaikan</option>
+                            </select>
+                            {% else %}
+                            <span class="badge {% if v.status == 'applied' %}bg-red-50 text-red-600{% else %}bg-slate-100 text-slate-500{% endif %}">
+                                {{ 'Diterapkan' if v.status == 'applied' else 'Diabaikan' }}
+                            </span>
+                            {% endif %}
+                        </td>
+                        <td class="py-2 pr-2">
+                            {% if can_edit %}
+                            <input type="text" class="v-reason text-xs border border-slate-200 rounded-lg px-2 py-1 w-40"
+                                   value="{{ v.reason or '' }}" placeholder="Alasan (opsional)">
+                            {% else %}
+                            <span class="text-slate-500">{{ v.reason or '-' }}</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-sm text-slate-400 py-6 text-center">
+            Tidak ada pelanggaran anti-cheat yang tercatat untuk kertas ini.
+        </p>
+        {% endif %}
+
+        {% if not can_edit %}
+        <p class="text-[11px] text-slate-500 mt-3">
+            Peran Anda hanya membaca. Perubahan status penalti dilakukan guru pemilik ujian
+            atau admin sekolah.
+        </p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
