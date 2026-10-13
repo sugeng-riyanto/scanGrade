@@ -187,7 +187,9 @@ def test_the_report_card_drops_the_duplicate_final(app):
     assert "None" not in html
     assert '<div class="l">Nilai Akhir</div>' not in html, "the strip still repeats it"
     assert html.count('<div class="lbl">Nilai Akhir</div>') == 1, "the headline keeps it"
-    assert "Skor MCQ" in html and "Pelanggaran" in html
+    assert "Skor Mentah" in html and "Pelanggaran" in html
+    assert "68.5" in html, "the strip prints the raw the formula names"
+    assert "4 / 4" in html, "the applied/recorded counts"
 
 
 def test_the_pupil_screen_shows_the_same_working():
@@ -200,3 +202,97 @@ def test_the_pupil_screen_shows_the_same_working():
 def test_the_pdf_template_names_the_formula_it_prints():
     src = (TEMPLATES / "student" / "result_detail_pdf.html").read_text(encoding="utf-8")
     assert "Nilai Akhir = maks(0, Skor Mentah" in src
+
+
+EXAM_SHEET_STATS = {"count": 1, "avg": 50.0, "max": 50.0, "min": 50.0,
+                    "passed": 0, "pass_rate": 0, "threshold": 70}
+
+
+def _render_sheet(app, row):
+    return app.jinja_env.get_template("teacher/print_exam_report.html").render(
+        exam=dict(EXAM), roster=[row], stats=dict(EXAM_SHEET_STATS),
+        class_names=[], school={}, teacher_name="", printed_on="now", pass_mark=70)
+
+
+def test_the_printed_roster_states_the_working_that_reconciles(app):
+    """The sheet's own note reads `Nilai Akhir = maks(0, Skor Mentah - Penalti)`.
+
+    The column beside it used to hold the *objective* score, which no essay enters,
+    so the note and the numbers disagreed on every mixed paper.
+    """
+    row = {"student_id": "murid-1", "student_name": "Ahmad", "status": "published",
+           "answers": {}, "score": 60.0, "violations": 4,
+           "raw": 68.5, "penalty": 5.0, "final_score": 63.5, "applied": 3, "recorded": 4}
+    html = _render_sheet(app, row)
+
+    assert "Skor Mentah" in html and "Skor MCQ" not in html, "the column was relabelled"
+    assert "68.5" in html and "3 / 4" in html
+    assert "Nilai Akhir = maks(0, Skor Mentah" in html
+    assert row["raw"] - row["penalty"] == row["final_score"], "the printed row reconciles"
+
+
+def test_the_printed_roster_falls_back_to_the_stored_row(app):
+    """A row the route did not decorate still prints numbers, never blanks."""
+    row = {"student_id": "m", "student_name": "A", "status": "published",
+           "answers": {}, "score": 60.0, "violations": 2,
+           "final_score": 63.5, "penalty": 5.0}
+    html = _render_sheet(app, row)
+    assert "None" not in html
+    assert "68.5" in html, "raw = final + penalty with no attached raw"
+
+
+# ── the shared reader that decorates a whole sitting ─────────────────────────
+
+class _FakeQuery:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def select(self, *a, **k):
+        return self
+
+    def eq(self, *a, **k):
+        return self
+
+    def order(self, *a, **k):
+        return self
+
+    def execute(self):
+        return type("_R", (), {"data": self._rows})()
+
+
+class _FakeDb:
+    def __init__(self, events):
+        self._events = events
+
+    def table(self, name):
+        return _FakeQuery(self._events if name == "violation_logs" else [])
+
+
+def test_working_for_exam_attaches_the_exact_parts():
+    from app.services import penalty_service
+
+    exam = {"id": "e1", "penalty_per_violation": 5, "anti_cheat_enabled": True,
+            "question_types": {"0": "mcq"}, "answer_key": {"0": "A"},
+            "question_weights": {"0": 100}, "total_questions": 1,
+            "question_scoring": {}}
+    events = [{"id": "v1", "user_id": "m", "violation_type": "tab_switch",
+               "created_at": "2026-01-01T00:00:00Z", "metadata": None}]
+    row = {"id": "s1", "student_id": "m", "exam_id": "e1", "answers": {"0": "A"},
+           "teacher_feedback": {}, "penalty": 0, "violations": 1}
+
+    penalty_service.working_for_exam(_FakeDb(events), exam, [row])
+
+    assert row["raw"] == 100.0, "the mark scheme's own raw, re-earned once"
+    assert row["penalty"] == 0.0, "the first offence is the warning"
+    assert row["applied"] == 1 and row["recorded"] == 1
+    assert row["raw"] - row["penalty"] == 100.0
+
+
+def test_display_parts_prefers_a_raw_the_route_attached():
+    """A floored paper: `final + penalty` overstates, an attached raw does not."""
+    stored = {"final_score": 0.0, "penalty": 30.0, "violations": 4}
+    assert display_parts(stored)["raw"] == 30.0, "the bound, absent a real raw"
+
+    parts = display_parts({**stored, "raw": 3.0, "applied": 4, "recorded": 4})
+    assert parts["raw"] == 3.0, "the mark scheme's own raw wins"
+    assert parts["applied"] == 4 and parts["ignored"] == 0

@@ -65,6 +65,30 @@ ringkasan), sehingga satu-satunya angka yang diperiksa pembaca justru yang terce
 kali. `tests/unit/test_final_score_single_source.py` menjaga kedua sisi: labelnya muncul
 sekali, dan jalan hitungnya muncul.
 
+### Lembar cetak menyatakan jalan hitungnya, dan angkanya rekonsiliasi
+
+Lembar hasil ujian (`teacher/print_exam_report.html`) dan kartu hasil
+(`print/report_card.html`) menyatakan rumusnya sendiri, jadi **setiap baris harus
+rekonsiliasi**: `Skor Mentah - Total Penalti = Nilai Akhir`. Kolom yang dulu ada di
+sana memuat **skor objektif** (`submissions.score`), dan itu tidak pernah
+rekonsiliasi — esai adalah nilai guru dan tidak masuk hitungan kolom itu, sehingga
+pada ujian campuran `Skor MCQ - Penalti` bukan nilai akhir. Kolom itu sekarang
+memuat **Skor Mentah** yang diperoleh dari mark scheme.
+
+Satu pembaca melayani seluruh angkatan:
+`penalty_service.working_for_exam(supabase, exam, rows)` membaca log pelanggaran
+**satu kali** untuk seluruh sitting, membangun mark scheme **satu kali**, lalu
+memberi setiap baris `raw`, `penalty`, `applied`, dan `recorded` — tanpa query per
+murid (kelas 30 tetap tiga pembacaan, bukan 30). `final_score.display_parts`
+(global Jinja `score_parts`) memakai `raw` yang sudah ditempelkan bila ada, dan
+hanya jatuh ke `final + penalty` bila tidak: sebuah kertas yang kena lantai 0
+**tidak bisa** dipulihkan skor mentahnya dari baris, jadi lembar tidak mengarang
+angka.
+
+Skor objektif tidak hilang dari aplikasi: layar koreksi guru
+(`teacher/grade_detail.html`) tetap menampilkannya sebagai `MCQ:`; yang berubah
+hanya lembar cetak, yang harus menjumlahkan.
+
 ## Kenapa per-posisi, bukan satu angka total
 
 `penalty_breakdown` memberi tiap pelanggaran nilai menurut **posisinya** di tangga

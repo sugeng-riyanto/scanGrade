@@ -88,17 +88,15 @@
     }
 
     .score-strip { width: 100%; border-collapse: separate; border-spacing: 5pt 0; margin: 8pt 0 12pt; }
-    .score-strip td { text-align: center; padding: 6pt 4pt; border-radius: 6pt; width: 25%; }
+    .score-strip td { text-align: center; padding: 6pt 4pt; border-radius: 6pt; width: 33.33%; }
     .score-strip td .v { font-size: 13pt; font-weight: bold; }
     .score-strip td .l { font-size: 7pt; font-weight: bold; color: #475569; text-transform: uppercase; }
-    .c-mcq { background: #ecfdf5; border: 1pt solid #a7f3d0; }
-    .c-mcq .v { color: #059669; }
+    .c-raw { background: #ecfdf5; border: 1pt solid #a7f3d0; }
+    .c-raw .v { color: #059669; }
     .c-pen { background: #fef2f2; border: 1pt solid #fca5a5; }
     .c-pen .v { color: #dc2626; }
     .c-vio { background: #fffbeb; border: 1pt solid #fcd34d; }
     .c-vio .v { color: #b45309; }
-    .c-fin { background: #fff7ed; border: 1pt solid #fed7aa; }
-    .c-fin .v { color: #ea580c; }
 
     /* ── tables ── */
     h2.sec {
@@ -272,11 +270,18 @@
     </div>
     {% endif %}
 
+    {# The working, once. The card's headline above states the final mark; these three
+       are what it is made of — Skor Mentah - Total Penalti = Nilai Akhir. The objective
+       score is deliberately not one of them: an essay is a teacher's mark and never
+       enters it, so `Skor MCQ - Penalti` would not be the final. `score_parts` is the
+       one reading, exact wherever the route attached the mark scheme's raw (the class
+       set and the single card both do, via `penalty_service.working_for_exam`). #}
+    {% set p = score_parts(submission) %}
     <table class="score-strip">
         <tr>
-            <td class="c-mcq"><div class="v">{{ submission.score if submission.score is not none else 0 }}</div><div class="l">Skor MCQ</div></td>
-            <td class="c-pen"><div class="v">{{ submission.penalty if submission.penalty is not none else 0 }}</div><div class="l">Penalti</div></td>
-            <td class="c-vio"><div class="v">{{ submission.violations if submission.violations is not none else 0 }}</div><div class="l">Pelanggaran</div></td>
+            <td class="c-raw"><div class="v">{{ p.raw }}</div><div class="l">Skor Mentah</div></td>
+            <td class="c-pen"><div class="v">{{ p.penalty }}</div><div class="l">Total Penalti</div></td>
+            <td class="c-vio"><div class="v">{{ p.applied }} / {{ p.recorded }}</div><div class="l">Pelanggaran</div></td>
         </tr>
     </table>
 

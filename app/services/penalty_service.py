@@ -220,7 +220,7 @@ def inspect(supabase, submission: Mapping[str, Any],
     # The raw is what the mark scheme paid, independent of any charge: grading the
     # paper with the penalty zeroed is the same arithmetic `rescore` uses to grade
     # it, so the two cannot drift.
-    raw = _raw_mark(exam, {**submission, "penalty": 0})
+    raw = raw_mark(exam, submission)
     return {
         "submission_id": submission.get("id"),
         "raw": round(raw, 2),
@@ -273,17 +273,61 @@ def recompute(supabase, submission_id: str,
     return picture
 
 
-def _raw_mark(exam: Mapping[str, Any], submission: Mapping[str, Any]) -> float:
-    """The submission's earned mark with no penalty — one call into the grader."""
+def raw_mark(exam: Mapping[str, Any], submission: Mapping[str, Any],
+             parts: Any = None) -> float:
+    """The submission's earned mark with **no penalty** — the formula's first term.
+
+    The penalty is zeroed *here* rather than by each caller, so the one thing that
+    makes this the raw mark and not the final cannot be forgotten at a call site. A
+    caller marking a whole class passes `parts` (`exam_scoring.exam_parts`) once, so
+    the mark scheme is built once per sitting rather than once per paper. A grader
+    that refuses falls back to the stored numbers — exact whenever the 0-floor did
+    not bite, which is the common case — rather than dropping the row.
+    """
     try:
-        parts = exam_scoring.exam_parts(exam)
-        return float(exam_scoring.rescore(submission, parts=parts)[0])
+        if parts is None:
+            parts = exam_scoring.exam_parts(exam)
+        return float(exam_scoring.rescore({**submission, "penalty": 0}, parts=parts)[0])
     except Exception:
         logger.exception("Could not re-earn the raw mark; falling back to stored")
         # Stored final + stored penalty is the best reconstruction when the grader
         # refuses: it is exact whenever the floor did not bite, which is the common
         # case, and it is still the paper's own numbers rather than a guess.
         return float(submission.get("final_score") or 0) + float(submission.get("penalty") or 0)
+
+
+def working_for_exam(supabase, exam: Mapping[str, Any] | None,
+                     submissions: Iterable[Mapping[str, Any]]) -> None:
+    """Attach the formula's parts to every row of one sitting, in place.
+
+    A printed roster or a stack of report cards states its own formula, so every row
+    has to reconcile: ``raw - penalty = final``. The objective score that used to sit
+    in that column does not — an essay is a teacher's mark and never enters it — so
+    each row now carries the *raw* the mark scheme earns, the penalty summed over its
+    applied violations, and the applied/ignored counts.
+
+    One events read for the whole sitting and one mark-scheme build, then the grader
+    runs in memory; a query per pupil is what turns a class set into 30 round-trips.
+    """
+    from app.services.anti_cheat_service import events_for_exam
+
+    exam = exam or {}
+    try:
+        parts = exam_scoring.exam_parts(exam)
+    except Exception:
+        logger.exception("Could not build the mark scheme for a score working")
+        parts = None
+    by_student: dict[str, list] = {}
+    for event in events_for_exam(supabase, exam.get("id")):
+        by_student.setdefault(event.get("user_id"), []).append(event)
+    for row in submissions:
+        events = with_decisions(by_student.get(row.get("student_id"), []),
+                                decisions(row))
+        part = breakdown_for(exam, events)
+        row["raw"] = round(raw_mark(exam, row, parts=parts), 2)
+        row["penalty"] = part["total"]
+        row["applied"] = part["applied"]
+        row["recorded"] = part["recorded"]
 
 
 def set_decision(supabase, submission_id: str, violation_id: str, status: str,

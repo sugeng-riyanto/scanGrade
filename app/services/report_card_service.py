@@ -30,8 +30,11 @@ SUBMISSION_FIELDS = (
     "id, exam_id, student_id, answers, score, max_score, violations, penalty, "
     "final_score, status, is_published, started_at, submitted_at, graded_at, "
     "teacher_feedback, "
+    # `question_scoring` rides with the mark scheme: the card prints the raw the
+    # scheme earns, and a paper marked in the AKM mode read through the default
+    # would print a different raw from the one it was graded by.
     "exams(id, title, subject, subject_id, teacher_id, school_id, total_questions, "
-    "question_types, answer_key, question_weights, pdf_page_urls)"
+    "question_types, answer_key, question_weights, question_scoring, pdf_page_urls)"
 )
 
 
@@ -208,6 +211,10 @@ def load_report_card(supabase, submission_id, student_id=None):
 
     submission = prepare_submission(submission)
     exam = submission["exam"]
+    # The card states the formula, so its numbers reconcile: the mark scheme's raw,
+    # the applied penalty and the counts it was summed over.
+    from app.services import penalty_service
+    penalty_service.working_for_exam(supabase, exam, [submission])
     # The paper's real mapel lives behind `subject_id`; the legacy text column is
     # not written by the builder. One resolver, shared with every other sheet.
     annotate_subject(supabase, exam)
@@ -260,6 +267,10 @@ def load_report_cards(supabase, exam_id, class_id=None):
     submissions = [prepare_submission(row) for row in rows]
     if not submissions:
         return []
+    # The formula's parts for the whole set at once: one events read and one mark
+    # scheme, so a class set reconciles without a query per pupil.
+    from app.services import penalty_service
+    penalty_service.working_for_exam(supabase, submissions[0].get("exam"), submissions)
     # One read for every card's subject, not one per card.
     annotate_subject(supabase, [s["exam"] for s in submissions if s.get("exam")])
 

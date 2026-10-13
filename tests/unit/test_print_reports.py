@@ -248,7 +248,7 @@ class TestTheReportCard:
         html = self.render(app)
         for expected in ["Ahmad Pratama", "1234567890", "Ujian Matematika",
                          "Matematika", "LT Guru 01", "SMP Negeri 1 Contoh",
-                         "Skor MCQ", "Penalti", "Pelanggaran", "Nilai Akhir"]:
+                         "Skor Mentah", "Penalti", "Pelanggaran", "Nilai Akhir"]:
             assert expected in html, f"{expected!r} is missing from the report card"
         assert ">55.5<" in html, "the final score itself"
 

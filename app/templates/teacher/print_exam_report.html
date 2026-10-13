@@ -184,7 +184,7 @@
                 <th class="center" style="width:7%">No</th>
                 <th style="width:30%">Nama Siswa</th>
                 <th class="center" style="width:13%">NISN</th>
-                <th class="center" style="width:9%">Skor MCQ</th>
+                <th class="center" style="width:9%">Skor Mentah</th>
                 <th class="center" style="width:8%">Penalti</th>
                 <th class="center" style="width:9%">Pelanggaran</th>
                 <th class="center" style="width:9%">Nilai Akhir</th>
@@ -199,9 +199,10 @@
                 <td class="center">{{ loop.index }}</td>
                 <td>{{ s.student_name or (s.student_id or '-')[:8] }}{% if s.get('submitted_late') %} <span class="late">terlambat</span>{% endif %}</td>
                 <td class="center">{{ ans.get('_nisn') or '&mdash;'|safe }}</td>
-                <td class="center">{{ s.get('score') if s.get('score') is not none else 0 }}</td>
-                <td class="center {{ 'no' if (s.get('penalty') or 0) else 'muted' }}">{{ s.get('penalty') or 0 }}</td>
-                <td class="center {{ 'no' if (s.get('violations') or 0) else 'muted' }}">{{ s.get('violations') or 0 }}</td>
+                {% set p = score_parts(s) %}
+                <td class="center">{{ p.raw }}</td>
+                <td class="center {{ 'no' if p.penalty else 'muted' }}">{{ p.penalty }}</td>
+                <td class="center {{ 'no' if p.applied else 'muted' }}">{{ p.applied }} / {{ p.recorded }}</td>
                 <td class="center">
                     <span class="{{ 'ok' if final is not none and final >= pass_mark else 'no' }}">{{ final if final is not none else '-' }}</span>
                 </td>
@@ -218,8 +219,10 @@
     <p style="font-size:11px;color:#475569;margin:6px 0 10px;line-height:1.5;">
         Nilai Akhir = maks(0, Skor Mentah &minus; Penalti). <b>Skor Mentah</b> adalah
         poin berbobot dari jawaban (skema per tipe soal, dinormalkan tepat ke 100)
-        termasuk penilaian guru. <b>Penalti</b> adalah tangga anti-cheat atas
-        pelanggaran yang tercatat; bila tidak ada pelanggaran, penalti 0.
+        termasuk penilaian guru. <b>Penalti</b> adalah tangga anti-cheat, dijumlahkan
+        hanya atas pelanggaran berstatus <b>diterapkan</b>; bila tidak ada pelanggaran,
+        penalti 0. Kolom <b>Pelanggaran</b> menyebut yang diterapkan di depan garis
+        miring dan yang tercatat di belakangnya
     </p>
 
     <table class="sign">

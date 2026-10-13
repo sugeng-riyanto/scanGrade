@@ -135,17 +135,29 @@ def display_parts(submission: Mapping[str, Any] | None) -> dict[str, Any]:
     if final is None:
         final = submission.get("score")
     final = _number(final)
-    recorded = int(_number(submission.get("violations")))
+    # An exact `raw` the route attached (``penalty_service.working_for_exam``) wins:
+    # for a paper the 0-floor reached, `final + penalty` would overstate the mark, and
+    # only the mark scheme knows the real one.
+    raw = submission.get("raw")
+    if raw is None:
+        raw = final + penalty
+    else:
+        raw = _number(raw)
+    applied = submission.get("applied")
+    recorded = submission.get("recorded")
+    if recorded is None:
+        recorded = int(_number(submission.get("violations")))
+    if applied is None:
+        # No decision is stored on the row itself, so the default reads as the
+        # historical one: every recorded violation applied.
+        applied = recorded
     return {
-        "raw": round(final + penalty, 2),
+        "raw": round(_number(raw), 2),
         "penalty": round(penalty, 2),
         "final": round(final, 2),
-        "recorded": recorded,
-        # No decision is stored on the row itself, so the default reads as the
-        # historical one: every recorded violation applied. A caller with the real
-        # breakdown passes it and these counts are its own.
-        "applied": recorded,
-        "ignored": 0,
+        "recorded": int(_number(recorded)),
+        "applied": int(_number(applied)),
+        "ignored": int(max(0, _number(recorded) - _number(applied))),
     }
 
 

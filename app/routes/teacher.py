@@ -2897,6 +2897,12 @@ def results_print():
     annotate_subject(supabase, exam)
 
     subs, scan_subs, online_subs, stats = _exam_results(supabase, exam_id)
+    # The sheet states its formula, so every row has to reconcile: raw - penalty =
+    # final. The objective score that used to sit in that column never did — an essay
+    # is a teacher's mark and does not enter it — so each row now carries the mark
+    # scheme's own raw, the applied/ignored counts, and the penalty they sum to.
+    from app.services import penalty_service
+    penalty_service.working_for_exam(supabase, exam, subs)
     roster = sorted(subs, key=_final_score, reverse=True)
 
     return render_template(
