@@ -1,5 +1,11 @@
 # ScanGrade — Role-Based Access Control (RBAC) & Interaction Flows
 
+> **Daftar peran yang definitif: 6 — `super_admin`, `admin_sekolah`, `principal`,
+> `vice_principal`, `guru`, `murid`** (README lama menyebut 4; sudah usang).
+> Dan hati-hati: **"Kepala Sekolah" adalah dua hal berbeda** — peran login `principal`
+> (pengawasan, baca-saja) versus **field teks `schools.principal_name`** yang tercetak
+> di dokumen. Rujukan tetap lengkap beserta buktinya: **`docs/ROLES_CLARIFICATION.md`**.
+
 ## 1. Role Hierarchy
 
 ```

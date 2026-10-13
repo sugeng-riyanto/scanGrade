@@ -150,6 +150,8 @@
     .sign td { width: 50%; text-align: center; font-size: 9pt; vertical-align: top; }
     .sign .space { height: 42pt; }
     .sign .line { border-top: .75pt solid #111827; margin: 0 12pt; padding-top: 2pt; }
+    .sign .nip { font-size: 8pt; color: #374151; margin-top: 1pt; }
+    .sign .placeholder { color: #6b7280; font-style: italic; }
     .doc-footer {
         margin-top: 14pt; padding-top: 5pt; border-top: .75pt solid #cbd5e1;
         font-size: 7pt; color: #94a3b8; text-align: center;
@@ -454,7 +456,16 @@
                 <div>Mengetahui,</div>
                 <div>Kepala Sekolah</div>
                 <div class="space"></div>
-                <div class="line">(............................................)</div>
+                {# The head of school is a *text field on the school row*
+                   (`schools.principal_name`), not the read-only `principal` login —
+                   see `docs/ROLES_CLARIFICATION.md`. It used to be a hardcoded dotted
+                   line, so the name never printed however complete the data was. #}
+                {% if school.get('principal_name') %}
+                <div class="line">{{ school.get('principal_name') }}</div>
+                {% if school.get('principal_nip') %}<div class="nip">NIP. {{ school.get('principal_nip') }}</div>{% endif %}
+                {% else %}
+                <div class="line placeholder">Nama belum diatur — admin sekolah dapat mengisi di Pengaturan Sekolah</div>
+                {% endif %}
             </td>
             <td>
                 <div>{{ school.get('city', '') }}{% if school.get('city') %}, {% endif %}{{ printed_on }}</div>

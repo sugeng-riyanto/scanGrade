@@ -113,7 +113,7 @@ def _fetch_schools(supabase, school_ids):
         return {}
     try:
         rows = supabase.table("schools") \
-            .select("id, name, address, npsn, city, province, logo_url") \
+            .select("id, name, address, npsn, city, province, logo_url, principal_name, principal_nip") \
             .in_("id", ids).execute().data or []
     except Exception:
         logger.exception("Report card: school(s) %s could not be read", ids)
@@ -126,7 +126,7 @@ def _fetch_school(supabase, school_id):
         return {}
     try:
         return row_or_none(
-            supabase.table("schools").select("name, address, npsn, city, province, logo_url")
+            supabase.table("schools").select("name, address, npsn, city, province, logo_url, principal_name, principal_nip")
             .eq("id", school_id).maybe_single().execute()
         ) or {}
     except Exception:
