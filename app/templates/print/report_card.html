@@ -235,7 +235,7 @@
 
     <div class="doc-title">
         <h1>Laporan Hasil Ujian</h1>
-        <div class="sub">{{ exam.get('title', 'Ujian') }}{% if exam.get('subject') %} &middot; {{ exam.get('subject') }}{% endif %}</div>
+        <div class="sub">{{ exam.get('title', 'Ujian') }}{% if subject_name(exam) %} &middot; {{ subject_name(exam) }}{% endif %}</div>
     </div>
 
     <table class="top">
@@ -245,7 +245,7 @@
                     <tr><td class="k">Nama Siswa</td><td class="s">:</td><td><strong>{{ student_name or '-' }}</strong></td></tr>
                     {% if student_nisn %}<tr><td class="k">NISN</td><td class="s">:</td><td>{{ student_nisn }}</td></tr>{% endif %}
                     {% if student_nis %}<tr><td class="k">NIS</td><td class="s">:</td><td>{{ student_nis }}</td></tr>{% endif %}
-                    <tr><td class="k">Mata Pelajaran</td><td class="s">:</td><td>{{ exam.get('subject', '-') }}</td></tr>
+                    <tr><td class="k">Mata Pelajaran</td><td class="s">:</td><td>{{ subject_label(exam) }}</td></tr>
                     <tr><td class="k">Nama Ujian</td><td class="s">:</td><td>{{ exam.get('title', 'Ujian') }}</td></tr>
                     <tr><td class="k">Jumlah Soal</td><td class="s">:</td><td>{{ total_q }} butir</td></tr>
                     <tr><td class="k">Guru</td><td class="s">:</td><td>{{ teacher_name or '-' }}</td></tr>

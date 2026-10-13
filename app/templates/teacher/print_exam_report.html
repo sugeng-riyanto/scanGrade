@@ -147,7 +147,7 @@
 
     <table class="ident">
         <tr>
-            <td class="k">Mata Pelajaran</td><td class="s">:</td><td>{{ exam.get('subject', '-') }}</td>
+            <td class="k">Mata Pelajaran</td><td class="s">:</td><td>{{ subject_label(exam) }}</td>
             <td class="k">Guru</td><td class="s">:</td><td>{{ teacher_name or '-' }}</td>
         </tr>
         <tr>
@@ -210,6 +210,15 @@
         {% endfor %}
         </tbody>
     </table>
+
+    {# The formula the school is filing, said in words: a sheet that prints a
+       bare "Nilai Akhir" invites the question this line answers. #}
+    <p style="font-size:11px;color:#475569;margin:6px 0 10px;line-height:1.5;">
+        Nilai Akhir = maks(0, Skor Mentah &minus; Penalti). <b>Skor Mentah</b> adalah
+        poin berbobot dari jawaban (skema per tipe soal, dinormalkan tepat ke 100)
+        termasuk penilaian guru. <b>Penalti</b> adalah tangga anti-cheat atas
+        pelanggaran yang tercatat; bila tidak ada pelanggaran, penalti 0.
+    </p>
 
     <table class="sign">
         <tr>

@@ -20,6 +20,7 @@ import json
 import logging
 from datetime import datetime, timedelta, timezone
 
+from app.services.subject_lookup import annotate as annotate_subject
 from app.utils.exam_access import exam_class_ids, result_released
 from app.utils.helpers import row_or_none
 
@@ -29,7 +30,7 @@ SUBMISSION_FIELDS = (
     "id, exam_id, student_id, answers, score, max_score, violations, penalty, "
     "final_score, status, is_published, started_at, submitted_at, graded_at, "
     "teacher_feedback, "
-    "exams(id, title, subject, teacher_id, school_id, total_questions, "
+    "exams(id, title, subject, subject_id, teacher_id, school_id, total_questions, "
     "question_types, answer_key, question_weights, pdf_page_urls)"
 )
 
@@ -207,6 +208,9 @@ def load_report_card(supabase, submission_id, student_id=None):
 
     submission = prepare_submission(submission)
     exam = submission["exam"]
+    # The paper's real mapel lives behind `subject_id`; the legacy text column is
+    # not written by the builder. One resolver, shared with every other sheet.
+    annotate_subject(supabase, exam)
     student = _fetch_profile(supabase, submission.get("student_id"))
 
     # The report belongs to the exam's school. A student's profile is only a
@@ -256,6 +260,8 @@ def load_report_cards(supabase, exam_id, class_id=None):
     submissions = [prepare_submission(row) for row in rows]
     if not submissions:
         return []
+    # One read for every card's subject, not one per card.
+    annotate_subject(supabase, [s["exam"] for s in submissions if s.get("exam")])
 
     # Every person the document names, in one read: each pupil, and the teacher on
     # every card (one id in practice, whatever the papers say).

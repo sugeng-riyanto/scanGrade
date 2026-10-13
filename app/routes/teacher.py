@@ -2893,6 +2893,9 @@ def results_print():
     if err:
         return err
 
+    from app.services.subject_lookup import annotate as annotate_subject
+    annotate_subject(supabase, exam)
+
     subs, scan_subs, online_subs, stats = _exam_results(supabase, exam_id)
     roster = sorted(subs, key=_final_score, reverse=True)
 

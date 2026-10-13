@@ -26,6 +26,7 @@ import json
 from dataclasses import dataclass
 from typing import Any, Mapping
 
+from app.services import final_score
 from app.services.question_types import (
     complete_weights, default_weights, earned_points, objective_result,
 )
@@ -130,8 +131,10 @@ def rescore(sub: Mapping[str, Any], *, parts: ExamParts,
         weight = float(parts.weights.get(str(index), 0) or 0)
         if weight > 0:
             earned += float(value) / 100.0 * weight
-    final = round(min(earned, 100), 2)
-    final = max(0, round(final - float(sub.get("penalty") or 0), 2))
+    # One arithmetic, shared with every other surface that shows a mark — see
+    # `app/services/final_score.py`. `earned` is the raw mark the scheme paid
+    # out; the penalty is what the school charged.
+    final = final_score.breakdown(earned, sub.get("penalty"))["final"]
     score = objective_result(qt, ak, answers, parts.total, parts.scoring).score
     return final, score
 

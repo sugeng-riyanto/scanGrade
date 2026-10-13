@@ -1471,7 +1471,7 @@ def result_detail(submission_id):
     supabase = get_supabase()
     try:
         res = supabase.table("submissions") \
-            .select("id, exam_id, student_id, answers, score, max_score, violations, penalty, final_score, status, is_published, started_at, submitted_at, graded_at, teacher_feedback, exams(id, title, subject, answer_key, question_types, question_scoring, total_questions, pdf_page_urls)") \
+            .select("id, exam_id, student_id, answers, score, max_score, violations, penalty, final_score, status, is_published, started_at, submitted_at, graded_at, teacher_feedback, exams(id, title, subject, subject_id, answer_key, question_types, question_scoring, total_questions, pdf_page_urls)") \
             .eq("id", submission_id) \
             .eq("student_id", g.user_id) \
             .single() \
@@ -1484,6 +1484,10 @@ def result_detail(submission_id):
     if submission.get("exams"):
         submission["exam"] = submission.pop("exams")
     submission.setdefault("is_hidden", False)
+    # The subject is behind `subject_id`, not the legacy text column: resolve
+    # it once here so the sheet never prints the Python word for "no value".
+    from app.services.subject_lookup import annotate as annotate_subject
+    annotate_subject(supabase, submission.get("exam") or {})
     # Parse JSON strings
     for field in ("teacher_feedback", "answers"):
         val = submission.get(field)
@@ -1559,7 +1563,7 @@ def download_result_pdf(submission_id):
     supabase = get_supabase()
     try:
         res = supabase.table("submissions") \
-            .select("id, exam_id, student_id, answers, score, max_score, violations, penalty, final_score, status, is_published, started_at, submitted_at, graded_at, teacher_feedback, exams(id, title, subject, answer_key, question_types, question_scoring, total_questions, pdf_page_urls)") \
+            .select("id, exam_id, student_id, answers, score, max_score, violations, penalty, final_score, status, is_published, started_at, submitted_at, graded_at, teacher_feedback, exams(id, title, subject, subject_id, answer_key, question_types, question_scoring, total_questions, pdf_page_urls)") \
             .eq("id", submission_id) \
             .eq("student_id", g.user_id) \
             .single() \
@@ -1572,6 +1576,10 @@ def download_result_pdf(submission_id):
     if submission.get("exams"):
         submission["exam"] = submission.pop("exams")
     submission.setdefault("is_hidden", False)
+    # The subject is behind `subject_id`, not the legacy text column: resolve
+    # it once here so the sheet never prints the Python word for "no value".
+    from app.services.subject_lookup import annotate as annotate_subject
+    annotate_subject(supabase, submission.get("exam") or {})
 
     # The PDF prints the answer key and per-question marks, so it follows the
     # same release rule as the on-screen view.
