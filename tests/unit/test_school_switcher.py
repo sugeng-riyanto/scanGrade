@@ -325,8 +325,7 @@ def _dashboard_context(**over) -> dict:
     return data
 
 
-def _dashboard_html(monkeypatch, schools=(), away=False):
-    app = create_app("app.config.TestingConfig")
+def _dashboard_html(app, monkeypatch, schools=(), away=False):
     monkeypatch.setattr(school_membership, "switchable_schools",
                         lambda *a, **k: {"schools": list(schools), "away": away})
     with app.test_request_context("/teacher/dashboard"):
@@ -374,8 +373,8 @@ class TestTheDashboardOffersTheSwitch:
             "the payload needs a fallback: a bare render of this template without "
             "the context processor must not fail")
 
-    def test_a_two_school_teacher_sees_both_with_their_npsn(self, monkeypatch):
-        html = _dashboard_html(monkeypatch, away=True, schools=[
+    def test_a_two_school_teacher_sees_both_with_their_npsn(self, monkeypatch, app):
+        html = _dashboard_html(app, monkeypatch, away=True, schools=[
             {"school_id": HOME, "name": "SMP Satu", "npsn": "11111111", "active": False},
             {"school_id": OTHER, "name": "SMA Dua", "npsn": "22222222", "active": True}])
         assert "SMP Satu" in html and "SMA Dua" in html
@@ -390,16 +389,16 @@ class TestTheDashboardOffersTheSwitch:
         token = re.search(r'name="_csrf_token" value="([^"]*)"', html)
         assert token and token.group(1), "a tokenless POST is refused by `csrf_protect`"
 
-    def test_a_single_school_teacher_never_sees_the_card(self, monkeypatch):
-        html = _dashboard_html(monkeypatch, schools=[
+    def test_a_single_school_teacher_never_sees_the_card(self, monkeypatch, app):
+        html = _dashboard_html(app, monkeypatch, schools=[
             {"school_id": HOME, "name": "SMP Satu", "npsn": "11111111", "active": True}])
         assert "sgDashboardSwitcher" not in html, (
             "one school, currently in it: there is nothing to switch to")
         assert 'value="home"' not in html, (
             "nothing to go back to either: no choice is in force")
 
-    def test_an_option_with_no_id_renders_an_empty_value(self, monkeypatch):
-        html = _dashboard_html(monkeypatch, schools=[
+    def test_an_option_with_no_id_renders_an_empty_value(self, monkeypatch, app):
+        html = _dashboard_html(app, monkeypatch, schools=[
             {"school_id": None, "name": "Tanpa id", "npsn": "", "active": False},
             {"school_id": OTHER, "name": "SMA Dua", "npsn": "22222222", "active": True}])
         select = html.split("sgDashboardSwitcher", 1)[1].split("</select>", 1)[0]
@@ -488,10 +487,9 @@ class TestTheDashboardIsCachedPerSchool:
                 "assignments and duties of the previous school were served for the "
                 "rest of the TTL after a switch")
 
-    def test_the_invalidation_drops_the_same_key(self, monkeypatch):
+    def test_the_invalidation_drops_the_same_key(self, monkeypatch, app):
         from app.routes import teacher as teacher_routes
 
-        app = create_app("app.config.TestingConfig")
         dropped: list = []
         monkeypatch.setattr(teacher_routes, "cache_delete", dropped.append)
         with app.test_request_context("/teacher/dashboard"):
@@ -501,8 +499,7 @@ class TestTheDashboardIsCachedPerSchool:
             "a writer must drop the page it dirtied — the one for the school it is "
             "acting in")
 
-    def test_switching_drops_the_destination_schools_page(self, monkeypatch):
-        app = create_app("app.config.TestingConfig")
+    def test_switching_drops_the_destination_schools_page(self, monkeypatch, app):
         dropped: list = []
         monkeypatch.setattr(req_cache, "invalidate",
                             lambda *keys: dropped.extend(keys))
