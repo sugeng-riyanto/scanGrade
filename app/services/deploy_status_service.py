@@ -1466,6 +1466,191 @@ def last_stop_state(path: pathlib.Path, *, now: _dt.datetime) -> dict:
     return state
 
 
+# ── why Gate 2 refused, which is a fact about a variable ─────────────────────
+#
+# The construct probe (Gate 2, `RUN_STEP="construct"`, exit 9) is the one gate
+# whose refusal is *almost always* about the environment rather than about the
+# code — and it is the one refusal whose reason was on no card. The step record
+# carries a step and a code (`last-stop`); the quarantine record carries the
+# traceback's tail, which names the variables when they are missing and names
+# nothing when the *file* could not be read at all. So a box whose `.env` is
+# `600 root:root` — the mode `docs/SECRET_ROTATION.md` says to set — reports
+# `Missing required env vars: SUPABASE_URL, SUPABASE_SERVICE_KEY` while those very
+# variables sit in that file, because the probe runs as the service user with no
+# `EnvironmentFile=` and the case it needs is the one the loader could not open.
+#
+# Two facts answer it, and neither is a second copy of the other: the account this
+# page runs as *is* the account the probe runs as, so whether the file can be read
+# is measurable here rather than guessed; and the loader's own verdict on the same
+# file is published as `app.config.DOTENV_ERROR`. The names themselves come from
+# the box's own record when it has them — the probe's words, not a re-derivation.
+CONSTRUCT_ENV_UNREADABLE = "env_unreadable"
+CONSTRUCT_MISSING_VARS = "missing_vars"
+CONSTRUCT_PLACEHOLDER_SECRET = "placeholder_secret"
+CONSTRUCT_OTHER = "construct_failed"
+CONSTRUCT_NONE = "none"
+CONSTRUCT_REASONS = frozenset({CONSTRUCT_ENV_UNREADABLE, CONSTRUCT_MISSING_VARS,
+                               CONSTRUCT_PLACEHOLDER_SECRET, CONSTRUCT_OTHER,
+                               CONSTRUCT_NONE})
+
+#: The two sentences the app raises for Gate 2, read out of the gate's own lines
+#: rather than re-derived — `app.config.Config.validate()` is the one place that
+#: decides both, and a second implementation here would disagree with it the first
+#: time either changed.
+MISSING_ENV_RE = re.compile(r"Missing required env vars:\s*(.+?)\s*$", re.M)
+PLACEHOLDER_SECRET_RE = re.compile(r"FLASK_SECRET_KEY is unset or still the")
+
+#: How many of the gate's own lines this card shows. The runner bounds what it
+#: writes (6) and this bounds what the page renders, for the same reason.
+CONSTRUCT_DETAIL_SHOWN = 6
+
+
+def _named_variables(lines: list[str]) -> list[str]:
+    """The variable names the refusing gate's own lines name, in its own order.
+
+    The message is a sentence with a list interpolated into it — `Missing required
+    env vars: A, B` — so this reads the names off the sentence instead of asking the
+    rule again: the page may not name a variable the refusal never named, nor drop one
+    it did. Surrounding punctuation is trimmed (a
+    hand-edited record, or a message that gains a full stop, must not hide the name
+    behind it) and anything that is not a name at all is dropped, because a *word*
+    rendered where a variable goes is a worse answer than no answer.
+    """
+    found = MISSING_ENV_RE.search("\n".join(lines or []))
+    if not found:
+        return []
+    names = [name.strip().strip(".,;:") for name in found.group(1).split(",")]
+    return [name for name in names if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name)]
+
+
+def env_file_state(path: pathlib.Path | str | None) -> dict:
+    """The `.env` this box's processes read, as *this* process can read it.
+
+    A measurement, not an inference: the read is attempted, so "this account cannot
+    open the file" is answered by the same syscall a booting process makes. `exists`
+    is kept apart from `readable` because the two have different remedies, and
+    `absent` is a normal box (its variables come from systemd) rather than a fault.
+    """
+    state: dict = {"path": None, "exists": None, "readable": None, "error": None,
+                   "user": None}
+    try:
+        import getpass
+        state["user"] = getpass.getuser()
+    except Exception:  # pragma: no cover - an environment with no notion of a user
+        state["user"] = None
+    if not path:
+        return state
+    target = pathlib.Path(path)
+    state["path"] = str(target)
+    try:
+        state["exists"] = target.exists()
+    except OSError as exc:
+        state["exists"] = None
+        state["error"] = f"{type(exc).__name__}: {exc}"
+        return state
+    if not state["exists"]:
+        return state
+    try:
+        with target.open("rb") as handle:
+            handle.read(1)
+        state["readable"] = True
+    except OSError as exc:
+        state["readable"] = False
+        state["error"] = f"{type(exc).__name__}: {exc}"
+    return state
+
+
+def construct_state(last_stop: dict, quarantine: dict, *,
+                    env_path: pathlib.Path | str | None = None,
+                    dotenv_error: str | None = None,
+                    required: tuple | list | None = None) -> dict:
+    """Why the app's own construction refused a release, in the app's own terms.
+
+    Relevant when the run stopped in Gate 2 (`last-stop`'s step) or when a held
+    commit was refused there (the quarantine's gate key) — the two records the
+    runner writes for one refusal, and either one can be the survivor.
+
+    ``reason_key`` is one of :data:`CONSTRUCT_REASONS`, and the record decides it: a
+    refusal whose own lines name no variable is *not* an environment fault, so it is
+    never blamed on the environment file however unreadable that file happens to be.
+    Only two things follow from names being present — the file could not be opened
+    (which is what makes every variable read as missing at once), or it could, and
+    they were genuinely absent from what the probe read.
+
+    ``variables`` are the names the box's own record named, and only ever those: the
+    page's own process is not the probe's (it gets its variables from systemd's
+    `EnvironmentFile=`, which the probe does not have), so the app's own `required`
+    list is carried for context and never read as "these are the missing ones".
+    """
+    if env_path is None or dotenv_error is None or required is None:
+        from app import config as app_config
+        env_path = env_path if env_path is not None else app_config.env_file_path()
+        dotenv_error = (dotenv_error if dotenv_error is not None
+                        else app_config.DOTENV_ERROR)
+        if required is None:
+            required = tuple(getattr(app_config.ProductionConfig, "REQUIRED_ENV", ()))
+
+    env_file = env_file_state(env_path)
+    state: dict = {
+        "relevant": False, "because": None, "reason_key": CONSTRUCT_NONE,
+        "variables": [], "variables_source": None, "required": list(required or ()),
+        "env_file": env_file, "dotenv_error": dotenv_error or None,
+        "lines": [], "lines_total": 0,
+    }
+
+    step = (last_stop or {}).get("step_key")
+    if step == "construct":
+        state["relevant"] = True
+        state["because"] = "last_stop"
+    elif (quarantine or {}).get("gate_key") == "app_did_not_construct":
+        state["relevant"] = True
+        state["because"] = "quarantine"
+    if not state["relevant"]:
+        return state
+
+    # The gate's own words, from whichever record still has them. Read here rather
+    # than re-read from disk: `report()` has already parsed this file, and a second
+    # read of the same record is how two cards start describing one refusal.
+    # A file is not obliged to hold strings, and `quarantine_state` only promises a
+    # list: anything else in it is dropped rather than joined, because a reader that
+    # raises turns "why did Gate 2 refuse" into a 500 on the page that answers it.
+    lines = [line for line in ((quarantine or {}).get("reasons") or [])
+             if isinstance(line, str) and line.strip()]
+    state["lines_total"] = len(lines)
+    state["lines"] = lines[:CONSTRUCT_DETAIL_SHOWN]
+
+    named = _named_variables(lines)
+    if named:
+        state["variables"] = named
+        state["variables_source"] = "record"
+    if PLACEHOLDER_SECRET_RE.search("\n".join(lines)):
+        # Its own sentence names the variable, so this is read off the sentence rather
+        # than off the missing list — a placeholder secret is non-empty, and would not
+        # appear there at all.
+        state["reason_key"] = CONSTRUCT_PLACEHOLDER_SECRET
+        if not named:
+            state["variables"] = ["FLASK_SECRET_KEY"]
+            state["variables_source"] = "record"
+        return state
+
+    if not named:
+        # No variable named: the fault is the app's own, and the file — readable or
+        # not — is not the answer. Blaming it here would be a card asserting a cause
+        # it measured nothing about.
+        state["reason_key"] = CONSTRUCT_OTHER
+        return state
+
+    if env_file["exists"] and env_file["readable"] is False:
+        # The cause, not the symptom: the probe has no `EnvironmentFile=`, so the file
+        # it cannot open is the file its variables had to come from, and every one of
+        # them reads as missing at once.
+        state["reason_key"] = CONSTRUCT_ENV_UNREADABLE
+        return state
+
+    state["reason_key"] = CONSTRUCT_MISSING_VARS
+    return state
+
+
 def situation_state(path: pathlib.Path, *, now: _dt.datetime,
                     held: bool = False) -> dict:
     """Whether what is blocking a deploy will clear itself, as the runner judged.
@@ -2926,7 +3111,7 @@ def report(*, repo=None, runner=None, snapshot_runner=None, pause_file=None,
            last_stop_file=None, situation_file=None, request_dir=None,
            release_request=None,
            perf_history_file=None, perf_baseline_file=None, refusals_dir=None,
-           box_edits_dir=None, running: dict | None = None,
+           box_edits_dir=None, env_file=None, running: dict | None = None,
            now: _dt.datetime | None = None) -> dict:
     """Everything the page shows. Any single part may be `unknown` with a reason.
 
@@ -2999,6 +3184,17 @@ def report(*, repo=None, runner=None, snapshot_runner=None, pause_file=None,
         box_edits_dir or os.environ.get("SCANGRADE_BOX_EDITS_DIR")
         or DEFAULT_BOX_EDITS_DIR)
     box_edits = box_edits_state(box_edits_dir, repo, now=now)
+    # Which file the *app* reads its environment from, for the Gate 2 card. Not
+    # defaulted to a path here: `None` means "resolve it the way the loader does", so
+    # a page cannot name a file the app is not reading. A test (or a box) can point
+    # it elsewhere with `SCANGRADE_ENV_FILE`, the same convention as `SCANGRADE_REPO`.
+    env_file = env_file or os.environ.get("SCANGRADE_ENV_FILE") or None
+    # Why the app's own construction refused, in the app's own terms. Read from the
+    # two records that describe one refusal — the step it stopped at, and the commit
+    # a gate held — plus a measurement only this process can make: the account it
+    # runs as is the account the probe runs as, so whether the environment file can
+    # be opened is answerable here.
+    construct = construct_state(last_stop, quarantine, env_path=env_file)
     # Every quarantined commit's own measurement, from one read of the same history
     # the perf card reads. Without this only the held commit has numbers: the older
     # refusals keep the runner's prose and lose the evidence behind it.
@@ -3070,6 +3266,11 @@ def report(*, repo=None, runner=None, snapshot_runner=None, pause_file=None,
         "run_steps": RUN_STEPS,
         "last_stop": last_stop,
         "last_stop_file": str(last_stop_file),
+        # Why Gate 2 refused — the variables, or the environment file this account
+        # cannot open — rather than only the step and the code. `none` when the last
+        # refusal was not Gate 2, so a card cannot claim a reason with no refusal.
+        "construct": construct,
+        "construct_reasons": CONSTRUCT_REASONS,
         # Whether what is blocking the deploy clears itself, as the runner judged it,
         # and the one action that ends it — the reading this page was missing.
         "situation": situation,

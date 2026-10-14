@@ -76,6 +76,61 @@ pytest tests/test_error_handling.py -v
 pytest tests/ --cov=app --cov-report=term-missing
 ```
 
+### Does the guard actually bite? (`deploy/mutation_check.py`)
+
+A green suite says the tests pass. It does not say they would **fail** if the rule they
+describe were broken — and the guards where that matters most are written as
+*narrowings*, whose removal keeps every happy path working: the membership guard's
+five clauses, the deploy page's cards, the environment rule `Config.validate()`
+refuses on. A **mutation harness** closes that gap: it breaks one moving part at a
+time, runs the guard files that are supposed to notice, and demands a red suite. A
+survivor is a hole in the guard, not a curiosity.
+
+Every harness is tracked in `tests/mutation/` (it used to live in `.freebuff/`, which
+`.gitignore` excludes, so "mutation-checked, 12/12 caught" was a sentence in a commit
+message nobody could reproduce). One command runs them:
+
+```bash
+python deploy/mutation_check.py --list      # what exists, and which files each guards
+python deploy/mutation_check.py --check     # every anchor still matches — seconds
+python deploy/mutation_check.py --run mutate_membership_guard    # ~7 minutes
+python deploy/mutation_check.py --all       # every harness
+```
+
+`--check` is the half a normal test pass runs, through
+`tests/unit/test_mutation_checks.py`: it loads each harness, asks that its `GUARDS`
+exist, its `MUTATIONS` labels are unique, and — the failure that bit twice while these
+were written — that **every anchor is still present in the file it names**. Without
+that, an anchor a later edit moved is discovered twenty minutes into a run, reported
+as `not injected`, and read as an unexplained survivor. Exit codes follow the rest of
+`deploy/`: `0` pass, `1` a survivor or a stale anchor, `2` could not measure (a
+harness that will not load, or a name that does not exist) — never a silent zero for
+a run that did not happen.
+
+Adding one is three data structures and one call:
+
+```python
+from tests.mutation.harness import main
+
+GUARDS = ["tests/unit/test_something.py"]
+MUTATIONS = [
+    ("the refusal becomes a fallback",        # what it breaks, for the report
+     "app/services/thing.py",                  # the file it breaks it in
+     "    if not granted:\n        return None",  # still present right now
+     "    if False:\n        return None"),
+]
+
+if __name__ == "__main__":
+    raise SystemExit(main("mutate_something", GUARDS, MUTATIONS))
+```
+
+The shared shape (`tests/mutation/harness.py`) is what restores every file from bytes
+read before the mutation, translates an anchor to the target's own line-ending style,
+and refuses to report at all when the baseline is red — a harness whose guards already
+fail would call every mutation "caught", which is the one wrong answer that looks
+exactly like a perfect score. Run a harness deliberately rather than in CI: minutes
+per mutation is the cost of the question it answers.
+
 ### A checkout with no `.env`
 
 `manage.py` boots a real app at import time, and `create_app` refuses to boot without

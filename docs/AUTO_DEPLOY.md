@@ -1945,6 +1945,58 @@ The vocabulary is the runner's own — `EXIT_CODES` and `RUN_STEPS` in
 directions: every `RUN_STEP=` assignment and every `exit N` in the script is in
 those tables, and every row in those tables has a sentence in the page.
 
+### And, when it stopped there, which variable — or which file
+
+A step and a code are the right answer for every step except the one that is almost
+never about the code. The construct probe (Gate 2, `RUN_STEP="construct"`, exit 9)
+runs `create_app()` under the production configuration, so what it actually tests is
+the box's *environment* — and `app did not construct (exit 9)` names neither the
+variable nor the file that made that true.
+
+The trap it walked into is worth knowing, because it is invisible from the outside:
+`.env` is `600 root:root` (`docs/SECRET_ROTATION.md` says so), the serving units get
+their variables from `EnvironmentFile=`, and the construct probe — `as_owner
+"$REPO/.venv/bin/python" -c …` — has no `EnvironmentFile=` at all. So on that box
+the probe reports
+
+```
+RuntimeError: Missing required env vars: SUPABASE_URL, SUPABASE_SERVICE_KEY
+```
+
+while both variables are sitting in that very file. An operator follows the record
+into `.env`, finds them, and learns nothing.
+
+So the card that carries the step now carries the reason, and the two answers are
+kept apart rather than averaged:
+
+* **which variable**, taken from the **box's own words** — the `<gate>` detail lines
+the runner records (`FAIL_DETAIL`, the traceback's last six non-blank lines, whose
+final line is the exception and its message). Parsing them rather than re-deriving
+`Config.validate()` is the point: the page and the refusal cannot disagree about the
+rule, and `Config.REQUIRED_ENV` is the one list they both read.
+* **or that the file is the cause**, which is a *measurement* this process can take
+because it runs as the same account the probe runs as: the page opens `app.config`'s
+own file and attempts a read (`env_file_state`), reports `exists` and `readable`
+separately (they have different remedies), and names the mode's one-line fix —
+`chmod 640` with the probe account's group, or move the values into the unit's
+`EnvironmentFile=`. The loader's own verdict on the same file (`DOTENV_ERROR`) is
+shown beside it as corroboration and never as the reason on its own, because a
+correctly-configured box keeps that file unreadable and still deploys.
+
+Order matters and is asserted: the names come from the record, and a refusal whose
+record names **no** variable is never blamed on the file however unreadable that file
+happens to be — a card that blamed it would send an operator to change a file mode
+that is exactly right. A refusal the probe never made (the app refused to be deployed
+by an unarmed runner, or the checkout could not reproduce its own commit) has its own
+`FAIL_REASON`, so its own key, and no reason block at all.
+
+Guards: `tests/unit/test_gate2_reason.py` — the reader's four outcomes, the
+names-from-the-record rule, the file measured rather than inferred (a patched
+`Path.open`), the page **rendered** with the block's added lines compared against the
+same page on another step, and `Config.validate()` raising from the same list the page
+names, plus that the card says which of the two records the reason came off. Mutation-
+checked, 22/22 injected defects caught (`.freebuff/mutate_gate2_reason.py`).
+
 ### Whether it clears itself, or needs you
 
 The records above answer *what* refused a release. They do not answer the question

@@ -813,6 +813,111 @@
                         <span class="text-surface-500 shrink-0" x-text="t('Berkas','File')"></span>
                         <code class="font-mono text-xs text-surface-700 break-all text-right">{{ ls.path }}</code>
                     </div>
+
+                    {#
+                        Why Gate 2 refused, rather than only the step and the code.
+
+                        The construct probe is the one gate whose refusal is almost
+                        always about the *environment* and not about the code, and
+                        it is the one refusal whose reason was on no card: the
+                        record names the variables when they are missing, and says
+                        nothing at all when the file holding them could not be
+                        opened — which is the case a `600 root:root` `.env`
+                        produces, since the probe runs as the service account with
+                        no `EnvironmentFile=`. That box then reads "missing required
+                        env vars: SUPABASE_URL, …" while those variables are in
+                        that very file, and the operator goes hunting in the file.
+
+                        Measured, not inferred: this page runs as the same account
+                        the probe runs as, so it opens the file itself, and the
+                        loader's own verdict on the same file is read beside it.
+                        The names come from the box's own record when it has them.
+                    #}
+                    {% set C = status.construct %}
+                    {% if C.relevant %}
+                    <div class="mt-4 pt-4 border-t border-rose-200 space-y-2">
+                        <h3 class="font-bold text-rose-700 text-sm"><span x-text="t('Kenapa Gate 2 menolak','Why Gate 2 refused')"></span></h3>
+                        {% if C.because == 'quarantine' %}
+                        {#
+                            Which record the reason came from, said only when the two
+                            disagree: the step this run stopped at is not the gate
+                            that refused — the reason is read off the held commit's
+                            own record, and a reader who assumed otherwise would look
+                            for the wrong run in the journal.
+                        #}
+                        <p class="text-xs text-surface-500" x-text="t('Sebabnya dibaca dari catatan commit yang ditahan, bukan dari langkah di atas.','The reason is read from the held commit record, not from the step above.')"></p>
+                        {% endif %}
+                        <p class="text-sm text-surface-600 leading-relaxed" x-text="t('Pemeriksaan construct dijalankan sebagai akun layanan dan tanpa EnvironmentFile, jadi variabelnya harus datang dari berkas .env pada saat itu juga — berbeda dari aplikasi yang melayani, yang mendapatkannya dari unit systemd.','The construct probe runs as the service account and with no EnvironmentFile, so its variables have to come from the .env at that moment — unlike the app that is serving, which gets them from the systemd unit.')"></p>
+
+                        <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1 text-sm">
+                            <span class="text-surface-500 shrink-0" x-text="t('Berkas lingkungan','Environment file')"></span>
+                            <span class="text-right min-w-0">
+                                <code class="font-mono text-xs text-surface-700 break-all">{{ C.env_file.path or '—' }}</code>
+                                {% if C.env_file.exists is none %}
+                                <span class="block text-xs text-surface-500" x-text="t('tidak bisa diperiksa dari sini','cannot be checked from here')"></span>
+                                {% elif not C.env_file.exists %}
+                                <span class="block text-xs text-surface-500" x-text="t('tidak ada di sini — variabelnya datang dari systemd','not there — its variables come from systemd')"></span>
+                                {% elif C.env_file.readable %}
+                                <span class="block text-xs text-surface-500"><span x-text="t('terbaca oleh akun ini','readable by this account')"></span>{% if C.env_file.user %} ({{ C.env_file.user }}){% endif %}</span>
+                                {% else %}
+                                <span class="block text-xs font-bold text-rose-700"><span x-text="t('TIDAK terbaca oleh akun ini','NOT readable by this account')"></span>{% if C.env_file.user %} ({{ C.env_file.user }}){% endif %}</span>
+                                {% if C.env_file.error %}<code class="block font-mono text-xs text-rose-700 break-all">{{ C.env_file.error }}</code>{% endif %}
+                                {% endif %}
+                            </span>
+                        </div>
+
+                        {% if C.reason_key == 'env_unreadable' %}
+                        <p class="text-sm text-rose-700 leading-relaxed" x-text="t('Berkasnya ada tetapi akun ini tidak bisa membukanya, jadi tidak satu pun variabel terbaca — itulah sebabnya pemeriksaan melaporkan variabel hilang padahal isinya ada. Jadikan berkasnya terbaca oleh akun pemeriksaan (chmod 640 dengan grup akun itu), atau pindahkan nilainya ke EnvironmentFile= milik unit systemd.','The file is there and this account cannot open it, so nothing was loaded — which is why the probe reports variables as missing while the file holds them. Make it readable by the account the probe runs as (chmod 640 with the group of that account), or move the values into the EnvironmentFile= of the systemd unit.')"></p>
+                        {% elif C.reason_key == 'placeholder_secret' %}
+                        <p class="text-sm text-rose-700 leading-relaxed" x-text="t('FLASK_SECRET_KEY belum disetel atau masih nilai contoh dari repositori, jadi setiap sesi akan ditandatangani dengan rahasia yang bisa dibaca siapa pun.','FLASK_SECRET_KEY is unset or still the placeholder that ships in the repository, so every session would be signed with a secret anybody who reads the repo can reproduce.')"></p>
+                        {% elif C.reason_key == 'missing_vars' %}
+                        <p class="text-sm text-rose-700 leading-relaxed" x-text="t('Lingkungan yang dibaca pemeriksaan tidak lengkap.','The environment the probe reads is incomplete.')"></p>
+                        {% else %}
+                        <p class="text-sm text-rose-700 leading-relaxed" x-text="t('Catatan ini tidak menyebut satu variabel pun, jadi penolakan ini bukan soal lingkungan yang tidak lengkap. Kalimat gerbang di atas dan baris-baris di bawah adalah kata-kata gerbang itu sendiri.','This record names no variable at all, so the refusal is not about an incomplete environment. The gate sentence above and the lines below are its own words.')"></p>
+                        {% endif %}
+
+                        {% if C.variables %}
+                        <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1 text-sm">
+                            <span class="text-surface-500 shrink-0" x-text="t('Disebut pemeriksaan','Named by the probe')"></span>
+                            <code class="font-mono text-xs text-rose-700 break-all text-right">{{ C.variables|join(', ') }}</code>
+                        </div>
+                        {% endif %}
+
+                        {% if C.required and C.reason_key == 'missing_vars' %}
+                        {#
+                            Shown only beside a refusal that named a variable, and
+                            labelled as the app's own rule: the page's process is not
+                            the probe's — it holds these through systemd's
+                            `EnvironmentFile=`, which the probe does not have — so this
+                            list must never read as "these are the missing ones".
+                        #}
+                        <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1 text-sm">
+                            <span class="text-surface-500 shrink-0" x-text="t('Yang dibutuhkan aplikasi','What the app requires')"></span>
+                            <code class="font-mono text-xs text-surface-500 break-all text-right">{{ C.required|join(', ') }}</code>
+                        </div>
+                        {% endif %}
+
+                        {% if C.env_file.readable and C.reason_key == 'missing_vars' %}
+                        <p class="text-xs text-surface-500 leading-relaxed" x-text="t('Berkasnya terbaca oleh akun ini, jadi variabel di atas memang tidak ada di lingkungan yang dibaca pemeriksaan — tambahkan ke berkas itu atau ke EnvironmentFile= unit.','The file is readable by this account, so the variables above are genuinely absent from the environment the probe reads — add them to that file, or to the EnvironmentFile= of the unit.')"></p>
+                        {% endif %}
+
+                        {% if C.dotenv_error %}
+                        {#
+                            Corroboration from the loader itself: `app.config` records
+                            the verdict of the one read whose failure is not fatal, so
+                            when the platform refuses a `600 root:root` file this
+                            process *also* could not read it. Shown as the loader's
+                            own words, and never as the reason on its own — a
+                            correctly-configured box keeps such a file unreadable and
+                            still deploys, because its units supply the variables.
+                        #}
+                        <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1 text-xs">
+                            <span class="text-surface-500 shrink-0" x-text="t('Catatan pemuat berkas','The record from the loader')"></span>
+                            <code class="font-mono text-surface-500 break-all text-right">{{ C.dotenv_error }}</code>
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% endif %}
                 </div>
                 {% endif %}
             </div>

@@ -50,6 +50,22 @@ def load_env_file(path=None) -> str:
 #: user cannot read" — the two look identical from the environment alone.
 DOTENV_ERROR = load_env_file()
 
+
+def env_file_path() -> str:
+    """The file :func:`load_env_file` would read here, or ``""`` when there is none.
+
+    The same resolution the loader rides on, so a reader that wants to *name* the
+    file — or to say that this account cannot open it — cannot disagree with the
+    loader about which file that is. Python-dotenv walks up from this module, so the
+    answer is the nearest ``.env`` above the checkout.
+    """
+    from dotenv import find_dotenv
+
+    try:
+        return find_dotenv(usecwd=False) or ""
+    except (OSError, ValueError):
+        return ""
+
 _INLINE_COMMENT = re.compile(r"\s+#")
 
 
@@ -226,10 +242,27 @@ class Config:
     #: Where the last-alert record is kept. Defaults to Flask's instance folder.
     DEPLOY_ALERT_STATE_DIR = env_str("SCANGRADE_ALERT_STATE_DIR", "") or None
 
+    #: The variables this app cannot run without, in the order a reader should try
+    #: them. Named here rather than inline in `validate()` because a *second* reader
+    #: needs the list rather than the exception: `/super-admin/deploy-status` has to
+    #: name which variable a refused release was missing, and parsing a traceback to
+    #: recover names this module already knows would be a second rule that can drift
+    #: from the one that refuses.
+    REQUIRED_ENV = ("SUPABASE_URL", "SUPABASE_SERVICE_KEY", "SECRET_KEY")
+
+    @classmethod
+    def missing_required(cls) -> list:
+        """Which of :data:`REQUIRED_ENV` are absent or empty, by name.
+
+        Empty counts as missing, which is the reading the refusal has always used:
+        ``SUPABASE_SERVICE_KEY=`` in a ``.env`` is a key nobody can use, and the
+        traceback an operator reads says `Missing required env vars`.
+        """
+        return [name for name in cls.REQUIRED_ENV if not getattr(cls, name)]
+
     @classmethod
     def validate(cls):
-        required = ["SUPABASE_URL", "SUPABASE_SERVICE_KEY", "SECRET_KEY"]
-        missing = [v for v in required if not getattr(cls, v)]
+        missing = cls.missing_required()
         if missing:
             raise RuntimeError(f"Missing required env vars: {', '.join(missing)}")
 
