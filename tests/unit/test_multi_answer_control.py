@@ -69,6 +69,19 @@ def _one(pattern: str, what: str) -> str:
     return match.group(0)
 
 
+def _word_free_cue() -> str:
+    """The cue's own element, as the page writes it — tag, classes and content."""
+    match = re.search(r'<span x-show="multiHintOn\(i\)" x-cloak.*?</span>', _page(), re.S)
+    assert match, (
+        "the word-free cue is gone from the exam page — a pupil who cannot read the "
+        "badge has nothing left telling them the question can hold more than one. The "
+        "`x-cloak` is part of the element on purpose: this cue starts hidden, and "
+        "without it a question answering one letter shows a cue about several until "
+        "Alpine takes over — the page's own convention for every block it draws "
+        "conditionally.")
+    return match.group(0)
+
+
 #: The client's kind map, so `sgKind` is the page's own answer rather than a guess.
 SG_KIND = r"function sgKind\(type\) \{[^\n]*\}"
 #: One branch of the paper's choice renderer, read as a region rather than as a
@@ -87,6 +100,8 @@ MULTI_BRANCH = r"<template x-if=\"qKind\(i\) === 'choice' && qIsMulti\(i\)\">(.*
 #: The three methods the tick control is made of, and the two they lean on.
 Q_IS_MULTI = r"qIsMulti\(i\) \{[^\n]*\}"
 IS_TICKED = r"isTicked\(i, opt\) \{.*?\n        \}(?=,)"
+#: The word-free cue's own reader, and the trigger inside `toggleOption`.
+MULTI_HINT_ON = r"multiHintOn\(i\) \{.*?\n        \}(?=,)"
 TOGGLE_OPTION = r"toggleOption\(i, opt\) \{.*?\n        \}(?=,)"
 SET_STRUCTURED = r"_setStructured\(i, value, filled\) \{.*?\n        \}(?=,)"
 MARK_ANSWERED = r"markAnswered\(i, val, overwrite\) \{.*?\n        \}(?=,)"
@@ -108,6 +123,7 @@ def _observe() -> dict:
     methods = ",\n".join([
         _one(Q_IS_MULTI, "the qIsMulti method"),
         _one(IS_TICKED, "the isTicked method"),
+        _one(MULTI_HINT_ON, "the multiHintOn method"),
         _one(TOGGLE_OPTION, "the toggleOption method"),
         _one(SET_STRUCTURED, "the _setStructured method"),
         _one(MARK_ANSWERED, "the markAnswered method"),
@@ -117,6 +133,7 @@ def _observe() -> dict:
         _one(SG_KIND, "the sgKind helper"),
         "function make(questions) {",
         "  return { questions: questions, answered: {}, _answerTimestamps: {},",
+        "           multiHinted: {},",
         "           markDirty() {}, _ev() {},",
         methods,
         "  };",
@@ -165,6 +182,29 @@ def _observe() -> dict:
 
         // 7. the two controls are told apart by the stored type, never by a flag
         S.mcq_is_not_multi = a.qIsMulti(0);
+
+        // 8. the word-free cue is *earned*: it appears at the second tick and not
+        //    before, and it stays for the rest of the question afterwards
+        let g = make([{type: 'mcq_multi', origIdx: 0, answer: null}]);
+        S.hint_at_none = g.multiHintOn(0);
+        g.toggleOption(0, 'A');
+        S.hint_at_one_tick = g.multiHintOn(0);
+        g.toggleOption(0, 'C');
+        S.hint_at_two_ticks = g.multiHintOn(0);
+        g.toggleOption(0, 'C');
+        S.hint_after_a_tick_was_taken_back = g.multiHintOn(0);
+        S.hint_question_kept_its_other_tick = g.isTicked(0, 'A');
+
+        // 9. a draft the server restored with two ticks already in it shows the cue
+        //    without waiting for another tap
+        let h = make([{type: 'mcq_multi', origIdx: 0, answer: ['B','D']}]);
+        S.hint_on_a_restored_draft = h.multiHintOn(0);
+
+        // 10. and a single-answer question never wears it, however many taps it
+        //     took to end up with one letter
+        let j = make([{type: 'mcq', origIdx: 0, answer: null}]);
+        j.markAnswered(0, 'A'); j.markAnswered(0, 'D');
+        S.hint_on_a_single_answer_question = j.multiHintOn(0);
 
         console.log(JSON.stringify(S));
         """),
@@ -324,6 +364,112 @@ class TestTheControlIsWiredToTheTypeNotToAFlag:
         assert '<span x-text="opt"></span>' in single and \
             '<span x-text="opt"></span>' in branch, (
             "the two rows no longer paint the option letter the same way")
+
+
+# ── 1b. the word-free half of the same cue ──────────────────────────────────
+
+
+class TestThePupilIsShownMoreThanOneWithoutBeingTold:
+    """The badge says the rule in words; this says it without any.
+
+    A pupil who cannot read the badge — a young one, one who reads slowly, one whose
+    first language is neither of the page's — still has to be able to *see* that this
+    question takes several letters, and a badge is a sentence. The cue is a double
+    tick, drawn beside it, and it is **earned**: a single-answer question is what one
+    tap means, so it appears only once a second letter has actually been ticked, and
+    then stays for that question (it names the rule, not the count, so taking a tick
+    back does not make it a lie).
+
+    Being wordless is not only about the pupil: a cue with no words on it adds no
+    bilingual pair and no leftover, so the page's own coverage floor does not move
+    for it — the only reason a release would have to re-record
+    `deploy/i18n_baseline.json` is a *word*, and this one deliberately has none.
+
+    The half that is easy to get wrong is where it sits. It has to sit **outside**
+    the option row: the row is measured button-by-button against the single-answer
+    row by the deploy's render gate (`deploy/exam_render_gate.py`), so a cue drawn
+    among the buttons would either move a pupil's control or put an `<i>` inside the
+    button the row's parity is claimed of. It is a label, never a control.
+    """
+
+    # ── what the pupil sees, driven by the page's own methods ────────────────
+
+    def test_it_appears_at_the_second_tick_and_never_at_the_first(self, seen):
+        assert seen["hint_at_none"] is False
+        assert seen["hint_at_one_tick"] is False, (
+            "the cue was on screen after one tap — one tap is what a single-answer "
+            "question expects, so a hint there is wallpaper, not a hint")
+        assert seen["hint_at_two_ticks"] is True, (
+            "a second tick landed and the pupil was told nothing wordless about it")
+
+    def test_it_stays_after_a_tick_is_taken_back(self, seen):
+        """Persistent means the rule, not the count: one letter left, and the cue is
+        still true — the question does still take more than one."""
+        assert seen["hint_after_a_tick_was_taken_back"] is True, (
+            "the cue blinked out the moment the count dropped to one, which makes it "
+            "a badge for the number rather than for the rule")
+        assert seen["hint_question_kept_its_other_tick"] is True
+
+    def test_a_restored_draft_with_two_ticks_already_shows_it(self, seen):
+        """The reading is of the answer, not of this sitting's taps: a paper resumed
+        mid-question must not look like a question that takes one letter."""
+        assert seen["hint_on_a_restored_draft"] is True
+
+    def test_a_single_answer_question_never_wears_it(self, seen):
+        assert seen["hint_on_a_single_answer_question"] is False, (
+            "a question whose data is one letter wore a cue about several")
+
+    # ── the wiring, and the two mistakes this change can make ────────────────
+
+    def test_the_flag_is_set_in_the_tick_control_and_nowhere_else(self):
+        page = _page()
+        assert page.count("multiHinted[i] = true;") == 1, (
+            "the cue's flag has more than one writer, so something other than a "
+            "second tick can raise it")
+        assert "multiHinted[i] = true;" in \
+            _one(TOGGLE_OPTION, "the toggleOption method"), (
+            "the flag is set outside the tick control — the plain row writes through "
+            "the same funnel, so a single-answer question can reach it")
+
+    def test_the_cue_says_nothing_in_any_language(self):
+        marker = _word_free_cue()
+        assert re.search(r"[A-Za-z0-9]", re.sub(r"<[^>]+>", "", marker)) is None, (
+            "the cue carries a letter or a digit, so it is copy: the pupil has to be "
+            "able to read it and the language toggle owes it a translation")
+        assert "x-text" not in marker and "t(" not in marker, (
+            "the cue is rendered from a string rather than drawn")
+        assert 'aria-hidden="true"' in marker, (
+            "the cue announces itself to a screen reader, which already has the rule "
+            "through `aria-pressed` on the buttons — twice-said is not more accessible")
+
+    def test_it_is_drawn_by_the_exception_and_by_nothing_else(self):
+        page = _page()
+        branch = _one(MULTI_BRANCH, "the exception's branch")
+        single = _one(SINGLE_BRANCH, "the single-answer branch")
+        assert 'x-show="multiHintOn(i)"' in branch, (
+            "the exception's row is the one place the cue belongs and it is not there")
+        assert "multiHintOn" not in single, (
+            "the single-answer row shows a cue about holding more than one answer")
+        assert page.count('x-show="multiHintOn(i)"') == 1, (
+            "the cue is drawn in more than one place, so it no longer marks the "
+            "exception")
+
+    def test_it_sits_outside_the_row_whose_parity_it_may_not_move(self):
+        branch = _one(MULTI_BRANCH, "the exception's branch")
+        # The *element*, not its name: the comment above it explains the rule and
+        # names the reader, so a search for the name would be satisfied by prose and
+        # would pass with the cue sitting **inside** the row it may not disturb.
+        cue = _word_free_cue()
+        assert cue in branch, "the cue is drawn outside the exception's own block"
+        assert branch.index(cue) < branch.index('class="opt-row'), (
+            "the cue is drawn inside the option row — the deploy's render gate measures "
+            "that row button-by-button against the single-answer row, so the cue "
+            "either moves a pupil's control or becomes a difference it finds")
+        button = re.search(r'<button [^>]*toggleOption.*?</button>', branch, re.S)
+        assert button and "<i" not in button.group(0), (
+            "an element rides inside the option button, so the row the pupil taps is no "
+            "longer the plain row's — the cue is the only thing allowed to say the "
+            "rule, and it may not be a second control")
 
 
 # ── 2. the marks the paper is scored by ──────────────────────────────────────

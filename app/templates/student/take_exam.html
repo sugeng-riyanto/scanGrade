@@ -1640,6 +1640,31 @@ body.sg-exam .sidebar-overlay { display: none !important; }
                             <div class="flex items-center gap-3 flex-wrap">
                                 <span class="text-sm font-extrabold shrink-0 text-stone-700" x-text="t('Soal ','Question ') + (i + 1) + ':'"></span>
                                 <span class="inline-flex items-center gap-1 text-[10px] font-bold text-primary-600 bg-primary-50 px-2 py-0.5 rounded-full border border-primary-200" x-text="t('Boleh lebih dari satu','More than one allowed')"></span>
+                                <!-- The same cue for the pupil who cannot read it, or
+                                     will not: a double tick is the wordless picture of
+                                     "two of these, together", and it is drawn only once
+                                     a second letter has been tapped (`multiHintOn`) — the
+                                     first tap being what a single-answer question
+                                     expects, a cue shown then would be wallpaper, and the
+                                     second is when the rule is true of the answer on
+                                     screen. It carries no figure, so it cannot go stale
+                                     when a tick is taken back.
+
+                                     Where it sits is the load-bearing part. It is
+                                     **outside** `.opt-row`, beside the word badge, so
+                                     the option row the render gate measures button by
+                                     button stays the plain row's — this cue may not be
+                                     the reason a pupil's own control moves, which is the
+                                     whole of the parity change it belongs to; it is a
+                                     `<span>` and never a control. And it is
+                                     `aria-hidden`, deliberately: the rule is already
+                                     announced by `aria-pressed` on the buttons, so this
+                                     is the sighted pupil's copy of a fact a screen
+                                     reader has had since the row was drawn — and being
+                                     wordless it carries nothing for the language toggle
+                                     to translate, which is why it adds no pair. -->
+                                <span x-show="multiHintOn(i)" x-cloak aria-hidden="true"
+                                      class="text-primary-600 text-[10px] leading-none"><i class="fas fa-check-double"></i></span>
                                 <div class="opt-row flex flex-wrap gap-2">
                                     <template x-for="opt in (_shuffledOpts[i] || ['A','B','C','D','E'])">
                                         <button type="button" @click="toggleOption(i, opt)"
@@ -2317,6 +2342,11 @@ function examApp(duration, totalQ) {
         // `init()` is still what turns it on for the preview door.
         previewMode: false,
         answered: {},
+        // The exception's *word-free* cue, keyed by question: set the first time a
+        // second tick lands on that question and never cleared, which is what makes
+        // the hint stay for the rest of it rather than blink out when a tick is
+        // removed again. See `multiHintOn`.
+        multiHinted: {},
         answersText: {},
         paragraphs: {},       // { i: [{id, text, html, order}] } per question
         essayMode: {},        // { i: 'text' | 'canvas' }
@@ -4708,6 +4738,19 @@ function examApp(duration, totalQ) {
             if (Array.isArray(a)) return a.indexOf(opt) > -1;
             return a === opt;
         },
+        // Whether the pupil is shown the word-free "this question can hold more than
+        // one" cue. It is *earned*, not permanent: one tap is what a single-answer
+        // question expects, so the cue appears at the second tick — the moment the
+        // rule first becomes true of this answer and the first moment it is worth
+        // telling — and then it stays, because it names the rule and not how many
+        // letters are ticked (removing one back to a single letter leaves it true).
+        // A draft the server restored already carrying two ticks shows it without
+        // another tap: the reading is of the answer, not of this sitting's taps.
+        multiHintOn(i) {
+            if (this.multiHinted[i]) return true;
+            const a = (this.questions[i] || {}).answer;
+            return Array.isArray(a) && a.length > 1;
+        },
         toggleOption(i, opt) {
             const q = this.questions[i];
             if (!q) return;
@@ -4720,6 +4763,11 @@ function examApp(duration, totalQ) {
             // answer-key page both read.
             const order = SG_QT.options || ['A','B','C','D','E'];
             list.sort((a, b) => order.indexOf(a) - order.indexOf(b));
+            // The cue's trigger, and the only place it is set: the second tick. The
+            // flag is sticky on purpose (see `multiHintOn`), and it is set here rather
+            // than in `_setStructured` so that no single-answer question — which
+            // writes through the same funnel — can ever wear a cue about several.
+            if (list.length > 1) this.multiHinted[i] = true;
             // Nothing ticked is *no answer*, not an empty set: `answered[i]` must go
             // back to unanswered, and an empty list would otherwise travel as a
             // truthy value and be counted as answered.
