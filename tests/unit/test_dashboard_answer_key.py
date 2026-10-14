@@ -247,9 +247,14 @@ class TestTheWritersInvalidateTheCache:
         """One helper, so the next writer is a one-line call rather than a
         rediscovery of the cache key and its failure mode."""
         assert "def _invalidate_teacher_dashboard(" in SOURCE
-        assert SOURCE.count('cache_delete(f"t_dash:{g.user_id}")') == 1, (
-            "the dashboard's cache key is being written out at more than one call "
-            "site again; keep it inside _invalidate_teacher_dashboard()")
+        assert 'f"t_dash:' not in SOURCE, (
+            "the dashboard's cache key is written out in the routes again. It is "
+            "school-scoped (`req_cache.teacher_dashboard_key`), and a key spelled "
+            "by hand here is one that the reader and the invalidation can disagree "
+            "about — which is what a switch that appears to do nothing looks like")
+        assert SOURCE.count("cache_delete(teacher_dashboard_key(") == 1, (
+            "the key must be dropped from exactly one call site, inside "
+            "_invalidate_teacher_dashboard()")
 
     def test_every_route_knows_which_teacher_it_is_for(self):
         """The dashboard cache is per user, and the invalidation uses `g.user_id`.

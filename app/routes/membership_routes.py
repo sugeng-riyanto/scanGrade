@@ -45,12 +45,14 @@ from __future__ import annotations
 
 from urllib.parse import urlencode
 
-from flask import Blueprint, g, jsonify, redirect, render_template, request, url_for
+from flask import (Blueprint, current_app, g, jsonify, redirect,
+                   render_template, request, url_for)
 
 from app.services.audit_service import log_activity
 from app.services import school_membership as membership
 from app.utils.auth import (admin_sekolah_required, get_supabase,
                             login_door_for, role_required)
+from app.utils import req_cache
 
 membership_bp = Blueprint("membership", __name__)
 #: The teacher-facing half lives under `/teacher`, and it is a second blueprint rather
@@ -358,6 +360,27 @@ def _safe_next(raw) -> str:
     return value
 
 
+def _forget_cached_dashboard(school_id) -> None:
+    """Drop this teacher's cached dashboard for the school being switched *into*.
+
+    The page is cached per teacher **per school**
+    (`req_cache.teacher_dashboard_key`), so the payload waiting in the destination
+    is not the one they are leaving. It may, however, predate the acceptance that
+    this switch is the first use of — and a control whose whole promise is "your
+    classes, pupils and marks now follow this NPSN" cannot answer with the previous
+    picture for twenty seconds. One delete, and only for the destination: the school
+    they left is not changed by leaving it, and dropping its page would cost that
+    school a cold load the next time they switch back.
+    """
+    if not school_id:
+        return
+    try:
+        req_cache.invalidate(
+            req_cache.teacher_dashboard_key(g.get("user_id"), school_id))
+    except Exception:
+        current_app.logger.debug("switch: dashboard cache drop failed", exc_info=True)
+
+
 @teacher_membership_bp.route("/membership/switch", methods=["POST"])
 @role_required(*_MEMBERSHIP_ROLES)
 def teacher_membership_switch():
@@ -388,6 +411,8 @@ def teacher_membership_switch():
     target = (request.form.get("school_id") or request.form.get("school") or "").strip()
     if not target or target == "home":
         membership.clear_active_school(token)
+        # Back to the profile's own school: that is the page the teacher lands on.
+        _forget_cached_dashboard(g.get("user_home_school_id"))
         log_activity("update", "active_school", g.get("user_id"),
                      new_data={"school_id": None, "choice": "home"},
                      user_id=g.get("user_id"))
@@ -398,6 +423,7 @@ def teacher_membership_switch():
         return redirect(url_for("membership_teacher.teacher_membership",
                                 status="not_member"))
     membership.set_active_school(token, target)
+    _forget_cached_dashboard(target)
     log_activity("update", "active_school", g.get("user_id"),
                  new_data={"school_id": target}, user_id=g.get("user_id"))
     return redirect(back or url_for("membership_teacher.teacher_membership",

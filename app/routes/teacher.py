@@ -57,7 +57,8 @@ from app.services.pdf_service import upload_pdf
 from app.services import pdf_service
 from app.services.audit_service import log_activity
 from app.utils.req_cache import (invalidate_school, invalidate_teacher_assignments,
-                                 school_classes, school_subjects, teacher_assignments_for)
+                                 school_classes, school_subjects, teacher_assignments_for,
+                                 teacher_dashboard_key)
 from app.utils import exam_window
 from app.utils import denials
 from app.services import (analysis_frameworks, analysis_report, analysis_scope,
@@ -641,14 +642,20 @@ def _needs_class_assignment(exam: dict) -> bool:
 
 
 def _invalidate_teacher_dashboard() -> None:
-    """Drop this teacher's cached dashboard row.
+    """Drop this teacher's cached dashboard row **for the school they act in**.
 
     The dashboard caches for 20 seconds, so without this a teacher saves an
     answer key, comes back, and sees the page exactly as it was — which is what
     "I filled it in and nothing changed" looked like from the outside.
+
+    The row is school-scoped (`req_cache.teacher_dashboard_key`), and so is this
+    invalidation: every writer here runs in the request's own school, which is the
+    page it dirties. The other school's cached page is not stale — nothing in this
+    request changed it — and dropping it would only cost that teacher a cold load
+    in the school they are not even in.
     """
     try:
-        cache_delete(f"t_dash:{g.user_id}")
+        cache_delete(teacher_dashboard_key(g.user_id, g.get("user_school_id")))
     except Exception:
         pass
 
@@ -657,8 +664,10 @@ def _invalidate_teacher_dashboard() -> None:
 @teacher_or_admin_required
 def dashboard():
     supabase = get_supabase()
-    # Try cache first (20s TTL)
-    cache_key = f"t_dash:{g.user_id}"
+    # Try cache first (20s TTL). Keyed by the school as well as the teacher: the
+    # classes, subjects, assignments and duties below are read for the *active*
+    # NPSN, so a per-teacher key served the previous school's page after a switch.
+    cache_key = teacher_dashboard_key(g.user_id, g.get("user_school_id"))
     cached = cache_get(cache_key)
     if cached:
         return render_template("teacher/dashboard.html", **cached)
