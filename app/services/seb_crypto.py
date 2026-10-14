@@ -64,19 +64,39 @@ ENC_VERSION = "v1"
 
 #: HKDF context. Fixed, and part of the derivation: changing it silently changes
 #: every key, which is why it is named here rather than built at a call site.
+#: Unrelated to the key *length* below, and deliberately left alone when it changed:
+#: stored blobs are versioned (``v1:``), the derivation that produced them did not
+#: change, and an exit key already written into an issued ``.seb`` file must still
+#: decrypt after this commit.
 KEY_INFO = b"scangrade/seb/at-rest/v1"
 
-#: The alphabet a generated password is drawn from, and the reason it is not
-#: `string.ascii_letters + string.digits`: this password is *read aloud over the
-#: phone* to a pupil or typed by a supervisor from a screen, so `0`/`O` and
-#: `1`/`l`/`I` are the difference between a working exit and a support call. The
-#: characters removed are the ones a human confuses, not arbitrary ones.
-PASSWORD_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
+#: The alphabet a generated password is drawn from: upper-case A-Z, and nothing
+#: else. Asked for by the operator reading the panel — "the exit key is 6 digits
+#: capital alphabetic, randomly" — and it is defensible for the *use*: this value
+#: is read aloud over the phone to a pupil or typed by a supervisor from a screen,
+#: so a fixed-width run of capitals has no `0`/`O`, no `1`/`l`/`I` and no
+#: lower-case to hear wrong, and a 6-cell box on the panel has nothing in it that
+#: can be misheard as something else.
+PASSWORD_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
-#: 12 characters over the 57-symbol alphabet above: about 70 bits, which is far
-#: past guessing for a value that is only ever valid for one exam and is rate
-#: limited at the door that reads it.
-PASSWORD_LENGTH = 12
+#: Six characters over the 26-symbol alphabet above — 26^6 ≈ 3.1·10^8, about
+#: **28 bits**. Stated plainly because it is a real reduction: the previous value
+#: was 12 characters over 57 symbols and some 70 bits. Two things make the smaller
+#: key acceptable here, and neither is a substitute for the other:
+#:
+#: * the value is valid for **one exam**, is regenerated rather than reused, and
+#:   is not a credential to anything else;
+#: * the server-side door that reads it is throttled (`app/routes/seb.py`
+#:   `@_rate_limit("6 per minute")` on the claim route), so an online guess is
+#:   bounded by the limiter rather than by the key.
+#:
+#: What it *cannot* lean on, and the reason this is written down: the
+#: ``hashedQuitPassword`` in the ``.seb`` file is compared **on the pupil's own
+#: machine, offline**, so the server's limiter never sees a brute-force attempt
+#: made there. Six capitals is a code a person can read out, not a secret that
+#: withstands an offline search; if this ever needs to hold against that, the
+#: length is the thing to raise — not the alphabet.
+PASSWORD_LENGTH = 6
 
 
 class SebCryptoError(RuntimeError):

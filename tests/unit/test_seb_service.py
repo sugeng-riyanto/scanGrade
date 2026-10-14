@@ -182,15 +182,32 @@ def test_an_encrypted_payload_is_refused_rather_than_misread():
 
 # ── 3. the passwords, and what the file may contain ─────────────────────────
 
-def test_the_minted_passwords_are_strong_and_unambiguous(app_ctx):
+def test_the_minted_passwords_are_six_capitals(app_ctx):
+    """The shape the operator asked for, and the shape the panel's field has.
+
+    Six cells, upper case only. The alphabet is pinned as an *equality* rather
+    than as "every character happens to be in it": a test that a draw is drawn
+    from the alphabet it is drawn from is no test at all, and the pair
+    (length, alphabet) is the whole of what a reader of the page is promised.
+    """
+    assert seb_crypto.PASSWORD_LENGTH == 6
+    assert seb_crypto.PASSWORD_ALPHABET == "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    # The ambiguity the old 57-symbol alphabet had to work around was *within* it:
+    # `0` beside `O`, `1` beside `l` and `I`. Nothing beside anything is left now,
+    # so `O` and `I` stay — dropping them from an all-capitals set would cost two
+    # symbols and buy no legibility at all.
+    for absent in "0123456789" + "abcdefghijklmnopqrstuvwxyz":
+        assert absent not in seb_crypto.PASSWORD_ALPHABET
+
     seen = {seb_crypto.mint_password() for _ in range(200)}
-    assert len(seen) == 200, "a repeat would mean the CSPRNG is not being used"
     for password in seen:
-        assert len(password) == seb_crypto.PASSWORD_LENGTH
-        assert all(ch in seb_crypto.PASSWORD_ALPHABET for ch in password)
-    # The characters a supervisor reading one aloud over the phone confuses.
-    for ambiguous in "0O1lI":
-        assert ambiguous not in seb_crypto.PASSWORD_ALPHABET
+        assert len(password) == 6, password
+        assert password.isupper() and password.isalpha(), password
+    # Not "200 distinct": 26^6 is 3.1·10^8, so 200 draws carry a birthday
+    # collision about 1 run in 15 000 — a flake, not a finding. What this asks is
+    # that the draw is spread over the space at all, which a counter or a constant
+    # fails and a CSPRNG passes with essentially no chance of a false alarm.
+    assert len(seen) >= 199, "200 draws landed on fewer than 199 values"
 
 
 def test_the_downloadable_file_never_carries_a_readable_password(app_ctx):
