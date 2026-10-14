@@ -151,6 +151,19 @@ class TestTheThreeRostersCarryTheControls:
             assert "activation_chart" in html, (
                 f"{name} does not read the payload the route counted")
 
+    def test_each_row_says_which_state_it_is_in(self):
+        """The count and the pie answer "how many"; the row's own badge answers "which",
+        and that is the question the filter above it is used to ask. Both states carry
+        one, because a badge that appears on the pending half alone reads as decoration
+        on the other."""
+        for name, flag in (("teachers.html", "t"), ("students.html", "s"),
+                           ("officials.html", "o")):
+            html = (TEMPLATES / name).read_text(encoding="utf-8")
+            assert f"{{% if {flag}.activated %}}" in html, (
+                f"{name} carries no per-row activation badge")
+            assert 'data-activated="1"' in html, f"{name} has no activated badge"
+            assert 'data-must-change="1"' in html, f"{name} has no pending badge"
+
     def test_every_list_route_reads_the_filter_and_counts_the_roster(self):
         src = (ROOT / "app" / "routes" / "admin_sekolah.py").read_text(encoding="utf-8")
         for fn in ("def students(", "def teachers(", "def officials("):

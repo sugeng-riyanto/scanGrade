@@ -462,8 +462,17 @@ class TestEveryNewAccountSaysThePasswordIsOneTime:
             "email": "a@b.c", "must_change_password": True}
 
     def test_the_officials_page_shows_the_marker(self):
+        """Both halves of the flag, off the fact the filter and the pie read.
+
+        The page printed only the pending marker, and off `must_change_password`
+        directly — which an older `list_officials` can leave out of a row, and the
+        badge would then say nothing while the filter and the chart counted the same
+        account as activated. One source, both states.
+        """
         html = OFFICIALS_TEMPLATE.read_text(encoding="utf-8")
-        assert "o.must_change_password" in html and 'data-must-change="1"' in html, (
+        assert "o.activated" in html, (
+            "the page does not read the activation flag the route counted")
+        assert 'data-must-change="1"' in html and 'data-activated="1"' in html, (
             "the page cannot tell an activated account from one still on its card")
 
     def test_the_upload_page_states_it_never_creates_an_account(self):

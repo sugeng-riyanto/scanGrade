@@ -216,7 +216,23 @@
                     <tr class="hover:bg-stone-50 transition" x-data="{ editing: false }" :class="selected.includes('{{ s.id }}') ? 'bg-amber-50/50' : ''">
                         <td class="px-2 py-3"><input type="checkbox" :checked="selected.includes('{{ s.id }}')" @click="selected.includes('{{ s.id }}') ? selected = selected.filter(x => x !== '{{ s.id }}') : selected.push('{{ s.id }}')" class="w-4 h-4"></td>
                         <td class="px-4 py-3 font-mono text-xs text-stone-600">{{ s.nisn or '-' }}</td>
-                        <td class="px-4 py-3 font-bold text-stone-700">{{ s.name }}</td>
+                        <td class="px-4 py-3 font-bold text-stone-700">
+                            {{ s.name }}
+                            {# The row's own answer to "has this pupil replaced the password
+                               the school issued". The count above and the pie beside it say
+                               how many; this says which, which is what the filter that
+                               reads the same flag is used to find. Both states are named,
+                               so the badge is a reading rather than decoration. #}
+                            {% if s.activated %}
+                            <span class="ml-1 badge bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                  data-activated="1"
+                                  x-text="t('Sudah aktivasi','Activated')"></span>
+                            {% else %}
+                            <span class="ml-1 badge bg-amber-50 text-amber-700 border border-amber-200"
+                                  data-must-change="1"
+                                  x-text="t('Belum aktivasi','Not activated')"></span>
+                            {% endif %}
+                        </td>
                         <td class="px-4 py-3"><span class="badge bg-violet-50 text-violet-700 border border-violet-200">{{ s.class_name or '-' }}</span></td>
                         <td class="px-4 py-3 text-stone-500">{{ s.email or '-' }}</td>
                         <td class="px-4 py-3 text-right">

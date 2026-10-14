@@ -206,7 +206,15 @@
                            difference between a school that knows an account is still
                            on the password it printed and one that assumes it was
                            changed — the same state the login page enforces. #}
-                        {% if o.must_change_password %}
+                        {# Both states, off the flag the route counted: `o.activated` is the
+                           same fact the filter above and the pie beside it read, so this
+                           row cannot answer "has this account been activated" differently
+                           from the list it sits in. A badge that only appears on the
+                           pending half reads as decoration on the other. #}
+                        {% if o.activated %}
+                        <span class="ml-1 inline-block text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700"
+                              data-activated="1" x-text="t('Sudah aktivasi','Activated')"></span>
+                        {% else %}
                         <span class="ml-1 inline-block text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700"
                               data-must-change="1" x-text="t('Belum aktivasi','Not activated')"></span>
                         {% endif %}

@@ -320,6 +320,22 @@
                                 {{ official_id_label.get(t.role, t.role) }}
                             </span>
                             {% endif %}
+                            {# Which of the school's own accounts have replaced the password
+                               it issued, said on the row and not only counted above. The
+                               header badge and the pie answer "how many"; this answers
+                               "which teacher", which is the question the filter is used
+                               to ask and the only one a count cannot answer. Both states
+                               are named, because a badge that appears on one of them
+                               reads as decoration on the other. #}
+                            {% if t.activated %}
+                            <span class="ml-1 badge bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                  data-activated="1"
+                                  data-lang-id="Sudah aktivasi" data-lang-en="Activated">Sudah aktivasi</span>
+                            {% else %}
+                            <span class="ml-1 badge bg-amber-50 text-amber-700 border border-amber-200"
+                                  data-must-change="1"
+                                  data-lang-id="Belum aktivasi" data-lang-en="Not activated">Belum aktivasi</span>
+                            {% endif %}
                         </td>
                         <td class="px-4 py-3 text-stone-500">{{ t.employee_number or '-' }}</td>
                         <td class="px-4 py-3 text-stone-500">{{ t.email }}</td>
