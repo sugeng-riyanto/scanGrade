@@ -36,6 +36,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.services import demo_schools, school_reset
+from tests.conftest import require_bootable_manage_app
 
 ROOT = Path(__file__).resolve().parents[2]
 SUPER_SRC = ROOT / "app" / "routes" / "super_admin.py"
@@ -286,6 +287,8 @@ class TestResolvingTheScope:
 
 class TestTheDemoSchoolsAreTheSeeds:
     def test_the_list_comes_from_the_seed(self):
+        # `manage.py` cannot be read as data: it boots a real app at import time.
+        require_bootable_manage_app()
         from manage import DEMO_SCHOOLS
         assert demo_schools.demo_school_npsns() == [
             str(s["npsn"]) for s in DEMO_SCHOOLS if s.get("npsn")]
@@ -293,6 +296,7 @@ class TestTheDemoSchoolsAreTheSeeds:
     def test_the_fallback_is_in_step_with_the_seed(self):
         """The fallback is a second copy of the list; drift would mean a reset
         that silently skips a demo school."""
+        require_bootable_manage_app()
         from manage import DEMO_SCHOOLS
         assert sorted(demo_schools.FALLBACK_NPSNS) == sorted(
             str(s["npsn"]) for s in DEMO_SCHOOLS if s.get("npsn"))

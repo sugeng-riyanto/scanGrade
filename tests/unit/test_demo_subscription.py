@@ -31,6 +31,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from tests.conftest import require_bootable_manage_app
+
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
@@ -49,7 +51,12 @@ def _manage():
 
     Cached: importing it builds the whole Flask app, and an uncached import per
     test spent a minute booting it fourteen times.
+
+    Skipped, not failed, in a checkout with no environment to boot that app from:
+    the import raises about missing variables, which reads like a broken suite.
+    See `tests/conftest.py::require_bootable_manage_app`.
     """
+    require_bootable_manage_app()
     import importlib.util
 
     spec = importlib.util.spec_from_file_location("sg_manage", MANAGE)

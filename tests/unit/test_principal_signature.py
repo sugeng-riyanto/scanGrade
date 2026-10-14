@@ -48,8 +48,12 @@ def _render_exam_sheet(app, school):
 
 
 def _render_report_card(app, school):
+    # `submitted_at` is here because the card *reads* it (`Dikumpulkan`), and it is a
+    # column `report_card_service` selects: without it the sheet printed `-` for every
+    # paper in this fixture and nothing said so — see `deploy/render_fixture_gate.py`.
     card = {"submission": {"answers": {}, "teacher_feedback": {}, "exam": dict(EXAM),
                            "status": "published", "is_published": True,
+                           "submitted_at": "2026-09-13T11:00:00+00:00",
                            "final_score": 55.5, "score": 60, "penalty": 4.5,
                            "violations": 2},
             "exam": dict(EXAM), "released": True, "student_name": "Ahmad",

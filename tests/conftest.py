@@ -59,6 +59,80 @@ def build_app(config: str = TESTING_CONFIG) -> Flask:
     return create_app(config)
 
 
+# ── the checkout's environment, and the tests whose subject needs one ────────
+#
+# `manage.py` is not a data file to read; it is a module that boots a real app at
+# import time, and the seed these tests check cannot be reached without it. That
+# works on a developer's box because the checkout's `.env` supplies
+# `SUPABASE_URL` and `SUPABASE_SERVICE_KEY`, and `create_app` refuses to boot
+# without them. The file is gitignored — so a fresh worktree (`git worktree add`,
+# a clone, `deploy/dirty_snapshot.py --run`) has none — and the run then reports
+# **ten errors** at fixture setup and **eighteen failures** raised inside the
+# import. Seventeen of the failures, and all ten errors, are only the environment
+# the checkout does not have. The eighteenth was a real defect the pile was hiding:
+# `get_config` stringified the config class it was handed, so a test that asked for
+# `TestingConfig` was silently given `DevelopmentConfig` — which boots against the
+# checkout's `.env` and cannot boot without one (see the fix in `app/config.py`).
+#
+# The right report for that is a skip that names the file and the variables: the
+# same run on a box with a `.env` has all of these tests, and most of what is
+# *in* these files reads `manage.py` as text and needs no environment at all, so
+# gating the whole module would throw away the tests the environment cannot touch.
+
+def manage_app_refusal() -> str:
+    """What `import manage` would be refused for here, or ``""`` when it would not.
+
+    Asked of the app's own rule rather than of a list of names kept here:
+    `manage.py` boots `app.config.DevelopmentConfig`, and `create_app` answers the
+    same question by calling its `validate()`. So this is the very check the
+    import would fail, made before doing the import — and a variable added to the
+    required set joins this answer without being named in this file.
+    """
+    from app.config import DevelopmentConfig
+
+    try:
+        DevelopmentConfig.validate()
+    except RuntimeError as exc:
+        return str(exc)
+    return ""
+
+
+def require_bootable_manage_app() -> None:
+    """Call before executing `manage.py`, in the function that does so.
+
+    Named apart from the refusal so the tests can hold both directions: it skips
+    when the app could not boot, and does nothing at all when it could — a gate
+    that always fires would silently delete every test it was added to protect.
+    """
+    refusal = manage_app_refusal()
+    if refusal:
+        pytest.skip(
+            f"needs a bootable app to read `manage.py`'s seed: {refusal} — "
+            f"`manage.py` boots a real app at import time and this checkout has no "
+            f"environment to boot one with (`.env` is gitignored, so a fresh "
+            f"worktree has none; copy `.env.example` to `.env` to run this)")
+
+
+def require_a_findable_env_file() -> None:
+    """Call before a test that has to *deny* the reading of a `.env`.
+
+    `test_env_and_email` runs a subprocess in which every `open()` of a
+    `.env`-shaped path fails, and asserts that the import survived it with the
+    reason recorded. With no such file for python-dotenv to resolve, the read is
+    never attempted, the reason stays empty, and the test fails while asserting a
+    behaviour it had no file to exercise. Asked of python-dotenv's own resolution
+    — the same `find_dotenv()` `load_env_file()` rides on — so a `.env` above the
+    worktree counts, and nothing here restates where it looks.
+    """
+    from dotenv import find_dotenv
+
+    if not find_dotenv():
+        pytest.skip(
+            "needs a `.env` to deny: the test makes the read of one fail and asks "
+            "that the import survives it, so a tree python-dotenv finds no `.env` "
+            "in has nothing to exercise — the read never happens")
+
+
 # ── the interpreter floor, asked about *this run* ─────────────────────────────
 #
 # Not at import, and not about "this box": a run that targets files this

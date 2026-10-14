@@ -352,6 +352,16 @@ def _resolve_config(name):
 
 
 def get_config(env=None):
+    # A class is handed back before anything is done to it. `str(env)` below turns
+    # one into "<class 'app.config.TestingConfig'>", which `_resolve_config` then
+    # cannot resolve — so a caller that passed an already-imported class (the shape
+    # `_resolve_config` documents and `build_app()` is typed for) silently got
+    # DevelopmentConfig instead: it booted against whatever the checkout's `.env`
+    # held, passed whenever that happened to satisfy it, and failed on a fresh
+    # worktree with "missing required env vars" — a report about the environment
+    # for an argument that was being ignored.
+    if isinstance(env, type):
+        return env
     # env_str() drops inline comments — "production  # deploy" must not silently
     # fall through to DevelopmentConfig (debug on) in production.
     env = env or env_str("FLASK_ENV", "development")

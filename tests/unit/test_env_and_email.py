@@ -37,6 +37,8 @@ from unittest.mock import patch
 
 import pytest
 
+from tests.conftest import require_a_findable_env_file
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -77,6 +79,27 @@ class TestEnvParsing:
     def test_dotted_config_path_resolves(self):
         from app.config import TestingConfig, get_config
         assert get_config("app.config.TestingConfig") is TestingConfig
+
+    def test_an_already_imported_config_class_is_that_class(self):
+        """`_resolve_config` documents the shape; `get_config` used to destroy it.
+
+        `str(env)` turned the class into `<class 'app.config.TestingConfig'>`,
+        which resolves to nothing, so the caller got the fallback —
+        `DevelopmentConfig` — instead. That went unnoticed for as long as the
+        checkout had a `.env` supplying what DevelopmentConfig needs to boot, and
+        a fresh worktree then reported "missing required env vars" for a test
+        whose argument was being ignored.
+        """
+        from app.config import DevelopmentConfig, TestingConfig, get_config
+        assert get_config(TestingConfig) is TestingConfig
+        assert get_config(DevelopmentConfig) is DevelopmentConfig
+
+    def test_a_config_class_is_not_mistaken_for_a_name(self, monkeypatch):
+        """The class wins over FLASK_ENV, which is what "already imported" means."""
+        from app.config import ProductionConfig, TestingConfig, get_config
+        monkeypatch.setenv("FLASK_ENV", "production")
+        assert get_config(TestingConfig) is TestingConfig
+        assert get_config() is ProductionConfig, "the name still decides"
 
 
 # ── An unreadable .env is a missing file, not a fatal one ─────
@@ -148,6 +171,26 @@ class TestAnUnreadableEnvFile:
         (tmp_path / "directory.env").mkdir()
         assert load_env_file(str(tmp_path / "directory.env")) == ""
 
+    def test_the_guard_fires_when_there_is_no_env_file_to_deny(self, monkeypatch):
+        """The skip's own two directions, so neither can quietly stop happening."""
+        import dotenv
+        monkeypatch.setattr(dotenv, "find_dotenv", lambda *a, **k: "")
+        with pytest.raises(pytest.skip.Exception) as refusal:
+            require_a_findable_env_file()
+        assert ".env" in str(refusal.value), (
+            "the skip does not say what the checkout is missing: " + str(refusal.value))
+
+    def test_the_guard_stays_out_of_the_way_when_there_is_one(self, tmp_path, monkeypatch):
+        """A skip here would be a green run with this test missing, so it fails."""
+        import dotenv
+        env = tmp_path / ".env"
+        env.write_text("SG_DOTENV_PROBE=1\n", encoding="utf-8")
+        monkeypatch.setattr(dotenv, "find_dotenv", lambda *a, **k: str(env))
+        try:
+            require_a_findable_env_file()
+        except pytest.skip.Exception as skipped:
+            pytest.fail(f"the guard skipped a checkout that has a `.env`: {skipped}")
+
     def test_a_process_with_an_unreadable_env_file_still_imports_the_config(self):
         """The incident itself, end to end: a fresh interpreter, denied at `open`.
 
@@ -155,7 +198,12 @@ class TestAnUnreadableEnvFile:
         in a subprocess on purpose: the failure was a process that never started,
         so a test that imports the already-loaded module proves nothing about the
         import, and `wsgi.py` and `manage.py` need the same guarantee as this file.
+
+        Skipped where there is no `.env` to deny: the denial is the whole subject,
+        and a tree python-dotenv finds none in never attempts the read. See
+        `tests/conftest.py::require_a_findable_env_file`.
         """
+        require_a_findable_env_file()
         script = (
             "import builtins\n"
             "real = builtins.open\n"

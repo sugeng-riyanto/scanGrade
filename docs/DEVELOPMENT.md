@@ -76,6 +76,30 @@ pytest tests/test_error_handling.py -v
 pytest tests/ --cov=app --cov-report=term-missing
 ```
 
+### A checkout with no `.env`
+
+`manage.py` boots a real app at import time, and `create_app` refuses to boot without
+`SUPABASE_URL` and `SUPABASE_SERVICE_KEY` — which a developer's box gets from the
+checkout's `.env`, a **gitignored** file. So a fresh worktree (`git worktree add`, a
+clone, `deploy/dirty_snapshot.py --run`, whose snapshot deliberately carries no
+ignored files) has no environment to boot it with, and the 27 tests that read the
+seed out of `manage.py` used to be reported as **ten errors and seventeen failures
+raised inside the import** — a wall of "missing required env vars" that looks like a
+broken suite and says nothing about the code. (The run showed *eighteen* failures.
+The eighteenth was not the environment: `create_app(SomeConfig)` — a config
+*class*, the shape `_resolve_config` documents — was stringified before it was
+resolved, so its caller silently got `DevelopmentConfig` and the test passed on a
+box with a `.env` while failing on a fresh worktree. `get_config` hands a class
+straight back now.)
+
+They are **skipped** now, with the reason naming the file and the variable
+(`tests/conftest.py::require_bootable_manage_app`), because an absent `.env` is a
+property of the checkout rather than a finding about the release. Everything around
+them keeps running: most of those files read `manage.py` as *text*, which needs no
+environment, and so do the rest of the ~9,100 tests. On a box with a `.env` — the
+VPS, your own checkout — nothing is skipped, and `tests/unit/test_app_fixture.py`
+fails if a test file ever executes `manage.py` without asking the guard first.
+
 ### Measuring the pages in a browser
 
 The pages a teacher and a pupil actually use are measured by a headless browser on
@@ -161,6 +185,15 @@ files and deletions as one commit — so the tree the suite measures is clean an
 is not reached. Your own checkout is only ever **read**: the edits are copied, never
 stashed or applied. Ignored files (`.env`, `.venv`) stay behind, and `--run` uses this
 checkout's own interpreter, so the dependencies under test are still the ones here.
+
+**A clean tree is not a fresh box**, and the difference matters when the subject *is*
+the environment: the snapshot lives **inside** this checkout (`.freebuff/snapshot`), and
+python-dotenv resolves a `.env` by walking **up** from the file that asks — so a run
+there still finds this checkout's `.env` and boots like a box that has one (measured:
+`find_dotenv()` from `.freebuff/snapshot` answers
+`F:\opencode\ScanGrade\main-merge\.env`). To reproduce a worktree with no environment at
+all, put the worktree **outside** the checkout (`git worktree add /tmp/sg-noenv HEAD`,
+which is also what `git worktree add` in the paragraph above means for a real one).
 
 `node_modules` is the one exception, and it is a **link** rather than a copy: without
 it `deploy/theme_gate.sh` cannot run the Tailwind CLI and reports the stylesheet check

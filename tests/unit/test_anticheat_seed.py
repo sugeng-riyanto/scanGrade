@@ -34,6 +34,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from tests.conftest import require_bootable_manage_app
+
 ROOT = Path(__file__).resolve().parents[2]
 SEED_PATH = ROOT / "deploy" / "anticheat_seed.py"
 
@@ -765,7 +767,13 @@ class TestTheWriterIsDryByDefault:
 
 @pytest.fixture(scope="module")
 def manage():
-    """`manage.py` builds a Flask app at import time, so import it once."""
+    """`manage.py` builds a Flask app at import time, so import it once.
+
+    Skipped, not failed, in a checkout with no environment to boot one from: the
+    import raises about missing variables, which reads like a broken suite. See
+    `tests/conftest.py::require_bootable_manage_app`.
+    """
+    require_bootable_manage_app()
     import manage as manage_module
     return manage_module
 

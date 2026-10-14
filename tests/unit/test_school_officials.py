@@ -33,6 +33,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from tests.conftest import require_bootable_manage_app
+
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
@@ -485,6 +487,9 @@ class TestTheSchoolAdminsCrud:
 
 class TestTheSeed:
     def test_every_demo_school_offers_both_officials(self):
+        # The seed lives in `manage.py`, which cannot be read without booting the
+        # app it owns — so this is the one test here that needs an environment.
+        require_bootable_manage_app()
         from manage import DEMO_SCHOOLS
 
         assert DEMO_SCHOOLS, "no demo schools to check"
