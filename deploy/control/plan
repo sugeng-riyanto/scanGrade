@@ -6,6 +6,6 @@
 #
 # Obeyed once per exact content: the `issued` stamp below is what makes a
 # re-issued command a new plan rather than one already obeyed.
-command: release
-issued: 2026-10-13T20:53:00Z
-note: retry the held commit a8fd7f2: the box took it, then a post-reload gate refused it and rolled back to f0e6b6d
+command: recover
+issued: 2026-10-14T04:54:20Z
+note: run the lever: the box took a8fd7f2 then a post-reload gate refused it and rolled back to f0e6b6d; clear the box state holding the activation chart
