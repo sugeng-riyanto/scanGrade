@@ -274,15 +274,33 @@ def duties_for_date(supabase, school_id: str, exam_date: str) -> list[dict]:
                  .eq("school_id", school_id).eq("exam_date", exam_date))
 
 
+def _teacher_in_school(supabase, school_id: str, teacher_id: str) -> bool:
+    """Whether a cell may hold this person — its own staff, or a member.
+
+    `_row(…, "teachers", …)` was the whole answer, and a `teachers` row is this
+    school's *employment* record: a guru who joined from another NPSN has none here
+    by design, so every click that placed them was refused as
+    `teacher_not_in_school` while the roster, the assignment matrix and the homeroom
+    column all name them. Asked of the merged staff list now
+    (`teacher_assignments.is_staff`) — the same list `teachers_of` offers from, so
+    the dropdown and the write cannot disagree about who is in this school.
+    """
+    from app.services import teacher_assignments as ta_service
+    return ta_service.is_staff(supabase, school_id, teacher_id)
+
+
 def teachers_of(supabase, school_id: str) -> list[dict]:
-    """This school's teachers, named, so a cell can be drawn and a dropdown filled."""
-    out = []
-    for row in _rows(supabase.table("teachers").select("id, profiles!inner(full_name)")
-                     .eq("school_id", school_id)):
-        out.append({"id": str(row["id"]),
-                    "name": (row.get("profiles") or {}).get("full_name") or ""})
-    out.sort(key=lambda t: t["name"].lower())
-    return out
+    """This school's teachers, named, so a cell can be drawn and a dropdown filled.
+
+    The one staff list (`teacher_assignments.staff_directory`), so a guru who joined
+    this NPSN from another is offerable as an invigilator like any other teacher of
+    the school. Reading `teachers` alone left them out of every picker, the auto-fill
+    and the grid's own name map — the same defect `teacher_in_school` closed for the
+    assignment matrix, and the same fix: one reader, one answer.
+    """
+    from app.services import teacher_assignments as ta_service
+    return [{"id": t["id"], "name": t["name"]}
+            for t in ta_service.staff_directory(supabase, school_id)]
 
 
 def matrix(supabase, school_id: str, exam_date: str) -> dict:
@@ -413,7 +431,7 @@ def assign(supabase, school_id: str, *, exam_date: str, period_id: str, room_id:
         return {"ok": False, "reason": "period_not_in_school"}
     if not _row(supabase, "exam_room", school_id, room_id):
         return {"ok": False, "reason": "room_not_in_school"}
-    if not _row(supabase, "teachers", school_id, teacher_id):
+    if not _teacher_in_school(supabase, school_id, teacher_id):
         return {"ok": False, "reason": "teacher_not_in_school"}
 
     room_counts, teacher_counts = _period_seats(supabase, school_id, exam_date, period_id)
@@ -465,7 +483,7 @@ def set_cell(supabase, school_id: str, *, exam_date: str, period_id: str,
         return {"ok": False, "reason": "period_not_in_school", "action": ""}
     if not _row(supabase, "exam_room", school_id, room_id):
         return {"ok": False, "reason": "room_not_in_school", "action": ""}
-    if not _row(supabase, "teachers", school_id, teacher_id):
+    if not _teacher_in_school(supabase, school_id, teacher_id):
         return {"ok": False, "reason": "teacher_not_in_school", "action": ""}
 
     existing = duties_for_date(supabase, school_id, exam_date)
@@ -519,7 +537,7 @@ def set_cells(supabase, school_id: str, *, exam_date: str, period_id: str,
     if not _row(supabase, "exam_period", school_id, period_id):
         return {"ok": False, "reason": "period_not_in_school", "results": [],
                 "applied": 0, "refused": 0, "action": mode}
-    if not _row(supabase, "teachers", school_id, teacher_id):
+    if not _teacher_in_school(supabase, school_id, teacher_id):
         return {"ok": False, "reason": "teacher_not_in_school", "results": [],
                 "applied": 0, "refused": 0, "action": mode}
 

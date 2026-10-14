@@ -323,6 +323,81 @@ def account_of_this_school(supabase, school_id, user_id) -> bool:
     return bool(rows)
 
 
+#: The staff list every picker in the app draws from, read once per request
+#: (`req_cache.memo`). One reader rather than one per surface, because a picker
+#: built from `teachers` alone is a picker that cannot see the teacher the school
+#: just accepted — the same defect `teacher_in_school` closed for the matrix.
+STAFF_MEMO_KEY = "staff:{school_id}"
+
+
+def staff_directory(supabase, school_id) -> list[dict]:
+    """Every person who teaches here, named once: its own staff **and** its members.
+
+    A membership (migration 044) is about *teaching here*; the `teachers` table is
+    this school's employment record. A guru who joined from another NPSN has no
+    employment row here by design (`teacher_in_school` records why), so a list read
+    from `teachers` alone reports that the school has no such teacher — which is
+    how the invigilation pickers saw someone the roster, the assignment matrix and
+    the homeroom column already name.
+
+    The names are the ones the two owners of those rows give them: an employee's
+    from `teachers`/`profiles`, a member's from `active_members` — whose whole
+    privacy rule is that the destination school reads *name, email and account
+    status* and never where else that teacher works. That read is made through
+    `school_membership`, so this file still names no closure column and no status,
+    and a database that cannot answer it answers `[]` (the service's own rule),
+    leaving the school's own staff listed rather than raising in a picker.
+
+    Display only, and never an access decision: `teacher_in_school` is what a
+    *write* asks, read fresh, because this list is memoised for a request.
+    """
+    school = str(school_id or "").strip()
+    if not school:
+        return []
+    from app.utils.req_cache import memo
+    return memo(STAFF_MEMO_KEY.format(school_id=school),
+                lambda: _load_staff(supabase, school))
+
+
+def is_staff(supabase, school_id, person_id) -> bool:
+    """Whether this school may give work to this person — a staff row, or a member.
+
+    The write-side twin of `staff_directory`: a picker built from the merged list
+    must not offer somebody the write then refuses, so the two ask one question.
+    Widening only — every id its own `teachers` row accepted still passes, plus the
+    teachers this school accepted through a membership.
+    """
+    wanted = str(person_id or "").strip()
+    if not wanted:
+        return False
+    return any(t["id"] == wanted for t in staff_directory(supabase, school_id))
+
+
+def _load_staff(supabase, school_id) -> list[dict]:
+    """The two reads behind `staff_directory`, in name order, each id once."""
+    merged: dict[str, dict] = {}
+    try:
+        rows = (supabase.table("teachers").select("id, profiles!inner(full_name)")
+                .eq("school_id", school_id).execute().data or [])
+    except Exception:
+        logger.debug("staff read failed; the members still list", exc_info=True)
+        rows = []
+    for row in rows:
+        uid = str(row.get("id") or "").strip()
+        if not uid:
+            continue
+        merged[uid] = {"id": uid,
+                       "name": (row.get("profiles") or {}).get("full_name") or "",
+                       "member": False}
+    from app.services import school_membership
+    for person in school_membership.active_members(supabase, school_id):
+        uid = str(person.get("user_id") or "").strip()
+        if not uid or uid in merged:
+            continue
+        merged[uid] = {"id": uid, "name": person.get("name") or "", "member": True}
+    return sorted(merged.values(), key=lambda t: (t["name"] or "").lower())
+
+
 def running_exams_for_removal(supabase, school_id, teacher_id, remove_pairs):
     """Papers that make a removal worth confirming.
 

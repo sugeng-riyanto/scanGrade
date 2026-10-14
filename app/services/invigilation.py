@@ -108,6 +108,20 @@ def _row_in_school(supabase, table: str, school_id: str, row_id: str,
     return rows[0] if rows else None
 
 
+def _teacher_in_school(supabase, school_id: str, teacher_id: str) -> bool:
+    """Whether this school may put this person on a sitting.
+
+    `_row_in_school(…, "teachers", …)` was the whole answer, and `teachers` is this
+    school's *employment* record — so a guru who joined from another NPSN, who has
+    no row here by design, was refused a duty the assignment matrix, the roster and
+    the homeroom column all say they may hold. The question is asked of the merged
+    staff list now (`teacher_assignments.is_staff`), which is the same list the
+    picker offers from: a person the form offers is a person the write accepts.
+    """
+    from app.services import teacher_assignments as ta_service
+    return ta_service.is_staff(supabase, school_id, teacher_id)
+
+
 def _exam_in_school(supabase, school_id: str, exam_id: str) -> bool:
     """Whether this exam may be scheduled by this school.
 
@@ -129,7 +143,7 @@ def _exam_in_school(supabase, school_id: str, exam_id: str) -> bool:
     exam = rows[0]
     if exam.get("school_id"):
         return str(exam["school_id"]) == str(school_id)
-    return bool(_row_in_school(supabase, "teachers", school_id, exam.get("teacher_id")))
+    return _teacher_in_school(supabase, school_id, exam.get("teacher_id"))
 
 
 # ── the schedule: what a vice principal builds ───────────────────────────────
@@ -201,12 +215,14 @@ def form_options(supabase, school_id: str) -> dict:
                   .eq("school_id", school_id).order("title"))
     classes = _rows(supabase.table("classes").select("id, name")
                     .eq("school_id", school_id).order("name"))
-    teachers = []
-    for row in _rows(supabase.table("teachers").select("id, profiles!inner(full_name)")
-                     .eq("school_id", school_id)):
-        teachers.append({"id": str(row["id"]),
-                         "name": (row.get("profiles") or {}).get("full_name") or ""})
-    teachers.sort(key=lambda t: t["name"].lower())
+    # The one staff list (`teacher_assignments.staff_directory`), not a read of
+    # `teachers` alone: a guru who joined this NPSN from another is a teacher of
+    # this school (`teacher_in_school`) and must be offerable as an invigilator.
+    # The same reader the roster and the homeroom column use is what keeps one
+    # screen from naming somebody another screen says does not exist.
+    from app.services import teacher_assignments as ta_service
+    teachers = [{"id": t["id"], "name": t["name"]}
+                for t in ta_service.staff_directory(supabase, school_id)]
     return {"exams": exams, "classes": classes, "teachers": teachers}
 
 
@@ -231,14 +247,17 @@ def _decorate(supabase, school_id: str, schedules: list[dict]) -> list[dict]:
                         .select("id, schedule_id, teacher_id, is_lead")
                         .eq("school_id", school_id)
                         .in_("schedule_id", schedule_ids)) if schedule_ids else []
-    teacher_ids = sorted({str(a["teacher_id"]) for a in assignments})
+    teacher_ids = {str(a["teacher_id"]) for a in assignments}
     names = {}
     if teacher_ids:
-        names = {str(r["id"]): (r.get("profiles") or {}).get("full_name") or ""
-                 for r in _rows(supabase.table("teachers")
-                                .select("id, profiles!inner(full_name)")
-                                .eq("school_id", school_id)
-                                .in_("id", teacher_ids))}
+        # The same staff list the picker is built from, so a duty held by a
+        # teacher who joined from another NPSN prints their name instead of an
+        # empty cell — a schedule that names its invigilators everywhere but one
+        # row is a schedule an operator cannot check.
+        from app.services import teacher_assignments as ta_service
+        names = {t["id"]: t["name"]
+                 for t in ta_service.staff_directory(supabase, school_id)
+                 if t["id"] in teacher_ids}
 
     by_schedule: dict[str, list[dict]] = {}
     for a in assignments:
@@ -264,7 +283,7 @@ def assign_invigilator(supabase, school_id: str, *, schedule_id: str, teacher_id
     """Put one teacher on one sitting, or update the duty they already have."""
     if not _row_in_school(supabase, "invigilation_schedules", school_id, schedule_id):
         return {"ok": False, "reason": "schedule_not_in_school"}
-    if not _row_in_school(supabase, "teachers", school_id, teacher_id):
+    if not _teacher_in_school(supabase, school_id, teacher_id):
         return {"ok": False, "reason": "teacher_not_in_school"}
 
     existing = _rows(supabase.table("invigilator_assignments").select("id")

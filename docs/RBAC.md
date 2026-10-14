@@ -579,6 +579,44 @@ keanggotaan yang sudah ditutup — dan memperlakukan `home` sebagai *hapus pilih
 sebagai id sekolah yang bisa dikarang klien. Setelah dipilih, resolusi per-request di
 `app/utils/auth.py` membuat kelas, murid, bobot nilai, KKM dan ujian mengikuti NPSN itu;
 penutupan keanggotaan mencabutnya pada request berikutnya, bukan setelah cache kedaluwarsa.
+
+### Satu daftar staf untuk setiap pemilih, dan tulisannya menerima apa yang ditawarkan
+
+Dua permukaan yang lahir sebelum migration 044 membaca tabel `teachers` saja, dan itu
+cukup untuk "staf sekolah ini" sampai satu sekolah bisa **menerima** guru dari NPSN lain.
+Guru anggota tidak punya baris kepegawaian di sekolah tujuan — dan memang sengaja, karena
+baris kedua tentang orang yang sama adalah jawaban kedua — sehingga daftar yang dibaca dari
+`teachers` saja melaporkan bahwa sekolah itu tidak punya guru tersebut. Yang terkena bukan
+daftar guru (sudah diperbaiki lewat `teacher_in_school`), melainkan pengawas ujian:
+`invigilation.form_options` dan `invigilation_matrix.teachers_of` mengisi dropdown, grid,
+auto-fill, dan importer Excel dari daftar itu, sehingga sekolah yang baru menerima seorang
+guru tidak bisa memberinya tugas mengawas — dan `assign_invigilator`, `assign`, `toggle`,
+`apply` **menolak** id yang sama dengan `teacher_not_in_school`, jadi POST yang dibuat
+tangan pun tidak bisa menembusnya.
+
+Sekarang satu pembaca menjawab pertanyaan itu untuk semua:
+**`teacher_assignments.staff_directory`** menggabungkan staf sendiri (dari `teachers`)
+dengan anggota `active` sekolah itu (dari `school_membership.active_members`, lewat service
+yang memiliki tabel keanggotaan), diurutkan menurut nama dan tidak pernah menduplikasi satu
+orang. **`teacher_assignments.is_staff`** adalah sisi tulis dari daftar yang sama
+(`any(t["id"] == wanted …)`), dan itu yang dipakai `invigilation` maupun
+`invigilation_matrix` — jadi apa yang ditawarkan formulir adalah apa yang diterima penulisan,
+satu jawaban, bukan dua. Sifatnya **melebarkan saja**: setiap id yang dulu diterima baris
+`teachers` masih diterima, ditambah guru anggota; orang asing tetap ditolak, dan pembacaan
+keanggotaan yang gagal tetap mengembalikan staf sendiri (aturan service itu) alih-alih
+melempar di dalam dropdown. Pembacaan itu memo per-request (`req_cache.memo`) sehingga satu
+halaman tidak membaca daftar yang sama berkali-kali; karena memo, ini **daftar tampilan dan
+bukan keputusan akses** — keputusan akses tetap `is_active_member`/`teacher_in_school` yang
+dibaca segar.
+
+Penjaga: `tests/unit/test_member_on_the_staff_list.py` (12 uji — anggota ada di daftar, orang
+yang sama tidak muncul dua kali, orang asing tetap tidak, `form_options` dan `teachers_of`
+sama-sama menawarkannya, penugasan mengawas untuk anggota diterima, orang asing tetap ditolak,
+dan pemeriksaan sumber bahwa tidak ada jalur kembali ke `_row(…, "teachers", …)`), dan
+`tests/unit/test_member_teacher_works_in_the_active_npsn.py` (6 uji — permukaan guru
+menjalankan alat yang sama: kelas, murid, bobot nilai dan KKM diambil dari NPSN aktif, dengan
+kontrol negatif bahwa sekolah rumah benar-benar berisi data lain sehingga asersi tidak lulus
+karena fixture kosong).
 ## Pintu tulis ujian: sekolah mana yang menyimpan sebuah ujian (guru anggota dua NPSN)
 
 `exams.school_id` adalah satu-satunya kolom yang menentukan **sekolah mana yang menimbang**
