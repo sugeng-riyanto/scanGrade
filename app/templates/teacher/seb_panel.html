@@ -18,11 +18,15 @@
 {% block content %}
 <div x-data="{
         shown: {},
+        // One slot per kind: the two exit keys are different values (`seb_service.
+        // issue` mints each with its own `mint_password()`), and a single `password`
+        // string made both <code> blocks print whichever was revealed last — two
+        // identical keys on screen, one of which did not open what its label said.
+        passwords: {},
         busy: '',
-        password: '',
         role: '',
         async reveal(kind) {
-            if (this.shown[kind]) { this.shown[kind] = false; this.password = ''; return; }
+            if (this.shown[kind]) { this.shown[kind] = false; this.passwords[kind] = ''; return; }
             this.busy = kind;
             try {
                 const fd = new FormData();
@@ -31,7 +35,7 @@
                 const res = await fetch('{{ url_for('seb.reveal_password', exam_id=exam.id) }}', {
                     method: 'POST', body: fd, headers: { 'X-Requested-With': 'fetch' } });
                 const data = await res.json();
-                if (data.ok) { this.password = data.password; this.role = data.role; this.shown[kind] = true; }
+                if (data.ok) { this.passwords[kind] = data.password; this.role = data.role; this.shown[kind] = true; }
                 else { window.sgAlert(sgT('Kata sandi tidak dapat dibuka. Hubungi admin sekolah.',
                                           'The password could not be opened. Contact your school admin.')); }
             } catch (e) { window.sgAlert(sgT('Gagal menghubungi server.', 'Could not reach the server.')); }
@@ -287,7 +291,7 @@
                         <span><i class="fas fa-eye-slash mr-1"></i><span x-text="t('Sembunyikan','Hide')"></span></span>
                     </template>
                 </button>
-                <code x-show="shown['{{ kind }}']" x-text="password"
+                <code x-show="shown['{{ kind }}']" x-text="passwords['{{ kind }}']"
                       class="px-3 py-2 rounded-lg bg-surface-800 text-white text-sm font-mono tracking-widest"></code>
                 <span x-show="shown['{{ kind }}'] && role !== 'owner_teacher' && role !== 'invigilator'"
                       class="text-xs text-amber-700"

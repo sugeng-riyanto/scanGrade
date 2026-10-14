@@ -619,14 +619,89 @@ class TestTheSchoolsStaff:
         assert rows[0]["access_type"] == seb_access.ACCESS_VIEW_PASSWORD
         assert rows[0]["on_behalf_of"] == OWNER
 
+    def test_the_schools_admin_may_flip_the_switch(self, app, monkeypatch):
+        """The admin manages every other property of this paper, so SEB follows.
+
+        `can_manage_exam` is the predicate the builder's own edit door applies
+        (`teacher._guard_exam`), and it admits the admin of the paper's school: the
+        admin may change the paper's anti-cheat switches, its answer key and its
+        published results. The SEB requirement is a property of that same row
+        (`exams.require_seb`, migration 062), so reading it as a separate resource
+        the admin cannot touch was the one switch out of reach.
+        """
+        out = run(app, monkeypatch, role="admin_sekolah", user=ADMIN, door="disable")
+        assert status_of(out) == 302, out
+        assert out["exam"]["require_seb"] is False
+
+        out = run(app, monkeypatch, role="admin_sekolah", user=ADMIN, door="enable",
+                  require_seb=False)
+        assert status_of(out) == 302, out
+        assert out["exam"]["require_seb"] is True
+        assert out["exam"]["seb_config_key"], "the admin turned it on with no key"
+        assert out["db"].rows("exam_seb_credential"), "no password was issued"
+
+    def test_the_admin_may_re_issue_and_the_panel_offers_the_switch(self, app,
+                                                                   monkeypatch):
+        before = run(app, monkeypatch, role="admin_sekolah", user=ADMIN, door="panel")
+        assert before["seen"]["passed"]["can_manage"] is True, (
+            "the panel refuses to show a switch the door now accepts")
+        old_key = before["exam"]["seb_config_key"]
+        out = run(app, monkeypatch, role="admin_sekolah", user=ADMIN, door="reissue")
+        assert status_of(out) == 302, out
+        assert out["exam"]["seb_config_key"] != old_key
+
+    def test_an_admin_of_another_school_may_not_flip_the_switch(self, app,
+                                                               monkeypatch):
+        for door in ("enable", "disable", "reissue"):
+            out = run(app, monkeypatch, role="admin_sekolah", user=ADMIN,
+                      school=OTHER_SCHOOL, door=door)
+            assert status_of(out) == 403, door
+
     @pytest.mark.parametrize("role,user", [
-        ("admin_sekolah", ADMIN), ("principal", PRINCIPAL),
-        ("vice_principal", VICE),
+        ("principal", PRINCIPAL), ("vice_principal", VICE),
     ])
-    def test_none_of_them_may_flip_the_switch(self, app, monkeypatch, role, user):
+    def test_an_official_who_does_not_own_the_paper_stays_read_only(self, app,
+                                                                   monkeypatch, role,
+                                                                   user):
+        """Oversight is a read: a paper they did not build is not theirs to gate."""
         for door in ("enable", "disable", "reissue"):
             out = run(app, monkeypatch, role=role, user=user, door=door)
             assert status_of(out) == 403, (role, door)
+        out = run(app, monkeypatch, role=role, user=user, door="panel")
+        assert status_of(out) == "template", out
+        assert out["seen"]["passed"]["can_manage"] is False, role
+
+    @pytest.mark.parametrize("role,user", [
+        ("principal", PRINCIPAL), ("vice_principal", VICE),
+    ])
+    def test_an_official_who_owns_the_paper_may_flip_the_switch(self, app,
+                                                               monkeypatch, role, user):
+        """An official who teaches owns those papers — `OWN_PAPER_ROLES` says so,
+        and the builder already lets them edit and publish them. Their SEB toggle
+        is the same fact, not a second kind of permission."""
+        # The row's key is computed from the URL the request arrives on, so the
+        # paper is built inside the same request context the doors run in.
+        cred = _credential(app)
+
+        def owned(require_seb=True):
+            with app.test_request_context(f"/student/exams/{EXAM_ID}"):
+                return _exam_row(require_seb=require_seb, credential=cred,
+                                 teacher_id=user)
+
+        out = run(app, monkeypatch, role=role, user=user, door="disable",
+                  exam=owned())
+        assert status_of(out) == 302, out
+        assert out["exam"]["require_seb"] is False
+
+        out = run(app, monkeypatch, role=role, user=user, door="enable",
+                  exam=owned(require_seb=False), require_seb=False)
+        assert status_of(out) == 302, out
+        assert out["exam"]["require_seb"] is True
+        assert out["exam"]["seb_config_key"]
+
+        panel = run(app, monkeypatch, role=role, user=user, door="panel",
+                    exam=owned())
+        assert panel["seen"]["passed"]["can_manage"] is True, role
 
     def test_another_schools_admin_gets_nothing(self, app, monkeypatch):
         for door in ("panel", "password", "file"):

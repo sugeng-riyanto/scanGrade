@@ -234,3 +234,26 @@ def test_the_panel_wires_the_same_field_the_route_reads():
     template = (pathlib.Path(__file__).resolve().parents[2]
                 / "app" / "templates" / "teacher" / "seb_panel.html").read_text(encoding="utf-8")
     assert 'name="{{ confirm_field }}"' in template
+
+
+def test_the_panel_reveals_each_exit_key_from_its_own_slot():
+    """Two different keys, two places to keep their plaintext.
+
+    The panel held *one* `password` string in its Alpine state and both `<code>`
+    blocks read it, so revealing the quit key and then the admin key printed the
+    admin's value **twice**: the screen showed two identical passwords for two keys
+    that `seb_service.issue` mints separately, and a supervisor who read that value
+    for the quit prompt was handed a key that does not open it while the correct one
+    sat hidden behind the same label. Each kind keeps its own slot now, and this
+    refuses the shared spelling coming back — a source rule, because the defect is
+    in the page's own state, which no rendered response can observe.
+    """
+    import pathlib
+    template = (pathlib.Path(__file__).resolve().parents[2]
+                / "app" / "templates" / "teacher" / "seb_panel.html").read_text(encoding="utf-8")
+    assert re.search(r"x-text=\"passwords\['\{\{ kind \}\}'\]\"", template), (
+        "a revealed key is not read from its own slot")
+    assert 'x-text="password"' not in template, (
+        "one Alpine string for two keys prints the second key twice")
+    assert re.search(r"passwords\[kind\]\s*=", template), (
+        "the reveal writes to a slot the code block does not read")

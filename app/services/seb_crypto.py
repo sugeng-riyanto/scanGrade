@@ -66,17 +66,23 @@ ENC_VERSION = "v1"
 #: every key, which is why it is named here rather than built at a call site.
 KEY_INFO = b"scangrade/seb/at-rest/v1"
 
-#: The alphabet a generated password is drawn from, and the reason it is not
-#: `string.ascii_letters + string.digits`: this password is *read aloud over the
-#: phone* to a pupil or typed by a supervisor from a screen, so `0`/`O` and
-#: `1`/`l`/`I` are the difference between a working exit and a support call. The
-#: characters removed are the ones a human confuses, not arbitrary ones.
-PASSWORD_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
+#: The alphabet a generated exit key is drawn from. The school asked for a key
+#: that is **six capital letters** — it is read aloud over the phone to a pupil or
+#: typed by a supervisor from the screen, and A–Z is the shortest thing that can be
+#: dictated without a case, a digit or a symbol being spelled out. The alphabet it
+#: replaces dropped `0`/`O` and `1`/`l`/`I`, the characters a reader confuses; with
+#: no digits and no lower case left, that rule has nothing to remove.
+PASSWORD_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
-#: 12 characters over the 57-symbol alphabet above: about 70 bits, which is far
-#: past guessing for a value that is only ever valid for one exam and is rate
-#: limited at the door that reads it.
-PASSWORD_LENGTH = 12
+#: Six characters over the 26-letter alphabet above: about 28 bits. That is far
+#: less than the 70 bits the previous 12-character mixed-case key carried, and the
+#: difference is deliberate rather than an oversight — the key is drawn from the OS
+#: CSPRNG (see :func:`mint_password`) and is rate-limited at the door that reads it,
+#: but a `.seb` file carries the key's SHA-256 and is handed to pupils, so 28 bits is
+#: brute-forceable offline by whoever holds the file. `docs/features/SEB.md` records
+#: that limit; it is the school's choice of usability over that particular threat,
+#: not a property of SEB.
+PASSWORD_LENGTH = 6
 
 
 class SebCryptoError(RuntimeError):

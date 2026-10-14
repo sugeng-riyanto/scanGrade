@@ -182,15 +182,26 @@ def test_an_encrypted_payload_is_refused_rather_than_misread():
 
 # ── 3. the passwords, and what the file may contain ─────────────────────────
 
-def test_the_minted_passwords_are_strong_and_unambiguous(app_ctx):
+def test_the_minted_password_is_six_capital_letters(app_ctx):
+    """The school's format for an exit key: six capital letters, drawn randomly.
+
+    Requested: "change the exit key is 6 digits capital alphabetic, randomly". The
+    key is read aloud over the phone to a pupil or typed by a supervisor from the
+    screen, so it is six A–Z capitals and nothing else — no digit, no lower case,
+    no symbol to be spelled out. It replaces a 12-character mixed-case key whose
+    alphabet dropped the characters a reader confuses (`0`/`O`, `1`/`l`/`I`); with
+    no digits and no lower case left, that rule has nothing to remove, and the
+    smaller alphabet is a deliberate trade the feature doc records rather than an
+    oversight — see the honest limit in `docs/features/SEB.md`.
+    """
+    assert seb_crypto.PASSWORD_LENGTH == 6
+    assert seb_crypto.PASSWORD_ALPHABET == "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
     seen = {seb_crypto.mint_password() for _ in range(200)}
     assert len(seen) == 200, "a repeat would mean the CSPRNG is not being used"
     for password in seen:
-        assert len(password) == seb_crypto.PASSWORD_LENGTH
-        assert all(ch in seb_crypto.PASSWORD_ALPHABET for ch in password)
-    # The characters a supervisor reading one aloud over the phone confuses.
-    for ambiguous in "0O1lI":
-        assert ambiguous not in seb_crypto.PASSWORD_ALPHABET
+        assert len(password) == 6, password
+        assert password.isalpha() and password.isupper(), password
+        assert all("A" <= ch <= "Z" for ch in password), password
 
 
 def test_the_downloadable_file_never_carries_a_readable_password(app_ctx):

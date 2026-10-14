@@ -105,6 +105,19 @@ istilah teknis:
 ### 🔒 Kunci keluar — **Quit Password** dan **Admin Password**
 
 - Digenerate **otomatis** oleh server; guru tidak pernah mengetiknya.
+- **Bentuknya: 6 huruf kapital A–Z.** `seb_crypto.mint_password()` menarik enam
+  karakter dari `PASSWORD_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"`, jadi kunci ini
+  bisa dibacakan lewat telepon dan diketik dari layar tanpa satu angka, huruf kecil,
+  atau simbol pun perlu dieja. Aturan lama yang menyingkirkan `0`/`O` dan `1`/`l`/`I`
+  ikut hilang bersama angka dan huruf kecil — tidak ada lagi yang perlu disingkirkan.
+- **Batas jujur yang datang bersama bentuk itu: 26⁶ ≈ 2²⁸ ≈ 3,1 × 10⁸ kemungkinan**,
+  jauh di bawah ~70 bit kunci 12 karakter campuran yang digantikannya. Berkas `.seb`
+  memuat **hash** kunci ini dan memang dipegang murid, jadi siapa pun yang memegang
+  berkas itu bisa mencoba **seluruh ruang kunci** di luar jaringan — GPU modern
+  menyelesaikannya dalam hitungan detik. Ini pilihan sekolah (kemudahan dibacakan
+  diutamakan), bukan sifat SEB: kuncinya tetap mencegah murid menebaknya lewat pintu
+  (yang juga dibatasi laju), tetapi ia **bukan** pertahanan terhadap murid yang mau
+  menjalankan hashcat pada salinan berkasnya sendiri.
 - **TIDAK PERNAH terlihat atau diberitahukan ke murid dalam bentuk apa pun.** Tidak
   ada endpoint, halaman, atau berkas yang bisa memberi murid kata sandi ini.
 - Yang masuk ke berkas `.seb` **hanya sidiknya (hash)**, bukan kata sandinya. Murid
@@ -238,19 +251,34 @@ berlaku, dan ketiganya penting untuk sekolah:
 
 ## Matriks akses (RBAC)
 
-Satu aturan, empat peran. Dijaga oleh `tests/unit/test_seb_access.py`, dan setiap
-akses yang **diberikan** tercatat di `seb_access_log` **dan** di `audit_logs`.
+Satu aturan, enam peran — dan dua batas yang sengaja. Dijaga oleh
+`tests/unit/test_seb_access.py`, dan setiap akses yang **diberikan** tercatat di
+`seb_access_log` **dan** di `audit_logs`.
 
-| Peran | Lihat kata sandi | Unduh berkas `.seb` | Batas |
-|---|---|---|---|
-| **Guru pemilik ujian** | ✅ kapan saja selama ujian aktif | ✅ | — |
-| **Admin sekolah** (sekolah sama) | ✅ kapan saja | ✅ | Bukan guru pemilik → dicatat **"atas nama guru X"** |
-| **Kepala sekolah / Wakil kepala sekolah** | ✅ (setara admin sekolah) | ✅ | Sama seperti di atas |
-| **Guru yang bertugas sebagai pengawas** | ✅ **hanya selama jendela tugasnya** | ✅ | Di luar jendela → **DITOLAK** |
-| **Murid peserta ujian** | ❌ **tidak pernah, di endpoint mana pun** | ✅ (hanya hash + CK) | Hanya berkasnya sendiri — dan "peserta" berarti aturan partisipasi aplikasi, lihat di bawah |
-| **Peran lain (termasuk `super_admin`)** | ❌ | ❌ | Ditolak dengan alasan `role_not_covered` di badan respons. Keputusan ini **tidak** menulis baris: `seb_access_log.access_type` hanya menerima `view_password`/`download_file` (migrasi 062), jadi tabel yang dimaksud dokumen ini adalah catatan **akses yang diberikan**, bukan penolakan — dulu tabel itu menjanjikan sebaliknya |
+| Peran | Lihat kata sandi | Unduh berkas `.seb` | Sakelar SEB (on/off/terbitkan ulang) | Batas |
+|---|---|---|---|---|
+| **Guru pemilik ujian** | ✅ kapan saja selama ujian aktif | ✅ | ✅ | — |
+| **Admin sekolah** (sekolah sama) | ✅ kapan saja | ✅ | ✅ | Bukan guru pemilik → dicatat **"atas nama guru X"** |
+| **Kepala sekolah / Wakil kepala sekolah** | ✅ (setara admin sekolah) | ✅ | ⚠️ **hanya pada kertas yang mereka susun sendiri** | Di luar kertas sendiri: baca saja, dicatat **"atas nama guru X"** |
+| **Guru yang bertugas sebagai pengawas** | ✅ **hanya selama jendela tugasnya** | ✅ | ❌ baca saja | Di luar jendela → **DITOLAK** |
+| **Murid peserta ujian** | ❌ **tidak pernah, di endpoint mana pun** | ✅ (hanya hash + CK) | ❌ | Hanya berkasnya sendiri — dan "peserta" berarti aturan partisipasi aplikasi, lihat di bawah |
+| **Peran lain (termasuk `super_admin`)** | ❌ | ❌ | ❌ | Ditolak dengan alasan `role_not_covered` di badan respons. Keputusan ini **tidak** menulis baris: `seb_access_log.access_type` hanya menerima `view_password`/`download_file` (migrasi 062), jadi tabel yang dimaksud dokumen ini adalah catatan **akses yang diberikan**, bukan penolakan — dulu tabel itu menjanjikan sebaliknya |
 
 Catatan penting:
+
+- **Sakelar mengikuti `can_manage_exam`, bukan matriks *baca*.** `exams.require_seb`
+  adalah properti baris ujian (migrasi 062), bukan sumber daya tersendiri, jadi
+  pertanyaan "siapa yang boleh menyalakannya" adalah pertanyaan yang pintu tulis
+  ujiannya sendiri sudah jawab (`teacher._guard_exam` → `can_manage_exam`):
+  **pemilik** kertas — guru, dan kepala sekolah atau wakilnya yang mengajar
+  (`OWN_PAPER_ROLES` menyebutnya) — atau **admin sekolah kertas itu**. Versi
+  pertama `seb._may_configure` menambahkan pertanyaan kedua yang lebih sempit
+  (`role == 'guru'`), dan itulah satu-satunya sakelar yang tidak terjangkau oleh
+  admin yang mengelola seluruh kertas maupun oleh pejabat yang menyusun kertasnya
+  sendiri — padahal keduanya boleh mengubah sakelar anti-cheat, kunci jawaban, dan
+  penerbitan hasil pada kertas yang sama. Yang **tetap** baca-saja: pengawas
+  bertugas, dan pejabat sekolah pada kertas milik orang lain. `super_admin` tetap
+  ditolak, sama seperti pada pembacaan.
 
 - **Kepala sekolah & wakil kepala sekolah mendapat akses setara admin sekolah**
   karena Fase 0 menemukan keduanya **sudah** punya dashboard akademik sekolah
@@ -338,7 +366,7 @@ berkas untuk diberikan** (`not_gated` — sakelar dan berkas adalah satu hal), d
 sebelum rute sempat menyerahkan apa pun. Keduanya diuji lewat rute, bukan lewat
 predikat.
 
-Dijaga `tests/unit/test_seb_rbac_matrix.py` (**53 uji**): **setiap pintu dijalankan
+Dijaga `tests/unit/test_seb_rbac_matrix.py` (**57 uji**): **setiap pintu dijalankan
 sebagai setiap peran** — panel, sakelar (enable/disable/reissue), kata sandi,
 berkas guru, berkas murid, handshake, laporan penolakan, endpoint sinyal, dan tiga
 pintu publik — terhadap PostgREST tiruan yang benar-benar menyimpan, dengan
@@ -723,15 +751,18 @@ ini."
 **Untuk ADMIN SEKOLAH** — "Kamu bisa melihat kata sandi yang sama seperti guru
 pemilik ujian — supaya kalau guru berhalangan, kamu tetap bisa membantu murid yang
 terkunci. Buka halaman **Pengawasan** sekolah, lalu tekan **Kata sandi SEB** di baris
-pelaksanaan ujian itu; halaman yang sama juga memuat kode pemulihan murid."
+pelaksanaan ujian itu; halaman yang sama juga memuat kode pemulihan murid.
+Kamu juga bisa menyalakan, mematikan, dan menerbitkan ulang setelan SEB sebuah
+ujian di sekolahmu — sama seperti properti ujian lain yang sudah kamu kelola."
 
 **Untuk PENGAWAS** — "Selama kamu bertugas mengawasi, kamu bisa melihat kata sandi
 keluar SEB untuk ujian di ruanganmu. Tautannya ada di baris tugasmu di halaman **Tugas
 Pengawasan**, dan hanya muncul selama jendela tugasmu — sebelum dan sesudahnya baris
 itu berkata begitu. Setelah tugasmu selesai, akses ini otomatis tertutup."**Untuk KEPALA SEKOLAH / WAKIL KEPALA SEKOLAH** — "Sama seperti admin sekolah: buka
 halaman **Pengawasan**, lalu **Kata sandi SEB** pada baris pelaksanaan ujiannya.
-Aksesnya baca saja dan tercatat atas nama guru pemilik ujian — kamu tidak bisa
-menyalakan atau mematikan sakelarnya."
+Pada kertas guru lain aksesnya baca saja dan tercatat atas nama guru pemilik ujian.
+Pada kertas yang **kamu susun sendiri** (kamu mengajar mapel itu) kamu adalah
+pemiliknya, jadi sakelar SEB-nya juga milikmu — sama seperti sisa halaman ujian itu."
 
 **Untuk MURID** — "Kamu cukup buka berkas yang diberikan guru/pengawas, ujian akan
 terbuka otomatis dan terkunci. Kalau kamu sudah membuka SEB lalu kembali ke halaman
