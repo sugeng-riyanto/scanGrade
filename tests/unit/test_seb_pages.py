@@ -236,24 +236,41 @@ def test_the_panel_wires_the_same_field_the_route_reads():
     assert 'name="{{ confirm_field }}"' in template
 
 
-def test_the_panel_reveals_each_exit_key_from_its_own_slot():
-    """Two different keys, two places to keep their plaintext.
+def test_the_panel_reveals_each_exit_key_from_its_own_slot(app):
+    """Two different keys, two places to keep their plaintext — **rendered**.
 
     The panel held *one* `password` string in its Alpine state and both `<code>`
     blocks read it, so revealing the quit key and then the admin key printed the
     admin's value **twice**: the screen showed two identical passwords for two keys
     that `seb_service.issue` mints separately, and a supervisor who read that value
     for the quit prompt was handed a key that does not open it while the correct one
-    sat hidden behind the same label. Each kind keeps its own slot now, and this
-    refuses the shared spelling coming back — a source rule, because the defect is
-    in the page's own state, which no rendered response can observe.
+    sat hidden behind the same label. Each kind keeps its own slot now.
+
+    A render and not a grep, for this file's own reason: the page's body is thrown
+    away by the layout branch unless `g.user_id` is set, so a source rule would pass
+    on a page that never renders the block — the failure mode this file's docstring
+    names twice over.
     """
-    import pathlib
-    template = (pathlib.Path(__file__).resolve().parents[2]
-                / "app" / "templates" / "teacher" / "seb_panel.html").read_text(encoding="utf-8")
-    assert re.search(r"x-text=\"passwords\['\{\{ kind \}\}'\]\"", template), (
-        "a revealed key is not read from its own slot")
-    assert 'x-text="password"' not in template, (
+    from flask import g
+
+    with app.test_request_context("/teacher/exams/ex-1/seb"):
+        g.user_id, g.user_role, g.user_name, g.tz_offset = "u-1", "guru", "Guru", 7
+        html = app.jinja_env.get_template("teacher/seb_panel.html").render(
+            exam={"id": "ex-1", "title": "Latihan", "require_seb": True,
+                  "seb_config_key": "k" * 8},
+            verdict={"ok": True, "role": "owner_teacher"},
+            credential={"exam_id": "ex-1"}, has_credential=True,
+            file_is_current=True, can_manage=True, back_url="/teacher/exams",
+            confirm_field="confirm_no_android",
+            mobile_risk={"pupils": 3, "android": 0, "ios": 0, "known": 2},
+            access_log=[], refusals=[],
+            refusal_tally={"refused_pupils": 0, "refused_attempts": 0,
+                           "refused_last_at": None})
+    assert "passwords: {}" in html, "the panel rendered no reveal state at all"
+    for kind in ("quit", "admin"):
+        assert f"passwords['{kind}']" in html, (
+            f"the {kind} key is not read from its own slot")
+    assert 'x-text="password"' not in html, (
         "one Alpine string for two keys prints the second key twice")
-    assert re.search(r"passwords\[kind\]\s*=", template), (
-        "the reveal writes to a slot the code block does not read")
+    assert html.count("passwords[kind] = data.password") == 1, (
+        "the reveal must write the slot the code block reads")
