@@ -423,6 +423,16 @@ def issue(supabase, exam: dict, *, start_url: str, actor_id: str | None = None) 
     immediate use only** — they are stored encrypted, never returned by a route
     that a page renders.
     """
+    # Read the row that is about to be replaced, before anything is minted, so a key
+    # write that fails can hand the previous passwords back. PostgREST has no
+    # transaction across `exam_seb_credential` and `exams`, and the two halves must
+    # never disagree: the `.seb` file is checked against the key on the *exam*, while
+    # the panel reads the passwords out of the *credential*. A rotated credential
+    # beside an unchanged key is the one state worse than a refusal — the panel reads
+    # out a password no file the school holds accepts, the download answers
+    # `stale_config` for good, and the screen says nothing about why.
+    previous = credentials_for(supabase, exam.get("id"))
+
     quit_password = seb_crypto.mint_password()
     admin_password = seb_crypto.mint_password()
     settings = settings_for(exam, start_url=start_url,
@@ -454,6 +464,19 @@ def issue(supabase, exam: dict, *, start_url: str, actor_id: str | None = None) 
                     .eq("id", exam.get("id")))
     if not updated:
         logger.error("seb_service: could not store the Config Key for exam %s", exam.get("id"))
+        if previous:
+            # Put the row back exactly as it was, because the key it was minted
+            # against did not change. `updated_at` moves with it, so the record of
+            # *when* this credential was issued stays the truth it was.
+            restored = _rows(supabase.table("exam_seb_credential").update({
+                "quit_password_hash": previous.get("quit_password_hash"),
+                "quit_password_enc": previous.get("quit_password_enc"),
+                "admin_password_hash": previous.get("admin_password_hash"),
+                "admin_password_enc": previous.get("admin_password_enc"),
+                "updated_at": previous.get("updated_at"),
+            }).eq("exam_id", exam.get("id")))
+            logger.error("seb_service: %s the previous passwords for exam %s",
+                         "restored" if restored else "could NOT restore", exam.get("id"))
         return {"ok": False, "reason": "write_failed"}
 
     exam["seb_config_key"] = key

@@ -481,6 +481,12 @@ def test_the_panel_warns_when_the_exam_changed_after_the_file_was_issued(app, _p
     assert "Pengaturan ujian berubah setelah berkas .seb ini dibuat." in stale
     assert "Files already shared keep working" in stale
     assert "Berkas lama yang sudah beredar masih bisa dibuka" in stale
+    # The second cause of the same refusal, which the first sentence does not cover:
+    # the key hashes `startURL`, so a file made on another address (`www`, http vs
+    # https, an alias) goes stale without any switch having been touched. A teacher
+    # told only "the settings changed" looks for a change that never happened.
+    assert "one school, one address" in stale
+    assert "satu sekolah, satu alamat" in stale
 
 
 def test_the_exam_form_renders_the_link_to_the_panel_beside_the_switches(app):

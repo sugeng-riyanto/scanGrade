@@ -228,6 +228,22 @@ berlaku, dan ketiganya penting untuk sekolah:
    muncul saat seseorang menekan tombol adalah penolakan yang tidak terlihat; karena
    itu panel punya kartu peringatan sendiri, dan `tests/unit/test_seb_generator.py`
    merendernya dalam dua bahasa.
+4. **Dua sebab, bukan satu.** Kunci mencakup `startURL`, jadi berkas yang dibuat
+   saat sekolah membuka aplikasi lewat **alamat lain** (`www` atau bukan, `http`
+   alih-alih `https`, alias domain) juga menjadi basi — tanpa satu sakelar pun
+   berubah. Kartu panel menyebut keduanya (dwibahasa), karena guru yang hanya
+diberi tahu "pengaturan ujian berubah" akan mencari perubahan yang tidak pernah
+   terjadi. Perbaikannya sama: terbitkan ulang **dari alamat yang sekolah pakai**.
+5. **Dua baris ini tidak boleh berbeda.** `seb_service.issue` menulis baris kata
+   sandi lalu kunci di baris ujian, dan PostgREST tidak punya transaksi lintas dua
+   tabel: bila tulisan kunci gagal setelah kata sandi diputar, kertas itu menyimpan
+   **kunci lama di sebelah kata sandi baru** — panel membacakan kata sandi yang
+   tidak diterima berkas mana pun yang dipegang sekolah, dan unduhan menjawab
+   `409 stale_config` selamanya. Sekarang baris kata sandi dibaca lebih dulu dan
+   **dikembalikan apa adanya** (kedua hash, kedua ciphertext, `updated_at`) saat
+   tulisan kunci gagal; penerbitan pertama yang gagal tidak punya apa pun untuk
+   dikembalikan dan hanya menjawab `ok: False`
+   (`tests/unit/test_seb_service.py`).
 
 ### Dua kerusakan yang ditemukan saat bagian ini dibangun
 

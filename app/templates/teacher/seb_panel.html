@@ -143,6 +143,14 @@
                                                 'The exam settings changed after this .seb file was made.')"></p>
                 <p x-text="t('Terbitkan berkas baru lalu bagikan ulang ke murid: unduhan berikutnya akan ditolak sampai itu dilakukan. Berkas lama yang sudah beredar masih bisa dibuka sampai berkas baru diterbitkan.',
                             'Issue a new file and hand it out again: the next download will be refused until you do. Files already shared keep working until a new one is issued.')"></p>
+                {# The second cause, said where the first one is: the Config Key covers
+                   `startURL`, so a file made while somebody was on a different address
+                   (`www` or not, http or https, an alias) no longer matches — and no
+                   switch was touched, so a teacher told only "the settings changed"
+                   goes looking for a change that never happened. Both are repaired
+                   the same way, from the address the school actually uses. #}
+                <p x-text="t('Ini juga terjadi bila aplikasi dibuka lewat alamat yang berbeda dari saat berkas dibuat (mis. tanpa “www”, atau http alih-alih https) — satu sekolah, satu alamat.',
+                            'This also happens when the app is opened on a different address than the one the file was made on (for example without “www”, or http instead of https) — one school, one address.')"></p>
             </div>
         </div>
         {% endif %}
