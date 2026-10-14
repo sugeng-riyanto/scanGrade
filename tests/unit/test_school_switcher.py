@@ -25,7 +25,6 @@ from pathlib import Path
 import pytest
 from flask import g, render_template_string
 
-from app import create_app
 from app.services import school_membership as membership
 from app.services import school_membership
 from app.utils import req_cache
@@ -105,7 +104,7 @@ class TestTheSchoolsATeacherMaySwitchBetween:
 
 
 class TestTheHeaderDoesNotReadTheMembershipsTwice:
-    def test_it_reuses_the_memo_key_the_request_path_uses(self, monkeypatch):
+    def test_it_reuses_the_memo_key_the_request_path_uses(self, monkeypatch, app):
         """One request, one read: the header reads what the resolution already did."""
         calls: list = []
         real = school_membership.membership_rows
@@ -116,7 +115,6 @@ class TestTheHeaderDoesNotReadTheMembershipsTwice:
 
         monkeypatch.setattr(school_membership, "membership_rows", counting)
         db = db_with(mrow(TEACHER, HOME), mrow(TEACHER, OTHER))
-        app = create_app("app.config.TestingConfig")
         with app.test_request_context("/teacher/dashboard"):
             g.user_id = TEACHER
             g.user_token = "tok-3"
@@ -149,20 +147,17 @@ def _render_switcher(app, role, schools=(), away=False, monkeypatch=None):
 
 
 class TestTheHeaderControlReachesTheChrome:
-    def test_a_teacher_with_two_schools_gets_them(self, monkeypatch):
-        app = create_app("app.config.TestingConfig")
+    def test_a_teacher_with_two_schools_gets_them(self, monkeypatch, app):
         html = _render_switcher(app, "guru",
                                 schools=[{"school_id": HOME, "name": "A", "active": True},
                                          {"school_id": OTHER, "name": "B", "active": False}],
                                 monkeypatch=monkeypatch)
         assert html == "2|False"
 
-    def test_a_pupil_never_gets_it(self, monkeypatch):
-        app = create_app("app.config.TestingConfig")
+    def test_a_pupil_never_gets_it(self, monkeypatch, app):
         assert _render_switcher(app, "murid", monkeypatch=monkeypatch) == "0|False"
 
-    def test_an_anonymous_page_never_gets_it(self, monkeypatch):
-        app = create_app("app.config.TestingConfig")
+    def test_an_anonymous_page_never_gets_it(self, monkeypatch, app):
         monkeypatch.setattr(school_membership, "switchable_schools",
                             lambda *a, **k: {"schools": [{"school_id": OTHER}], "away": False})
         with app.test_request_context("/"):
@@ -233,9 +228,8 @@ class TestTheControlIsInTheChrome:
         assert "{% if _switcher.get('away') %}" in block, (
             "a `home` option with no choice in force would clear nothing")
 
-    def test_a_teacher_page_actually_renders_the_switcher(self, monkeypatch):
+    def test_a_teacher_page_actually_renders_the_switcher(self, monkeypatch, app):
         """End to end through the chrome: the payload reaches a real `<select>`."""
-        app = create_app("app.config.TestingConfig")
         monkeypatch.setattr(school_membership, "switchable_schools",
                             lambda *a, **k: {"schools": [
                                 {"school_id": HOME, "name": "SMP Satu", "active": False},
@@ -264,7 +258,7 @@ class TestTheControlIsInTheChrome:
         assert token and token.group(1), (
             "a tokenless POST is refused by `csrf_protect`, so the switch would look "
             "like it did nothing")
-    def test_a_row_with_no_id_renders_an_empty_value_not_the_word_none(self, monkeypatch):
+    def test_a_row_with_no_id_renders_an_empty_value_not_the_word_none(self, monkeypatch, app):
         """The template's own contract, whatever the payload holds.
 
         `switchable_schools` skips a row with no id today — which is exactly why a
@@ -272,7 +266,6 @@ class TestTheControlIsInTheChrome:
         template has to promise it itself: an empty payload is not the same promise
         as a form that can never post `None` as a uuid.
         """
-        app = create_app("app.config.TestingConfig")
         monkeypatch.setattr(school_membership, "switchable_schools",
                             lambda *a, **k: {"schools": [
                                 {"school_id": None, "name": "Tanpa id", "active": False},
