@@ -171,13 +171,27 @@ def test_the_report_card_shows_the_name_or_an_honest_fallback(app):
     assert "Kimia" in named and FALLBACK_ID not in named
 
 
+def _render_pupil_pdf(app, exam):
+    """The pupil's own PDF sheet, as this file renders it.
+
+    Module-level rather than nested, so `deploy/render_fixture_gate.py` measures the
+    same call this file does — a second copy of the context is the drift that gate
+    exists to catch, and a fixture it cannot reach is a document it cannot measure.
+    """
+    # `submitted_at` is what the sheet prints under `Dikumpulkan`; it is a column the
+    # route's submission row carries, and a fixture without it printed `-` silently
+    # (see `deploy/render_fixture_gate.py`).
+    return app.jinja_env.get_template("student/result_detail_pdf.html").render(
+        submission={"exam": exam, "answers": {}, "teacher_feedback": {},
+                    "status": "published", "submitted_at": "2026-09-13T11:00:00+00:00",
+                    "final_score": 70, "score": 75,
+                    "penalty": 5, "violations": 1},
+        student_name="Ahmad", teacher_name="", school_info={}, merged_pages={})
+
+
 def test_the_pupil_pdf_shows_the_name_or_an_honest_fallback(app):
     def render(exam):
-        return app.jinja_env.get_template("student/result_detail_pdf.html").render(
-            submission={"exam": exam, "answers": {}, "teacher_feedback": {},
-                        "status": "published", "final_score": 70, "score": 75,
-                        "penalty": 5, "violations": 1},
-            student_name="Ahmad", teacher_name="", school_info={}, merged_pages={})
+        return _render_pupil_pdf(app, exam)
 
     blank = render(dict(EXAM))
     assert "None" not in blank

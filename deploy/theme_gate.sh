@@ -141,13 +141,20 @@
 #      the box, and it is refused like any other finding: a gate someone can
 #      delete is a gate that stops running, silently, from that commit onwards.
 #
+#   deploy/render_fixture_gate.py
+#     whether the report documents and the fixtures that render them still agree.
+#     A sheet that starts reading a key its fixture never supplies draws the hole as
+#     an empty string — a 200, no error, and every assertion about the rest of the
+#     sheet still passing — so the gate renders each document from each fixture with
+#     `StrictUndefined` and refuses the release when a fixture lags its reader.
+#
 # Usage:  bash deploy/theme_gate.sh
 # ─────────────────────────────────────────────────────────────────────────────
 set -uo pipefail
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # Word-split on purpose: pytest takes them as separate paths.
-TESTS="tests/unit/test_dark_theme_contrast.py tests/unit/test_tailwind_class_names.py tests/unit/test_theme_stylesheet.py tests/unit/test_language_toggle.py tests/unit/test_i18n_coverage.py tests/unit/test_css_freshness.py tests/unit/test_landing_facilities.py tests/unit/test_static_tree.py tests/unit/test_no_committed_secrets.py"
+TESTS="tests/unit/test_dark_theme_contrast.py tests/unit/test_tailwind_class_names.py tests/unit/test_theme_stylesheet.py tests/unit/test_language_toggle.py tests/unit/test_i18n_coverage.py tests/unit/test_css_freshness.py tests/unit/test_landing_facilities.py tests/unit/test_static_tree.py tests/unit/test_no_committed_secrets.py tests/unit/test_render_fixture_gate.py"
 
 # The app's own refusal markers, and the reason they are named here rather than
 # spelled out in the block that reads them: they are literals in
@@ -166,7 +173,7 @@ ALLOW_DIRTY_VAR="SCANGRADE_ALLOW_DIRTY_CHECKOUT"
 # next defect, and every release after it ships unexamined. So the list is
 # checked up front, and a missing file is exit 3 (about the release), not exit 2
 # (about the box).
-ARMAMENT="$TESTS deploy/i18n_coverage.py deploy/css_freshness.py deploy/schema_contract.py"
+ARMAMENT="$TESTS deploy/i18n_coverage.py deploy/css_freshness.py deploy/schema_contract.py deploy/render_fixture_gate.py"
 for check in $ARMAMENT; do
   # `-s` and not `-f`: a file that exists and holds nothing is the same release
   # as one where it was deleted, only quieter.
@@ -271,6 +278,35 @@ if [ "$COV_RC" -ne 0 ]; then
   exit 1
 fi
 
+# The report documents and the fixtures that render them, in one matrix: every
+# document against every fixture, rendered with `StrictUndefined`, so a key a
+# document reads and a fixture does not supply is a refusal rather than a blank on
+# the sheet. Its exit codes are its own — 0 pass, 1 a fixture lags its reader or a
+# document has none, 2 could not measure (the app would not build, a fixture would
+# not import) — and 2 is a property of this box, so it is said loudly and nothing is
+# refused: a laptop whose venv is half-built is in no position to reject a release.
+FIXTURES_CLAIM=""
+FIXTURES_OUT=$("$PY" "$REPO/deploy/render_fixture_gate.py" 2>&1)
+FIXTURES_RC=$?
+if [ "$FIXTURES_RC" -eq 1 ]; then
+  echo >&2
+  echo "theme gate: FAILED — a report fixture and a report document no longer agree." >&2
+  echo "            A sheet prints a hole where the missing key belongs: the page still" >&2
+  echo "            answers 200, nothing raises, and the fixture's own tests still pass" >&2
+  echo "            because they assert about the parts that did render." >&2
+  echo "$FIXTURES_OUT" | sed 's/^/    /' >&2
+  exit 1
+fi
+if [ "$FIXTURES_RC" -eq 2 ]; then
+  echo "theme gate: the report documents were NOT rendered against their fixtures —" >&2
+  echo "            the app would not build or a fixture would not import here. That is a" >&2
+  echo "            property of this box, not of the release, so nothing is refused." >&2
+  echo "$FIXTURES_OUT" | sed 's/^/    /' >&2
+fi
+if [ "$FIXTURES_RC" -eq 0 ]; then
+  FIXTURES_CLAIM=", and every report document is rendered from a fixture with no key missing"
+fi
+
 # The committed stylesheet is what the app serves, so it is judged here rather
 # than at the moment somebody notices a page looks wrong. Its exit codes are its
 # own: 0 in sync, 1 stale, 2 could not measure (no node, no node_modules on this
@@ -372,7 +408,8 @@ if [ "$RC" -eq 0 ]; then
   if [ "$CSS_RC" -eq 0 ]; then
     echo "$SCHEMA_OUT"
     echo "$CSS_OUT"
-    echo "theme gate: OK — readable in both themes, every named utility is compiled, the committed stylesheet is the one the templates produce, the app's own stylesheet stays a cached file, every file under /static/ is one the app asks for and in a commit, every page declares the language of its own copy, no template translates less than it did, no tracked file carries a service-role key or a hard-coded Flask secret, and every table, column and policy the code names is one this repository declares, with every role it compares against one the database holds${APPLIED_CLAIM}, and every facility the landing page advertises one this repository can show"
+    echo "$FIXTURES_OUT"
+    echo "theme gate: OK — readable in both themes, every named utility is compiled, the committed stylesheet is the one the templates produce, the app's own stylesheet stays a cached file, every file under /static/ is one the app asks for and in a commit, every page declares the language of its own copy, no template translates less than it did, no tracked file carries a service-role key or a hard-coded Flask secret, and every table, column and policy the code names is one this repository declares, with every role it compares against one the database holds${APPLIED_CLAIM}${FIXTURES_CLAIM}, and every facility the landing page advertises one this repository can show"
     exit 0
   fi
   echo >&2
