@@ -951,6 +951,47 @@ def _answered(request_id="r1", status=200):
             "params": {"requestId": request_id, "response": {"status": status}}}
 
 
+class TestTheReplyToTheReportIsWaitedFor:
+    """The verdict judges the *status* of the page's report, so the report has to be
+    given the time to be answered.
+
+    The driver waited for the request to be on the wire and navigated on that breath,
+    which aborts the fetch. `_client_from` then left `status` at 0 and the gate refused
+    the release for a route that had answered and written its row — measured on the box,
+    on every release. The count the wait is on now, driven with the events a real load
+    emits.
+    """
+
+    REFUSED = "https://box" + gate.REFUSAL_SUFFIX
+
+    def test_a_reply_to_the_report_is_counted(self):
+        events = [_request(self.REFUSED, method="POST", request_id="a"),
+                  _answered("a", 200)]
+        assert gate.refusal_answers(events) == 1
+
+    def test_a_report_with_no_reply_yet_is_not_counted(self):
+        assert gate.refusal_answers([_request(self.REFUSED, method="POST")]) == 0
+
+    def test_a_reply_to_another_route_is_not_an_answer_to_this_report(self):
+        events = [_request(self.REFUSED, method="POST", request_id="a"),
+                  _request("https://box" + gate.CLAIM_SUFFIX, method="POST",
+                           request_id="b"),
+                  _answered("b", 200)]
+        assert gate.refusal_answers(events) == 0, (
+            "a claim's reply was read as the refusal route answering")
+
+    def test_a_get_on_the_refusal_route_is_not_a_report(self):
+        events = [_request(self.REFUSED, method="GET", request_id="a"),
+                  _answered("a", 200)]
+        assert gate.refusal_answers(events) == 0
+
+    def test_both_waits_are_on_the_answer_and_not_only_the_request(self):
+        """The two conditions the driver breaks on, asserted where they live."""
+        code = _code(_source(GATE))
+        assert "refusal_answers(events) >= 1" in code
+        assert 'refusal_answers(events[press["index"]:]) >= 1' in code
+
+
 class TestTheRetryTheRefusalPanelOffers:
     """The panel's own control, and the three ways pressing it can be useless.
 
@@ -1269,6 +1310,7 @@ class TestThePressIsARealOne:
         code = _code(_source(GATE))
         assert 'press["index"] = len(events)' in code
         assert 'refusal_posts(events[press["index"]:]) >= 1' in code
+        assert 'refusal_answers(events[press["index"]:]) >= 1' in code
 
     def test_the_path_the_press_is_counted_under_is_the_paper_s_own(self):
         """Derived from `PAPER_PATH`, which the app's url_map already pins."""
@@ -1573,6 +1615,10 @@ class TestTheReadingCannotBeFooledByAPageThatHasNotRun:
         first = code[start:code.index("first_load = len(events)", start)]
         assert "settled(value, refusal_posts(events))" in first, (
             "the first load is cut without waiting for the page's script or its report")
+        assert "refusal_answers(events) >= 1" in first, (
+            "the first load is cut on the request alone, so the navigation below "
+            "aborts its reply and the status this gate judges reads as 0 for a route "
+            "that answered")
         assert "panels" not in first, (
             "the wait is still satisfied by a panel Alpine has not processed")
         after = code[code.index('await c.send("Page.navigate", url=paper)'):]

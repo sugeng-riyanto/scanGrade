@@ -1051,6 +1051,44 @@ def refusal_posts(events: list) -> int:
     return seen
 
 
+def refusal_answers(events: list) -> int:
+    """Refusal reports the browser holds the route's **answer** to, out of its events.
+
+    The other half of `refusal_posts`, and the half the driver was missing. A report
+    leaves from the same handler that flips the page's state, so the request is on the
+    wire in the same breath as the state the wait is on — and the driver used to cut
+    the window and navigate on that breath. A navigation aborts every fetch still in
+    flight, so `Network.responseReceived` for that POST never arrived, `_client_from`
+    left `status` at 0, and this gate refused the release for a route that answered.
+
+    Measured on the box before this existed: every release, including the merges that
+    had landed cleanly, was rolled back with "the refusal route answered HTTP 0 to the
+    page's own report" — while the row count check passed on the same run, because the
+    row the same POST wrote *was* on the server. The request reached the route and the
+    browser was never given its reply, which is the difference between a finding and a
+    measurement taken too early.
+
+    A report that is never answered is still a finding, and the budget is what
+    separates it from a slow box: the wait spends the budget either way.
+    """
+    reports: set = set()
+    for ev in events:
+        if ev.get("method") != "Network.requestWillBeSent":
+            continue
+        params = ev.get("params") or {}
+        request = params.get("request") or {}
+        if str(request.get("method") or "").upper() == "POST" \
+                and str(request.get("url") or "").endswith(REFUSAL_SUFFIX):
+            reports.add(params.get("requestId"))
+    answered = 0
+    for ev in events:
+        if ev.get("method") != "Network.responseReceived":
+            continue
+        if (ev.get("params") or {}).get("requestId") in reports:
+            answered += 1
+    return answered
+
+
 def settled(value: dict, posts: int, *, want_reports: int = 1) -> bool:
     """Whether the page's own script has *finished*, and its report left.
 
@@ -1280,7 +1318,12 @@ async def _drive_client(base_url, browser, cookies, claim_url, paper, insecure):
                 # box while the other gates ran. Waiting
                 # for the state and for the report it implies is the difference between
                 # measuring the page and measuring its placeholder.
-                if settled(value, refusal_posts(events)):
+                # The report *and* its answer. Waiting only for the request cut the
+                # window before the reply came back, and the navigation below aborted
+                # it — see `refusal_answers`. The budget still ends a report that is
+                # never answered.
+                if (settled(value, refusal_posts(events))
+                        and refusal_answers(events) >= 1):
                     break
                 if time.time() >= deadline:
                     break
@@ -1363,7 +1406,12 @@ async def _drive_client(base_url, browser, cookies, claim_url, paper, insecure):
                     # that filed nothing is a finding, and the budget is exactly what
                     # tells a finding from a slow box — so the wait is spent, not
                     # shortened, on the runs that are about to be refused.
-                    if refusal_posts(events[press["index"]:]) >= 1:
+                    # The press's own report, and now its answer too, for the reason
+                    # the first load waits on both: this reading is judged on the
+                    # status the route returned, and closing the browser on the
+                    # request alone is how that status read 0.
+                    if (refusal_posts(events[press["index"]:]) >= 1
+                            and refusal_answers(events[press["index"]:]) >= 1):
                         break
                     if time.time() >= deadline:
                         break
