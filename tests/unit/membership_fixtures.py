@@ -80,8 +80,13 @@ class FakeQuery:
         return self
 
     def upsert(self, payload, on_conflict=None):
+        # postgrest accepts one row or a list of them, and the app uses both
+        # shapes: `teacher_assignments.save` writes a whole matrix in one call.
+        # A fake that only took a dict turned that call into a `ValueError` about
+        # a sequence of length 6, i.e. the fake's limit read as the code's.
         self.mode = "upsert"
-        self.payload = dict(payload)
+        self.payload = ([dict(row) for row in payload] if isinstance(payload, list)
+                        else dict(payload))
         self.conflict = on_conflict
         return self
 
@@ -135,18 +140,24 @@ class FakeQuery:
             rows.append(new)
             self.db.writes.append(("insert", self.table, dict(self.payload)))
             return Result([dict(new)])
-        # upsert: the conflict columns name the row it updates
+        # upsert: the conflict columns name the row it updates. One row or many,
+        # so a bulk write is one call here as it is in postgrest.
+        batch = self.payload if isinstance(self.payload, list) else [self.payload]
         keys = [k.strip() for k in (self.conflict or "").split(",") if k.strip()]
-        for row in rows:
-            if keys and all(str(row.get(k)) == str(self.payload.get(k)) for k in keys):
-                row.update(self.payload)
-                self.db.writes.append(("upsert", self.table, dict(self.payload)))
-                return Result([dict(row)])
-        new = dict(self.payload, id=self.payload.get("id")
-                   or f"{self.table}-{len(rows) + 1}")
-        rows.append(new)
-        self.db.writes.append(("upsert", self.table, dict(self.payload)))
-        return Result([dict(new)])
+        written = []
+        for item in batch:
+            for row in rows:
+                if keys and all(str(row.get(k)) == str(item.get(k)) for k in keys):
+                    row.update(item)
+                    self.db.writes.append(("upsert", self.table, dict(item)))
+                    written.append(dict(row))
+                    break
+            else:
+                new = dict(item, id=item.get("id") or f"{self.table}-{len(rows) + 1}")
+                rows.append(new)
+                self.db.writes.append(("upsert", self.table, dict(item)))
+                written.append(dict(new))
+        return Result(written)
 
 
 class FakeDb:

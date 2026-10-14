@@ -96,7 +96,8 @@ def create_student_account(supabase, *, school_id, nisn, full_name, email,
     Without that rollback a failed row left an auth user plus a profile with no
     ``students`` row: an account that can sign in but appears in no class list.
 
-    Raises ``ValidationError`` when the NISN is already taken.
+    Raises ``ValidationError`` when the NISN is already taken, or when the posted
+    class is not this school's (`owned_class_id`) — before anything is created.
     """
     nisn = str(nisn).strip()
     existing = find_student_by_nisn(supabase, nisn)
@@ -104,6 +105,17 @@ def create_student_account(supabase, *, school_id, nisn, full_name, email,
         where = "sekolah ini" if str(existing.get("school_id")) == str(school_id) \
             else "sekolah lain"
         raise ValidationError("nisn", f"NISN {nisn} sudah terdaftar di {where}")
+
+    # The class is a foreign key that arrives in a form body, and it is the one
+    # column that decides which school's rosters this pupil will appear on. It is
+    # checked here, at the single writer, rather than at four doors: every caller
+    # that mints a pupil account passes through this function, so a door added
+    # later cannot forget the rule. The doors ask `owned_class_id` first anyway,
+    # because a 422 naming the class is a better answer than an exception, but
+    # what makes the row impossible is this line.
+    class_id, class_error = owned_class_id(supabase, school_id, class_id)
+    if class_error:
+        raise ValidationError("class_id", class_error)
 
     profile_fields = {"nisn": nisn}
     if class_id:
@@ -120,9 +132,61 @@ def create_student_account(supabase, *, school_id, nisn, full_name, email,
     )
 
 
+#: The refusals of the class check below, as sentences. Constants rather than
+#: literals at the four doors, so the door that pre-checks and the writer that
+#: guards cannot answer the same request two different ways.
+CLASS_NOT_OURS = "Kelas yang dipilih bukan milik sekolah ini"
+CLASS_UNVERIFIABLE = "Kelas tidak dapat diverifikasi untuk sekolah ini"
+
+
+def owned_class_id(supabase, school_id, class_id):
+    """``(class_id, error)`` — the posted class, if this school owns it.
+
+    `class_id` arrives in a form body and is written straight onto both
+    `profiles.class_id` and `students.class_id`, and every reader of a class roster
+    filters by school **and** class (`teacher_assignments.students_in_classes`, the
+    exam roster, the weighted grade table). A class id from another NPSN therefore
+    produces a pupil who belongs to this school and to a class it does not own —
+    precisely the row `cross_school_repair` reports as `class_pupil_mismatch` for an
+    operator to untangle by hand.
+
+    The actor with a reason to *have* another school's class ids is the teacher who
+    works at two of them, which is the door this check stands on: `/students/import`
+    is the guru's page, and none of the four doors that write this column — the guru's
+    import, the JSON import, the admin's add and the admin's edit — offered the class
+    it posted any ownership question at all.
+
+    A refusal, never a silent drop: an import that answers "6 created" while filing
+    six pupils with no class is the failure mode this file already refuses elsewhere
+    (a row that exists and is wrong looks exactly like success from the page).
+
+    An unreadable `classes` read refuses too. "Could not ask" is not "ours", and the
+    write this guards is a row a school's rosters will then be built from.
+    """
+    wanted = str(class_id or "").strip()
+    if not wanted:
+        return None, None                       # no class asked for: nothing to check
+    if not school_id:
+        return None, CLASS_UNVERIFIABLE
+    try:
+        rows = (supabase.table("classes").select("id")
+                .eq("id", wanted).eq("school_id", school_id)
+                .limit(1).execute().data or [])
+    except Exception:
+        logger.debug("class ownership read failed; refusing the import", exc_info=True)
+        return None, CLASS_UNVERIFIABLE
+    if not rows:
+        return None, CLASS_NOT_OURS
+    return wanted, None
+
+
 def import_students_from_csv(file_stream, school_id, class_id=None, batch_size=50):
     """Import students from CSV. Returns {success, failed, errors, total}.
-    Raises ValidationError if CSV structure is invalid.
+
+    Raises ValidationError if CSV structure is invalid. A posted `class_id` that is
+    not this school's is refused by `create_student_account`, so the rows carry the
+    refusal instead of being written with a foreign class; the route asks
+    `owned_class_id` before calling this, and answers 422 once for the file.
     """
     content = file_stream.read().decode("utf-8-sig")
     reader = csv.DictReader(io.StringIO(content))

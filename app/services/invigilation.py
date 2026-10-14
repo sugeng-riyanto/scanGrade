@@ -226,19 +226,35 @@ def form_options(supabase, school_id: str) -> dict:
     return {"exams": exams, "classes": classes, "teachers": teachers}
 
 
-def _decorate(supabase, school_id: str, schedules: list[dict]) -> list[dict]:
+def _decorate(supabase, school_id: str, schedules: list[dict], *,
+              reader_id: str | None = None, now=None) -> list[dict]:
     """Attach the exam title, the class name and the invigilators to each sitting.
 
     Three reads for the whole page rather than three per row: a school with forty
     classes would otherwise pay a hundred and twenty round-trips at ~150 ms each to
     draw one table.
+
+    Two more facts ride the exam read, because both are decisions somebody makes
+    *because of this row* and neither costs a round-trip: ``require_seb`` is what the
+    page needs to offer the SEB panel for a gated paper at all, and — for a reader
+    who is a supervisor rather than the school's staff — ``seb_open`` says whether
+    the duty window of **this** sitting covers now. The window is asked of
+    ``seb_access.in_duty_window``, the door's own function, so the page cannot offer
+    a link the door would refuse; ``reader_id`` is what turns that question on, and
+    it is absent on the staff schedule, where the reader has no duty to be inside.
     """
     exam_ids = sorted({str(s["exam_id"]) for s in schedules if s.get("exam_id")})
     class_ids = sorted({str(s["class_id"]) for s in schedules if s.get("class_id")})
     schedule_ids = [str(s["id"]) for s in schedules]
 
-    exams = {str(r["id"]): r.get("title") or "" for r in _rows(
-        supabase.table("exams").select("id, title").in_("id", exam_ids))} if exam_ids else {}
+    # The clock columns are here for `seb_access.in_duty_window`, which derives a
+    # supervisor's window from the exam's own deadline (`exam_window.deadline`): the
+    # same three fields the SEB panel's select carries, for the same reason.
+    exams = {str(r["id"]): r for r in _rows(
+        supabase.table("exams")
+        .select("id, title, require_seb, duration_minutes, end_at, "
+                "auto_submit_on_window_end")
+        .in_("id", exam_ids))} if exam_ids else {}
     classes = {str(r["id"]): r.get("name") or "" for r in _rows(
         supabase.table("classes").select("id, name")
         .eq("school_id", school_id).in_("id", class_ids))} if class_ids else {}
@@ -270,11 +286,28 @@ def _decorate(supabase, school_id: str, schedules: list[dict]) -> list[dict]:
 
     out = []
     for s in schedules:
-        out.append(dict(s,
-                        exam_title=exams.get(str(s.get("exam_id")), ""),
-                        class_name=classes.get(str(s.get("class_id")), ""),
-                        invigilators=by_schedule.get(str(s["id"]), [])))
+        exam = exams.get(str(s.get("exam_id"))) or {}
+        row = dict(s,
+                   exam_title=exam.get("title") or "",
+                   class_name=classes.get(str(s.get("class_id")), ""),
+                   require_seb=bool(exam.get("require_seb")),
+                   invigilators=by_schedule.get(str(s["id"]), []))
+        if reader_id is not None:
+            row["seb_open"] = row["require_seb"] and _seb_open(
+                exam, s.get("scheduled_at"), now)
+        out.append(row)
     return out
+
+
+def _seb_open(exam: dict, scheduled_at, now=None) -> bool:
+    """Whether this sitting's own duty window covers ``now``.
+
+    Imported lazily because ``seb_access`` reaches back into this module for
+    ``invigilated_exam_ids``; it is the same function that module's decision asks, so
+    the link a page draws and the answer a door gives are one rule rather than two.
+    """
+    from app.services import seb_access
+    return seb_access.in_duty_window(exam, scheduled_at, now)
 
 
 def assign_invigilator(supabase, school_id: str, *, schedule_id: str, teacher_id: str,
@@ -314,11 +347,17 @@ def remove_assignment(supabase, school_id: str, assignment_id: str) -> dict:
 
 # ── the teacher's own duty ──────────────────────────────────────────────────
 
-def tasks_for_teacher(supabase, school_id: str, teacher_id: str) -> list[dict]:
+def tasks_for_teacher(supabase, school_id: str, teacher_id: str,
+                      *, now=None) -> list[dict]:
     """The sittings this teacher is assigned to, with the rest of their room.
 
     Read from the assignment, never from the schedule: a teacher's page lists the
     duties that carry their name, and a schedule they are not on is not their duty.
+
+    ``now`` (or the box's own clock) decides the one extra fact each row carries —
+    ``seb_open``, whether the SEB panel may be opened for that paper *at this
+    moment* — because a duty outside its window has no password to show and the page
+    must not offer a door that refuses.
     """
     mine = _rows(supabase.table("invigilator_assignments").select("schedule_id")
                  .eq("school_id", school_id).eq("teacher_id", teacher_id))
@@ -329,7 +368,8 @@ def tasks_for_teacher(supabase, school_id: str, teacher_id: str) -> list[dict]:
                       .select("id, exam_id, class_id, scheduled_at, room, notes")
                       .eq("school_id", school_id)
                       .in_("id", schedule_ids))
-    return _decorate(supabase, school_id, schedules)
+    return _decorate(supabase, school_id, schedules,
+                     reader_id=teacher_id, now=now)
 
 
 def teacher_board(supabase, school_id: str, teacher_id: str) -> dict:

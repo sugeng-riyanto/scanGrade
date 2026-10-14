@@ -35,6 +35,104 @@
         </a>
     </div>
 
+    {% if exam and exam.id %}
+    {# ── the paper's own bar: the state it is in, the PDF the pupils will read,
+       and every door out of this page ────────────────────────────────────────
+       The actions were a card in the right-hand column, and in this grid that
+       column wraps *below* the three-column form — so on a 3,000-line builder
+       the page's own navigation was the furthest thing down it, and a teacher
+       who came to check the paper before publishing had to scroll past the whole
+       form to reach Preview, Results or Print LJK. They sit at the top now,
+       beside the two things worth knowing before publishing: whether the paper
+       is visible to its classes, and whether the PDF the pupils will read is
+       actually there. The PDF line is answered by the server (`exam.pdf_url`),
+       never inferred in the page: a green checklist for a stored file, and the
+       drop-zone sentence when there is none. #}
+    <div class="card p-4 sm:p-5 mb-6" data-exam-actions>
+        <div class="flex flex-wrap items-start justify-between gap-4">
+            <div class="min-w-0">
+                <p class="text-[10px] font-bold text-surface-400 uppercase tracking-wide"
+                   x-text="t('Edit Ujian','Edit Exam')"></p>
+                <p class="mt-0.5 text-lg font-extrabold text-surface-800 truncate">{{ exam.title }}</p>
+                <div class="flex flex-wrap items-center gap-1.5 mt-2">
+                    <span class="px-2 py-0.5 rounded-full text-[10px] font-bold
+                        {% if exam.status == 'active' %}bg-emerald-50 text-emerald-700
+                        {% elif exam.status == 'draft' %}bg-surface-100 text-surface-600
+                        {% else %}bg-rose-50 text-rose-700{% endif %}">{{ exam.status }}</span>
+                    {% if exam.is_published %}
+                    <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-primary-50 text-primary-700"
+                          x-text="t('Terlihat murid','Visible to pupils')"></span>
+                    {% else %}
+                    <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-surface-100 text-surface-500"
+                          x-text="t('Belum terlihat murid','Not visible to pupils yet')"></span>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="flex flex-wrap gap-2">
+                <a href="{{ url_for('teacher.preview_exam', exam_id=exam.id) }}"
+                   class="h-10 px-3 rounded-xl bg-primary-600 text-white hover:bg-primary-700 text-xs font-extrabold inline-flex items-center gap-1.5 transition">
+                    <i class="fas fa-eye"></i><span x-text="t('Pratinjau','Preview')"></span>
+                </a>
+                <a href="{{ url_for('teacher.bubble_sheet', exam_id=exam.id) }}"
+                   class="h-10 px-3 rounded-xl border border-surface-200 text-surface-600 hover:text-primary-600 hover:border-primary-200 text-xs font-bold inline-flex items-center gap-1.5 transition">
+                    <i class="fas fa-print"></i><span x-text="t('Cetak LJK','Print answer sheet')"></span>
+                </a>
+                <a href="{{ url_for('teacher.results', exam_id=exam.id) }}"
+                   class="h-10 px-3 rounded-xl border border-surface-200 text-surface-600 hover:text-primary-600 hover:border-primary-200 text-xs font-bold inline-flex items-center gap-1.5 transition">
+                    <i class="fas fa-chart-bar"></i><span x-text="t('Hasil','Results')"></span>
+                </a>
+                {# The live room and the pattern view are one page now; these two
+                   doors are its two halves, so a teacher lands on the one they came
+                   for. Both point at the survivor page, whose two anchors are below. #}
+                <a href="{{ url_for('teacher.exam_sessions', exam_id=exam.id) }}#room"
+                   class="h-10 px-3 rounded-xl border border-surface-200 text-surface-600 hover:text-primary-600 hover:border-primary-200 text-xs font-bold inline-flex items-center gap-1.5 transition">
+                    <i class="fas fa-tower-broadcast"></i><span x-text="t('Pengawasan Langsung','Live proctoring')"></span>
+                </a>
+                <a href="{{ url_for('teacher.exam_sessions', exam_id=exam.id) }}#observations"
+                   class="h-10 px-3 rounded-xl border border-surface-200 text-surface-600 hover:text-primary-600 hover:border-primary-200 text-xs font-bold inline-flex items-center gap-1.5 transition">
+                    <i class="fas fa-magnifying-glass-chart"></i><span x-text="t('Analisis Pola','Pattern analysis')"></span>
+                </a>
+                <button type="button" onclick="deleteExam('{{ exam.id }}')"
+                        class="h-10 px-3 rounded-xl border border-rose-200 text-rose-600 hover:bg-rose-50 text-xs font-bold inline-flex items-center gap-1.5 transition">
+                    <i class="fas fa-trash"></i><span x-text="t('Hapus','Delete')"></span>
+                </button>
+            </div>
+        </div>
+
+        {# The PDF the pupils will read. Its state comes from the row the route
+           read, so a paper whose file was uploaded days ago says so on arrival —
+           the same fact the builder's own status bar carries, in the line a
+           teacher checks before pressing Publish. #}
+        <div class="mt-4 pt-4 border-t border-surface-100 flex flex-wrap items-center gap-3">
+            <i class="fas fa-file-pdf text-base {% if exam.pdf_url %}text-emerald-600{% else %}text-surface-400{% endif %}"></i>
+            <div class="min-w-0 flex-1">
+                <p class="text-[10px] font-bold text-surface-400 uppercase tracking-wide"
+                   x-text="t('PDF yang dilihat murid saat ujian','The PDF students see during the exam')"></p>
+                {% if exam.pdf_url %}
+                <p class="mt-0.5 text-sm font-bold text-emerald-700 flex flex-wrap items-center gap-1.5 min-w-0"
+                   data-pdf-status="uploaded" data-pdf-name="{{ exam.pdf_url.split('/')[-1] }}">
+                    <i class="fas fa-check-circle"></i>
+                    <span class="truncate">{{ exam.pdf_url.split('/')[-1] }}</span>
+                    <span class="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700"
+                          x-text="t('Sudah diunggah','Uploaded')"></span>
+                </p>
+                {% else %}
+                <p class="mt-0.5 text-xs text-surface-500 flex flex-wrap items-center gap-1.5" data-pdf-status="empty">
+                    <a href="#pdf-upload" class="font-bold text-primary-600 hover:text-primary-700 underline underline-offset-2"
+                       x-text="t('Seret PDF ke sini atau klik untuk upload','Drag a PDF here or click to upload')"></a>
+                    <span class="text-surface-400" x-text="t('· PDF soal ujian — maksimal 20MB','· Exam PDF — 20MB maximum')"></span>
+                </p>
+                {% endif %}
+            </div>
+            <a href="{{ url_for('teacher.upload_exam_pdf', exam_id=exam.id) }}"
+               class="h-10 px-3 rounded-xl border border-surface-200 text-surface-600 hover:text-primary-600 hover:border-primary-200 text-xs font-bold inline-flex items-center gap-1.5 transition shrink-0">
+                <i class="fas fa-upload"></i>
+                <span x-text="t('{{ 'Ganti PDF' if exam.pdf_url else 'Unggah PDF' }}','{{ 'Replace PDF' if exam.pdf_url else 'Upload PDF' }}')"></span>
+            </a>
+        </div>
+    </div>
+    {% endif %}
+
     {% if component_gap %}
     {# A paper filed under a component the subject does not weight contributes
        nothing to the weighted final mark. The save-time flash is momentary; this
@@ -140,7 +238,7 @@
             </div>
 
             <!-- PDF Upload Card -->
-            <div class="card p-5 mb-6 overflow-hidden" x-data="pdfUpload()"><!-- Header -->
+            <div id="pdf-upload" class="card p-5 mb-6 overflow-hidden" x-data="pdfUpload()"><!-- Header -->
                 <div class="flex items-center gap-3 mb-5">
                     <div class="w-11 h-11 rounded-2xl bg-gradient-to-br from-rose-500 to-pink-600 flex items-center justify-center shadow-lg shadow-rose-200/60 shrink-0"><i class="fas fa-file-pdf text-white text-sm"></i></div>
                     <div class="flex-1 min-w-0">
@@ -310,8 +408,19 @@
             </div>
 
             <!-- 📄 Persistent PDF Status Bar -->
+            {# This bar opened in `empty` on every load, including a paper that
+               already had a PDF: it said "No PDF uploaded yet" beside a drop zone
+               the teacher had used days earlier, and the only way to find out the
+               file was there was to open the pupil's preview. Its state now comes
+               from the row the route read (`exam.pdf_url`), so a stored file is a
+               green checklist the moment the page arrives — and the file's name is
+               the one on disk, taken from the stored path rather than guessed. #}
             <div class="mb-6 p-4 rounded-2xl border-2 transition-all duration-300"
-                 x-data="{ pdfStatus: 'empty', pdfName: '', hasAI: false, qCount: 0, pdfUrl: '', aiClassified: false, generatingKey: false, keyGenerated: false, keyFailed: false, keyError: '' }"
+                 data-pdf-stored="{{ '1' if (exam and exam.pdf_url) else '0' }}"
+                 x-data="{ pdfStatus: '{{ 'success' if (exam and exam.pdf_url) else 'empty' }}',
+                           pdfName: '{{ exam.pdf_url.split('/')[-1] if (exam and exam.pdf_url) else '' }}',
+                           hasAI: false, qCount: 0, pdfUrl: '{{ exam.pdf_url if (exam and exam.pdf_url) else '' }}',
+                           aiClassified: false, generatingKey: false, keyGenerated: false, keyFailed: false, keyError: '' }"
                  x-init="
                     window.addEventListener('pdf-uploaded', e => {
                         pdfStatus = 'success';
@@ -1779,48 +1888,10 @@
             </form>
         </div>
 
-        <div class="lg:col-span-1">
-            {% if exam and exam.id %}
-            <div class="card p-6 space-y-4 sticky top-20 sg-layer-sticky">
-                <h3 class="font-extrabold text-slate-800" x-text="t('Aksi','Actions')"></h3>
-                <div class="space-y-2">
-                    <a href="{{ url_for('teacher.preview_exam', exam_id=exam.id) }}"
-                       class="block text-sm bg-primary-600 text-white px-3 py-2.5 rounded-xl hover:bg-primary-700 font-extrabold text-center shadow-lg transition">
-                        <i class="fas fa-eye mr-1"></i>Preview
-                    </a>
-                    <a href="{{ url_for('teacher.bubble_sheet', exam_id=exam.id) }}"
-                       class="block text-sm font-extrabold text-primary-600 hover:bg-primary-50 px-3 py-2 rounded-xl transition">
-                        <i class="fas fa-print mr-1"></i><span x-text="t('Cetak LJK','Print answer sheet')"></span>
-                    </a>
-                    <a href="{{ url_for('teacher.results', exam_id=exam.id) }}"
-                       class="block text-sm font-extrabold text-primary-600 hover:bg-primary-50 px-3 py-2 rounded-xl transition">
-                        <i class="fas fa-chart-bar mr-1"></i><span x-text="t('Hasil','Results')"></span>
-                    </a>
-                    {# The live room and the pattern view are one page now; these two
-                       doors are its two halves, so a teacher lands on the one they came
-                       for. Both point at the survivor page, whose two anchors are below. #}
-                    <a href="{{ url_for('teacher.exam_sessions', exam_id=exam.id) }}#room"
-                       class="block text-sm font-extrabold text-primary-600 hover:bg-primary-50 px-3 py-2 rounded-xl transition">
-                        <i class="fas fa-tower-broadcast mr-1"></i><span x-text="t('Pengawasan Langsung','Live proctoring')"></span>
-                    </a>
-                    <a href="{{ url_for('teacher.exam_sessions', exam_id=exam.id) }}#observations"
-                       class="block text-sm font-extrabold text-primary-600 hover:bg-primary-50 px-3 py-2 rounded-xl transition">
-                        <i class="fas fa-magnifying-glass-chart mr-1"></i><span x-text="t('Analisis Pola','Pattern analysis')"></span>
-                    </a>
-                    <a href="{{ url_for('teacher.upload_exam_pdf', exam_id=exam.id) }}"
-                       class="block text-sm font-extrabold text-primary-600 hover:bg-primary-50 px-3 py-2 rounded-xl transition">
-                        <i class="fas fa-upload mr-1"></i><span x-text="t('{{ 'Ganti PDF' if exam.pdf_url else 'Unggah PDF' }}','{{ 'Replace PDF' if exam.pdf_url else 'Upload PDF' }}')"></span>
-                    </a>
-                    <button type="button" onclick="deleteExam('{{ exam.id }}')"
-                            class="block w-full text-sm font-extrabold text-red-600 hover:bg-red-50 px-3 py-2 rounded-xl text-left transition">
-                        <i class="fas fa-trash mr-1"></i><span x-text="t('Hapus','Delete')"></span>
-                    </button>
-                </div>
-            </div>
-            {% else %}
-            <div style="display:none"></div>
-            {% endif %}
-        </div>
+        {# The right-hand column held the Actions card, and in this grid it wrapped
+           below the full-width form — see the bar at the top of the page, which is
+           where its doors live now. The column itself is gone rather than emptied:
+           an empty one still costs a grid cell and a gap. #}
         </div><!-- end x-data wrapper (aiMode) -->
     </div>
 </div>

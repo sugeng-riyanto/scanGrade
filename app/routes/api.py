@@ -28,7 +28,7 @@ from app.services.question_types import (
     complete_weights, earned_points, grade_answer, is_objective,
     normalize_answer_map, objective_result,
 )
-from app.services.student_import import create_student_account
+from app.services.student_import import create_student_account, owned_class_id
 from app.utils.logger import get_logger
 from app.errors import ValidationError, NotFoundError, GradingError, AIProcessingError
 from app.utils.rate_limiter import limiter
@@ -2103,6 +2103,15 @@ def api_import_students():
     df.columns = df.columns.str.lower()
 
     supabase = get_supabase()
+    # The posted class is a foreign key from an untrusted body, and it is written
+    # onto both `profiles.class_id` and `students.class_id` -- a class of another
+    # NPSN would file this school's pupils into another school's roster, which is
+    # the row the integrity sweep reports as `class_pupil_mismatch`. Asked before
+    # the loop, so the answer is one refusal for the file rather than one per row.
+    class_id, class_error = owned_class_id(supabase, school_id, class_id)
+    if class_error:
+        return jsonify({"error": class_error}), 422
+
     results = {"success": 0, "failed": 0, "total": len(df), "errors": []}
 
     # Process in chunks for memory efficiency

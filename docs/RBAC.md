@@ -679,3 +679,69 @@ melindungi sebuah simpan adalah **penolakannya** — pintu berhenti sebelum bari
 Karena itu empat ujinya yang menentukan adalah posting tangan yang menyebut sekolah rumah dan
 keanggotaan yang tidak terbaca, keduanya diperiksa **tidak menulis apa pun**; kolomnya sendiri
 dipin di pintu JSON, tempat nilainya memang bisa berbeda dari yang disebut body.
+
+## Peta kerja guru anggota: satu baris, satu NPSN — dan kelas yang ditulis harus milik sekolah yang bertindak
+
+Kelima bagian di atas membuat penerimaan seorang guru dari NPSN lain **terlihat** dan
+**dapat dipilih**. Yang belum dipin adalah apa yang baris itu **berikan**, dan di mana
+baris itu **boleh ditulis**:
+
+- **Penulisnya matriks sekolah tujuan.** `teacher_assignments.save` menulis satu baris
+  `(teacher_id, class_id, subject_id, school_id, school_year, status)` setelah
+  `validate_targets` menyetujuinya: guru harus `teacher_in_school` (baris `profiles`
+  sekolah ini **atau** keanggotaan `active`), dan setiap kelas/mapel harus
+  `owned_class_ids`/`owned_subject_ids` sekolah itu — kalau tidak, **403 dan tidak
+  ada baris ditulis** (`db.writes == []`), bukan penurunan diam-diam. Mapel yang tidak
+  diaktifkan untuk kelasnya (migrasi 049) ditolak dengan cara yang sama.
+- **Yang diberikan hanya berlaku di NPSN itu.** `current_pairs`, `assigned_class_ids`,
+  `school_pairs_detail` dan `students_in_classes` semuanya bertanya dengan
+  **sekolah + guru** dalam satu kueri. Jadi kelas yang anggota ajar di sekolah kerja
+  adalah miliknya **di sana saja**: `assigned_class_ids(db, WORK, u)` berisi `c-work`
+  sementara `assigned_class_ids(db, HOME, u)` kosong, dan `students_in_classes(db, HOME,
+  ["c-work"])` tidak mengembalikan siapa pun. `POST /teacher/assignments` menulis dengan
+  `g.user_school_id`, jadi peta yang dibuat admin satu sekolah tidak pernah muncul di
+  sekolah lain.
+- **Pintu papan nama murid menolak sebelum membaca.** `/teacher/api/exam-roster` menjawab
+  **403** untuk kelas yang tidak ditugaskan ke pemanggil — dan penolakan itu terjadi
+  *sebelum* satu pun baris `profiles` dibaca, karena daftar murid adalah hal yang paling
+  tidak ingin diberikan oleh penolakan yang terlambat.
+- **Bobot nilai mengikuti NPSN makalahnya.** `_resolve_grade_component` menerima id
+  komponen yang dimiliki sekolah yang bertindak, dan **menjatuhkan** id sekolah lain ke
+  `None` (makalah tanpa kategori, yang keluar dari penjumlahan berbobot). Diuji dua arah:
+  id milik sekolah sendiri diterima, id sekolah lain ditolak — di kedua sekolah — sehingga
+  sebuah makalah hanya pernah masuk ke penjumlahan bobot satu NPSN.
+- **Kelas seorang murid adalah milik sekolah yang menuliskannya.** `profiles.class_id` dan
+  `students.class_id` datang dari body/kolom CSV, dan dulu tidak ada pintu yang
+  menanyakan apakah kelas itu milik sekolah yang bertindak — padahal
+  `school_integrity` sudah lama melaporkan baris seperti itu sebagai
+  `class_pupil_mismatch` (kelas sekolah lain menahan murid sekolah lain), lengkap dengan
+  pintu karantina/pemulihan untuk membersihkannya. Aktor yang *punya alasan* memegang id
+  kelas sekolah lain adalah guru lintas NPSN itu sendiri: `/students/import` adalah
+  halaman guru. Aturannya kini satu kalimat di satu fungsi —
+  `student_import.owned_class_id` (`(class_id, error)`), yaitu pertanyaan yang sama
+  yang ditanyakan pada baris `classes` (`id` **dan** `school_id` dalam satu kueri):
+  - `create_student_account` (penulis tunggal setiap akun murid) menolaknya sebagai
+    `ValidationError` **sebelum** akun dibuat — jadi pintu yang ditambahkan nanti pun
+    mewarisi aturannya;
+  - `/students/import/csv` (guru) dan `POST /api/students/import` menjawab **422** satu
+    kali untuk seluruh berkas;
+  - `/admin-sekolah/students/create` dan `/admin-sekolah/students/<id>/edit` menolaknya
+    dengan pesan dan tidak menulis apa pun.
+  - Kelas **kosong** tetap berarti "belum ditempatkan" (bukan penolakan), sedangkan
+    pembacaan `classes` yang **gagal** menolak: "tidak bisa bertanya" bukan "milik kita",
+    dan yang dijaga adalah baris yang akan jadi dasar seluruh daftar kelas sekolah.
+
+Penjaga: `tests/unit/test_member_teacher_crud_in_the_active_npsn.py` (13 uji —
+peta ditulis dengan `school_id` sekolah yang bertanya, kelas/mapel sekolah lain ditolak
+tanpa baris, satu baris memberi kerja di satu NPSN dan tidak di NPSN lain, pintu papan
+nama menolak sebelum membaca murid, dan komponen bobot sekolah lain dijatuhkan — semuanya
+dijalankan terhadap database yang berisi **dua** sekolah dengan baris berbeda, jadi
+"membaca NPSN aktif" tidak bisa lulus karena fixture kosong) dan
+`tests/unit/test_pupil_class_belongs_to_the_school.py` (17 uji — aturan itu sendiri
+termasuk pembacaan yang gagal dan kelas kosong, penulis tunggal yang tidak mencetak akun,
+dua pintu impor, dua pintu admin, dan dua ejaan rumah (`_class_in_school` di
+`admin_sekolah` untuk form kenaikan kelas vs `owned_class_id` untuk murid) yang harus
+menjawab empat pertanyaan yang sama dengan jawaban yang sama).
+`.freebuff/mutate_pupil_class_scope.py` **9/9 cacat tertangkap** (filter sekolah dihapus,
+hasil kosong dibaca sebagai milik sendiri, pembacaan gagal dibaca sebagai izin, kelas
+kosong dibaca sebagai kelas asing, dan masing-masing dari empat pintu berhenti bertanya).

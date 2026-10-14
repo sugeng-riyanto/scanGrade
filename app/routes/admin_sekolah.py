@@ -20,7 +20,7 @@ from app.decorators.security import require_school_access
 from app.decorators.subscription import require_subscription
 from app.services.audit_service import log_activity, log_create, log_update, log_delete
 from app.services import trial_settings as trial_cfg
-from app.services.student_import import create_student_account
+from app.services.student_import import create_student_account, owned_class_id
 from app.utils.req_cache import (invalidate_class, invalidate_school,
                                  invalidate_teacher_assignments)
 from app.services import teacher_assignments as ta_service
@@ -3266,6 +3266,16 @@ def create_student():
         flash("Nama murid wajib diisi", "error")
         return redirect("/admin-sekolah/students")
 
+    # The class decides which school's rosters this pupil is counted on, and it
+    # arrives in a form body: a class of another NPSN would file our pupil into
+    # another school's list (the `class_pupil_mismatch` the integrity page exists
+    # to report). `create_student_account` refuses it as well, at the single
+    # writer; this door asks first so the admin gets a sentence, not a failure.
+    class_id, class_error = owned_class_id(supabase, sid, class_id)
+    if class_error:
+        flash(class_error, "error")
+        return redirect("/admin-sekolah/students")
+
     try:
         user_email = email or _generate_email(nama, _get_email_domain(sid))
         uid = create_student_account(
@@ -3291,7 +3301,14 @@ def edit_student(student_id):
     if nisn:
         data["nisn"] = nisn.strip()
     cls = request.form.get("class_id")
-    data["class_id"] = cls if cls else None
+    # Moving a pupil is the same write as creating one: the class must be this
+    # school's, or the pupil is filed on a roster of another NPSN and the roster
+    # it left still counts them. Empty stays "no class"; a wrong id is refused.
+    _class_id, class_error = owned_class_id(supabase, _school_id(), cls)
+    if class_error:
+        flash(class_error, "error")
+        return redirect("/admin-sekolah/students")
+    data["class_id"] = _class_id if _class_id else None
 
     profile_data = {}
     nama = request.form.get("name", request.form.get("full_name", ""))

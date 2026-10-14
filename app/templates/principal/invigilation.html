@@ -116,7 +116,22 @@
                     {% for s in schedules %}
                     <tr class="border-t border-surface-100" data-schedule="{{ s.id }}">
                         <td class="px-4 py-2.5 text-surface-600">{{ (s.scheduled_at or '')[:16].replace('T', ' ') }}</td>
-                        <td class="px-4 py-2.5 text-surface-700 font-medium">{{ s.exam_title }}</td>
+                        <td class="px-4 py-2.5 text-surface-700 font-medium">
+                            {{ s.exam_title }}
+                            {# The door into the SEB panel for the school's staff — the
+                               three roles that may read a gated paper's exit password at
+                               any time. Offered only for a paper that is gated at all:
+                               an ungated one has no credential and the panel refuses
+                               it, which is a link that cannot work. #}
+                            {% if s.require_seb %}
+                            <a href="{{ url_for('seb.panel', exam_id=s.exam_id) }}"
+                               data-seb-link="{{ s.exam_id }}"
+                               class="mt-1 inline-flex items-center gap-1 text-xs font-bold text-primary-600 hover:text-primary-700">
+                                <i class="fas fa-key"></i>
+                                <span x-text="t('Kata sandi SEB','SEB password')"></span>
+                            </a>
+                            {% endif %}
+                        </td>
                         <td class="px-4 py-2.5 text-surface-600">{{ s.class_name }}</td>
                         <td class="px-4 py-2.5 text-surface-500">{{ s.room or '—' }}</td>
                         <td class="px-4 py-2.5">

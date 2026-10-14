@@ -5,7 +5,9 @@ from flask import Blueprint, render_template, request, jsonify, g, flash, redire
 from app.utils.auth import guru_required, get_supabase
 from app.utils.responses import error_response
 from app.errors import ValidationError
-from app.services.student_import import validate_csv, import_students_from_csv
+from app.services.student_import import (
+    validate_csv, import_students_from_csv, owned_class_id,
+)
 from app.utils.logger import get_logger
 
 student_bp = Blueprint("students", __name__, url_prefix="/students")
@@ -44,6 +46,13 @@ def import_csv():
     school_id = g.get("user_school_id")
     if not school_id:
         return error_response("NO_SCHOOL", "Sekolah tidak terdaftar", status_code=400)
+
+    # The posted class is a foreign key from an untrusted body; a cross-NPSN teacher
+    # can read another school's class ids off its own pages. Answer 422 here rather
+    # than let the service raise `ValidationError` into a 500.
+    class_id, class_error = owned_class_id(get_supabase(), school_id, class_id)
+    if class_error:
+        return error_response("BAD_CLASS", class_error, status_code=422)
 
     results = import_students_from_csv(file, school_id, class_id)
 

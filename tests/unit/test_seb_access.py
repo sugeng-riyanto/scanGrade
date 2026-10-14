@@ -53,7 +53,7 @@ def _no_invigilation(monkeypatch):
     from app.services import invigilation
     monkeypatch.setattr(invigilation, "invigilated_exam_ids",
                         lambda *a, **k: set())
-    monkeypatch.setattr(seb_access, "duty_start", lambda *a, **k: None)
+    monkeypatch.setattr(seb_access, "duty_sittings", lambda *a, **k: [])
 
 
 def _decide(role, user="u-1", access=seb_access.ACCESS_VIEW_PASSWORD, exam=None,
@@ -64,10 +64,27 @@ def _decide(role, user="u-1", access=seb_access.ACCESS_VIEW_PASSWORD, exam=None,
 
 
 # ── the pupil: never a password, at any endpoint ────────────────────────────
+#
+# The file branch is judged by `exam_sitting_allowed` — the app's participation
+# rule, the same one the exam door and the handshake route apply. It is substituted
+# here for the same reason the two database lookups are: the predicate itself is
+# driven by its own tests (`test_exam_targets.py`, `test_seb_rbac_matrix.py` drives
+# it whole), and what this file is about is which predecessor `decide` calls. A test
+# that patched the per-pupil list instead would still be green today and would stop
+# noticing the day the file door went back to reading that list on its own.
+
+@pytest.fixture()
+def _sitting_allowed(monkeypatch):
+    from app.utils import exam_access
+
+    def _install(allowed):
+        monkeypatch.setattr(exam_access, "exam_sitting_allowed",
+                            lambda *a, **k: (allowed, ""))
+    _install(True)
+    return _install
+
 
 def test_a_pupil_can_never_read_a_password(monkeypatch):
-    from app.services import exam_targets
-    monkeypatch.setattr(exam_targets, "student_is_included", lambda *a, **k: True)
     # The module's own password access type, and a plausible-looking variant of it:
     # both refused. An access type this module does not define is refused by name
     # *before* the role is considered, which is the stricter of the two orders — so
@@ -79,20 +96,54 @@ def test_a_pupil_can_never_read_a_password(monkeypatch):
                    access="password")["reason"] == "wrong_access_type"
 
 
-def test_a_pupil_in_the_target_list_may_download_the_file(monkeypatch):
-    from app.services import exam_targets
-    monkeypatch.setattr(exam_targets, "student_is_included", lambda *a, **k: True)
+def test_a_pupil_who_may_sit_the_paper_may_download_its_file(_sitting_allowed):
     out = _decide("murid", user="u-pupil", access=seb_access.ACCESS_DOWNLOAD_FILE)
     assert out["ok"] is True
     assert out["role"] == seb_access.ROLE_STUDENT
 
 
-def test_a_pupil_outside_the_target_list_is_refused(monkeypatch):
-    from app.services import exam_targets
-    monkeypatch.setattr(exam_targets, "student_is_included", lambda *a, **k: False)
+def test_a_pupil_the_sitting_would_refuse_is_refused_the_file(_sitting_allowed):
+    _sitting_allowed(False)
     out = _decide("murid", user="u-stranger", access=seb_access.ACCESS_DOWNLOAD_FILE)
     assert out["ok"] is False
     assert out["reason"] == "not_included"
+
+
+def test_the_pupil_file_door_asks_the_participation_rule_not_the_target_list():
+    """Source rule, because the wrong predicate is a *plausible* call.
+
+    The per-pupil list exists only for a `target_mode='students'` paper, so reading
+    it alone answers "no" for every pupil of an ordinary class-assigned paper — the
+    defect that made the handshake page's own download button 403 for a whole
+    school. `student_is_included` may therefore not appear in this module at all;
+    the participation rule already consults it, in the one place that knows when it
+    applies.
+    """
+    import ast
+    from pathlib import Path
+    tree = ast.parse(Path(seb_access.__file__).read_text(encoding="utf-8"))
+    # Names, not text: the explanation of this rule names both predicates, and a
+    # guard that fired on its own documentation is a guard somebody deletes.
+    used = {node.attr for node in ast.walk(tree)
+            if isinstance(node, ast.Attribute)} | \
+           {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+    assert "student_is_included" not in used, (
+        "the per-pupil target list is read on its own again: it answers 'no' for "
+        "every pupil of a class-assigned paper")
+    assert "exam_sitting_allowed" in used
+
+
+def test_a_pupil_gets_nothing_from_a_paper_nobody_gated():
+    """The file and the toggle are one thing: no requirement, no file."""
+    out = _decide("murid", user="u-pupil", exam=dict(EXAM, require_seb=False),
+                  access=seb_access.ACCESS_DOWNLOAD_FILE)
+    assert out["ok"] is False and out["reason"] == "not_gated"
+
+
+def test_a_gated_paper_with_no_key_has_no_file_for_a_pupil_either():
+    out = _decide("murid", user="u-pupil", exam=dict(EXAM, seb_config_key=None),
+                  access=seb_access.ACCESS_DOWNLOAD_FILE)
+    assert out["ok"] is False and out["reason"] == "no_credential"
 
 
 # ── the owner teacher ───────────────────────────────────────────────────────
@@ -123,15 +174,24 @@ def test_a_teacher_from_another_school_is_refused():
 DUTY_AT = NOW.isoformat()
 
 
-def _with_duty(monkeypatch, scheduled_at):
+def _with_duty(monkeypatch, *stamps):
+    """A duty, expressed as what the store returns: the sittings' own timestamps.
+
+    The seam is the *read* (`duty_sittings`) and deliberately not the window rule.
+    Patching `covering_sitting` — which is what `duty_start` used to be — would make
+    "refused an hour early" a statement about the patch: a one-stamp stub is inside
+    the window by construction. `decide` asks `covering_sitting`, which asks every
+    stamp with `in_duty_window`, and the two tests below drive the real arithmetic.
+    """
     from app.services import invigilation
     monkeypatch.setattr(invigilation, "invigilated_exam_ids",
                         lambda sb, school, teacher: {str(EXAM["id"])})
-    monkeypatch.setattr(seb_access, "duty_start", lambda *a, **k: scheduled_at)
+    monkeypatch.setattr(seb_access, "duty_sittings",
+                        lambda *a, **k: [s.isoformat() for s in stamps])
 
 
 def test_an_invigilator_inside_the_duty_window_may_view_and_download(monkeypatch):
-    _with_duty(monkeypatch, DUTY_AT)
+    _with_duty(monkeypatch, NOW)
     for access in seb_access.ACCESS_TYPES:
         out = _decide("guru", user="u-invigilator", access=access)
         assert out["ok"] is True, access
@@ -140,7 +200,7 @@ def test_an_invigilator_inside_the_duty_window_may_view_and_download(monkeypatch
 
 def test_an_invigilator_before_the_window_is_refused(monkeypatch):
     """Arriving an hour early is not being on duty."""
-    _with_duty(monkeypatch, (NOW + timedelta(hours=2)).isoformat())
+    _with_duty(monkeypatch, NOW + timedelta(hours=2))
     out = _decide("guru", user="u-invigilator")
     assert out["ok"] is False
     assert out["reason"] == "outside_duty_window"
@@ -148,15 +208,28 @@ def test_an_invigilator_before_the_window_is_refused(monkeypatch):
 
 def test_an_invigilator_after_the_window_is_refused(monkeypatch):
     """After the room is cleared the access closes itself, with no cron job."""
-    _with_duty(monkeypatch, (NOW - timedelta(days=2)).isoformat())
+    _with_duty(monkeypatch, NOW - timedelta(days=2))
     out = _decide("guru", user="u-invigilator")
     assert out["ok"] is False
     assert out["reason"] == "outside_duty_window"
 
 
+def test_a_supervisor_on_the_second_sitting_of_one_paper_is_on_duty(monkeypatch):
+    """Any sitting counts, not the earliest: two shifts, one supervisor.
+
+    The morning shift is long over and the afternoon one is running. Asking only the
+    earliest — which is what this module did before `covering_sitting` — refused the
+    teacher standing in the room of the shift that had not ended.
+    """
+    _with_duty(monkeypatch, NOW - timedelta(hours=8), NOW)
+    out = _decide("guru", user="u-invigilator")
+    assert out["ok"] is True
+    assert out["role"] == seb_access.ROLE_INVIGILATOR
+
+
 def test_the_window_ends_at_the_exams_own_deadline_plus_the_tail(monkeypatch):
     """A 60-minute paper is not a 24-hour licence: the close comes from the clock."""
-    _with_duty(monkeypatch, DUTY_AT)
+    _with_duty(monkeypatch, NOW)
     opens, closes = seb_access.duty_window(EXAM, DUTY_AT)
     assert opens == NOW - timedelta(minutes=seb_access.DUTY_LEAD_MINUTES)
     assert closes == NOW + timedelta(minutes=60 + seb_access.DUTY_TAIL_MINUTES)

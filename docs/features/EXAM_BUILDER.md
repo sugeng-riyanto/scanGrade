@@ -319,6 +319,42 @@ Pinch-zoom is left working on top of it (WCAG 1.4.4 / 1.4.10 forbid switching it
 off). The chosen size is stored as the `text_scale` preference, so it follows the
 pupil to their next device. See `docs/DESIGN_SYSTEM.md`.
 
+## The page's own bar: the state, the paper's PDF, and the doors
+
+The edit page (`/teacher/exams/<id>`) carries a bar directly under its heading with
+the three things a teacher checks *before* publishing — all three of which used to be
+somewhere else on a three-thousand-line page:
+
+* **the state**: the paper's `status` and whether its classes can see it yet;
+* **the PDF the pupils will read**: a green checklist with the stored file's own name
+  when `exams.pdf_url` is set, and the drop-zone sentence (*Seret PDF ke sini atau
+  klik untuk upload* · *PDF soal ujian — maksimal 20MB*) when it is not. The link in
+  the empty state is an anchor to the upload card (`#pdf-upload`), which is where the
+  drag-and-drop zone actually lives;
+* **every door out of the page**: Pratinjau, Cetak LJK, Hasil, Pengawasan Langsung
+  (`#room`), Analisis Pola (`#observations`), Ganti/Unggah PDF and Hapus. They used to
+  be a `sticky` card in a `lg:col-span-1` column, and in a `lg:grid-cols-3` grid whose
+  form spans all three columns that column **wraps below the form** — so the page's
+  own navigation was the last thing on it, behind the whole builder. The column is
+  gone, not merely emptied: an empty one still costs a grid cell and a gap.
+
+The same state is what the builder's persistent status bar opens in. That bar started
+at `pdfStatus: 'empty'` on *every* load, so a paper whose PDF had been uploaded days
+earlier said **"No PDF uploaded yet"** beside a drop zone the teacher had already
+used, and the only way to discover the file was there was to open the pupil's preview.
+It is seeded from the row the route read (`exam.pdf_url`) now, file name included and
+taken from the stored path rather than guessed, and its live events (`pdf-uploaded` /
+`pdf-reset` / `pdf-error`) still drive it afterwards.
+
+`tests/unit/test_exam_edit_actions.py` renders the page in both states and asserts each
+claim **where it is about**: the bar's hooks appear before the form's publish button
+and before the drop zone, a stored file is `data-pdf-status="uploaded"` carrying the
+file's name, a paper without one is `data-pdf-status="empty"` with the drop-zone
+sentence, the status bar's Alpine seed is `success`/`empty` with the row, and the
+create page shows no bar at all. Every one of those is red against the template as it
+was (`git show HEAD:app/templates/teacher/exam_form.html`): the hooks did not exist
+and the wrapping column did.
+
 ## The teacher's preview of the pupil's page
 
 Every card on `/teacher/exams` offers **Pratinjau Tampilan Murid**
@@ -383,3 +419,5 @@ asserted against what happened, not what the source looks like.
   write-nothing save.
 * `tests/unit/test_exam_preview.py` — the preview creates nothing, arms nothing, and
   the frames are the sizes they claim.
+* `tests/unit/test_exam_edit_actions.py` — the top bar (state, PDF, doors) and the
+  status bar's seeded state, rendered rather than grepped.

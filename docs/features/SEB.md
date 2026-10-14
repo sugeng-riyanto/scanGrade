@@ -247,8 +247,8 @@ akses yang **diberikan** tercatat di `seb_access_log` **dan** di `audit_logs`.
 | **Admin sekolah** (sekolah sama) | ✅ kapan saja | ✅ | Bukan guru pemilik → dicatat **"atas nama guru X"** |
 | **Kepala sekolah / Wakil kepala sekolah** | ✅ (setara admin sekolah) | ✅ | Sama seperti di atas |
 | **Guru yang bertugas sebagai pengawas** | ✅ **hanya selama jendela tugasnya** | ✅ | Di luar jendela → **DITOLAK** |
-| **Murid peserta ujian** | ❌ **tidak pernah, di endpoint mana pun** | ✅ (hanya hash + CK) | Hanya berkasnya sendiri |
-| **Peran lain (termasuk `super_admin`)** | ❌ | ❌ | Dicatat sebagai `role_not_covered` |
+| **Murid peserta ujian** | ❌ **tidak pernah, di endpoint mana pun** | ✅ (hanya hash + CK) | Hanya berkasnya sendiri — dan "peserta" berarti aturan partisipasi aplikasi, lihat di bawah |
+| **Peran lain (termasuk `super_admin`)** | ❌ | ❌ | Ditolak dengan alasan `role_not_covered` di badan respons. Keputusan ini **tidak** menulis baris: `seb_access_log.access_type` hanya menerima `view_password`/`download_file` (migrasi 062), jadi tabel yang dimaksud dokumen ini adalah catatan **akses yang diberikan**, bukan penolakan — dulu tabel itu menjanjikan sebaliknya |
 
 Catatan penting:
 
@@ -261,12 +261,92 @@ Catatan penting:
   administrator platform tidak punya kebutuhan operasional untuk membaca kata sandi
   ujian satu sekolah. Penolakan ini dicatat sebagai data, supaya kebutuhan itu — bila
   benar-benar ada — muncul sebagai fakta, bukan sebagai tebakan di sini.
-- **Jendela tugas pengawas** berasal dari jam ujian itu sendiri
-  (`exam_window.deadline`), ditambah 30 menit sebelum dan 60 menit sesudah. Di luar
-  rentang itu aksesnya **tertutup sendiri**, tanpa cron job.
 - Tombol **tampilkan/sembunyikan** ada supaya kata sandi tidak tampil saat halaman
   dibuka — mencegah bocor lewat *screen-share* atau rekaman tanpa ada yang sengaja
   membagikannya.
+- **Jendela tugas pengawas** berasal dari jam ujian itu sendiri
+  (`exam_window.deadline`), ditambah 30 menit sebelum dan 60 menit sesudah. Di luar
+  rentang itu aksesnya **tertutup sendiri**, tanpa cron job. Yang dihitung adalah
+  **setiap** pelaksanaan yang menyebut guru itu, bukan yang paling awal: kertas yang
+  dikerjakan dua kali sehari (dua kelas, dua shift) menugaskan orang yang sama dua
+  kali, dan versi pertama aturan ini hanya menanyakan yang paling awal — sehingga
+  pengawas shift kedua ditolak di tengah shiftnya sendiri. Satu fungsi
+  (`seb_access.covering_sitting`) menjawabnya untuk pintu **dan** untuk halaman.
+
+### Pintu masuknya: tautan, bukan URL yang harus dihafal
+
+Izin tanpa pintu adalah izin yang tidak ada. Panel SEB hanya bisa dicapai dengan
+mengetik URL-nya bagi empat dari lima peran sampai perubahan ini: satu-satunya tautan
+di aplikasi duduk di form ujian **guru pemilik**. Sekarang ada dua pintu, keduanya di
+halaman yang perannya memang sudah buka:
+
+| Halaman | Siapa yang membukanya | Tautannya muncul untuk |
+|---|---|---|
+| `/admin-sekolah/invigilation`, `/principal/invigilation`, `/vice-principal/invigilation` | admin sekolah, kepala sekolah, wakil kepala sekolah | setiap pelaksanaan ujian yang **wajib SEB** (mereka boleh membaca kapan saja, jadi tidak ada jendela yang perlu dihitung) |
+| `/teacher/invigilation` | guru, termasuk pengawas | pelaksanaan wajib SEB **yang jendelanya sedang terbuka baginya**; di luar jendela barisnya berkata begitu alih-alih menautkan ke penolakan |
+
+Halaman admin sekolah adalah tempat yang tepat dan bukan kebetulan: di situ juga ada
+**kode pemulihan murid**, jadi orang yang sedang menolong murid terkunci sudah berada
+di halaman itu. Tautan untuk kertas **tanpa** `require_seb` sengaja tidak pernah
+ditampilkan — kertas seperti itu tidak punya kredensial dan panelnya menolak, jadi
+tautannya adalah tautan yang tidak bisa bekerja. Tombol **Kembali** panel juga
+mengikuti pembacanya (`PANEL_BACK_ENDPOINTS`): kepala sekolah dan wakilnya dulu dikirim
+ke daftar ujian guru, yang adalah pintu guru/admin dan menjawab 403 bagi mereka —
+dead end yang sama, satu klik lebih dalam.
+
+Dijaga `tests/unit/test_seb_panel_doors.py` (**19 uji**, halaman **dirender** lewat
+Jinja aplikasi, bukan digrep): baris membawa `require_seb` dan `seb_open`, nilai
+`seb_open` sama dengan jawaban `seb_access.in_duty_window`, layanan invigilasi tidak
+punya aritmetika jendela sendiri (`timedelta` tidak muncul di sana), shift kedua
+terbuka, tautan hanya muncul di baris yang tepat, dan tabel "Kembali" menutup tepat
+peran yang matriks berikan. `tests/unit/test_seb_rbac_matrix.py` menambah uji peran →
+tujuan "Kembali", dan `.freebuff/mutate_seb_rbac_matrix.py` menyuntikkan **12 cacat**
+(termasuk jendela yang diabaikan, hanya pelaksanaan paling awal, kolom `require_seb`
+yang hilang dari bacaan, dan "Kembali" yang selalu ke halaman guru) — **12/12
+tertangkap**.
+
+### "Peserta ujian" adalah aturan aplikasi, bukan daftar sasaran per murid
+
+Kolom murid di tabel di atas berbunyi "hanya berkasnya sendiri", dan cara ia
+*dijalankan* pernah salah dengan cara yang paling merugikan: `decide()` menjawab
+permintaan murid atas berkasnya sendiri dengan
+`exam_targets.student_is_included`, yaitu predikat **daftar sasaran per murid** —
+daftar yang hanya ada pada kertas `target_mode='students'`. Dibaca sendirian, ia
+`False` untuk **setiap** murid di kertas biasa yang ditugaskan ke kelas, karena
+tidak ada baris sasaran untuk ditemukan. Akibatnya
+`/student/exams/<id>/seb-file` — rute di balik tombol **Unduh berkas .seb saya** di
+halaman *Buka dengan SEB* — menjawab **403 `not_included` kepada setiap murid di
+sekolah** pada setiap kertas yang belum dialihkan ke daftar per murid, padahal
+halaman itu sendiri menawarkan tombolnya (dan satu uji menahan keberadaan tombol
+itu). Berkas yang justru jadi alasan fitur ini ada tidak bisa diambil di tempat ia
+ditawarkan.
+
+Arah sebaliknya juga salah, dan lebih sunyi: pada kertas `target_mode='students'`,
+predikat itu **memberi** berkas tanpa pernah menanyakan apakah kertasnya terbit,
+aktif, atau milik sekolah dan kelas murid itu.
+
+Sekarang satu aturan dipakai: **`exam_sitting_allowed`** — terbit, aktif, sekolah
+murid itu, kelas murid itu, lalu daftar sasaran bila kertasnya punya. Itu aturan
+yang sudah dipakai **pintu ujian** dan **kedua rute handshake** (`seb-claim` dan
+laporan penolakan), jadi tiga pintu murid sekarang satu aturan, bukan tiga versi:
+kertas kelas tidak lagi ditolak kepada muridnya sendiri, dan kertas sasaran tidak
+lagi bisa diunduh oleh murid yang tidak akan diterima duduk di kertas itu.
+
+Dua batas yang ikut diputuskan di sini: **kertas tanpa `require_seb` tidak punya
+berkas untuk diberikan** (`not_gated` — sakelar dan berkas adalah satu hal), dan
+**kertas yang wajib SEB tetapi belum punya kunci** menjawab `no_credential`
+sebelum rute sempat menyerahkan apa pun. Keduanya diuji lewat rute, bukan lewat
+predikat.
+
+Dijaga `tests/unit/test_seb_rbac_matrix.py` (**53 uji**): **setiap pintu dijalankan
+sebagai setiap peran** — panel, sakelar (enable/disable/reissue), kata sandi,
+berkas guru, berkas murid, handshake, laporan penolakan, endpoint sinyal, dan tiga
+pintu publik — terhadap PostgREST tiruan yang benar-benar menyimpan, dengan
+`_load_exam`, `exam_sitting_allowed` dan `invigilated_exam_ids` yang **asli**
+(hanya jamnya yang diserahkan ke `decide(now=...)`, karena jendela tugas memang
+argumennya). Cacat disuntikkan lewat `.freebuff/mutate_seb_rbac_matrix.py` — **12
+cacat, 12/12 tertangkap**, termasuk pengembalian predikat lama dan setiap pintu baru
+di bagian di atas — yaitu bentuk merah lebih dulu dari setiap perbaikan ini.
 
 ---
 
@@ -642,11 +722,18 @@ ini."
 
 **Untuk ADMIN SEKOLAH** — "Kamu bisa melihat kata sandi yang sama seperti guru
 pemilik ujian — supaya kalau guru berhalangan, kamu tetap bisa membantu murid yang
-terkunci."
+terkunci. Buka halaman **Pengawasan** sekolah, lalu tekan **Kata sandi SEB** di baris
+pelaksanaan ujian itu; halaman yang sama juga memuat kode pemulihan murid."
 
 **Untuk PENGAWAS** — "Selama kamu bertugas mengawasi, kamu bisa melihat kata sandi
-keluar SEB untuk ujian di ruanganmu. Setelah tugasmu selesai, akses ini otomatis
-tertutup."**Untuk MURID** — "Kamu cukup buka berkas yang diberikan guru/pengawas, ujian akan
+keluar SEB untuk ujian di ruanganmu. Tautannya ada di baris tugasmu di halaman **Tugas
+Pengawasan**, dan hanya muncul selama jendela tugasmu — sebelum dan sesudahnya baris
+itu berkata begitu. Setelah tugasmu selesai, akses ini otomatis tertutup."**Untuk KEPALA SEKOLAH / WAKIL KEPALA SEKOLAH** — "Sama seperti admin sekolah: buka
+halaman **Pengawasan**, lalu **Kata sandi SEB** pada baris pelaksanaan ujiannya.
+Aksesnya baca saja dan tercatat atas nama guru pemilik ujian — kamu tidak bisa
+menyalakan atau mematikan sakelarnya."
+
+**Untuk MURID** — "Kamu cukup buka berkas yang diberikan guru/pengawas, ujian akan
 terbuka otomatis dan terkunci. Kalau kamu sudah membuka SEB lalu kembali ke halaman
 **Buka dengan SEB** dan masih melihat pesan yang sama, tekan **Periksa lagi** di
 halaman itu — kamu tidak perlu mencari tautan ujiannya lagi. Kalau tetap tidak bisa,

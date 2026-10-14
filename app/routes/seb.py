@@ -74,6 +74,23 @@ CONFIRM_FIELD = "confirm_no_android"
 #: moment a broken install is cheap to find.
 TEST_CONFIG_PATH = "/panduan/seb/berhasil"
 
+#: Where each reader's *Back* button goes — one table, because the panel is read by
+#: four roles and only one of them came from a teacher's page. `teacher.my_exams` is
+#: a teacher-or-admin door, so a head of school sent there is a 403 — the same dead
+#: end the invigilation links below were added to remove, one click further in. The
+#: guru's destination is the exam list they *do* own; the three staff roles go back
+#: to the invigilation schedule, which is now a page that links here.
+PANEL_BACK_ENDPOINTS = {
+    "admin_sekolah": "admin_sekolah.invigilation_page",
+    "principal": "principal.principal_invigilation",
+    "vice_principal": "principal.vice_principal_invigilation",
+}
+
+
+def _back_url() -> str:
+    """The page this reader came from, for the panel's Back button."""
+    return url_for(PANEL_BACK_ENDPOINTS.get(g.get("user_role")) or "teacher.my_exams")
+
 
 def _rate_limit(limit):
     """The app's limiter when it has one — a signal endpoint must not be free to hammer."""
@@ -176,6 +193,8 @@ def panel(exam_id):
         # reads it as "the file is broken".
         file_is_current=live and seb_service.file_is_current(exam, credential),
         can_manage=_may_configure(exam),
+        # Where Back goes, per role: a staff reader did not come from a teacher page.
+        back_url=_back_url(),
         confirm_field=CONFIRM_FIELD,
         mobile_risk=_mobile_risk(_supabase(), exam),
         access_log=seb_access.log_for_exam(_supabase(), exam.get("school_id"), exam_id),

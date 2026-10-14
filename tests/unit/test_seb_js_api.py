@@ -476,7 +476,19 @@ def test_a_claimed_client_still_opens_a_sitting_like_any_other(app, monkeypatch)
     (-3600, False),       # a claim dating from the future is not fresher than now
 ])
 def test_claim_freshness_at_the_edges(age, expected):
-    assert seb_service.claim_valid(_claim(age=age), EXAM_ID) is expected
+    """The rule at its boundaries — against a clock this test supplies.
+
+    `now` is passed rather than left to the wall clock, and that is the fix for a
+    test that could not pass: the age is produced by subtracting from *one* reading
+    of the clock and judged against a *later* one, so a claim stamped exactly
+    `JS_CLAIM_TTL` ago is always a fraction past the limit by the time it is judged.
+    The boundary the rule states — the last second of the window still admits — is
+    only observable when both readings are the same instant.
+    """
+    now = datetime(2026, 10, 14, 9, 0, tzinfo=timezone.utc)
+    claim = {"exam_id": EXAM_ID, "method": seb_service.JS_CLAIM_METHOD,
+             "at": (now - timedelta(seconds=age)).isoformat()}
+    assert seb_service.claim_valid(claim, EXAM_ID, now=now) is expected
 
 
 def test_a_stored_claim_is_read_as_what_it_is():
