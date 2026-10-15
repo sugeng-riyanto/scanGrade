@@ -131,6 +131,56 @@ halaman Config Key (`"hashedQuitPassword":"8577da2e…"`). Beberapa tulisan piha
 ketiga menampilkan awalan itu; dengan awalan tersebut, SEB akan menolak kata sandi
 yang benar, tanpa pesan kesalahan yang menjelaskan kenapa.
 
+Bentuk kata sandinya **empat huruf kapital** (A–Z, tanpa angka), diminta pemilik
+produk dengan ruang kombinasinya disebut lebih dulu: 26⁴ = 456 976, sekitar 18,8 bit.
+Angka itu kecil, dan tulisannya apa adanya di `app/services/seb_crypto.py` bersama
+batasnya: nilainya dibacakan orang di dalam SEB yang sudah terkunci dan pintu yang
+membacanya dibatasi laju, **tetapi** hash di dalam berkas dibandingkan **di komputer
+murid, tanpa jaringan dan tanpa pembatas laju**, sementara murid memegang berkas itu.
+Kalau suatu saat nilai ini harus menahan pencarian offline, yang dinaikkan adalah
+**panjangnya** — bukan alfabetnya.
+
+Algoritmanya diverifikasi ke **kode kliennya sendiri**, bukan ke tulisan pihak ketiga:
+SEB untuk Windows menghitungnya di
+`SafeExamBrowser.Configuration/Cryptography/HashAlgorithm.cs` —
+`SHA256(Encoding.UTF8.GetBytes(password))` yang ditulis sebagai `b.ToString("x2")` —
+dan `ClientResponsibility.IsValidQuitPassword` membandingkannya dengan
+`StringComparison.OrdinalIgnoreCase`, sehingga huruf besar/kecil hex **tidak pernah**
+menjadi sebab penolakan. Vektornya adalah uji unit milik SEB sendiri
+(`"blabbedyblubbedy"` → `4adfa806…`), dipaku di `tests/unit/test_seb_exit_key.py`, dan
+`deploy/seb_quit_probe.py` menanyakan hal yang sama kepada **SEB yang terpasang di
+mesin yang menjalankannya**.
+
+### Dua cacat yang membuat kunci keluar tidak bisa dipakai (15 Oktober 2026)
+
+Murid sungguhan terkunci di kertas sungguhan. Diagnosis pertama menyalahkan algoritma
+hash; **itu salah**, dan bantahannya ada di alinea di atas. Yang benar ada dua, dan
+keduanya di sisi ScanGrade:
+
+1. **Satu sel untuk dua kata sandi.** Panel menyimpan **satu** variabel Alpine
+   (`password`) untuk sel "kata sandi keluar" *dan* sel "kata sandi admin", sementara
+   visibilitasnya dilacak per jenis. Membuka yang kedua menimpa teks sel pertama — jadi
+   pengawas bisa membaca kata sandi **admin** dari kotak berlabel "kata sandi keluar",
+   dan SEB menjawab `wrong quit password` untuk nilai yang sesungguhnya sah. Sekarang
+   satu slot per jenis (`passwords[kind]`), dan selnya diuji dari template itu sendiri.
+2. **Berkas yang sudah beredar tidak pernah ditandai batal.** `issue()` — dipanggil
+   `enable` **dan** `reissue` — mencetak ulang kedua kata sandi lalu menulis Config Key
+   baru ke baris ujian. Setiap berkas `.seb` yang sudah dibagikan berhenti cocok: pintu
+   menolak kliennya (header-nya dihash atas kunci lama) dan kata sandi yang terbaca di
+   panel bukan kata sandi di dalam berkas murid — persis keadaan yang terukur di
+   produksi (`hashedQuitPassword` berkas murid `dd111419…`, baris kredensial
+   `3d7b7dd6…`, barisnya ditulis ulang **22 menit sesudah** unduhan terakhir).
+   `file_is_current` tidak bisa melihatnya, sebab penulisan ulang itu mengganti **alat
+   ukurnya sendiri**. Panel sekarang mengatakannya (`file_void_after_reissue`), di atas
+   tombol tampilkan, karena tindakan pembaca berikutnya adalah membacakan kata sandi.
+
+Untuk ujian yang sudah terlanjur dibuat: **berkas yang sudah beredar harus diganti**
+(satu tombol, lalu bagikan ulang). Tidak ada migrasi data yang diperlukan — server tidak
+punya cara tahu murid mana memegang berkas mana — yang hilang hanyalah kalimat yang
+memberitahukannya, dan sekarang kalimat itu ada. Murid yang **sedang** di dalam ujian
+justru kasus yang paling butuh kunci yang benar, dan itulah satu-satunya keadaan yang
+harus membuat pengawas berhenti dan menerbitkan ulang lebih dulu.
+
 ---
 
 ## Bentuk berkas `.seb`
@@ -307,7 +357,9 @@ Catatan penting:
   benar-benar ada — muncul sebagai fakta, bukan sebagai tebakan di sini.
 - Tombol **tampilkan/sembunyikan** ada supaya kata sandi tidak tampil saat halaman
   dibuka — mencegah bocor lewat *screen-share* atau rekaman tanpa ada yang sengaja
-  membagikannya.
+  membagikannya. Dan setiap tombol menulis ke **slotnya sendiri**: satu variabel bersama
+  untuk dua sel adalah bagaimana kata sandi admin terbaca dari kotak kata sandi keluar,
+  dan bagaimana sebuah kunci yang benar dilaporkan sebagai rusak (lihat di bawah).
 - **Jendela tugas pengawas** berasal dari jam ujian itu sendiri
   (`exam_window.deadline`), ditambah 30 menit sebelum dan 60 menit sesudah. Di luar
   rentang itu aksesnya **tertutup sendiri**, tanpa cron job. Yang dihitung adalah
