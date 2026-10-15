@@ -218,10 +218,50 @@ BUILDER_WITHOUT_CONTROLS = _shell(
 BUILDER_WITHOUT_THE_ROOT = _shell(
     "<div class='exam-builder'><form>" + _control(20) + "</form></div>")
 
-#: The pupil's page as it is when it renders: a question control and an answer block.
+#: The question-type blob the paper writes into its own page, shaped exactly as the
+#: template writes it (`type: ({...})[i] || 'mcq'`). The gate reads the exception
+#: question out of the *served document* before it opens the page, so without this
+#: there is no answer to "how many exception questions should be on this page" and it
+#: answers could-not-measure rather than clean. It is a function, never called: the
+#: template's own copy of that line runs inside a loop that defines `i`, and a bare
+#: `return` of it here would be the page error the fixtures below are made of.
+_TYPE_BLOB = ('<script>function sgQType(i) { '
+              'return {type: ({"0": "mcq", "1": "mcq_multi"})[i] || \'mcq\'}.type; '
+              '}</script>')
+
+
+def _opt_row(*, pressed: bool = False) -> str:
+    """One question's option row: two letters at 118x40.
+
+    `aria-pressed` is how the gate tells the exception question from the plain one,
+    so the plain row must not carry it — and the two rows are built here rather than
+    written twice because the gate then requires the exception's row to be the plain
+    row beside it field by field. The marker is the only difference it may see.
+    """
+    mark = " aria-pressed='false'" if pressed else ""
+    buttons = "".join(
+        f"<button class='opt-btn'{mark} style='width:118px;height:40px'>{letter}</button>"
+        for letter in ("A", "B"))
+    return f"<div class='opt-row'>{buttons}</div>"
+
+
+def _question(number: int, *, exception: bool = False) -> str:
+    """One question block: its own number label, its one row, and the exception's badge."""
+    badge = ("<span class='inline-flex'>Boleh lebih dari satu</span>"
+             if exception else "")
+    return (f"<div><span>Soal {number}:</span>{badge}"
+            f"{_opt_row(pressed=exception)}</div>")
+
+
+#: The pupil's page as it is when it renders: a question control, the two questions the
+#: served blob declares (one with the exception's row and badge), and that blob.
 _EXAM_STAGE = ("<div class='exam-stage'>"
                "<button class='q-btn' type='button'>1</button>"
-               "<div class='exam-answers'><div>answer</div></div></div>")
+               "<div class='exam-answers'>"
+               + _question(1) + _question(2, exception=True) +
+               "</div>"
+               "</div>"
+               + _TYPE_BLOB)
 
 EXAM_INTACT = _shell(_EXAM_STAGE)
 
