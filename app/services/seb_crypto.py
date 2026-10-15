@@ -71,32 +71,41 @@ ENC_VERSION = "v1"
 KEY_INFO = b"scangrade/seb/at-rest/v1"
 
 #: The alphabet a generated password is drawn from: upper-case A-Z, and nothing
-#: else. Asked for by the operator reading the panel — "the exit key is 6 digits
-#: capital alphabetic, randomly" — and it is defensible for the *use*: this value
-#: is read aloud over the phone to a pupil or typed by a supervisor from a screen,
-#: so a fixed-width run of capitals has no `0`/`O`, no `1`/`l`/`I` and no
-#: lower-case to hear wrong, and a 6-cell box on the panel has nothing in it that
-#: can be misheard as something else.
+#: else. Asked for by the operator reading the panel, in two steps — first "the
+#: exit key is 6 digits capital alphabetic, randomly", then four — and it is
+#: defensible for the *use*: this value is read aloud over the phone to a pupil or
+#: typed by a supervisor from a screen, so a fixed-width run of capitals has no
+#: `0`/`O`, no `1`/`l`/`I` and no lower-case to hear wrong.
+#:
+#: `I` and `O` **stay**, and that is a decision rather than an oversight: the
+#: ambiguity the old 57-symbol alphabet worked around was *within* it (`0` beside
+#: `O`, `1` beside `l`), and with digits and lower case gone there is nothing for
+#: them to sit beside. Dropping two symbols from an all-capitals set would cost
+#: 27% of the space below and buy no legibility at all.
 PASSWORD_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
-#: Six characters over the 26-symbol alphabet above — 26^6 ≈ 3.1·10^8, about
-#: **28 bits**. Stated plainly because it is a real reduction: the previous value
-#: was 12 characters over 57 symbols and some 70 bits. Two things make the smaller
-#: key acceptable here, and neither is a substitute for the other:
+#: **Four** characters over the 26-symbol alphabet above: 26^4 = 456 976, about
+#: **18.8 bits**. The operator asked for this size with the smaller space stated
+#: to them, and accepted it — so it is written down here rather than argued about
+#: again, together with what it is and is not safe against:
 #:
-#: * the value is valid for **one exam**, is regenerated rather than reused, and
-#:   is not a credential to anything else;
-#: * the server-side door that reads it is throttled (`app/routes/seb.py`
-#:   `@_rate_limit("6 per minute")` on the claim route), so an online guess is
-#:   bounded by the limiter rather than by the key.
-#:
-#: What it *cannot* lean on, and the reason this is written down: the
-#: ``hashedQuitPassword`` in the ``.seb`` file is compared **on the pupil's own
-#: machine, offline**, so the server's limiter never sees a brute-force attempt
-#: made there. Six capitals is a code a person can read out, not a secret that
-#: withstands an offline search; if this ever needs to hold against that, the
-#: length is the thing to raise — not the alphabet.
-PASSWORD_LENGTH = 6
+#: * **What it is sized for.** The value is *transcribed by a person inside a
+#:   locked SEB*: a supervisor reads it off the panel and types it into the
+#:   client's own prompt. There is no script on the other side of a network, and
+#:   the route that reads a password is throttled
+#:   (`app/routes/seb.py`, `@_rate_limit("6 per minute")`), so an *online* guess
+#:   costs a supervisor's time at a locked machine.
+#: * **What it is not.** The ``hashedQuitPassword`` inside the ``.seb`` file is
+#:   compared **on the pupil's own machine, with no network and no limiter**, and
+#:   the pupil holds that file. Four capitals is a code somebody can read out
+#:   loud; it is not a secret that survives an offline search of 4.6·10^5
+#:   candidates, which is milliseconds of SHA-256. Stated plainly because a reader
+#:   of this file is entitled to know the limit rather than discover it.
+#: * **What makes it livable anyway.** The value is worth exactly one sitting: it
+#:   is minted per issue, never reused, and opens nothing but this paper's own
+#:   exit. If it ever has to hold against the offline case, **length is the knob**
+#:   — not the alphabet, and not a longer hash.
+PASSWORD_LENGTH = 4
 
 
 class SebCryptoError(RuntimeError):
@@ -109,6 +118,22 @@ def sha256_hex(text: str) -> str:
     Lower case and unprefixed, per the official example. Nothing here trims or
     normalises: a password with a leading space hashes with it, exactly as SEB
     will hash what the supervisor typed.
+
+    **This is checked against the client's own code, not against a write-up.** SEB
+    for Windows computes the value in
+    ``SafeExamBrowser.Configuration/Cryptography/HashAlgorithm.cs`` as
+    ``String.Join("", SHA256(Encoding.UTF8.GetBytes(password)).Select(b => b.ToString("x2")))``
+    — UTF-8 input, no salt, no trimming, lower-case hex — and
+    ``SafeExamBrowser.Client/Responsibilities/ClientResponsibility.cs``
+    (``IsValidQuitPassword``) compares it with ``StringComparison.OrdinalIgnoreCase``
+    against the hash of what was typed. So the *encoding* below is the same bytes
+    as ``b.ToString("x2")``, and the case cannot be the thing that breaks a match
+    even if a future edit upper-cases the digest.
+
+    The vector that makes this a check rather than a claim is the client's own unit
+    test (``SafeExamBrowser.Configuration.UnitTests/Cryptography/HashAlgorithmTests.cs``):
+    ``"blabbedyblubbedy"`` → ``4adfa806cb610693a6200e4cdbdafeaf352876a35f964a781d691457df9cd378``.
+    ``tests/unit/test_seb_exit_key.py`` asserts it here, byte for byte.
     """
     return hashlib.sha256(str(text or "").encode("utf-8")).hexdigest()
 

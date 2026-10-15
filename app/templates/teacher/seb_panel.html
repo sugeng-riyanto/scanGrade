@@ -11,6 +11,13 @@
   * the passwords are **not on the page when it opens**. They are behind a
     show/hide button, because a screen-share or a recording of a scrolling teacher
     is how a secret leaks without anybody deciding to share it;
+  * and each of the two cells holds **its own** value. One `password` variable
+    shared by both was how a supervisor read the *admin* password out of the quit
+    box: revealing the second kind overwrote the first cell's text (the cells are
+    shown per kind, the text was not), SEB answered "wrong quit password", and the
+    exit key the system generated looked broken when it was the panel that was.
+    Guarded by `tests/unit/test_seb_exit_key.py`, and the surviving shape is
+    `passwords[kind]` — one slot each, so neither reveal can be read as the other;
   * every sentence is a `t()` pair, and the page carries no fixed `lang=`: it is
     translated copy, so it follows the reader's own choice like every other page.
 #}
@@ -18,11 +25,11 @@
 {% block content %}
 <div x-data="{
         shown: {},
+        passwords: {},
         busy: '',
-        password: '',
         role: '',
         async reveal(kind) {
-            if (this.shown[kind]) { this.shown[kind] = false; this.password = ''; return; }
+            if (this.shown[kind]) { this.shown[kind] = false; this.passwords[kind] = ''; return; }
             this.busy = kind;
             try {
                 const fd = new FormData();
@@ -31,7 +38,7 @@
                 const res = await fetch('{{ url_for('seb.reveal_password', exam_id=exam.id) }}', {
                     method: 'POST', body: fd, headers: { 'X-Requested-With': 'fetch' } });
                 const data = await res.json();
-                if (data.ok) { this.password = data.password; this.role = data.role; this.shown[kind] = true; }
+                if (data.ok) { this.passwords[kind] = data.password; this.role = data.role; this.shown[kind] = true; }
                 else { window.sgAlert(sgT('Kata sandi tidak dapat dibuka. Hubungi admin sekolah.',
                                           'The password could not be opened. Contact your school admin.')); }
             } catch (e) { window.sgAlert(sgT('Gagal menghubungi server.', 'Could not reach the server.')); }
@@ -273,6 +280,27 @@
                         'Use only in an emergency: a pupil needs to leave before the exam is over. Pupils never see these passwords.')"></p>
         </div>
 
+        {% if file_void %}
+        {# The one state in which a key read off this page is *known* not to open the
+           file a pupil is holding. It is above the buttons rather than below them,
+           because the reader's next act is to read a password aloud — and the
+           remedy (issue and redistribute) is what has to happen first. The other,
+           louder-looking state (`file_is_current` false) cannot see this one: a
+           re-issue writes the new Config Key over the stored one, so the panel's
+           own staleness check reports "current" while every distributed file has
+           just been voided. See `seb_service.file_void_after_reissue`. #}
+        <div class="rounded-xl bg-rose-50 border border-rose-100 p-4 flex items-start gap-3"
+             data-seb-file-void>
+            <i class="fas fa-key text-rose-600 mt-0.5"></i>
+            <div class="text-sm text-rose-700 space-y-1">
+                <p class="font-bold" x-text="t('Kata sandi ini dibuat ulang SETELAH berkas .seb terakhir diunduh.',
+                                                'These passwords were regenerated AFTER the last .seb file was downloaded.')"></p>
+                <p x-text="t('Berkas yang sudah beredar tidak lagi cocok dengan kata sandi di bawah: murid yang belum membukanya akan ditolak di pintu, dan kata sandi yang terbaca di sini bukan kata sandi di dalam berkas mereka. Terbitkan berkas baru lalu bagikan ulang sebelum membaca kata sandi.',
+                            'The files already handed out no longer match the passwords below: a pupil who has not opened it yet will be turned away at the door, and the key read here is not the key inside their file. Issue a new file and hand it out again before reading a password out.')"></p>
+            </div>
+        </div>
+        {% endif %}
+
         {% for kind, label_id, label_en in [('quit', 'Kata sandi keluar (untuk murid berhenti)', 'Quit password (lets a pupil stop)'),
                                             ('admin', 'Kata sandi admin (untuk pengawas mengubah pengaturan)', 'Admin password (lets a supervisor open settings)')] %}
         <div class="rounded-xl border border-surface-100 p-3 sm:p-4 space-y-2">
@@ -287,7 +315,7 @@
                         <span><i class="fas fa-eye-slash mr-1"></i><span x-text="t('Sembunyikan','Hide')"></span></span>
                     </template>
                 </button>
-                <code x-show="shown['{{ kind }}']" x-text="password"
+                <code x-show="shown['{{ kind }}']" x-text="passwords['{{ kind }}']"
                       class="px-3 py-2 rounded-lg bg-surface-800 text-white text-sm font-mono tracking-widest"></code>
                 <span x-show="shown['{{ kind }}'] && role !== 'owner_teacher' && role !== 'invigilator'"
                       class="text-xs text-amber-700"

@@ -387,6 +387,58 @@ def file_is_current(exam, credential: dict | None) -> bool:
     return current_key(exam, credential) == stored
 
 
+#: The access-log row type that means "a pupil or a teacher now holds this file".
+#: Named here rather than typed at the call site because the *other* value
+#: (``view_password``) is a different fact: a password was read, which changes
+#: nothing about the files already out there.
+DOWNLOADED = "download_file"
+
+
+def _row_moment(row) -> datetime | None:
+    """One log row's own timestamp, through the app's single ISO reader."""
+    return exam_window.parse_dt((row or {}).get("created_at"))
+
+
+def file_void_after_reissue(credential: dict | None, access_log) -> bool:
+    """Whether a file was handed out that the **passwords have since been replaced under**.
+
+    The state this exists to make visible, measured in production on 15 October 2026
+    and the reason a real pupil could not leave a real paper: a teacher reads an exit
+    key off this panel, types it into a locked SEB, and SEB answers *wrong quit
+    password* — because the key on screen belongs to the **newest** issue while the
+    ``.seb`` in the pupil's hands carries the **previous** one's hash.
+
+    :func:`file_is_current` cannot see it, and that is the whole reason this is a
+    second question rather than a second clause. ``file_is_current`` compares the
+    exam's settings against the exam's **stored Config Key** — and a re-issue writes
+    a *new* key over that stored one, so it updates the very yardstick it is judged
+    by and reports ``True`` while every distributed file has just been voided.
+
+    What is known, and what is claimed: a download row older than the credential's
+    last write means **a file exists that this issue's passwords did not make**. The
+    consequence follows from the two ways the file is used, and both are real — the
+    door compares a client's header against the stored key, which has changed, so a
+    pupil who has not opened it yet is refused; and the file's ``hashedQuitPassword``
+    is the previous plaintext, so the key read aloud here is not the key that opens
+    it. What is *not* claimed: that every pupil is locked out — whoever is already
+    inside a sitting stays inside, which is precisely when a supervisor needs the
+    right key.
+
+    Reads two things the panel already fetched, so the answer costs no round trip.
+    A missing or unreadable timestamp answers ``False``: "somebody holds a void
+    file" is not a claim to make out of evidence that could not be read.
+    """
+    issued_at = _row_moment({"created_at": (credential or {}).get("updated_at")})
+    if issued_at is None:
+        return False
+    handed_out = [_row_moment(row) for row in (access_log or [])
+                  if isinstance(row, dict) and row.get("access_type") == DOWNLOADED]
+    moments = [moment for moment in handed_out if moment is not None]
+    if not moments:
+        return False
+    return issued_at > max(moments)
+
+
 # ── minting and storing ─────────────────────────────────────────────────────
 
 def _rows(query) -> list[dict]:
@@ -679,10 +731,10 @@ def observe_save_key(exam: dict, exam_id: str, request_url: str,
 
 
 __all__ = [
-    "BLOCKED_WHEN_UNKNOWN", "EXAM_OWNS", "KEY_ABSENT", "KEY_MATCH",
+    "BLOCKED_WHEN_UNKNOWN", "DOWNLOADED", "EXAM_OWNS", "KEY_ABSENT", "KEY_MATCH",
     "KEY_MISMATCH", "KIND_ADMIN", "KIND_QUIT", "KINDS",
     "ORIGINATOR_VERSION", "PLAIN_PREFIX", "credentials_for", "current_key",
-    "decode_seb", "file_is_current", "gated", "issue", "key_state",
-    "observe_save_key", "plist_xml", "reveal",
+    "decode_seb", "file_is_current", "file_void_after_reissue", "gated", "issue",
+    "key_state", "observe_save_key", "plist_xml", "reveal",
     "seb_file_bytes", "settings_for", "start_url", "verify",
 ]

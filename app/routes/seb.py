@@ -184,9 +184,20 @@ def panel(exam_id):
     # deliberately not enough — its passwords open a door nothing is checking.
     live = bool(out.get("ok")) and bool(credential and exam.get("seb_config_key"))
     refusals = seb_door_log.refusals_for_exam(_supabase(), exam_id)
+    # Read once and used twice: the history table below renders these rows, and the
+    # "the passwords were replaced after a file went out" question is arithmetic over
+    # the same rows — so the panel's warning and its history cannot disagree about
+    # which download it is talking about, and the check costs no extra round trip.
+    access_log = seb_access.log_for_exam(_supabase(), exam.get("school_id"), exam_id)
     return render_template(
         "teacher/seb_panel.html", exam=exam, verdict=out, credential=credential,
         has_credential=live,
+        # Two different ways a file stops opening the paper, kept as two questions
+        # because they have two different remedies and only one of them is the
+        # teacher's mistake: `file_is_current` is "the settings moved under the file",
+        # `file_void` is "the passwords were replaced under it" — and the second is
+        # invisible to the first, see `seb_service.file_void_after_reissue`.
+        file_void=live and seb_service.file_void_after_reissue(credential, access_log),
         # The file is generated from the exam's switches, so an exam edited after
         # the file was issued no longer generates its own stored key. The panel has
         # to *say* that: the download would refuse, and a teacher who cannot see why
@@ -197,7 +208,7 @@ def panel(exam_id):
         back_url=_back_url(),
         confirm_field=CONFIRM_FIELD,
         mobile_risk=_mobile_risk(_supabase(), exam),
-        access_log=seb_access.log_for_exam(_supabase(), exam.get("school_id"), exam_id),
+        access_log=access_log,
         # Who could not get in, and when. Read once, and the tally taken from the
         # very rows the table lists, so the number and the rows cannot disagree.
         # `refusal_summary` is called here rather than in the template because it is

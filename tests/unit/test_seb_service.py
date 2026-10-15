@@ -182,15 +182,20 @@ def test_an_encrypted_payload_is_refused_rather_than_misread():
 
 # ── 3. the passwords, and what the file may contain ─────────────────────────
 
-def test_the_minted_passwords_are_six_capitals(app_ctx):
+def test_the_minted_passwords_are_four_capitals(app_ctx):
     """The shape the operator asked for, and the shape the panel's field has.
 
-    Six cells, upper case only. The alphabet is pinned as an *equality* rather
+    Four cells, upper case only. The alphabet is pinned as an *equality* rather
     than as "every character happens to be in it": a test that a draw is drawn
     from the alphabet it is drawn from is no test at all, and the pair
     (length, alphabet) is the whole of what a reader of the page is promised.
+
+    What the *size* costs is not this test's business and is not hidden either —
+    `app/services/seb_crypto.py` states the space (26^4, 18.8 bits) and what it is
+    and is not safe against, and `test_seb_exit_key.py` guards the half of it that
+    can be measured against the client's own code.
     """
-    assert seb_crypto.PASSWORD_LENGTH == 6
+    assert seb_crypto.PASSWORD_LENGTH == 4
     assert seb_crypto.PASSWORD_ALPHABET == "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
     # The ambiguity the old 57-symbol alphabet had to work around was *within* it:
     # `0` beside `O`, `1` beside `l` and `I`. Nothing beside anything is left now,
@@ -199,15 +204,17 @@ def test_the_minted_passwords_are_six_capitals(app_ctx):
     for absent in "0123456789" + "abcdefghijklmnopqrstuvwxyz":
         assert absent not in seb_crypto.PASSWORD_ALPHABET
 
-    seen = {seb_crypto.mint_password() for _ in range(200)}
+    seen = {seb_crypto.mint_password() for _ in range(60)}
     for password in seen:
-        assert len(password) == 6, password
+        assert len(password) == 4, password
         assert password.isupper() and password.isalpha(), password
-    # Not "200 distinct": 26^6 is 3.1·10^8, so 200 draws carry a birthday
-    # collision about 1 run in 15 000 — a flake, not a finding. What this asks is
-    # that the draw is spread over the space at all, which a counter or a constant
-    # fails and a CSPRNG passes with essentially no chance of a false alarm.
-    assert len(seen) >= 199, "200 draws landed on fewer than 199 values"
+    # Not "60 distinct": four characters is 26^4 = 456 976, so 60 draws collide
+    # about 1 run in 250 (birthday: 60·59/2 ≈ 1 770 pairs over 456 976). The
+    # tolerance of two is what keeps that from being a flake, while a counter, a
+    # constant or a draw from a 4-value set stays far outside it. The old 200-draw
+    # form would have been a 1-in-250 failure here, which is how a guard earns a
+    # reputation for being flaky and then gets deleted.
+    assert len(seen) >= 58, f"60 draws landed on only {len(seen)} values"
 
 
 def test_the_downloadable_file_never_carries_a_readable_password(app_ctx):
