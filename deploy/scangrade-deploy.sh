@@ -3582,10 +3582,22 @@ fi
 #
 # It reuses Gate 4's own credentials and base URL — the smoke test already signs a
 # pupil in, and the demo exam is on that pupil's list — so there is no second conf
-# to keep in step. Exit 2 is "could not measure" (no browser, no sittable demo
-# exam, the page did not load): never a rollback, an unmeasured release is not a
-# bad one, and it is said loudly rather than passed off as a pass. Exit 1 is a real
-# finding and rolls back only when the box is armed to enforce it
+# to keep in step.
+#
+# **Exit 2 no longer keeps the release on a box that enforces this gate.** It used
+# to, on the reasoning that an unmeasured release is not a bad one — and the
+# journal shows what that reasoning cost: `exam render gate could not measure
+# (exit 2)` followed by `DEPLOY OK`, a gate that had stopped guarding anything
+# while every run of it read as fine. Every cause of exit 2 — no browser, no
+# credentials, no sittable demo exam, a sign-in that failed — means the page was
+# never *looked at*, and to a pupil a page nobody looked at is indistinguishable
+# from a blank one. So on an enforcing box the release is unverified and is not
+# kept, through the same rollback path a blank page takes; exit 1 is unchanged.
+# The enforcement switch is what keeps this honest rather than brittle: a box with
+# no browser never armed the gate, and where RENDER_ENFORCE is unset the reading
+# stays non-blocking — still said out loud, never passed off as a pass.
+#
+# Exit 1 is a real finding and rolls back only when the box is armed to enforce it
 # (RENDER_ENFORCE), the way the smoke and touch gates are.
 if [ "$HEALTHY" = "1" ] && [ -f "$SMOKE_CONF" ]; then
   RENDER_ENV=()
@@ -3602,11 +3614,24 @@ if [ "$HEALTHY" = "1" ] && [ -f "$SMOKE_CONF" ]; then
       log "$(printf '%s\n' "$RENDER_OUT" | grep -m1 '^exam render gate: OK' || echo 'exam render gate: OK')" ;;
     2)
       # Includes the box's own demo data: a fixture that was never re-seeded carries
-      # no exception question, so the row and its badge could not be measured. Said
-      # rather than passed off as a pass, and never a rollback.
-      log "exam render gate could not measure (exit 2) — this release's pupil exam"
-      log "    page was NOT rendered in a browser, or it carries no exception question:"
-      printf '%s\n' "$RENDER_OUT" | grep -E '^    ' | head -4 | sed 's/^/  /' ;;
+      # no exception question, so the row and its badge could not be measured — and
+      # that is *also* a release in which nothing looked at the page. Refused on an
+      # enforcing box, for the reason the gate's own comment gives; kept, loudly,
+      # where the box never armed the gate.
+      if [ "${RENDER_ENFORCE:-false}" = "true" ]; then
+        log "exam render gate could not measure (exit 2) — the pupil's exam page was"
+        log "    NOT rendered, so this release is unverified: rolling back to $BEFORE"
+        printf '%s\n' "$RENDER_OUT" | grep -E '^exam render gate|^    ' | head -6 | sed 's/^/    /'
+        HEALTHY=0
+        FAIL_REASON="exam render gate (could not measure: exit 2)"
+        FAIL_DETAIL=$(printf '%s\n' "$RENDER_OUT" | grep -E '^exam render gate: could not measure|^    ')
+      else
+        log "exam render gate could not measure (exit 2) — this release's pupil exam"
+        log "    page was NOT rendered or carries no exception question, and this box"
+        log "    does not enforce the gate (RENDER_ENFORCE is not 'true' in"
+        log "    $SMOKE_CONF), so the release is kept and the page is unverified:"
+        printf '%s\n' "$RENDER_OUT" | grep -E '^    ' | head -4 | sed 's/^/  /'
+      fi ;;
     *)
       if [ "${RENDER_ENFORCE:-false}" = "true" ]; then
         # Both halves of that gate land here: a page that did not render, and a page

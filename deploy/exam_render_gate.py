@@ -55,7 +55,9 @@ Exit codes
   0  the exam page rendered, with questions and no page error
   1  a finding — blank exam (a real regression)
   2  could not measure — no browser, no credentials, no sittable demo exam, or
-     the page did not load. **Not** a pass, and deliberately distinct from one.
+     the page did not load. **Not** a pass, and deliberately distinct from one:
+     the runner refuses it on a box that enforces this gate (`RENDER_ENFORCE`),
+     so a page nobody looked at is never shipped as a page that was verified.
 
 Flags / environment (the deploy passes these; flags win):
   --base-url URL         RENDER_BASE_URL      where the app is serving
@@ -190,8 +192,10 @@ def render_expression() -> str:
         "    stageH: stage ? Math.round(stage.getBoundingClientRect().height) : 0,"
         # `d.body` is null until the parser has built it, and the poll's first look
         # can land before that. Reading `.innerText` off it threw a TypeError, the
-        # gate answered "could not measure" (exit 2), and exit 2 does not stop a
-        # release — so the read must survive a document that is not built yet.
+        # gate answered "could not measure" (exit 2) — and a run that answers
+        # could-not-measure is a release in which nothing looked at the page, which
+        # the runner now refuses on an enforcing box — so the read must survive a
+        # document that is not built yet.
         "    bodyText: (d.body && d.body.innerText || '').slice(0, 120),"
         "  };"
         "})()"
