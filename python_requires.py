@@ -87,6 +87,18 @@ def _message(info, offenders: "list[Unparseable]" = ()) -> str:
     return "\n".join(lines)
 
 
+def below_floor(version_info=None) -> bool:
+    """Whether *info* is older than :data:`MINIMUM`.
+
+    The predicate :func:`check` refuses on, public because a second caller needs the
+    *answer* rather than the refusal: ``deploy/render_fixture_gate.py`` may only report
+    a fixture file this interpreter cannot parse as a property of the box when this is
+    true. One comparison, two readers.
+    """
+    info = sys.version_info if version_info is None else version_info
+    return _below(info)
+
+
 def check(version_info=None) -> None:
     """Refuse an interpreter older than :data:`MINIMUM`, for any caller.
 
@@ -94,7 +106,7 @@ def check(version_info=None) -> None:
     under the version it refuses; it defaults to the running interpreter.
     """
     info = sys.version_info if version_info is None else version_info
-    if _below(info):
+    if below_floor(info):
         raise RuntimeError(_message(info))
 
 
