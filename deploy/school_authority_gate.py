@@ -82,6 +82,12 @@ without the decorator that checks it; and a value the audit cannot trace at all 
 could not tell where this school came from" is the honest finding, and printing it as
 `untraceable` is the point rather than a gap.
 
+The home school's one exemption is the cache key (see `CACHE_CLEARER_WORDS`), and it
+is narrow on purpose: it applies to the *mention* sweep — a value handed to a clearer
+is not supplying a school to anything — and never to a value that carries the name
+`school_id` on its way to a write, which the rule above still refuses. A release that
+filed a row under the profile's school is refused with a cache clear one line away.
+
 Exit codes, like the other gates:
 
   0  every teacher-facing write route resolves its school from this request
@@ -125,8 +131,21 @@ ROW_GUARD = "require_school_access"
 ACTIVE_SCHOOL = "user_school_id"
 
 #: The profile's school, which for a cross-school teacher is *not* the school they are
-#: acting in. A write route never has a use for it.
+#: acting in. No write files a row under it.
 HOME_SCHOOL = "user_home_school_id"
+
+#: The words a function that *forgets* a cached page is named with. Such a call is
+#: handed a cache **key**, not a school a row is filed under: `req_cache.invalidate(
+#: key)` drops the page whose key it is given, and this repository's own
+#: `_forget_cached_dashboard(school_id)` drops one teacher's dashboard for one school.
+#: The profile's school there can only drop the wrong page — it cannot file a row under
+#: it — and main's school switcher has to name it: clearing the active choice lands the
+#: teacher back on their home school, whose cached page is exactly the stale picture
+#: that must go.
+#:
+#: Matched as a whole word of the function's name, so `_forget_cached_dashboard` reads
+#: as a clearer and a name that merely begins with one does not.
+CACHE_CLEARER_WORDS = ("clear", "drop", "evict", "forget", "invalidate", "purge")
 
 #: The keys that name a school in a payload or a query.
 SCHOOL_KEYS = ("school_id", "school", "schoolId")
@@ -157,6 +176,32 @@ def _methods(decorator: ast.AST) -> set[str]:
         if kw.arg == "methods" and isinstance(kw.value, (ast.List, ast.Tuple)):
             return {e.value.upper() for e in kw.value.elts if isinstance(e, ast.Constant)}
     return set()
+
+
+def _is_cache_clearer(node: ast.AST) -> bool:
+    """Is this call one that only names a cached page to forget?
+
+    A whole word of the function's own name, so an unrelated name is not read as one.
+    """
+    if not isinstance(node, ast.Call):
+        return False
+    words = _name_of(node).strip("_").lower().split("_")
+    return any(word in CACHE_CLEARER_WORDS for word in words)
+
+
+def _cache_key_nodes(tree: ast.Module) -> set:
+    """Every node inside a call that is handed a cache key, not a school.
+
+    A set of the node objects themselves: `ast` nodes hash and compare by identity, so
+    the finding loop below skips exactly the mentions that reach a clearer. The
+    write-route rule is untouched by it — there a value is read where it *supplies* a
+    school, which is a different question from where it is mentioned.
+    """
+    keys = set()
+    for node in ast.walk(tree):
+        if _is_cache_clearer(node):
+            keys.update(ast.walk(node))
+    return keys
 
 
 def _strings(node: ast.AST):
@@ -386,10 +431,15 @@ def audit_module(path: pathlib.Path) -> tuple[list[Finding], int]:
     findings: list[Finding] = []
     examined = 0
 
-    # The home school is refused wherever it appears in a write route: there is no
-    # legitimate use for it on this side, and "used it somewhere I did not think to
-    # trace" is exactly the failure this gate exists for.
+    # The home school is refused wherever it appears in a write route: no write on this
+    # side has a legitimate use for it, and "used it somewhere I did not think to trace"
+    # is exactly the failure this gate exists for. The one thing a call may do with it is
+    # name the cached page to forget (see CACHE_CLEARER_WORDS) — that value reaches a
+    # cache key and no row.
+    cache_keys = _cache_key_nodes(tree)
     for node in ast.walk(tree):
+        if node in cache_keys:
+            continue
         if isinstance(node, ast.Attribute) and node.attr == HOME_SCHOOL:
             findings.append(Finding(
                 file=path.name, line=node.lineno, function=_enclosing(tree, node),

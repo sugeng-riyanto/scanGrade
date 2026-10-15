@@ -210,6 +210,54 @@ class TestTheDefectShapesAreCaught:
         assert proc.returncode == EXIT_FINDING, f"{expression} was not refused"
         assert "home school" in kinds(proc)
 
+    #: The one shape the home school is legitimately named in: a cache key. A switcher
+    #: has to drop the *destination* school's cached page, and sending a teacher back to
+    #: their own school makes the profile's the destination — which is why main's own
+    #: `teacher_membership_switch` writes `_forget_cached_dashboard(g.user_home_school_id)`.
+    HOME_KEY_CALLS = ('_forget_cached_dashboard(g.get("user_home_school_id"))',
+                      'req_cache.invalidate(g.get("user_home_school_id"))',
+                      'cache.drop_page_for(g.get("user_home_school_id"))')
+
+    @pytest.mark.parametrize("call", HOME_KEY_CALLS)
+    def test_a_cached_page_named_by_the_profile_is_not_a_write(self, tmp_path, call):
+        """A value that reaches a cache key cannot file a row under that school.
+
+        Refusing it would refuse the route that has to exist: main's school switcher
+        clears the active choice, the teacher lands back on their home school, and the
+        stale page waiting there is exactly what must go.
+        """
+        source = CLEAN + (f"\n\ndef switch_page():\n    return {call}\n")
+        proc = run_gate(tree_with(tmp_path, source), "--json")
+        assert proc.returncode == 0, (
+            f"a cache key was read as a tenant boundary: {call}\n{proc.stdout}")
+        assert kinds(proc) == []
+
+    def test_the_exemption_is_not_a_hole(self, tmp_path):
+        """The same value where it *supplies* a school is still refused, one line from
+        a cache clear — the rule reads where a value goes, not where it is mentioned."""
+        before = SHAPES["the profile's school is written"][0]
+        written = CLEAN.replace(before, SHAPES["the profile's school is written"][1])
+        source = written + (
+            '\n\ndef switch_page():\n    return _forget_cached_dashboard('
+            'g.get("user_home_school_id"))\n')
+        proc = run_gate(tree_with(tmp_path, source), "--json")
+        assert proc.returncode == EXIT_FINDING, (
+            "a row filed under the profile's school passed because a cache clear sat "
+            "beside it:\n" + proc.stdout)
+        assert "home school" in kinds(proc)
+
+    def test_the_exemption_needs_a_clearer_word(self, tmp_path):
+        """Matched as a word of the call's own name, so an unrelated helper handed the
+        profile's school is still a finding — the exemption is not a prefix."""
+        source = CLEAN + (
+            '\n\ndef estimate():\n    return page_estimate('
+            'g.get("user_home_school_id"))\n')
+        proc = run_gate(tree_with(tmp_path, source), "--json")
+        assert proc.returncode == EXIT_FINDING, (
+            "the profile's school passed through a name that is not a cache clearer:\n"
+            + proc.stdout)
+        assert "home school" in kinds(proc)
+
 
 # ── what is out of scope, and why ────────────────────────────────
 

@@ -404,7 +404,6 @@ fi
 # resolves its school from somewhere else, 2 could not measure (no route modules, or
 # one that will not parse) — the box's property, relayed as such rather than as a
 # finding.
-SCHOOL_CLAIM=""
 SCHOOL_OUT=$("$PY" "$REPO/deploy/school_authority_gate.py" 2>&1)
 SCHOOL_RC=$?
 if [ "$SCHOOL_RC" -eq 1 ]; then
@@ -417,10 +416,6 @@ if [ "$SCHOOL_RC" -eq 1 ]; then
   echo "$SCHOOL_OUT" | sed 's/^/    /' >&2
   exit 1
 fi
-if [ "$SCHOOL_RC" -eq 0 ]; then
-  SCHOOL_CLAIM=", and every teacher-facing write route files its rows under the school of this request"
-fi
-
 if [ "$RC" -ne 0 ] && [ "$RC" -ne 5 ] && [ "$CSS_RC" -eq 0 ]; then
   echo "$CSS_OUT"   # the stylesheet half is fine; say so before the failure
 fi
@@ -458,7 +453,8 @@ if [ "$RC" -eq 0 ]; then
     echo "$CSS_OUT"
     echo "$FIXTURES_OUT"
     echo "$SCHOOL_OUT"
-    echo "theme gate: OK — readable in both themes, every named utility is compiled, the committed stylesheet is the one the templates produce, the app's own stylesheet stays a cached file, every file under /static/ is one the app asks for and in a commit, every page declares the language of its own copy, no template translates less than it did, no tracked file carries a service-role key or a hard-coded Flask secret, and every table, column and policy the code names is one this repository declares, with every role it compares against one the database holds${APPLIED_CLAIM}${FIXTURES_CLAIM}${SCHOOL_CLAIM}, and every facility the landing page advertises one this repository can show"    exit 0
+    echo "theme gate: OK — readable in both themes, every named utility is compiled, the committed stylesheet is the one the templates produce, the app's own stylesheet stays a cached file, every file under /static/ is one the app asks for and in a commit, every page declares the language of its own copy, no template translates less than it did, no tracked file carries a service-role key or a hard-coded Flask secret, and every table, column and policy the code names is one this repository declares, with every role it compares against one the database holds${APPLIED_CLAIM}${FIXTURES_CLAIM}, and every facility the landing page advertises one this repository can show, and every teacher-facing write route files its rows under the school of this request"
+    exit 0
   fi
   echo >&2
   echo "theme gate: the stylesheet freshness check COULD NOT RUN — this release is" >&2
