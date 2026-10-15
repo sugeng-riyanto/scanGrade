@@ -1401,18 +1401,6 @@ def exam_form():
     # the class a pupil is in this year, and a closed year stays read-only.
     active_year_id = (ta_service.active_school_year(
         supabase, g.get("user_school_id")) or {}).get("id")
-    # ── the school this paper is filed under ───────────────────────────────────
-    # A create is a tenant decision, so it goes through the authority rather than
-    # through whatever `g.user_school_id` happens to hold: the answer is the school
-    # this request is *verified* in, or a refusal. Before this, the row was written
-    # with `g.user_school_id`, which for a teacher whose active NPSN is not the one
-    # their profile names meant the paper — and the weighting and results that
-    # follow its `school_id` — landed in the home school. See
-    # `app/services/school_membership.py::filing_school`.
-    school_id, _school_error = filing_school_for_request(
-        requested_school_id=request.form.get("school_id"))
-    if _school_error:
-        return _exam_save_refused(autosave, _school_error)
     data = {
         "teacher_id": g.user_id,
         "school_id": school_id,

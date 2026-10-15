@@ -534,12 +534,17 @@ def _door_body(src: str, name: str) -> str:
 
 def test_one_refusal_helper_answers_both_a_json_and_a_browser_save():
     src = _routes()
-    # Four per door: the question count, the window order, the assessment calendar,
-    # and the school the paper is filed under (`filing_school_for_request`, which
-    # refuses a create it cannot verify). Counted per door rather than over the file,
-    # so a door that loses one while another gains two cannot pass.
-    for name in ("exam_form", "exam_detail"):
-        assert _door_body(src, name).count("return _exam_save_refused(autosave,") == 4, (
+    # Five on the builder: the question count, the window order, the assessment
+    # calendar, the school the paper is filed under (`filing_school_for_request`,
+    # which refuses a create it cannot verify), and the plan's exam allowance —
+    # asked inside this handler rather than on the door, so that saving a paper
+    # which already exists is never charged to it (see
+    # `subscription_service.exam_quota`). The other door has four, having no paper
+    # to mint. Counted per door rather than over the file, so a door that loses one
+    # while another gains two cannot pass.
+    expected = {"exam_form": 5, "exam_detail": 4}
+    for name, count in expected.items():
+        assert _door_body(src, name).count("return _exam_save_refused(autosave,") == count, (
             f"{name}: every refusal has to answer an autosave with a sentence "
             "rather than a redirect")
     assert 'return jsonify({"ok": False, "error": message}), 400' in src, (
