@@ -1,0 +1,123 @@
+name: browser gate
+
+# The pages a teacher and a pupil actually use, measured in a headless browser on
+# every push — the exam builder's finger floor, the pupil's exam page, and the SEB
+# handshake page's own script. Until this workflow existed all three ran *only* on
+# the deploy box, after a release had been fetched: a DOM regression was found by the
+# box, on the branch the box reads, as a rollback.
+#
+# Nothing here needs a database, a secret, a network or the deploy box. `deploy/browser_gate.py`
+# serves the app out of the checkout it just cloned — the real `create_app`, the real
+# routes, templates and static assets — with the two Supabase clients replaced by
+# in-memory stand-ins seeded from `deploy/demo_exam_fixture.py`, and signs in through
+# the app's own login POST. See the module docstrings for what that does and does not
+# prove (a green fixture is not evidence about the box's data or TLS; the box still
+# runs its own gates).
+#
+# The job also asks the other half of the question, and it is the half that keeps the
+# gate honest: `tests/unit/test_browser_gates_can_fail.py` points each of these gates at
+# a page that is broken in the dimension it measures and requires a **finding** (exit
+# 1), never a "could not measure" (exit 2) — a gap does not refuse a release, so a gate
+# that answers 2 for a broken page is a gate that ships it.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pages:
+    name: the shipped pages, in a headless browser
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      # The app's own dependency list, so CI builds the app the box builds. The gate
+      # imports the app rather than a subset of it: a page is only the release's page
+      # if the release's own code rendered it.
+      - name: install the app's dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # The browser is located the way the gate already locates it: `SG_CHROME` first,
+      # then the usual names. GitHub's ubuntu images ship Chrome; if that ever changes,
+      # this step fails loudly instead of the gate answering "no browser" — a CI job
+      # that cannot measure must not go green for it.
+      - name: find a browser
+        id: browser
+        run: |
+          for candidate in google-chrome google-chrome-stable chromium chromium-browser; do
+            found="$(command -v "$candidate" || true)"
+            if [ -n "$found" ]; then
+              echo "path=$found" >> "$GITHUB_OUTPUT"
+              echo "using $found"
+              exit 0
+            fi
+          done
+          echo "::error::no Chrome/Chromium on this runner, so the pages cannot be measured"
+          exit 1
+
+      # Two claims, and the second is the one a reader is most likely to take on
+      # trust: the first file guards the verdict arithmetic, and the second *runs
+      # each gate against a deliberately broken page* and requires a finding rather
+      # than a "could not measure" — because exit 2 does not refuse a release. The
+      # browser found above is handed to both, so neither can pass by skipping.
+      - name: the gate's own guards
+        env:
+          SG_CHROME: ${{ steps.browser.outputs.path }}
+        run: |
+          python -m pytest tests/unit/test_browser_gate.py -q
+          python -m pytest tests/unit/test_browser_gates_can_fail.py -q
+
+      - name: measure the shipped pages
+        env:
+          SG_CHROME: ${{ steps.browser.outputs.path }}
+        run: |
+          set +e
+          python deploy/browser_gate.py --json-out browser-gate.json
+          code=$?
+          set -e
+          {
+            echo "### browser gate — exit \`${code}\`"
+            python - <<'PY'
+          import json, os
+          path = "browser-gate.json"
+          if not os.path.exists(path):
+              print("no reading was written")
+              raise SystemExit(0)
+          reading = json.load(open(path, encoding="utf-8"))
+          print(f"measured `{reading.get('base_url')}` with `{reading.get('browser')}`")
+          print()
+          print("| part | state |")
+          print("| --- | --- |")
+          for name, part in (reading.get("parts") or {}).items():
+              print(f"| {name} | {part.get('state')} |")
+          PY
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$code" = "0" ]; then
+            exit 0
+          fi
+          if [ "$code" = "1" ]; then
+            echo "::error::the browser gate found a regression in the shipped pages"
+            exit 1
+          fi
+          echo "::error::the browser gate could not measure the pages (exit 2) — a CI run that cannot look is not a pass"
+          exit 1
+
+      - name: keep the reading
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-gate-reading
+          path: browser-gate.json
+          if-no-files-found: warn

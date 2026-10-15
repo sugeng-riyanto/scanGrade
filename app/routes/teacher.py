@@ -50,7 +50,7 @@ from app.services import teacher_assignments as ta_service
 from app.services import grade_weighting
 from app.services import subject_kkm as kkm_service
 from app.services.anti_cheat_service import (
-    events_for_exam, events_for_student, leaving_summary,
+    events_for_exam, events_for_student, leaving_summary, recorded_violations,
 )
 from app.services.pdf_service import upload_pdf
 from app.services import pdf_service
@@ -1212,6 +1212,25 @@ def _builder_scope(supabase, sid):
     return subjects, classes, None
 
 
+def _recorded_violations_for_builder(supabase, exam_row, exam_id) -> int:
+    """How many rows the builder's warning has to name — 0 for a monitored paper.
+
+    Read **only** when the paper is switched off. On a monitored paper there is no
+    switch to warn about (the card cannot show the warning at all), and a read on
+    every page open to compute a number nobody will see is the round-trip this
+    codebase keeps paying for — see the round-trip budget in AGENTS.md.
+
+    `anti_cheat_service.enabled` stays the switch's one reader and
+    `anti_cheat_service.recorded_violations` the log's, so this function decides
+    *whether to ask*, never what the answer means.
+    """
+    from app.services.anti_cheat_service import enabled as anti_cheat_on
+
+    if anti_cheat_on(exam_row):
+        return 0
+    return recorded_violations(supabase, exam_id)
+
+
 @teacher_bp.route("/exams/new", methods=["GET", "POST"])
 @subscription_write_required
 @teacher_or_admin_required
@@ -1623,10 +1642,17 @@ def exam_detail(exam_id):
             exam_data.get("grade_component_type_id"),
             exam_data.get("school_year_id")
             or (ta_service.active_school_year(supabase, sid) or {}).get("id"))
+        # The school's switch, and what it does *not* undo: a paper that is switched
+        # off keeps every violation row it already recorded, so the anti-cheat card
+        # says how many there are rather than implying the record was cleared. Asked
+        # once, and only for a paper that is off — `_recorded_violations_for_builder`.
+        recorded_violation_count = _recorded_violations_for_builder(
+            supabase, exam_row, exam_id)
         return render_template("teacher/exam_form.html", exam=exam_data, subjects=subjects, classes=classes,
                                classes_by_subject=classes_by_subject,
                                saved_targets=saved_targets,
                                component_gap=component_gap,
+                               recorded_violations=recorded_violation_count,
                                grade_components=_grade_components_by_subject(supabase, sid),
                                option_letters=list(CHOICE_OPTIONS),
                                builder_defaults=_builder_defaults(supabase, g.user_id, subjects, classes))

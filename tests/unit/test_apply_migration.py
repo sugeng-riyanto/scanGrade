@@ -19,12 +19,17 @@ one is here because getting it wrong is silent rather than loud:
 import ast
 import hashlib
 import importlib.util
+import io
 import json
+import subprocess
 import sys
+import tarfile
 from pathlib import Path
 
 import psycopg2
 import pytest
+
+from tests.unit.git_env import git_env
 
 ROOT = Path(__file__).resolve().parents[2]
 DEPLOY = ROOT / "deploy"
@@ -338,6 +343,255 @@ def test_the_ledger_entry_names_the_file_the_hash_and_who(tmp_path):
     assert payload["sha256"] == "abc123"
     assert payload["recovery_point"] == "/tmp/snap.tar.gz"
     assert payload["by"] and payload["by"] != "?@"
+
+
+# ── one file, one identity, on every platform ────────────────────────────────
+#
+# The digest is the whole of the ledger's answer to "has this file been edited since
+# it was applied?", and it was answering *yes* for files nobody had touched: this
+# Windows checkout materialises a committed LF file as CRLF, so one unchanged
+# migration carried two shas and the box read `APPLIED, THEN EDITED` — measured here
+# for `037` and again for `064_seb_door_refusals.sql`, whose record held exactly the
+# sha of the same file with LF inserted. Two things hold that now, and both are
+# checked below: the ledger folds CRLF before hashing, so the digest cannot depend on
+# the platform, and the repository pins the extension to LF, so the file itself
+# cannot either.
+
+#: One migration's bytes: as the committing machine stores them, and as a Windows
+#: checkout of the same commit holds them.
+LF_SQL = b"CREATE TABLE widget (id uuid);\nSELECT 1;\n"
+CRLF_SQL = LF_SQL.replace(b"\n", b"\r\n")
+
+
+def _bytes(path: Path, body: bytes) -> Path:
+    """Fixture bytes written literally. `write_text` translates `\n` to `\r\n` on
+    Windows, and a fixture whose line endings depend on the machine that writes it
+    cannot measure line endings."""
+    path.write_bytes(body)
+    return path
+
+
+def _record(path: Path, body: bytes) -> None:
+    """The record the Linux box would have written after applying `body`."""
+    path.write_text(json.dumps({"sha256": hashlib.sha256(body).hexdigest(),
+                                "applied_at": "2026-09-13T05:37:43+00:00"}),
+                    encoding="utf-8")
+
+
+def test_a_crlf_checkout_and_an_lf_box_are_one_identity(tmp_path):
+    """One file, two platforms' bytes, one digest — and that digest is the value an
+    LF box computes, which is what keeps every sha already on record valid."""
+    crlf = _bytes(tmp_path / "crlf.sql", CRLF_SQL)
+    lf = _bytes(tmp_path / "lf.sql", LF_SQL)
+
+    assert app_mig.file_digest(crlf) == app_mig.file_digest(lf)
+    assert app_mig.file_digest(lf) == hashlib.sha256(LF_SQL).hexdigest()
+
+
+def test_a_lone_carriage_return_is_a_byte_of_the_file_not_a_line_ending(tmp_path):
+    """Only CRLF is folded. A CR that is not part of a line ending is content, and
+    folding it would make the identity a claim about a file nobody stored."""
+    body = b"SELECT 'a\rb';\n"
+
+    assert app_mig.file_digest(_bytes(tmp_path / "odd.sql", body)) == \
+        hashlib.sha256(body).hexdigest()
+
+
+def test_status_calls_a_crlf_checkout_applied(tmp_path, capsys):
+    """The false positive itself, at the surface a human reads."""
+    migrations = tmp_path / "migrations"
+    migrations.mkdir()
+    _bytes(migrations / "024_x.sql", CRLF_SQL)
+    ledger = tmp_path / "ledger"
+    ledger.mkdir()
+    _record(ledger / "024_x.json", LF_SQL)
+
+    app_mig.status(ledger, migrations)
+
+    out = capsys.readouterr().out
+    assert "applied 2026-09-13" in out
+    assert "APPLIED, THEN EDITED" not in out
+
+
+def test_verify_calls_a_crlf_checkout_applied(monkeypatch, tmp_path, capsys):
+    """`--verify` reads the same identity, so the two modes cannot answer differently
+    about one file — which is the shape the fix had to cover twice."""
+    migrations = tmp_path / "migrations"
+    migrations.mkdir()
+    _bytes(migrations / "026_widget.sql", CRLF_SQL)
+    ledger = tmp_path / "ledger"
+    ledger.mkdir()
+    _record(ledger / "026_widget.json", LF_SQL)
+    monkeypatch.setattr(app_mig, "schema_snapshot",
+                        lambda cur, extra_schemas=(): {"table widget"})
+
+    code = app_mig.verify(ledger, migrations, object())
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "applied 2026-09-13" in out
+    assert "APPLIED, THEN EDITED" not in out
+
+
+def test_the_record_is_the_digest_of_the_text_that_was_run(tmp_path):
+    """The writer's half of one identity, and the only place the two halves of a single
+    reading are told apart: `describe_file` hands back the SQL to execute and the sha to
+    record, in that order. Swap them and this platform executes a hash and records the
+    SQL as the file's identity — while `--status`, `--verify` and the
+    one-definition guard all still agree with themselves, because each of them reads a
+    *value* and none of them reads the pairing."""
+    path = _bytes(tmp_path / "027_widget.sql", CRLF_SQL)
+
+    sql, digest = app_mig.describe_file(path)
+
+    assert sql == CRLF_SQL.decode("utf-8")
+    assert digest == hashlib.sha256(LF_SQL).hexdigest()
+
+
+def test_a_crlf_checkout_records_the_boxs_digest_for_a_file_nobody_touched(tmp_path):
+    """The sentence the fix exists for, at the surface that outlives the run: what an
+    apply on this platform writes down is the digest the Linux box holds, so the two
+    boxes cannot end up disagreeing about a file neither has edited."""
+    path = _bytes(tmp_path / "027_widget.sql", CRLF_SQL)
+
+    _, digest = app_mig.describe_file(path)
+    entry = app_mig.record(tmp_path / "ledger", path, digest, [], None)
+
+    assert json.loads(entry.read_text(encoding="utf-8"))["sha256"] == \
+        hashlib.sha256(LF_SQL).hexdigest()
+
+
+def test_the_identity_function_is_the_only_definition_of_it():
+    """Three call sites hashed bytes for themselves before, and they disagreed: the
+    record was written from one reading and compared against another. A fourth would
+    disagree again, so the tool may hold exactly one definition."""
+    hashing = [line.strip() for line in SOURCE.splitlines() if "hashlib.sha256" in line]
+
+    assert hashing == ["return hashlib.sha256(canonical_bytes(raw)).hexdigest()"], (
+        "every digest must come from digest_of()/file_digest(), so that the mode "
+        f"writing a record and the mode reading it cannot drift apart: {hashing}")
+
+
+def _glob_patterns() -> list[tuple[str, bool]]:
+    """Every pattern this ledger globs over the migrations directory, and whether it
+    reads the declared constant.
+
+    Scoped to the receiver spelled `migrations`, deliberately: the same module globs a
+    *snapshot* directory for `*.tar.gz` archives, which are not migrations and whose
+    bytes no per-file identity covers. A glob over anything else is therefore not this
+    guard's business — but a `migrations` glob it cannot evaluate is an assertion
+    failure rather than a silent omission, so the reader cannot quietly stop covering
+    the globs it was written for.
+    """
+    found: list[tuple[str, bool]] = []
+    for node in ast.walk(ast.parse(SOURCE)):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "glob" and node.args):
+            continue
+        receiver = node.func.value
+        if not (isinstance(receiver, ast.Name) and receiver.id == "migrations"):
+            continue
+        argument = node.args[0]
+        if isinstance(argument, ast.Constant) and isinstance(argument.value, str):
+            found.append((argument.value, False))
+        elif isinstance(argument, ast.JoinedStr):
+            via = any(isinstance(part, ast.FormattedValue)
+                      and isinstance(part.value, ast.Name)
+                      and part.value.id == "MIGRATION_SUFFIX"
+                      for part in argument.values)
+            pattern = "".join(
+                part.value if isinstance(part, ast.Constant) else
+                getattr(app_mig, getattr(part.value, "id", ""), "")
+                for part in argument.values)
+            found.append((pattern, via))
+        else:
+            raise AssertionError(f"a glob this guard cannot read: {ast.dump(argument)}")
+
+    assert found, (
+        "no glob over `migrations` found — either the ledger stopped discovering "
+        "migrations or it renamed the directory, and this guard is now reading nothing")
+    return found
+
+
+def _globbed_suffixes() -> set[str]:
+    return {Path(pattern).suffix for pattern, _ in _glob_patterns()}
+
+
+def _attributes_in(repo: Path, path: str, *names: str) -> dict[str, str]:
+    """What git says about a path, resolved the way a checkout resolves it.
+
+    `git check-attr` rather than a reader of our own: the answer is the *last*
+    matching line of a file a user's global config and `info/attributes` can also feed,
+    and a hand-rolled matcher is how a guard ends up agreeing with itself while the
+    checkout disagrees with it.
+    """
+    done = subprocess.run(["git", "-C", str(repo), "check-attr", *names, "--", path],
+                          capture_output=True, text=True, check=False, env=git_env())
+    assert done.returncode == 0, (
+        f"git check-attr could not be asked ({done.returncode}): {done.stderr.strip()}")
+    return {name: value for _, name, value in
+            (line.split(": ", 2) for line in done.stdout.splitlines() if line.strip())}
+
+
+def test_the_ledger_globs_only_the_extension_it_declares():
+    """One extension, named once. A literal glob is invisible to the constant, so a
+    change to the constant would leave a glob behind still looking for the old
+    extension — and the pin is checked against the one that is declared."""
+    patterns = _glob_patterns()
+
+    assert {Path(pattern).suffix for pattern, _ in patterns} == {app_mig.MIGRATION_SUFFIX}, (
+        "a glob looks for an extension the ledger does not declare — and therefore for "
+        "one whose line endings nothing pins")
+    assert all(via for _, via in patterns), (
+        f"an extension is written into a glob instead of `MIGRATION_SUFFIX`, which is "
+        f"then not the only place it is named: {patterns}")
+
+
+def test_every_extension_the_ledger_identifies_files_by_is_pinned_to_lf():
+    """The ledger folds line endings now, so a CRLF checkout no longer *lies* — but the
+    file is still two different files on two platforms, and the attribute is what
+    decides which one the repository stores. This pin was missing for `*.sql`: 27 of
+    the 73 migrations in `supabase/migrations` were materialised CRLF here while the
+    box read the LF the blobs hold."""
+    assert app_mig.MIGRATION_SUFFIX.startswith("."), "an extension, not a bare name"
+
+    for suffix in sorted(_globbed_suffixes()):
+        attrs = _attributes_in(ROOT, f"supabase/migrations/0000_example{suffix}",
+                               "text", "eol")
+        assert attrs["eol"] == "lf", (
+            f"`{suffix}` is hashed by deploy/apply_migration.py, and `.gitattributes` "
+            f"leaves its line endings to `core.autocrlf` (eol: {attrs['eol']}): one "
+            "unchanged file would be two files, and which one a checkout holds would "
+            "depend on the machine. Add `<pattern> text eol=lf`.")
+        assert attrs["text"] in ("set", "auto"), (
+            f"`{suffix}` is pinned to eol=lf with text={attrs['text']}: `eol` is only "
+            "honoured for a path git treats as text, so the pin does nothing.")
+
+
+def test_the_pin_check_can_fail(tmp_path):
+    """A guard that cannot fail is not a guard. The same reading, against a repository
+    that pins one extension and leaves the ledger's to `core.autocrlf`, must say so —
+    and a later line overriding the pin must be seen too, because that is the one way
+    a written rule stops being the rule."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    assert subprocess.run(["git", "-C", str(repo), "init", "-q"], env=git_env(),
+                          check=False).returncode == 0
+
+    (repo / ".gitattributes").write_bytes(b"*.py text eol=lf\n")
+    assert _attributes_in(repo, "x.py", "text", "eol") == {"text": "set", "eol": "lf"}
+    assert _attributes_in(repo, "x.sql", "text", "eol") == {"text": "unspecified",
+                                                             "eol": "unspecified"}
+
+    # A later line wins, per attribute: a pin that a rule further down undoes is not
+    # a pin, and the guard must read the attribute the way a checkout resolves it.
+    (repo / ".gitattributes").write_bytes(b"*.sql text eol=lf\n*.sql text eol=crlf\n")
+    assert _attributes_in(repo, "x.sql", "text", "eol")["eol"] == "crlf"
+
+    # `-text` leaves `eol` meaningless, which the guard's second assertion answers for.
+    (repo / ".gitattributes").write_bytes(b"*.sql -text\n")
+    assert _attributes_in(repo, "x.sql", "text", "eol") == {"text": "unset",
+                                                             "eol": "unspecified"}
 
 
 # ── there is no way to skip the trial ────────────────────────────────────────
@@ -704,3 +958,234 @@ def test_the_named_exception_does_not_leak_to_another_file(monkeypatch, tmp_path
     out = capsys.readouterr().out
     assert code == 6, out
     assert "MISSING  policy schools.schools_read_own" in out
+
+
+# ── which archive can undo the migration: the one that does not already have it ─
+#
+# `064_seb_door_refusals.sql` was applied on 10 October and applied again on 12
+# October, to prove it idempotent. The re-run took its own snapshot first, and by then
+# the table the file creates was already in the schema — so the box held three
+# archives carrying that one stem and the **newest** of them was the one that could not
+# undo anything: restoring it leaves `seb_door_refusal` exactly where it is, under a
+# record calling it the way back. The archive is read here, not just its name.
+
+def _snapshot(out_dir: Path, name: str, tables) -> Path:
+    """A real snapshot archive: a member per table, and the manifest the tool reads.
+
+    Written rather than faked, because the decision is made from the manifest and a
+    fixture of `b"archive-bytes"` would only measure its own emptiness.
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+    archive = out_dir / name
+    # `tables=None` writes a manifest that does not say which tables it carries, which
+    # is not the same thing as one that carries none — see the guard below.
+    body = {"label": name, "kind": "postgrest-logical-snapshot"}
+    if tables is not None:
+        body["tables"] = {table: {"rows": 0, "sha256": "0" * 64} for table in tables}
+    manifest = json.dumps(body).encode("utf-8")
+    with tarfile.open(archive, "w:gz") as tar:
+        for table in (tables or []):
+            blob = b""
+            info = tarfile.TarInfo(f"tables/{table}.ndjson")
+            info.size = len(blob)
+            tar.addfile(info, io.BytesIO(blob))
+        info = tarfile.TarInfo("manifest.json")
+        info.size = len(manifest)
+        tar.addfile(info, io.BytesIO(manifest))
+    return archive
+
+
+WIDGET_SQL = "CREATE TABLE widget (id uuid);\n"
+WIDGET = [("table", "table widget", 0)]
+COLUMN_ONLY = [("column", "column widget.id", 0)]
+OLD_ARCHIVE = "scangrade-db-20261010T034327Z-064_widget.tar.gz"
+
+
+def _recorded(ledger: Path, stem: str = "064_widget"):
+    return json.loads((ledger / f"{stem}.json").read_text(encoding="utf-8"))
+
+
+def test_a_snapshot_that_already_carries_the_table_cannot_undo_it(tmp_path):
+    after = _snapshot(tmp_path, "scangrade-db-20261012T112256Z-064_widget.tar.gz",
+                      ["widget"])
+    before = _snapshot(tmp_path, OLD_ARCHIVE, [])
+
+    assert app_mig.can_undo(after, WIDGET) is False, (
+        "a snapshot taken after the migration still carries the table it creates, and "
+        "restoring it leaves the migration exactly where it was")
+    assert app_mig.can_undo(before, WIDGET) is True
+    assert app_mig.can_undo(before, COLUMN_ONLY) is None, (
+        "a manifest lists tables and nothing else, so a file that creates no table "
+        "has no answer here — 'cannot say' is not a refusal")
+    junk = tmp_path / "hand-copied.tar.gz"
+    junk.write_bytes(b"archive-bytes")
+    assert app_mig.can_undo(junk, WIDGET) is None, (
+        "an archive whose manifest cannot be read has no verdict to give, and the "
+        "name rule stands for it exactly as before")
+
+
+def test_a_manifest_that_does_not_list_tables_cannot_say(tmp_path):
+    """A snapshot whose manifest holds no table list is not a snapshot holding none:
+    reading it as empty would have `can_undo` call every such archive able, which is
+    exactly the claim this section exists to stop making."""
+    quiet = _snapshot(tmp_path, "scangrade-db-20261012T112256Z-064_widget.tar.gz",
+                      None)
+
+    assert app_mig.snapshot_tables(quiet) is None
+    assert app_mig.can_undo(quiet, WIDGET) is None
+
+
+def test_the_archive_that_can_undo_it_wins_over_the_newest_name(tmp_path):
+    out = tmp_path / "backups"
+    _snapshot(out, OLD_ARCHIVE, [])
+    _snapshot(out, "scangrade-db-20261012T111743Z-064_widget.tar.gz", ["widget"])
+    _snapshot(out, "scangrade-db-20261012T112256Z-064_widget.tar.gz", ["widget"])
+    path = tmp_path / "064_widget.sql"
+    path.write_text(WIDGET_SQL, encoding="utf-8")
+
+    chosen = app_mig.undoing_archive(out, path, WIDGET)
+
+    assert chosen.name == OLD_ARCHIVE, (
+        "the two newest archives with the stem were taken after the table existed, so "
+        "they are the ones that cannot undo this migration")
+    newest = app_mig.undoing_archive(out, path, COLUMN_ONLY)
+    assert newest.name == "scangrade-db-20261012T112256Z-064_widget.tar.gz", (
+        "when nothing can say, the newest name still stands")
+    assert app_mig.undoing_archive(out / "absent", path, WIDGET) is None
+
+
+def _commit_setup(monkeypatch, tmp_path, *, taken_tables, archives=(), on_record=None,
+                  sql=WIDGET_SQL, name="064_widget.sql"):
+    """Drive a real `--commit` run, with the snapshot and the catalogue scripted."""
+    repo = tmp_path / "repo"
+    migrations = repo / "supabase" / "migrations"
+    migrations.mkdir(parents=True)
+    (migrations / name).write_text(sql, encoding="utf-8")
+    out = tmp_path / "backups"
+    for archive_name, tables in archives:
+        _snapshot(out, archive_name, tables)
+    taken = _snapshot(out, f"scangrade-db-20261012T112256Z-{Path(name).stem}.tar.gz",
+                      taken_tables)
+    ledger = tmp_path / "ledger"
+    ledger.mkdir(parents=True, exist_ok=True)
+    if on_record is not None:
+        (ledger / f"{Path(name).stem}.json").write_text(
+            json.dumps({"file": name, "sha256": "x", "recovery_point": on_record}),
+            encoding="utf-8")
+
+    monkeypatch.setattr(app_mig, "load_migration_url", lambda repo: "postgresql://x")
+    monkeypatch.setattr(app_mig, "check_target", lambda url, repo: REF)
+    monkeypatch.setattr(app_mig, "connect", lambda url: FakeConn())
+    monkeypatch.setattr(app_mig, "schema_snapshot", lambda cur: {"table widget": "x"})
+    monkeypatch.setattr(app_mig, "dry_run", lambda url, sql, require_idempotent: [])
+    monkeypatch.setattr(app_mig, "take_recovery_point",
+                        lambda url, repo, out_dir, keep, label: taken)
+    monkeypatch.setattr(sys, "argv", [
+        "apply_migration.py", str(migrations / name), "--commit",
+        "--repo", str(repo), "--out", str(out), "--ledger", str(ledger)])
+    return taken, out, ledger
+
+
+def test_the_snapshot_is_named_when_it_can_undo_the_migration(monkeypatch, tmp_path):
+    """The ordinary run: the snapshot was taken *before* the file ran, so it is the
+    recovery point and nothing is written about why."""
+    taken, _out, ledger = _commit_setup(monkeypatch, tmp_path, taken_tables=[])
+
+    assert app_mig.main() == 0
+
+    payload = _recorded(ledger)
+    assert payload["recovery_point"] == str(taken)
+    assert "recovery_point_basis" not in payload, (
+        "the run that applies a migration takes the right archive by construction, so "
+        "there is nothing to explain")
+
+
+def test_a_reapply_names_the_archive_that_can_undo_it_not_the_snapshot_it_took(
+        monkeypatch, tmp_path, capsys):
+    taken, out, ledger = _commit_setup(
+        monkeypatch, tmp_path, taken_tables=["widget"], archives=[(OLD_ARCHIVE, [])],
+        on_record=str(tmp_path / "backups" / OLD_ARCHIVE))
+
+    assert app_mig.main() == 0
+
+    payload = _recorded(ledger)
+    assert payload["recovery_point"] == str(out / OLD_ARCHIVE), (
+        "the re-run's snapshot already carries `widget`, so naming it claims a "
+        "restoration that leaves the migration in place")
+    assert payload["recovery_point"] != str(taken)
+    assert "widget" in payload["recovery_point_basis"]
+    assert "already named" in payload["recovery_point_basis"]
+    assert "NOT naming the snapshot this run took" in capsys.readouterr().out
+
+
+def test_a_reapply_falls_back_to_the_files_own_older_archive(monkeypatch, tmp_path):
+    """No record yet, but the box still holds the archive the first run took: that is
+    the one that can undo the migration, and it is the one the record names."""
+    _taken, out, ledger = _commit_setup(
+        monkeypatch, tmp_path, taken_tables=["widget"], archives=[(OLD_ARCHIVE, [])])
+
+    assert app_mig.main() == 0
+
+    payload = _recorded(ledger)
+    assert payload["recovery_point"] == str(out / OLD_ARCHIVE)
+    assert "taken before it" in payload["recovery_point_basis"]
+
+
+def test_a_reapply_with_no_archive_that_can_undo_it_names_none(monkeypatch, tmp_path):
+    """Nothing on the box predates the table, so the record says so — an empty path is
+    honest and a wrong one is what a recovery gets spent on."""
+    _taken, _out, ledger = _commit_setup(monkeypatch, tmp_path, taken_tables=["widget"])
+
+    assert app_mig.main() == 0
+
+    payload = _recorded(ledger)
+    assert payload["recovery_point"] is None
+    assert "no archive that can" in payload["recovery_point_basis"]
+
+
+def test_a_record_naming_an_archive_proved_unable_is_not_kept(monkeypatch, tmp_path):
+    """The record's own archive is preferred only while it can still undo the file: a
+    snapshot taken after the migration is not made true by having been recorded."""
+    stale = _snapshot(tmp_path / "backups", "scangrade-db-20261011T000000Z-064_widget.tar.gz",
+                      ["widget"])
+    _taken, out, ledger = _commit_setup(
+        monkeypatch, tmp_path, taken_tables=["widget"], archives=[(OLD_ARCHIVE, [])],
+        on_record=str(stale))
+
+    assert app_mig.main() == 0
+
+    payload = _recorded(ledger)
+    assert payload["recovery_point"] == str(out / OLD_ARCHIVE), (
+        "the archive the record named was taken after the table existed, and was not "
+        "kept on the strength of being written down")
+
+
+def test_a_record_naming_an_archive_outside_the_backup_dir_is_still_kept(
+        monkeypatch, tmp_path):
+    """The archive a record names is authoritative about *where* it is: an adopted one
+    that was moved out of a scratch directory, or a box whose `--out` has since moved,
+    leaves the record as the only thing that knows. Nothing that can undo the file is
+    in the backup directory here, so the record's own archive is the answer."""
+    elsewhere = _snapshot(tmp_path / "moved-here", OLD_ARCHIVE, [])
+    taken, out, ledger = _commit_setup(
+        monkeypatch, tmp_path, taken_tables=["widget"], on_record=str(elsewhere))
+
+    assert app_mig.main() == 0
+
+    payload = _recorded(ledger)
+    assert Path(payload["recovery_point"]) == elsewhere, (
+        "the record already named the archive that can undo this migration")
+    assert str(out / OLD_ARCHIVE) != str(elsewhere), (
+        "the fixture has to keep them apart or the test proves nothing")
+    assert "already named" in payload["recovery_point_basis"]
+
+
+def test_the_commit_path_decides_the_recovery_point_before_it_records_it():
+    """The record is written from a decision about the archive, not from whatever the
+    run happened to take, and the decision sits in the path that writes the record."""
+    decided = _main_calls("recovery_point_to_name")
+    recorded = _main_calls("record")
+
+    assert decided and recorded
+    assert max(decided) < min(recorded), (
+        "the recovery point must be chosen before the record names it")

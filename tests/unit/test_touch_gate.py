@@ -346,6 +346,28 @@ class TestTheRunContract:
             "question_types" in line for line in lines
         ), "a finding must name the control an operator has to fix"
 
+    def test_an_empty_builder_is_a_finding_and_not_a_pass(self, monkeypatch):
+        """Zero measured controls is the blank page, not a clean one.
+
+        The scope is on the page — a page without it is answered "not the exam
+        builder", exit 2, above — so a builder that laid out with nothing in it is a
+        release whose form did not render. Counting that as zero findings was how an
+        empty page passed this gate; `tests/unit/test_browser_gates_can_fail.py`
+        found it by serving exactly that page, and this is the same case without a
+        browser in the way.
+        """
+        g, (code, lines, payload) = self._run(
+            monkeypatch,
+            [{"width": 820, "height": 1180, "controls": []}],
+        )
+        assert code == g.EXIT_FINDING, lines
+        assert payload["measured"] == 0
+        assert payload["findings"] == [], (
+            "an empty builder has no control to name, so it must be reported by the "
+            "page rather than by a control"
+        )
+        assert any("no controls" in line for line in lines), lines
+
 
 # ── the deploy runs it on every release ──────────────────────────
 

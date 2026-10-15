@@ -778,6 +778,11 @@ def _register_blueprints(app):
     # the sidebar, the breadcrumb area and the login redirect all name one of
     # them, so a single shared prefix would put two readers on one address.
     app.register_blueprint(principal_bp)
+    # The school switcher. Its own module because the rule it guards is about identity
+    # rather than about any one role's pages: it is the writer of the per-session
+    # school every other door reads (see `app/routes/membership_routes.py`).
+    from app.routes.membership_routes import school_switch_bp
+    app.register_blueprint(school_switch_bp)
     app.register_blueprint(tools_bp, url_prefix="/tools")
     # Question media is served at its own root rather than under a role prefix: the
     # same URL is handed to a pupil sitting the paper and to the teacher previewing
@@ -920,6 +925,34 @@ def _register_request_logging(app):
             "tz_offset": g.get("tz_offset", DEFAULT_TZ_OFFSET),
             "ui_prefs": g.get("user_prefs") or {},
         }
+
+    @app.context_processor
+    def inject_school_switcher():
+        """What the header's school control needs, for the readers that can have one.
+
+        The chrome is on every page, which is exactly why the two cheap answers are
+        first: an anonymous page and a single-school role (a pupil, a school admin)
+        return the empty payload without touching the database at all. For a teacher
+        who may hold two memberships the payload comes from `switchable_schools`,
+        whose membership rows are the *same memoised read* the request's own school
+        resolution already made — so a page pays no extra query for this control.
+
+        It never raises. A membership read that fails, a cache that is unreachable, a
+        school row that cannot be named: all of them answer "nothing to switch",
+        because a control in the chrome may not be the reason a page does not render.
+        """
+        empty = {"schools": [], "away": False}
+        try:
+            from app.services.school_membership import (is_cross_school_role,
+                                                        switchable_schools)
+            if not g.get("user_id") or not is_cross_school_role(g.get("user_role")):
+                return {"school_switcher": empty}
+            return {"school_switcher": switchable_schools(
+                g.get("user_id"), g.get("user_token"), g.get("user_role"),
+                active_school_id=g.get("user_school_id"))}
+        except Exception:
+            app.logger.debug("header school switcher unavailable", exc_info=True)
+            return {"school_switcher": empty}
 
     @app.after_request
     def log_request(response):

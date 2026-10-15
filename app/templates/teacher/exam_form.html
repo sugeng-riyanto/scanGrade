@@ -1602,6 +1602,10 @@
                    page whose own card read "Always on" while it did. #}
                 <div class="card p-5 space-y-4" x-data="antiCheatSettings({
                     enabled: {{ 'true' if (exam.get('anti_cheat_enabled') if exam else True) else 'false' }},
+                    {# How many violation rows this paper already holds. The route reads it
+                       only for a switched-off paper (a monitored one has no switch to warn
+                       about), so the number is 0 on a new paper and on a monitored one. #}
+                    recorded_violations: {{ recorded_violations|default(0) }},
                     penalty_per_violation: {{ exam.get('penalty_per_violation', 5) if exam else 5 }},
                     max_violations: {{ exam.get('max_violations', 5) if exam else 5 }},
                     fullscreen_required: {{ 'true' if (exam.get('fullscreen_required') if exam else True) else 'false' }},
@@ -1631,6 +1635,18 @@
                        fact about the assessment, not about the reader. #}
                     <div x-show="!enabled" x-cloak class="text-xs font-bold text-rose-700 bg-rose-50 border border-rose-200 rounded-xl px-3 py-2">
                         <i class="fas fa-eye-slash mr-1"></i><span x-text="t('Anti-cheat dimatikan untuk kertas ini: tidak ada pelanggaran yang dicatat, tidak ada penalti, dan kertas tidak dikunci.','Anti-cheat is off for this paper: no violations are recorded, nothing is charged, and the sitting is never locked.')"></span>
+                        {# The half a switch cannot undo, and the half the sentence above
+                           leaves out: switching anti-cheat off stops the *recording*, it
+                           does not take back what is already on it. The rows stay on the
+                           marking page and on the printed sheet, and they leave with the
+                           paper itself (the delete door deletes them, nothing else does).
+                           Shown only when there is something to keep: a warning about an
+                           empty record is noise, and noise is how a real warning gets
+                           skimmed. #}
+                        <span x-show="recorded_violations > 0" x-cloak class="block mt-1 text-amber-700">
+                            <i class="fas fa-triangle-exclamation mr-1"></i><span class="font-extrabold" x-text="recorded_violations"></span>
+                            <span x-text="t('peristiwa sudah tercatat di kertas ini dan tetap tampil di halaman penilaian serta lembar yang dicetak: mematikan anti-cheat tidak menghapusnya, dan catatan itu hanya hilang bila kertasnya dihapus.','event(s) are already on the record for this paper and stay on the marking page and the printed sheet: switching anti-cheat off does not remove them, and the record goes only when the paper itself is deleted.')"></span>
+                        </span>
                     </div>
                     <div class="flex flex-col sm:flex-row items-start sm:items-center gap-2 mb-3 text-xs sm:text-sm">
                         <label class="flex items-center gap-2">

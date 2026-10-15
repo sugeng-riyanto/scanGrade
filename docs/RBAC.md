@@ -517,11 +517,76 @@ kertas) dan sekolah tempat ia **sedang bekerja** di request ini.
   guru lintas sekolah ke sekolah rumahnya, yaitu sekolah tempat makalah berikutnya akan
   disimpan.
 
-Batas yang jujur: pemilih sekolah (dan alur permintaan bergabung ke NPSN lain) berada di
-cabang `feat/membership-*`, belum di cabang ini. Jadi di sini sekolah aktif = sekolah
-rumah kecuali `set_active_school()` dipanggil (ia hanya dihormati bila baris keanggotaan
-masih `active`, sehingga tulisan tanpa verifikasi tidak bisa memindahkan siapa pun).
+Batas yang jujur: alur **permintaan** bergabung ke NPSN lain (undangan, persetujuan,
+persetujuan orang tua) berada di cabang `feat/membership-*`, belum di cabang ini. Yang
+sudah ada di sini adalah **pemilihnya** (bagian terakhir dokumen ini), jadi sekolah aktif
+bukan lagi selalu sekolah rumah dan `set_active_school()` kini punya pemanggil. Pilihan itu
+tetap hanya dihormati bila baris keanggotaan masih `active`, sehingga tulisan tanpa
+verifikasi tidak bisa memindahkan siapa pun.
 Penjaga: `tests/unit/test_exam_school_authority.py` (33 uji, termasuk **empat uji yang
 menjalankan pintu `POST /exam/`-nya** dan membaca baris yang benar-benar diserahkan ke
 basis data, bukan hanya memastikan rutenya bertanya; `.freebuff/mutate_exam_school.py`
 **29/29 cacat tertangkap**).
+
+## Memilih NPSN yang sedang dikerjakan
+
+Sekolah setiap request diselesaikan dari keanggotaan `active` oleh `resolve_for_request`,
+dan itu menghormati pilihan per-token. Yang tidak ada sampai sekarang adalah **penulisnya**:
+`set_active_school()` tak punya pemanggil, sehingga guru yang diterima NPSN kedua tetap
+terselesaikan ke sekolah rumahnya — sekolah tujuan tidak menemukannya di roster, tidak bisa
+memberinya kelas, dan makalah serta nilainya tidak ikut pindah. Satu-satunya cara dianggap
+mengajar di sana adalah **meninggalkan** sekolah rumah (`profiles.school_id`), yang
+memindahkan setiap baris yang pernah ia tulis.
+
+- **Pembaca** — `school_membership.switchable_schools()` menjawab
+  `{"schools": [{"school_id", "name", "active"}], "away": bool}`. Partisi peran ditanyakan
+  **sebelum membaca apa pun** (chrome ada di setiap halaman): murid, admin sekolah, dan
+  halaman anonim mendapat payload kosong tanpa menyentuh `teacher_school_membership`. Untuk
+  guru, barisnya diambil dari `_rows_for_request` yang sama — memo per request yang sudah
+  dibayar penyelesaian sekolah request itu — dan nama sekolahnya dari cache baris
+  per-sekolah (`req_cache.school_row`), jadi kontrol ini tidak menambah satu pun
+  round-trip. Hanya baris `status = 'active'` yang ditawarkan, dan daftarnya **diurutkan**
+  (tanpa peduli huruf besar-kecil) supaya dua halaman tidak menampilkan dua urutan. Semua
+  bentuk kegagalan baca — baris `None`, tabel yang belum ada sebelum migrasi 044, memo atau
+  klien yang melempar — dijawab dengan payload kosong, **bukan error**: kontrol di chrome
+  tidak boleh jadi alasan sebuah halaman gagal dirender.
+- **Pintu** — `POST /teacher/school/switch` (`app/routes/membership_routes.py`) adalah
+  satu-satunya penulis pilihan itu di seluruh aplikasi. POST-only (GET tidak boleh
+  memindahkan sekolah sebuah sesi); penolakan berupa **403**, bukan redirect diam-diam,
+  karena tulisan yang ditolak di aplikasi ini pernah terlihat persis seperti tulisan yang
+  tidak melakukan apa-apa; baris keanggotaan diperiksa **sebelum** menulis; `home`, nilai
+  kosong, dan field yang tidak ada semuanya **menghapus** pilihan, sehingga kembali ke
+  sekolah asal tidak butuh tahu sekolah mana itu dan tidak bisa dipalsukan klien; `next`
+  hanya diterima sebagai path lokal satu-slash (`//evil.example` bersifat protocol-relative,
+  backslash dibaca sebagai slash oleh lebih dari satu klien, URL absolut membuat pilihan
+  sekolah jadi open redirect, dan tab/CR/LF **dibuang browser sebelum URL di-parse** sehingga
+  `/<TAB>/evil.example` sampai ke parser sebagai `//evil.example` — ketiganya ditolak); halaman pendaratannya mengikuti peran yang berpindah (`guru` →
+  `/teacher/dashboard`, `principal` dan `vice_principal` → dasbor masing-masing), sebab
+  redirect ke halaman yang tidak bisa dibuka terlihat sama seperti kegagalan berpindah; dan
+  setiap perubahan dicatat lewat `log_activity`.
+- **Pilihan** disimpan di sisi server, per token sesi (`ACTIVE_SCHOOL_KEY`), tidak pernah di
+  cookie atau form, dan `resolve_for_request` tetap satu-satunya pembacanya — baris
+  keanggotaannya diperiksa ulang di setiap request, dan pilihan yang barisnya sudah hilang
+  dihapus di request berikutnya.
+- **Chrome** — kontrolnya ada di `base.html`, dirender hanya bila ada yang bisa dipilih, dari
+  `school_switcher` yang disuntikkan satu context processor (`inject_school_switcher`). Tidak
+  ada halaman yang menyerahkannya: template membacanya lewat processor itu.
+
+Penjaga bagian ini: `tests/unit/test_school_switcher.py` (31 uji, dijalankan lewat mutasi —
+`29/29` cacat tertangkap atas **tiga** berkas penjaga sekaligus:
+`test_school_switcher.py`, `test_nullable_id_form_fields.py`, dan `test_year_lock.py`
+(`.freebuff/mutate_school_switcher.py`). Dua penjaga terakhir itulah yang menangkap dua
+cacat yang tak terlihat oleh uji yang memalsukan inputnya sendiri: `{{ s.school_id }}`
+yang diinterpolasi telanjang di `<option>` (id NULL akan tercetak sebagai kata `None` dan
+Postgres menolaknya sebagai uuid) dan pintu tulis baru yang belum pernah didengar kunci
+tahun — sekarang dicatat di `test_year_lock.EXEMPT` **dengan alasan**, bukan dengan kunci,
+sebab kunci itu akan menghalangi guru yang sekolah asalnya berada di tahun tertutup untuk
+memilih sekolah yang terbuka. Pelajaran yang layak
+dicatat: fixture dua sekolahnya mula-mula datang **sudah terurut**, jadi menghapus
+pengurutannya pun tetap lulus — fixture-nya sekarang justru kebalikan dari urutan terurut,
+dan nama sekolah keduanya sengaja huruf kecil sebab ASCII menaruh setiap huruf besar sebelum
+huruf kecil. Batas jujurnya: kontrol hanya muncul untuk peran lintas sekolah dan hanya bila
+ada sekolah kedua (atau pilihan yang sedang berlaku); ia memilih **sekolah, bukan kelas**; dan
+pilihan itu hidup di cache KV selama TTL sesi, jadi cache yang dibersihkan mengembalikan
+pembaca ke sekolah rumahnya untuk dipilih lagi — baris keanggotaan, bukan pilihannya, yang
+jadi otoritas.

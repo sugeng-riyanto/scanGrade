@@ -373,6 +373,87 @@ def _ttl():
     return _session_ttl()
 
 
+#: What the switcher answers when there is nothing to choose. One object, because
+#: the chrome reads two keys off it on every page of the site, and a reader with a
+#: single school must be able to say "nothing to switch" without a special case.
+NO_CHOICE: dict = {"schools": [], "away": False}
+
+
+def switchable_schools(user_id, token, role, active_school_id=None, supabase=None) -> dict:
+    """The schools this account may work in, and which one it is in now.
+
+    The half of the feature that was missing. `resolve_for_request` resolves the
+    school of **every** request from the verified active membership, and that
+    resolution honours a per-token choice (`set_active_school`) — which nothing
+    called. So a teacher whose second NPSN had accepted them stayed in their home
+    school: the destination school could not find them on its roster, and their
+    lessons, marks and papers never followed the school they were accepted into.
+    The only way to be treated as acting elsewhere was to *leave* the home school,
+    which is what this control exists to stop being necessary.
+
+    Returns ``{"schools": [{"school_id", "name", "active"}], "away": bool}``.
+    ``away`` means a choice is in force, so the control also offers the way back to
+    the school the profile names — and that option is *why* the home school does not
+    have to be in the list: a teacher migrated into a second school has no membership
+    row for their own, so a list built only from rows could never lead them home.
+
+    Three properties, each a decision:
+
+    * **no extra round-trip on any page.** The rows come from the same memoised read
+      `resolve_for_request` already made for this request, and a school's *name* is
+      the same for everyone in it, so it comes from the per-school row cache. The
+      chrome is on every page, and a control may not cost a query there.
+    * **the list is empty rather than an error** when the rows cannot be read, and
+      empty when there is nothing to switch to. A reader with one school, in it, has
+      no second school to choose, and the header is not the place to find that out
+      loudly; a read that failed must not be the reason a page does not render.
+    * **only the roles that can hold two memberships read anything at all** — the
+      same partition `is_cross_school_role` draws on every other path, so a pupil's
+      and a school admin's page pays nothing for a control they will never see.
+    """
+    if not user_id or not is_cross_school_role(role):
+        # The role is a parameter rather than something read off a profile here on
+        # purpose: the answer decides whether the membership table is read *at all*,
+        # and a reader that had to fetch a profile to learn it would pay a query on
+        # every pupil's page for a control they can never see.
+        return dict(NO_CHOICE)
+    away = bool(get_active_school(token))
+    try:
+        rows = _rows_for_request(user_id, supabase)
+    except Exception:
+        # `membership_rows` answers a failed read with `None`, and a missing table
+        # with `[]`; this is the third kind of failure — the memo or the client
+        # itself — and the chrome may not raise on any of them.
+        logger.debug("switcher membership read failed; hiding the control", exc_info=True)
+        return dict(NO_CHOICE)
+    if rows is None:
+        return dict(NO_CHOICE)
+    ids: list[str] = []
+    for row in rows:
+        if str(row.get("status") or "") != STATUS_ACTIVE:
+            continue
+        school_id = str(row.get("school_id") or "").strip()
+        if school_id and school_id not in ids:
+            ids.append(school_id)
+    active = str(active_school_id or "").strip()
+    if not ids or (len(ids) == 1 and not away and ids[0] == active):
+        return dict(NO_CHOICE)
+    from app.utils.req_cache import school_row
+    schools = []
+    for school_id in ids:
+        try:
+            name = str((school_row(school_id, "name") or {}).get("name") or "")
+        except Exception:
+            # A name is presentation; an id is still an answer, and a reader who can
+            # see which school they are in is better served than one who sees nothing.
+            logger.debug("switcher name read failed; showing the id", exc_info=True)
+            name = ""
+        schools.append({"school_id": school_id, "name": name,
+                        "active": school_id == active})
+    schools.sort(key=lambda s: (s["name"] or s["school_id"]).lower())
+    return {"schools": schools, "away": away}
+
+
 def invite(supabase, school_id, user_id, role="guru", invited_by=None) -> dict:
     """Offer (or re-offer) a membership, status `invited`.
 

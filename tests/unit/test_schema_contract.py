@@ -11,10 +11,14 @@ The tests below pin three separate things: that the readers read SQL correctly (
 checker that invents columns teaches its reader to ignore it), that the verdict is the
 *state* after the files are applied rather than the *history* of what they once said
 (028 closes holes 002 and 007 opened, and a check that cannot see a DROP reports them
-for ever), and that the repository as it stands passes.
+for ever), that the repository as it stands passes, and that no two migration files
+claim the same number — which is the one defect whose only symptom is a *sentence*:
+`migration 064` stops naming a file, and the ledger and the directory disagree about
+which migration was applied without either of them raising anything.
 """
 from __future__ import annotations
 
+import ast
 import os
 import pathlib
 import re
@@ -673,9 +677,169 @@ class TestAskingTheApiWithAPublicKey:
             "those it creates a row in production")
 
 
+# ── the numbers on the files ────────────────────────────────────────────────
+
+class TestTwoFilesNeverClaimOneNumber:
+    """`064_membership_closure_canonical.sql` and `064_seb_door_refusals.sql` both
+    claimed 064 on `main`, and nothing failed: each file applied cleanly on its own,
+    the offline contract was happy, and the release shipped. What was broken was the
+    *name* — every sentence about migration 064, the ledger's file stem, the comment in
+    a service, the heading in `docs/RBAC.md` — and, later, the apply tool, which reads
+    the directory in name order and would run whichever the sort put first.
+
+    The numbers are read from the file names because that is what orders them. The five
+    pairs that predate this rule are recorded rather than repaired (the ledger keys a
+    record by the file's stem, so renumbering an applied file orphans its record), and
+    the pins below are the two directions that matter: the table may not describe a
+    number this tree has stopped sharing, and the tree may not share a number the table
+    does not describe.
+    """
+
+    def _write(self, tmp_path, *names):
+        for name in names:
+            (tmp_path / name).write_text("", encoding="utf-8")
+        return sorted(tmp_path.glob("*.sql"))
+
+    def test_two_files_on_one_number_are_a_finding(self, tmp_path):
+        files = self._write(tmp_path, "064_membership_closure_canonical.sql",
+                            "064_seb_door_refusals.sql")
+        found = sc.migration_number_findings(files)
+        assert [f["kind"] for f in found] == ["migration number"]
+        assert found[0]["name"] == "064"
+        assert "064_seb_door_refusals.sql" in found[0]["where"]
+        assert "064_membership_closure_canonical.sql" in found[0]["where"]
+
+    def test_one_file_on_a_number_is_clean(self, tmp_path):
+        assert sc.migration_number_findings(self._write(tmp_path, "064_seb_door_refusals.sql")) == []
+
+    def test_a_dated_name_claims_no_number(self, tmp_path):
+        """Two files from one day are not two files from one migration: `20260608`
+        is read as an eight-digit date because that is what it is, and the pair shares
+        it legitimately."""
+        files = self._write(tmp_path, "20260608_fix_rls_policies.sql",
+                            "20260608_usage_tracking.sql")
+        assert [sc.migration_number(p) for p in files] == [None, None]
+        assert sc.migration_number_findings(files) == []
+
+    def test_a_prefix_that_is_not_a_sequence_number_is_a_finding(self, tmp_path):
+        """It reads as 064 to a person and as nothing at all to a sort, which is the
+        worst of both: the file moves in the order somebody typed and no other
+        sentence in the tree can name it."""
+        found = sc.migration_number_findings(self._write(tmp_path, "0640_seb.sql"))
+        assert [f["kind"] for f in found] == ["migration name"]
+        assert found[0]["name"] == "0640_seb.sql"
+
+    def test_a_name_with_no_numeric_prefix_is_not_this_checks_business(self, tmp_path):
+        """`combined_021_024_RUN_ME.sql` claims three numbers it does not own and
+        `_RUN_ALL_AT_ONCE.sql` claims one file's worth of everything; neither orders
+        anything, so neither is a migration number."""
+        files = self._write(tmp_path, "combined_021_024_RUN_ME.sql", "_RUN_ALL_AT_ONCE.sql",
+                            "schema.sql")
+        assert sc.migration_number_findings(files) == []
+
+    def test_a_third_file_on_a_recorded_pair_is_still_a_finding(self, tmp_path):
+        """The pairs are frozen, not opened: a number already shared by two files may
+        be left alone and never extended."""
+        files = self._write(tmp_path, "001_initial_schema.sql",
+                            "001_enable_rls_and_policies.sql", "001_third.sql")
+        found = sc.migration_number_findings(files)
+        assert [f["name"] for f in found] == ["001"]
+        assert "001_third.sql" in found[0]["where"]
+
+    def test_a_recorded_pair_on_its_own_is_a_finding_off_the_recorded_names(self, tmp_path):
+        """Two files that share a number are judged by *which* files they are: a fresh
+        pair on 001 — two names the table never recorded — is a collision even though
+        the number is in the table. Without that direction a pair could be renamed
+        into existence, which is how this would quietly start allowing new ones."""
+        files = self._write(tmp_path, "001_initial_schema.sql", "001_something_else.sql")
+        assert [f["name"] for f in sc.migration_number_findings(files)] == ["001"]
+
+    def _shared(self):
+        """{number: {names}} for every number more than one file in the real tree claims."""
+        claims: dict[int, list[str]] = {}
+        for path in sc.sql_files():
+            number = sc.migration_number(path)
+            if number is not None:
+                claims.setdefault(number, []).append(pathlib.Path(path).name)
+        return {n: set(names) for n, names in claims.items() if len(names) > 1}
+
+    def test_the_recorded_pairs_are_exactly_the_ones_this_tree_shares(self):
+        """Both directions, so the table cannot drift: a repaired pair has to come out
+        of it, and (with the finding above) a new pair cannot be kept quiet by putting
+        it in."""
+        shared = self._shared()
+        assert set(shared) == set(sc.LEGACY_SHARED_NUMBERS), (
+            "the recorded pairs and the pairs this tree actually shares have diverged")
+        for number, names in shared.items():
+            assert names == set(sc.LEGACY_SHARED_NUMBERS[number]), (
+                f"{number} is now claimed by {sorted(names)}, not by "
+                f"{sorted(sc.LEGACY_SHARED_NUMBERS[number])}")
+        assert len(sc.LEGACY_SHARED_NUMBERS) == 5, (
+            "five pairs predate the rule. A sixth is a decision, not bookkeeping: it "
+            "says two files may share a number here, which is the defect this check "
+            "exists for")
+
+    def test_the_dated_allowance_is_exactly_the_dated_names_this_tree_carries(self):
+        """Named one by one rather than skipped by shape, so a *new* file with an
+        eight-digit prefix fails instead of walking through a pattern."""
+        present = {pathlib.Path(p).name for p in sc.sql_files()
+                   if pathlib.Path(p).name[:1].isdigit() and sc.migration_number(p) is None}
+        assert present == set(sc.DATED_LEGACY), (
+            "the dated names in the tree and the allowance do not agree")
+
+    def test_this_repository_is_clean(self):
+        assert sc.migration_number_findings(sc.sql_files()) == []
+
+    def test_the_verdict_is_a_refusal(self, monkeypatch, tmp_path, capsys):
+        """The finding has to leave as exit 1 through `main`, or it is a report.
+
+        One injected file whose number is free is not enough — a single claim is not a
+        collision — so two are added, and everything else the tool reads is still the
+        real tree: the verdict has to come from the numbers, not from a defect the test
+        introduced beside them.
+        """
+        for name in ("064_membership_closure_canonical.sql", "064_seb_door_refusals.sql"):
+            (tmp_path / name).write_text("", encoding="utf-8")
+        real = sc.sql_files
+        monkeypatch.setattr(sc, "sql_files",
+                            lambda directory=None: real(directory) + sorted(tmp_path.glob("*.sql")))
+        assert sc.main([]) == 1
+        out = capsys.readouterr().out
+        assert "migration number `064`" in out, out
+        assert "1 migration naming finding(s)" in out, (
+            "the count is printed whether or not it is zero, so a clean run says what "
+            "it looked at")
+
+
 # ── wiring ──────────────────────────────────────────────────────────────────
 
 class TestTheGateRunsIt:
+    def test_no_printed_string_needs_a_console_that_can_encode_it(self):
+        """Every branch, not only the one this box reaches.
+
+        The subprocess test below runs the check on a *clean* tree, so it exercises only
+        the success line — and the sentences that matter most are the ones printed when
+        something is wrong, on the box in the school, with no `PYTHONIOENCODING`. An em
+        dash in a `print` is a `UnicodeEncodeError` there: the gate reads a traceback
+        instead of the finding, and the reader is handed a stack trace where the fix was.
+        This walks the tool's own source instead, so a new sentence is covered the
+        moment it is written. (Found by the migration-number guard's own sentence, which
+        shipped with two em dashes and a clean-tree test that could not see them.)
+        """
+        source = pathlib.Path(sc.__file__).read_text(encoding="utf-8")
+        printed: list[str] = []
+        for node in ast.walk(ast.parse(source)):
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                    and node.func.id == "print"):
+                printed += [part.value for part in ast.walk(node)
+                            if isinstance(part, ast.Constant)
+                            and isinstance(part.value, str)]
+        assert printed, "no printed strings were read at all"
+        offenders = sorted({text for text in printed if not text.isascii()})
+        assert not offenders, (
+            "a printed string needs a console that can encode it, and the gate does not "
+            f"set one: {offenders}")
+
     def test_its_output_survives_a_console_that_is_not_utf8(self):
         """The VPS gate runs this with no PYTHONIOENCODING, so an em dash in a
         *printed* string is a UnicodeEncodeError on a cp1252 box — the tool would

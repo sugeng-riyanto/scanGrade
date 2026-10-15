@@ -762,6 +762,17 @@ def finals_for_student(supabase, school_id: str, subject_ids, year_id: str | Non
 #: real change is a multiple of 0.1; this only keeps float noise out.
 IMPACT_MIN_DELTA = 0.05
 
+#: How far an **already-reported** mark may move before a save has to ask: a point.
+#: A released mark is one the pupil (and often a parent) has already been shown, so
+#: a change to it is a correction rather than work in progress — and a whole point is
+#: the smallest movement that reads as a different mark rather than as the same one
+#: rounded twice. It is *strictly* more than this: a mark that moves by exactly one
+#: point is left alone, because ``compute`` rounds both sides to one decimal, so the
+#: difference is a multiple of 0.1 and the two marks the pupil saw are 1.0 apart.
+#: Every reader of the limit goes through the payload's ``reported.limit``, so a page
+#: never promises a number it does not count with.
+REPORTED_MOVE_LIMIT = 1.0
+
 #: How many rows one impact read may page through before it says it may have
 #: stopped short. PostgREST hands back 1000 rows per request whatever the caller
 #: asked for, so a school-wide read that does not page is a *silently partial*
@@ -831,7 +842,8 @@ def affected_subjects(supabase, school_id: str, year_id: str | None, scope: str,
 
 def class_impact(supabase, school_id: str, subjects: list[dict], year_id: str | None,
                  weights: dict, *, limit: int = 25,
-                 min_delta: float = IMPACT_MIN_DELTA) -> dict:
+                 min_delta: float = IMPACT_MIN_DELTA,
+                 reported_limit: float = REPORTED_MOVE_LIMIT) -> dict:
     """Which pupils' final marks a distribution change would move, and by how much.
 
     The weight preview answers what a change does to **one** learner. A mark is
@@ -857,6 +869,9 @@ def class_impact(supabase, school_id: str, subjects: list[dict], year_id: str | 
           "kkm":     {pupils: [ {student_id, subject_id, name, class_name,
                                  subject_name, kkm, source, saved, live, delta}, … ],
                       count, shown, checked},   # worst fall below the line first
+          "reported":{pupils: [ {student_id, subject_id, name, class_name,
+                                 subject_name, saved, live, delta}, … ],
+                      count, shown, checked, limit},  # biggest move first
           "shown":   int,        # rows in "pupils" (the cap is per read, not per pupil)
           "capped":  bool,       # the read hit its row cap: counts may be short
           "typed_total": int,    # the weights as typed, so a caller can say "not 100%"
@@ -877,6 +892,19 @@ def class_impact(supabase, school_id: str, subjects: list[dict], year_id: str | 
     * a name that cannot be read is ``"?"`` — the counts and the deltas do not
       depend on it, and a pupil is never dropped for being unprintable.
 
+    ``reported`` is the same movement asked of the **already-reported** marks only,
+    and with the question a count cannot answer: which of them would move by **more
+    than** ``reported_limit`` points. A pupil who has a mark of 76 published and
+    would be recomputed to 74 has lost two points on a number their parents have
+    already seen — that is not a movement to read about later in a table, it is the
+    one an admin has to be warned about *before* the save, which is why the block
+    names the pupils and travels with ``limit``. It is tested on the difference of
+    the two marks as the pupil sees them (both are ``compute``'s one-decimal
+    results), so one point exactly is not "more than a point", and it is tested
+    before ``min_delta`` for the same reason the crossing is: a caller's movement
+    threshold must not be able to hide it. ``checked`` counts every released pair,
+    so an empty list reads as "none moved that far" rather than "none was looked at".
+
     ``kkm`` is the same question asked against the school's **pass line**: a
     **released** mark that reads as passing today and would read as failing after
     the save. It is listed separately from ``pupils`` and tested on the unrounded
@@ -895,6 +923,8 @@ def class_impact(supabase, school_id: str, subjects: list[dict], year_id: str | 
     empty = {"pupils": [], "shown": 0, "capped": False, "typed_total": 0,
              "subjects": [], "kkm": {"pupils": [], "count": 0, "shown": 0,
                                      "checked": 0},
+             "reported": {"pupils": [], "count": 0, "shown": 0, "checked": 0,
+                          "limit": reported_limit},
              "counts": {"pairs": 0, "moved": 0, "up": 0, "down": 0,
                         "reported": 0, "pupils_marked": 0, "pupils_moved": 0,
                         "max_up": None, "max_down": None}}
@@ -989,6 +1019,7 @@ def class_impact(supabase, school_id: str, subjects: list[dict], year_id: str | 
     marked: set[str] = set()
     moved: list[dict] = []
     crossings: list[dict] = []
+    big_moves: list[dict] = []
     released_pairs = 0
     for (student, subject), rows in rows_by.items():
         saved = compute(rows, custom.get(subject) or default)
@@ -1018,6 +1049,19 @@ def class_impact(supabase, school_id: str, subjects: list[dict], year_id: str | 
                     "saved": saved["final"], "live": live["final"],
                     "delta": round(live["final"] - saved["final"], 1)})
         delta = round(live["final"] - saved["final"], 1)
+        # The same released marks, asked the question a count cannot answer: a
+        # movement of more than ``reported_limit`` points on a mark the pupil has
+        # already been shown. Tested here, before ``min_delta``, so a caller's
+        # movement threshold can never filter it away — and on the difference of
+        # the two marks as they are *displayed*, so exactly one point is not more
+        # than a point.
+        if was_released and abs(delta) > reported_limit:
+            big_moves.append({"student_id": student, "subject_id": subject,
+                              "name": names.get(student, "?"),
+                              "class_name": classes.get(student, ""),
+                              "subject_name": entry["name"],
+                              "saved": saved["final"], "live": live["final"],
+                              "delta": delta})
         if abs(delta) < min_delta:
             continue                      # unchanged is the common answer, and not a finding
         entry["moved"] += 1
@@ -1036,6 +1080,10 @@ def class_impact(supabase, school_id: str, subjects: list[dict], year_id: str | 
     # admin most needs to see; the pupil is the tie-break, so the order is stable.
     crossings.sort(key=lambda r: (r["live"] - r["kkm"], r["subject_id"],
                                   r["student_id"]))
+    # The biggest movement first, for the same reason: a capped list of "more than a
+    # point" must lead with the pupil whose mark changed the most.
+    big_moves.sort(key=lambda r: (-abs(r["delta"]), r["subject_id"],
+                                  r["student_id"]))
     try:
         size = max(1, int(limit))
     except (TypeError, ValueError):
@@ -1052,6 +1100,9 @@ def class_impact(supabase, school_id: str, subjects: list[dict], year_id: str | 
         "subjects": [per_subject[sid] for sid in ids],
         "kkm": {"pupils": crossings[:size], "count": len(crossings),
                 "shown": len(crossings[:size]), "checked": released_pairs},
+        "reported": {"pupils": big_moves[:size], "count": len(big_moves),
+                     "shown": len(big_moves[:size]), "checked": released_pairs,
+                     "limit": reported_limit},
         "counts": {
             "pairs": sum(e["evaluated"] for e in per_subject.values()),
             "moved": len(moved),

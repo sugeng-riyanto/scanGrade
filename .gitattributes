@@ -6,6 +6,19 @@
 *.yml text eol=lf
 *.yaml text eol=lf
 *.json text eol=lf
+# The migration ledger identifies each migration by its bytes, and the deploy
+# box compares the digest it has on record against the one it reads here. Grading
+# them exactly as they lay was how one committed LF file, materialised CRLF by
+# this checkout's `core.autocrlf=true`, came to carry two digests and read as
+# `APPLIED, THEN EDITED` on the box for a file nobody had touched — measured for
+# `037` and again for `064_seb_door_refusals.sql`. The ledger folds CRLF to LF
+# before hashing now (`canonical_bytes`), so the digest no longer depends on the
+# platform; the *file* still does, and 27 of the 73 migrations in
+# `supabase/migrations` were materialised CRLF before this line existed. Pinned
+# like every other extension above, for the same reason: one file, one identity,
+# on every platform that applies it. `tests/unit/test_apply_migration.py` fails
+# if an extension this tool hashes is ever left unpinned the way this one was.
+*.sql text eol=lf
 *.md text eol=lf
 *.service text eol=lf
 *.timer text eol=lf

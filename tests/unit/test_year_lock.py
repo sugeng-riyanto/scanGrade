@@ -82,6 +82,16 @@ EXEMPT = {
         "authorises a fresh sitting at a new year's door; a closed year's own rows "
         "are not touched",
 
+    # ── membership_routes.py: which school the session is in ──
+    # It writes a per-token session fact (the chosen school) and an audit row; the
+    # choice is not year-scoped at all — it is what the *next* request resolves its
+    # school from — and every page it then reaches asks its own year lock. Locking
+    # this door would mean a teacher whose own school sits in a closed year could not
+    # choose the school that is open, which is the opposite of what the lock is for.
+    "school_switch_bp /teacher/school/switch":
+        "chooses which school the session is in; it writes no mark, paper or year "
+        "row, and each page the switch then reaches asks its own year lock",
+
     # ── exam.py: the API doors for a paper ──
     "exam_bp /": "creates a NEW paper; nothing to date yet",
 

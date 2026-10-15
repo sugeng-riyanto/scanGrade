@@ -1168,12 +1168,20 @@ def _preflight_block() -> str:
     return script[script.index(PREFLIGHT_START):script.index(PREFLIGHT_END)]
 
 
-def _preflight_harness(repo: Path, state_dir: Path) -> str:
-    """The preflight and its call, lifted out with the four things it needs.
+def _preflight_harness(repo: Path, state_dir: Path, *,
+                       as_owner: str = 'as_owner() { "$@"; }\n',
+                       owner: str = "service-user") -> str:
+    """The preflight and its call, lifted out with the things it needs.
 
     `--check` is not run here: `$REPO/deploy/arm-auto-deploy.sh` is a stub, so the
     question under test is what the deploy *does* with each answer, which is the
     half the checker's own tests cannot reach.
+
+    `as_owner` and `owner` are parameters because the preflight now takes *two*
+    readings of one file — as root and as the checkout's owner — and a harness that
+    can only run both as the same caller cannot express the disagreement this check
+    exists for (see `tests/unit/test_caller_armament.py`). The default is the
+    identity stub, which is what "the two callers agree" looks like.
     """
     script = DEPLOY_SH.read_text(encoding="utf-8")
     block = _preflight_block()
@@ -1183,10 +1191,32 @@ def _preflight_harness(repo: Path, state_dir: Path) -> str:
         f'REPO="{repo}"\n'
         f'STATE_DIR="{state_dir}"\n'
         f'UNARMED_FILE="{state_dir}/unarmed"\n'
+        f'OWNER="{owner}"\n'
         'log() { echo "$*"; }\n'
-        'as_owner() { "$@"; }\n'
+        + as_owner
         + _branch_first_block() + block + tail + "\necho REACHED\n"
     )
+
+
+def _run_preflight(repo: Path, state_dir: Path, **harness) -> subprocess.CompletedProcess:
+    """The harness, run from a file rather than handed to bash through `-c`.
+
+    A line continuation in the lifted block is a backslash to bash and an escape to
+    the Windows command line `subprocess` builds, so `-c` mangles exactly the lines
+    that continue: measured on this box, a `printf` whose argument list continued on
+    the next line lost its continuation and bash reported `unexpected end of file` at
+    a line nowhere near the fault. The file carries the block's own bytes, so what is
+    judged is the script a box runs.
+
+    Decoded as UTF-8 explicitly: the harness prints the checker's own copy, which
+    carries an em dash, and the default codec on this box is not UTF-8 — a comparison
+    against that text would fail on the punctuation rather than on the behaviour.
+    """
+    script = _preflight_harness(repo, state_dir, **harness)
+    runner = state_dir.parent / "preflight-harness.sh"
+    runner.write_bytes(script.encode("utf-8"))
+    return subprocess.run([BASH, str(runner)], capture_output=True, text=True,
+                          encoding="utf-8", errors="replace")
 
 
 def _stub_checker(repo: Path, code: int, text: str) -> None:
@@ -1306,8 +1336,7 @@ def test_an_unarmed_box_is_refused_and_the_record_says_why(tmp_path):
     _stub_checker(repo, 1, "NOT ARMED — the runner is a copy")
     state = tmp_path / "state"
 
-    run = subprocess.run([BASH, "-c", _preflight_harness(repo, state)],
-                         capture_output=True, text=True)
+    run = _run_preflight(repo, state)
     assert run.returncode == 15, run.stdout + run.stderr
     assert "REACHED" not in run.stdout, "it refused and carried on anyway"
     assert "UNARMED" in run.stdout
@@ -1332,8 +1361,7 @@ def test_an_armed_box_carries_on_and_clears_the_record(tmp_path):
     state.mkdir()
     (state / "unarmed").write_text("2026-09-20T00:00:00+00:00\nold refusal\n", encoding="utf-8")
 
-    run = subprocess.run([BASH, "-c", _preflight_harness(repo, state)],
-                         capture_output=True, text=True)
+    run = _run_preflight(repo, state)
     assert run.returncode == 0, run.stdout + run.stderr
     assert "REACHED" in run.stdout
     assert not (state / "unarmed").exists(), (
@@ -1352,8 +1380,7 @@ def test_a_checker_that_is_not_there_is_a_refusal_not_a_crash(tmp_path):
     (repo / "deploy").mkdir(parents=True)
     state = tmp_path / "state"
 
-    run = subprocess.run([BASH, "-c", _preflight_harness(repo, state)],
-                         capture_output=True, text=True)
+    run = _run_preflight(repo, state)
     assert run.returncode == 15, run.stdout + run.stderr
     assert "armament checker is missing" in run.stdout, run.stdout
     assert (state / "unarmed").exists()

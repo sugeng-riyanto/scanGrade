@@ -709,6 +709,57 @@ window.sgSavePrefs = function (patch) {
                     <span class="text-[10px] font-bold" x-text="darkMode ? t('Terang','Light') : t('Gelap','Dark')"></span>
                 </button>
 
+                {# ── Which NPSN this teacher is working in ─────────────────────────
+                   The school of **every** request is resolved from the verified
+                   active membership (`school_membership.resolve_for_request`), and
+                   the choice that resolution honours is written by the one door
+                   below — this is what posts to it. Nothing was writing that
+                   choice, so a teacher whose second NPSN had accepted them stayed
+                   in their home school, and being treated as acting elsewhere meant
+                   *leaving* the home school instead of choosing.
+
+                   Rendered only when there is something to choose (`school_switcher`,
+                   from `inject_school_switcher`): a reader with one school gets the
+                   empty payload and sees nothing at all. `away` adds the way back to
+                   the school their own profile names — which is what makes the home
+                   school unnecessary in the list, and is the only route home for the
+                   teacher whose own school has no membership row.
+
+                   Visible on a phone as well as a desktop on purpose: the device the
+                   pupils and most teachers actually hold is a phone, and a control
+                   that hides on the narrowest screen is a teacher who cannot change
+                   school from the device they use. The picker carries `tap-44` for the
+                   same reason the navbar's own controls do — a header control a thumb
+                   cannot hit is a feature only a desktop can use. #}
+                {% set _switcher = school_switcher|default({}) %}
+                {% set _switch_schools = _switcher.get('schools') or [] %}
+                {% if _switch_schools|length > 1 or _switcher.get('away') %}
+                <form method="POST" action="/teacher/school/switch" class="flex items-center">
+                    <input type="hidden" name="next" value="{{ request.full_path.rstrip('?') }}">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                    <label for="sgSchoolSwitcher" class="sr-only"
+                           x-text="t('Sekolah aktif','Active school')"></label>
+                    <select id="sgSchoolSwitcher" name="school_id" onchange="this.form.submit()"
+                            class="tap-44 w-32 text-xs font-bold rounded-lg border border-surface-200 text-surface-600"
+                            :title="t('Kelas, murid dan penilaian mengikuti NPSN ini','Your classes, pupils and marks follow this NPSN')">
+                        {% for s in _switch_schools %}
+                        <option value="{{ s.school_id or '' }}" {% if s.active %}selected{% endif %}>{{ s.name or s.school_id }}</option>
+                        {% endfor %}
+                        {% if _switcher.get('away') %}
+                        <option value="home" x-text="t('Sekolah asal saya','My own school')"></option>
+                        {% endif %}
+                    </select>
+                    {# Without JavaScript the `<select>` above cannot submit on its own
+                       (`onchange` is JavaScript), and Alpine is not running either — so
+                       this fallback's label is written in **both languages on purpose**:
+                       a reader with scripting off has no `localStorage` for the toggle to
+                       have been stored in, and a label bound with `x-text` here would
+                       render as an empty button, which is the one thing a fallback may
+                       not do. #}
+                    <noscript><button type="submit" class="tap-44 text-xs font-bold underline text-surface-500">Pindah / Switch</button></noscript>
+                </form>
+                {% endif %}
+
                 <!-- User dropdown -->
                 <div class="relative" @click.outside="userMenuOpen = false">
                     <button @click="userMenuOpen = !userMenuOpen"
