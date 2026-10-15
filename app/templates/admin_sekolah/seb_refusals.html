@@ -1,0 +1,234 @@
+{% extends "base.html" %}
+{# Who could not get in, ranked by class and by paper.
+
+   The other half of the question a teacher's SEB panel answers. The panel asks it
+   about one paper, after the fact; an admin asks it about the whole school, before
+   the next sitting — which class keeps being turned away, and which file reached
+   nobody. Every number on this page comes from `seb_door_refusal` (migration 064),
+   whose own comment says it left the school-level index for exactly this read.
+
+   Two rules are written into the copy rather than left to the reader:
+
+   * **A refusal is not a charge.** The most common cause is a pupil who opened the
+     link in an ordinary browser, or a `.seb` file a teacher edited after handing it
+     out. An admin who reads this page as an accusation punishes the wrong person,
+     so the page says what it is before it says any number.
+   * **Which numbers are shown, and why two of them.** Pupils and attempts are
+     different facts: five attempts by one pupil is a mistyped link, one attempt each
+     by five pupils is a file that reached nobody. A single total cannot tell them
+     apart, so the ranking is ordered by pupils first and the second column is there
+     to explain the first.
+
+   No apostrophe appears in either half of any pair: the panels bind a pair as
+   `t('id','en')`, so a `'` in the copy would close the Alpine string early. #}
+{% block title %}{{ 'Tidak Bisa Masuk' if lang == 'id' else 'Could Not Get In' }} - ScanGrade{% endblock %}
+{% block page_title %}{{ 'Tidak Bisa Masuk' if lang == 'id' else 'Could Not Get In' }}{% endblock %}
+{% block content %}
+<div class="max-w-7xl mx-auto space-y-6">
+
+    {# ── what this page is, and the window it is answering for ────────────── #}
+    <div class="card p-5">
+        <div class="flex flex-wrap items-start justify-between gap-4">
+            <div class="flex items-start gap-3">
+                <i class="fas fa-door-closed text-primary-600 text-xl mt-0.5"></i>
+                <div class="space-y-1">
+                    <h1 class="text-lg font-bold text-surface-800"
+                        x-text="t('Murid yang tidak bisa masuk','Pupils who could not get in')"></h1>
+                    <p class="text-sm text-surface-600 max-w-3xl"
+                       x-text="t('Catatan pintu SEB untuk sekolah ini: siapa yang ditolak, di kelas mana, dan pada ujian mana. Diurutkan dari yang paling sering, supaya polanya terlihat sebelum ujian berikutnya dimulai.','The SEB door log for this school: who was turned away, in which class, on which paper. Ranked worst first, so the pattern is visible before the next sitting begins.')"></p>
+                </div>
+            </div>
+            <div class="flex items-center gap-2">
+                {% for window in windows %}
+                <a href="/admin-sekolah/seb-refusals?days={{ window }}"
+                   class="px-3 py-1.5 rounded-full text-xs font-bold {% if window == days %}bg-primary-600 text-white{% else %}bg-surface-100 text-surface-600{% endif %}"
+                   x-text="t('{{ window }} hari','{{ window }} days')"></a>
+                {% endfor %}
+            </div>
+        </div>
+
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-5">
+            <div class="rounded-xl bg-surface-50 border border-surface-200 p-3">
+                <p class="text-2xl font-bold text-surface-800">{{ summary.refused_pupils }}</p>
+                <p class="text-xs text-surface-500"
+                   x-text="t('Murid tidak bisa masuk','Pupils refused')"></p>
+            </div>
+            <div class="rounded-xl bg-surface-50 border border-surface-200 p-3">
+                <p class="text-2xl font-bold text-surface-800">{{ summary.refused_attempts }}</p>
+                <p class="text-xs text-surface-500"
+                   x-text="t('Percobaan ditolak','Attempts refused')"></p>
+            </div>
+            <div class="rounded-xl bg-surface-50 border border-surface-200 p-3">
+                <p class="text-2xl font-bold text-surface-800">{{ summary.papers }}</p>
+                <p class="text-xs text-surface-500"
+                   x-text="t('Ujian terdampak','Papers affected')"></p>
+            </div>
+            <div class="rounded-xl bg-surface-50 border border-surface-200 p-3">
+                <p class="text-sm font-bold text-surface-800">
+                    {% if summary.refused_last_at %}{{ summary.refused_last_at|tz }}{% else %}-{% endif %}
+                </p>
+                <p class="text-xs text-surface-500"
+                   x-text="t('Penolakan terakhir','Most recent refusal')"></p>
+            </div>
+        </div>
+    </div>
+
+    {# ── the sentence that keeps this page from being read as a punishment ─── #}
+    <div class="rounded-xl bg-amber-50 border border-amber-200 p-4 flex items-start gap-3"
+         data-seb-refusal-not-penalty>
+        <i class="fas fa-circle-info text-amber-600 mt-0.5"></i>
+        <div class="text-sm text-amber-800 space-y-1">
+            <p class="font-bold"
+               x-text="t('Ditolak masuk bukan pelanggaran dan bukan penalti.','A refusal at the door is not a violation and not a penalty.')"></p>
+            <p x-text="t('Murid yang tidak bisa masuk belum mengerjakan apa pun dan tidak kehilangan satu poin pun. Penyebab tersering ada di berkas atau di tautan, bukan pada murid: dibuka dari browser biasa alih-alih dari SEB, atau berkas .seb yang dipegang murid sudah lama karena pengaturan ujian diubah setelah berkas itu dibagikan.','A pupil who could not get in has sat nothing and has lost no points. The usual causes are in the file or in the link rather than in the pupil: opened in an ordinary browser instead of SEB, or a .seb file that went stale because the exam settings were changed after it was handed out.')"></p>
+        </div>
+    </div>
+
+    {% if not summary.refused_attempts %}
+    <div class="card p-6 text-center space-y-2">
+        <i class="fas fa-circle-check text-2xl text-emerald-500"></i>
+        <p class="text-sm font-semibold text-surface-700"
+           x-text="t('Tidak ada penolakan di pintu SEB dalam {{ days }} hari terakhir.','No SEB door refusals in the last {{ days }} days.')"></p>
+        <p class="text-xs text-surface-500"
+           x-text="t('Murid yang membuka ujian dari SEB tidak meninggalkan catatan di sini, jadi halaman yang kosong berarti pintunya bekerja.','Pupils who open the exam from SEB leave no record here, so an empty page means the door worked.')"></p>
+    </div>
+    {% else %}
+
+    {% if summary.truncated %}
+    <p class="text-xs text-surface-500"
+       x-text="t('Catatan dibatasi ke baris terbaru pada jendela ini, jadi angkanya berasal dari bagian terbaru itu.','The log was capped at the newest rows in this window, so these numbers come from that newest part.')"></p>
+    {% endif %}
+
+    {# ── why they were refused: the pattern, before the names ─────────────── #}
+    <div class="card p-5 space-y-3">
+        <h2 class="font-bold text-surface-800"
+            x-text="t('Penyebab penolakan','Why they were refused')"></h2>
+        <div class="space-y-2">
+            {% for reason in reasons %}
+            <div class="flex items-start justify-between gap-3 text-sm">
+                <span class="text-surface-700 flex-1"
+                      x-text="t('{{ reason.label[0] }}','{{ reason.label[1] }}')"></span>
+                <span class="font-bold text-surface-800">{{ reason.count }}</span>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    {# ── by class ──────────────────────────────────────────────────────────── #}
+    <div class="card p-5 space-y-3">
+        <h2 class="font-bold text-surface-800"
+            x-text="t('Per kelas','By class')"></h2>
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm min-w-[640px]">
+                <thead>
+                    <tr class="text-left text-xs uppercase tracking-wide text-surface-500">
+                        <th class="py-2 pr-3" x-text="t('Kelas','Class')"></th>
+                        <th class="py-2 px-3" x-text="t('Murid','Pupils')"></th>
+                        <th class="py-2 px-3" x-text="t('Percobaan','Attempts')"></th>
+                        <th class="py-2 px-3" x-text="t('Terakhir','Last')"></th>
+                        <th class="py-2 px-3" x-text="t('Penyebab terbanyak','Most common cause')"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in classes %}
+                    <tr class="border-t border-surface-100">
+                        <td class="py-2 pr-3 font-semibold text-surface-800">
+                            {% if row.label %}{{ row.label }}{% else %}
+                            <span class="text-surface-500"
+                                  x-text="t('{{ class_unknown[0] }}','{{ class_unknown[1] }}')"></span>
+                            {% endif %}
+                        </td>
+                        <td class="py-2 px-3 font-bold text-surface-800">{{ row.pupils }}</td>
+                        <td class="py-2 px-3 text-surface-600">{{ row.attempts }}</td>
+                        <td class="py-2 px-3 text-surface-600">{% if row.last_at %}{{ row.last_at|tz }}{% else %}-{% endif %}</td>
+                        <td class="py-2 px-3 text-surface-600">
+                            {% if row.reason_label %}
+                            <span x-text="t('{{ row.reason_label[0] }}','{{ row.reason_label[1] }}')"></span>
+                            {% else %}-{% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    {# ── by paper ──────────────────────────────────────────────────────────── #}
+    <div class="card p-5 space-y-3">
+        <h2 class="font-bold text-surface-800"
+            x-text="t('Per ujian','By paper')"></h2>
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm min-w-[640px]">
+                <thead>
+                    <tr class="text-left text-xs uppercase tracking-wide text-surface-500">
+                        <th class="py-2 pr-3" x-text="t('Ujian','Exam')"></th>
+                        <th class="py-2 px-3" x-text="t('Murid','Pupils')"></th>
+                        <th class="py-2 px-3" x-text="t('Percobaan','Attempts')"></th>
+                        <th class="py-2 px-3" x-text="t('Terakhir','Last')"></th>
+                        <th class="py-2 px-3" x-text="t('Penyebab terbanyak','Most common cause')"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in papers %}
+                    <tr class="border-t border-surface-100">
+                        <td class="py-2 pr-3 font-semibold text-surface-800">{{ row.label }}</td>
+                        <td class="py-2 px-3 font-bold text-surface-800">{{ row.pupils }}</td>
+                        <td class="py-2 px-3 text-surface-600">{{ row.attempts }}</td>
+                        <td class="py-2 px-3 text-surface-600">{% if row.last_at %}{{ row.last_at|tz }}{% else %}-{% endif %}</td>
+                        <td class="py-2 px-3 text-surface-600">
+                            {% if row.reason_label %}
+                            <span x-text="t('{{ row.reason_label[0] }}','{{ row.reason_label[1] }}')"></span>
+                            {% else %}-{% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    {# ── the individual refusals, newest first ─────────────────────────────── #}
+    <div class="card p-5 space-y-3">
+        <h2 class="font-bold text-surface-800"
+            x-text="t('Penolakan terbaru','The most recent refusals')"></h2>
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm min-w-[640px]">
+                <thead>
+                    <tr class="text-left text-xs uppercase tracking-wide text-surface-500">
+                        <th class="py-2 pr-3" x-text="t('Murid','Pupil')"></th>
+                        <th class="py-2 px-3" x-text="t('Kelas','Class')"></th>
+                        <th class="py-2 px-3" x-text="t('Ujian','Exam')"></th>
+                        <th class="py-2 px-3" x-text="t('Penyebab','Cause')"></th>
+                        <th class="py-2 px-3" x-text="t('Waktu','Time')"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in recent %}
+                    <tr class="border-t border-surface-100">
+                        <td class="py-2 pr-3 font-semibold text-surface-800">
+                            {% if row.name %}{{ row.name }}{% else %}
+                            <span class="text-surface-500"
+                                  x-text="t('Nama tidak terbaca','Name unavailable')"></span>
+                            {% endif %}
+                        </td>
+                        <td class="py-2 px-3 text-surface-600">
+                            {% if row.class_label %}{{ row.class_label }}{% elif row.class_missing %}
+                            <span class="text-surface-500"
+                                  x-text="t('{{ class_unknown[0] }}','{{ class_unknown[1] }}')"></span>
+                            {% else %}-{% endif %}
+                        </td>
+                        <td class="py-2 px-3 text-surface-600">{{ row.exam_label }}</td>
+                        <td class="py-2 px-3 text-surface-600">
+                            <span x-text="t('{{ row.label[0] }}','{{ row.label[1] }}')"></span>
+                        </td>
+                        <td class="py-2 px-3 text-surface-600">{% if row.at %}{{ row.at|tz }}{% else %}-{% endif %}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+</div>
+{% endblock %}

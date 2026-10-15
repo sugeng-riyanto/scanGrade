@@ -242,6 +242,237 @@ def refusal_summary(refusals: list[dict]) -> dict:
     }
 
 
+# ── the school-wide question ─────────────────────────────────────────────────
+#
+# A teacher's panel answers "how many of my pupils could not get in" for one paper.
+# An admin meets the other half of it the morning of a sitting: *which classes and
+# which papers keep turning people away*, asked before the room fills rather than
+# after. Migration 064 left the index for exactly this read
+# (`idx_seb_door_refusal_school_created`) and said so; what was missing was the
+# page, and this is the arithmetic behind it.
+#
+# Two answers, one shape. A class and a paper are ranked by the **same two
+# numbers**, because the same two questions are asked of each: how many *pupils*
+# (distinct `student_id`) and how many *attempts*. One pupil who tried five times is
+# a pupil who mistyped a link; five pupils who tried once each is a file that
+# reached nobody, and a single total cannot tell them apart. Ordering is pupils
+# first, then attempts, then the most recent refusal — so a tie is decided by
+# evidence rather than by the order a dict happened to be built in.
+
+#: The windows the page offers, in days. A whitelist and not a number off the query
+#: string: the reader turns it into a timestamp, and "last 999999 days" is a scan
+#: nobody asked for.
+WINDOWS = (7, 30, 90)
+DEFAULT_WINDOW = 30
+
+#: Rows one school's page reads. Past this the *newest* rows are what is read, the
+#: page says the window was truncated, and no count can overstate anything: every
+#: number here is taken from the rows in hand.
+MAX_SCHOOL_ROWS = 2000
+
+#: How many individual refusals the page lists under the rankings.
+RECENT_ROWS = 25
+
+#: The pair a refusal with no usable class renders as. A pupil whose profile was
+#: deleted keeps its `student_id` (the migration set that column `ON DELETE SET
+#: NULL` on purpose) and therefore has no class — named rather than dropped, because
+#: "we cannot tell which class" is a different fact from "no refusals".
+NO_CLASS_LABEL = ("Kelas tidak diketahui", "Class unknown")
+
+#: The embedded profile, with the class this page groups by. `class_id` is a plain
+#: column here rather than a second embed: grouping happens in this process over rows
+#: the page already holds, and a join through `classes` would make the read fail as a
+#: whole the day that relationship is renamed.
+PROFILE_EMBED_CLASS = "profiles!left(full_name, class_id)"
+
+
+def window_days(raw) -> int:
+    """A window the page offers, from whatever arrived in the query string."""
+    try:
+        days = int(str(raw))
+    except (TypeError, ValueError):
+        return DEFAULT_WINDOW
+    return days if days in WINDOWS else DEFAULT_WINDOW
+
+
+def refusals_for_school(supabase, school_id: str, days: int = DEFAULT_WINDOW,
+                        limit: int = MAX_SCHOOL_ROWS) -> list[dict]:
+    """One school's refusals over one window, newest first.
+
+    One query, filtered by the column migration 064 indexes — and by the school,
+    which is the same narrowing its RLS policy makes, so this reader and a future
+    one behind the anon key cannot disagree about what a school may see. A read that
+    fails is an empty list and a logged warning, never an exception thrown at a page:
+    an admin whose log is unreadable must still get their dashboard.
+    """
+    from datetime import datetime, timedelta, timezone
+    if not school_id:
+        return []
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    try:
+        rows = _rows(supabase.table(TABLE)
+                     .select(f"{ROW_COLUMNS}, {PROFILE_EMBED_CLASS}")
+                     .eq("school_id", school_id)
+                     .gte("created_at", since)
+                     .order("created_at", desc=True).limit(limit))
+    except Exception as exc:                                     # noqa: BLE001
+        logger.warning("seb_door_log: read failed for school %s: %s", school_id, exc)
+        return []
+    return [_as_row(row) | {"exam_id": row.get("exam_id"),
+                            "class_id": _row_class(row)}
+            for row in rows]
+
+
+def _row_class(row: dict) -> str | None:
+    """The class the refused pupil is in, from the embedded profile."""
+    profile = row.get("profiles") or {}
+    if not isinstance(profile, dict):
+        return None
+    class_id = profile.get("class_id")
+    return str(class_id) if class_id else None
+
+
+def _rank(groups: dict, key_name: str) -> list[dict]:
+    """Order grouping buckets the one way this page orders anything.
+
+    Pupils first (the headcount a room is run by), then attempts (the file that
+    reached nobody), then recency. ``-attempts`` and the string key are the tie
+    breakers that make the order total, so two runs over the same rows agree.
+    """
+    out = []
+    for key, bucket in groups.items():
+        paid = sorted(bucket["reasons"].items(), key=lambda kv: (-kv[1], kv[0]))
+        out.append({
+            key_name: key,
+            "label": bucket["label"],
+            "pupils": len(bucket["pupils"]),
+            "attempts": bucket["attempts"],
+            "last_at": bucket["last_at"],
+            "reason": paid[0][0] if paid else None,
+            "reason_label": REASON_LABELS.get(paid[0][0], (paid[0][0], paid[0][0]))
+                            if paid else None,
+        })
+    out.sort(key=lambda row: (-row["pupils"], -row["attempts"],
+                              str(row[key_name] or "")))
+    return out
+
+
+def rank_refusals(refusals: list[dict], classes: list[dict] | None = None,
+                  exams: dict | None = None) -> dict:
+    """Who could not get in, ranked by class and by paper — the whole page's data.
+
+    Pure arithmetic over rows a caller already holds, so the ranking can be tested
+    without a database and cannot cost a round trip per row. ``classes`` is
+    :func:`app.utils.req_cache.school_classes`' own list (id, name) and ``exams`` is
+    an id->title map; a class or a paper that cannot be named is still listed, under
+    the ``NO_CLASS_LABEL`` pair or under its id, because a bucket the page cannot
+    label is not a bucket to hide.
+
+    Nothing here reads the score, the ladder or the lockout path, and the caller
+    writes nothing: this is the same non-punitive contract the writers keep.
+    """
+    class_names = {str(row.get("id")): (row.get("name") or "")
+                   for row in (classes or []) if isinstance(row, dict)}
+    exam_titles = {str(k): v for k, v in (exams or {}).items()}
+
+    by_class: dict = {}
+    by_exam: dict = {}
+    reasons: dict = {}
+    pupils: set = set()
+    papers: set = set()
+    moments: list = []
+
+    for row in refusals or []:
+        if not isinstance(row, dict):
+            continue
+        reason = str(row.get("reason") or "unknown")
+        reasons[reason] = reasons.get(reason, 0) + 1
+        at = row.get("at")
+        if at:
+            moments.append(at)
+        if row.get("student_id"):
+            pupils.add(str(row["student_id"]))
+        exam_id = row.get("exam_id")
+        if exam_id:
+            papers.add(str(exam_id))
+
+        class_id = row.get("class_id")
+        # The *name*, or None — never a sentence. A label baked here would be one
+        # language's words on a page that follows the reader's toggle, and the
+        # template is the only place that knows which half to render.
+        by_class.setdefault(class_id, {
+            "label": (class_names.get(str(class_id)) if class_id else None) or None,
+            "pupils": set(), "attempts": 0, "last_at": None, "reasons": {},
+        })
+        by_exam.setdefault(exam_id, {
+            "label": exam_titles.get(str(exam_id)) or (str(exam_id) if exam_id else ""),
+            "pupils": set(), "attempts": 0, "last_at": None, "reasons": {},
+        })
+        for bucket in (by_class[class_id], by_exam[exam_id]):
+            bucket["attempts"] += 1
+            bucket["reasons"][reason] = bucket["reasons"].get(reason, 0) + 1
+            if row.get("student_id"):
+                bucket["pupils"].add(str(row["student_id"]))
+            if at and (bucket["last_at"] is None or str(at) > str(bucket["last_at"])):
+                bucket["last_at"] = at
+
+    recent = []
+    for row in (refusals or [])[:RECENT_ROWS]:
+        if not isinstance(row, dict):
+            continue
+        class_id = row.get("class_id")
+        recent.append({
+            "student_id": row.get("student_id"),
+            "name": row.get("name"),
+            "class_label": class_names.get(str(class_id)) if class_id else None,
+            "class_missing": not (class_id and class_names.get(str(class_id))),
+            "exam_id": row.get("exam_id"),
+            "exam_label": exam_titles.get(str(row.get("exam_id")))
+                          or (str(row.get("exam_id")) if row.get("exam_id") else ""),
+            "label": row.get("label") or REASON_LABELS.get(
+                str(row.get("reason") or "unknown"), ("", "")),
+            "user_agent": row.get("user_agent"),
+            "at": row.get("at"),
+        })
+
+    return {
+        "classes": _rank(by_class, "class_id"),
+        "papers": _rank(by_exam, "exam_id"),
+        "reasons": [{"reason": reason, "count": count,
+                     "label": REASON_LABELS.get(reason, (reason, reason))}
+                    for reason, count in sorted(reasons.items(),
+                                                key=lambda kv: (-kv[1], kv[0]))],
+        "recent": recent,
+        "summary": {
+            "refused_pupils": len(pupils),
+            "refused_attempts": len(refusals or []),
+            "papers": len(papers),
+            "classes": len([k for k in by_class if k]),
+            "refused_last_at": max(moments) if moments else None,
+            "truncated": len(refusals or []) >= MAX_SCHOOL_ROWS,
+        },
+    }
+
+
+def exam_titles(supabase, exam_ids) -> dict:
+    """The titles of the papers a window mentions, in one read.
+
+    One query for the whole page rather than one per row, and an id that has no row
+    is simply absent — the ranking falls back to the id, so a paper deleted between
+    the two reads is listed rather than dropped.
+    """
+    ids = [str(i) for i in (exam_ids or []) if i]
+    if not ids:
+        return {}
+    try:
+        rows = _rows(supabase.table("exams").select("id, title").in_("id", ids))
+    except Exception as exc:                                     # noqa: BLE001
+        logger.warning("seb_door_log: could not read exam titles: %s", exc)
+        return {}
+    return {str(row.get("id")): row.get("title") for row in rows
+            if isinstance(row, dict) and row.get("id")}
+
+
 def attach_refusals(supabase, exam_id: str, stats: dict) -> None:
     """Put the refusal tally on ``stats`` for the results header.
 
@@ -259,7 +490,10 @@ def attach_refusals(supabase, exam_id: str, stats: dict) -> None:
 
 
 __all__ = [
-    "CLIENT_REASONS", "MAX_ROWS", "PROFILE_EMBED", "REASONS", "REASON_KEY_MISMATCH",
-    "REASON_LABELS", "REASON_NO_CLIENT", "REASON_NO_KEY", "ROW_COLUMNS", "TABLE",
-    "attach_refusals", "now_iso", "record", "refusal_summary", "refusals_for_exam",
+    "CLIENT_REASONS", "DEFAULT_WINDOW", "MAX_ROWS", "MAX_SCHOOL_ROWS",
+    "NO_CLASS_LABEL", "PROFILE_EMBED", "PROFILE_EMBED_CLASS", "REASONS",
+    "REASON_KEY_MISMATCH", "REASON_LABELS", "REASON_NO_CLIENT", "REASON_NO_KEY",
+    "RECENT_ROWS", "ROW_COLUMNS", "TABLE", "WINDOWS",
+    "attach_refusals", "exam_titles", "now_iso", "rank_refusals", "record",
+    "refusal_summary", "refusals_for_exam", "refusals_for_school", "window_days",
 ]

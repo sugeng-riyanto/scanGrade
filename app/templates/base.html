@@ -358,6 +358,7 @@ window.sgSavePrefs = function (patch) {
             <a href="/admin-sekolah/assessment-periods" class="nav-item {% if request.path == '/admin-sekolah/assessment-periods' %}active{% endif %}"><i class="fas fa-calendar-check"></i><span x-text="t('Periode Penilaian','Assessment Periods')"></span></a>
             {# Matriks pengawas ujian, di pintu admin: sekolah tanpa wakil kepala tetap bisa menugaskan pengawas. #}
             <a href="/admin-sekolah/invigilation" class="nav-item {% if request.path == '/admin-sekolah/invigilation' %}active{% endif %}"><i class="fas fa-clipboard-check"></i><span x-text="t('Jadwal Pengawasan','Invigilation')"></span></a>
+            <a href="/admin-sekolah/seb-refusals" class="nav-item {% if request.path == '/admin-sekolah/seb-refusals' %}active{% endif %}"><i class="fas fa-door-closed"></i><span x-text="t('Tidak Bisa Masuk','Could Not Get In')"></span></a>
             <div class="nav-section-title pt-2"><span x-text="t('Pengguna','Users')"></span></div>
             <a href="/admin-sekolah/teachers" class="nav-item {% if request.path == '/admin-sekolah/teachers' %}active{% endif %}"><i class="fas fa-chalkboard-teacher"></i><span x-text="t('Guru','Teachers')"></span></a>
             <a href="/admin-sekolah/students" class="nav-item {% if request.path == '/admin-sekolah/students' %}active{% endif %}"><i class="fas fa-user-graduate"></i><span x-text="t('Murid','Students')"></span></a>

@@ -52,7 +52,12 @@ EXPECTED: dict[str, list[tuple[str, list[str]]]] = {
                       "/admin-sekolah/subjects", "/admin-sekolah/grade-weights",
                       "/admin-sekolah/promote",
                       "/admin-sekolah/assessment-periods",
-                      "/admin-sekolah/invigilation"]),
+                      "/admin-sekolah/invigilation",
+                      # Who could not get in, ranked by class and by paper. It sits
+                      # with the exam-day work (`/admin-sekolah/invigilation`), not
+                      # with the reports: it is read *before* the next sitting, the
+                      # way the schedule beside it is.
+                      "/admin-sekolah/seb-refusals"]),
         # `/admin-sekolah/membership` sits with the people, not with the data: it
         # answers who works here and who asked to join from another NPSN, which is
         # the same question the three entries above it answer.
