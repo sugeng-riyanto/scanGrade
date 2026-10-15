@@ -51,7 +51,7 @@ INSTALLER = DEPLOY / "install-auto-deploy.sh"
 HOOK = DEPLOY / "git-hooks" / "pre-commit"
 
 ARMAMENT_TOOLS = ("deploy/i18n_coverage.py", "deploy/css_freshness.py",
-                  "deploy/schema_contract.py")
+                  "deploy/schema_contract.py", "deploy/school_authority_gate.py")
 
 EXIT_FINDING, EXIT_CANNOT_RUN, EXIT_DISARMED = 1, 2, 3
 

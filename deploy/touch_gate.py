@@ -15,7 +15,11 @@ Signs in over HTTPS as the teacher account the smoke test already uses, opens th
 exam builder (`/teacher/exams/new`), emulates a finger (`pointer: coarse`, the
 media query the rule is asked as), and at each documented tablet width — portrait
 *and* landscape — measures every control the rule names. Any control under the
-floor is a finding.
+floor is a finding — and so is a builder that laid out with no controls in it at
+all, because the scope is the release's own page and an empty form is a regression
+rather than a page this gate cannot judge. (A page *without* the scope is the other
+answer — `could not measure`, because a renamed scope and a page that is not the
+builder are the same reading.)
 
 The floor is measured the way the rule can be enforced: a control whose computed
 `display` is `inline` is **not** measured, because `min-height`/`min-width` do not
@@ -27,9 +31,11 @@ reason.
 Exit codes
 ----------
   0  every measured control is at least the floor, at every width
-  1  a finding — at least one control is under the floor (a real regression)
-  2  could not measure — no browser, no credentials, the page did not render,
-     a navigation timed out. **Not** a pass, and deliberately distinct from one.
+  1  a finding — at least one control is under the floor, or the builder rendered
+     with no controls in it at all (a real regression)
+  2  could not measure — no browser, no credentials, the page did not render, the
+     builder scope is not on the page, a navigation timed out. **Not** a pass, and
+     deliberately distinct from one.
 
 The distinction is the whole point: exit 2 is "we could not look", and the deploy
 keeps a release it could not look at (loudly) rather than rejecting a good one over
@@ -525,6 +531,26 @@ def run(base_url, teacher, insecure=False, browser=None, widths=WIDTHS):
         if len(all_findings) > 12:
             lines.append(f"    ... and {len(all_findings) - 12} more")
         return EXIT_FINDING, lines, {"findings": all_findings, "measured": measured}
+
+    if measured == 0:
+        # The scope is on the page and **not one control the rule names is inside it**.
+        # That is a builder whose form did not render — and counting it as zero
+        # findings would be a clean answer about a page with nothing on it, which is
+        # how a blank builder ships past a gate whose whole subject is the controls in
+        # it. A page *without* the scope is a different answer and is handled above
+        # (`not the exam builder`, exit 2): this one is the release's own page, so it
+        # is a finding. Found by `tests/unit/test_browser_gates_can_fail.py`, which
+        # runs this gate against a deliberately empty builder.
+        lines.append(
+            f"touch gate: FAILED — the exam builder rendered {SCOPE} with no controls "
+            f"in it:"
+        )
+        lines.append(
+            f"    - {len(SELECTORS)} control kinds are measured and not one of them is "
+            f"on the page, at {len(readings)} tablet width(s)"
+        )
+        return EXIT_FINDING, lines, {"findings": [], "measured": 0,
+                                     "reason": "empty-builder"}
 
     lines.append(
         f"touch gate: OK — {measured} controls measured, none under "

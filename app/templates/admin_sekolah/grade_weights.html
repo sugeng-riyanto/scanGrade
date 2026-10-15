@@ -206,6 +206,11 @@ function gradeWeights() {
         impact: {
             pupils: [], subjects: [], shown: 0, capped: false, typed_total: 0,
             kkm: {pupils: [], count: 0, shown: 0, checked: 0},
+            // The released marks that would move by more than a point, and the
+            // point itself: the panel and the save check read the threshold from
+            // here rather than typing it, so the page cannot promise a number it
+            // does not count with.
+            reported: {pupils: [], count: 0, shown: 0, checked: 0, limit: 0},
             counts: {pairs: 0, moved: 0, up: 0, down: 0, reported: 0,
                      pupils_marked: 0, pupils_moved: 0, max_up: null, max_down: null},
         },
@@ -464,6 +469,40 @@ function gradeWeights() {
                 + shown.join('\n') + more + '\n\n'
                 + this.t('Tetap simpan?', 'Save anyway?'));
         },
+        // ── the reported-mark line: a mark the pupil has already seen ───────
+        // The crossing above is a pass becoming a fail. This is the wider case:
+        // every released mark that would move by **more than a point**, in either
+        // direction — a number a parent may already have read, quietly becoming a
+        // different number. It reuses the figures the KKM check just read for this
+        // exact policy (the signature is that policy's URL), so asking the second
+        // question costs no second read on the normal path, and the point itself
+        // is taken from the payload rather than typed here. If the read fails the
+        // save goes ahead: a preview that could not load must not become a lock.
+        async confirmReportedMoves(scope, subjectId, weights) {
+            const url = this.impactUrl(scope, subjectId, weights);
+            if (!this.impactDone || this.impactSignature !== url) {
+                if (!(await this.loadImpact(url))) { return true; }
+            }
+            const block = this.impact.reported || {};
+            const rows = block.pupils || [];
+            if (!rows.length) { return true; }
+            const shown = rows.slice(0, 10).map(r =>
+                '• ' + r.name + (r.class_name ? ' (' + r.class_name + ')' : '')
+                + ' — ' + r.subject_name + ': ' + Number(r.saved).toFixed(1)
+                + ' → ' + Number(r.live).toFixed(1)
+                + ' (' + (r.delta > 0 ? '+' : '') + Number(r.delta).toFixed(1) + ')');
+            const more = block.count > shown.length
+                ? '\n' + this.t('…dan ' + (block.count - shown.length) + ' murid lain.',
+                                 '…and ' + (block.count - shown.length) + ' more pupils.')
+                : '';
+            return confirm(this.t(
+                'Bobot ini menggeser nilai akhir yang sudah terbit lebih dari ',
+                'These weights would move already-reported final marks by more than ')
+                + Number(block.limit).toFixed(1)
+                + this.t(' poin:\n\n', ' point(s):\n\n')
+                + shown.join('\n') + more + '\n\n'
+                + this.t('Tetap simpan?', 'Save anyway?'));
+        },
         impactStale() {
             // A figure computed before the admin typed another weight answers for a
             // policy that no longer exists, so it is labelled rather than left to be
@@ -484,6 +523,7 @@ function gradeWeights() {
             // The default binds every subject that follows it, so the check is run
             // against the default's own policy before it is written.
             if (!(await this.confirmKkm('default', null, this.defaults))) { return; }
+            if (!(await this.confirmReportedMoves('default', null, this.defaults))) { return; }
             this.saving = 'defaults'; this.msg = '';
             this.post('/admin-sekolah/grade-weights/defaults', { weights: this.defaults })
                 .then(d => {
@@ -531,6 +571,8 @@ function gradeWeights() {
             // preview happens to be showing.
             if (!(await this.confirmKkm('subject', subjectId,
                                         this.row(subjectId)))) { return; }
+            if (!(await this.confirmReportedMoves('subject', subjectId,
+                                                  this.row(subjectId)))) { return; }
             this.saving = subjectId; this.msg = '';
             this.post('/admin-sekolah/grade-weights/' + subjectId, { weights: this.row(subjectId) })
                 .then(d => {
@@ -910,6 +952,34 @@ function gradeWeights() {
                             <p class="text-xs font-medium text-red-500 mt-1"
                                x-show="impact.kkm.shown < impact.kkm.count"
                                x-text="t('Menampilkan ','Showing ') + impact.kkm.shown + ' / ' + impact.kkm.count"></p>
+                        </div>
+                        <!-- The wider released-mark warning, and the one a count
+                             cannot carry: a mark the pupil has already been shown
+                             that would move by **more than a point**, either way.
+                             The line above is a pass becoming a fail; this is every
+                             parent-visible number that changes by enough to read as
+                             a different mark, so the pupils are named with the
+                             direction and the size. The point itself comes out of
+                             the payload, not out of this file. -->
+                        <div class="mt-3 p-3 rounded-xl bg-amber-50 border border-amber-200"
+                             x-show="impact.reported.count > 0" data-impact-reported>
+                            <p class="text-xs font-extrabold text-amber-700">
+                                <i class="fas fa-triangle-exclamation mr-1"></i>
+                                <span x-text="impact.reported.count + t(' nilai yang sudah terbit bergerak lebih dari ',' already-reported final mark(s) would move by more than ') + Number(impact.reported.limit).toFixed(1) + t(' poin:',' point(s):')"></span>
+                            </p>
+                            <ul class="mt-1">
+                                <template x-for="row in impact.reported.pupils" :key="'moved-' + row.student_id + '-' + row.subject_id">
+                                    <li class="text-xs font-medium text-amber-700">
+                                        <span class="font-bold" x-text="row.name"></span>
+                                        <span x-text="row.class_name ? ' · ' + row.class_name : ''"></span>
+                                        <span x-text="' — ' + row.subject_name + ': ' + Number(row.saved).toFixed(1) + ' → ' + Number(row.live).toFixed(1)"></span>
+                                        <span class="font-bold" x-text="' (' + (row.delta > 0 ? '+' : '') + Number(row.delta).toFixed(1) + ')'"></span>
+                                    </li>
+                                </template>
+                            </ul>
+                            <p class="text-xs font-medium text-amber-700 mt-1"
+                               x-show="impact.reported.shown < impact.reported.count"
+                               x-text="t('Menampilkan ','Showing ') + impact.reported.shown + ' / ' + impact.reported.count"></p>
                         </div>
                         <div class="overflow-x-auto mt-3" x-show="impact.pupils.length > 0">
                             <table class="w-full text-sm min-w-[640px]">

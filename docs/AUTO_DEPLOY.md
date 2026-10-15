@@ -1142,6 +1142,64 @@ compares nothing and says so rather than assuming agreement. Guard:
 `tests/unit/test_caller_armament.py`, mutation-checked **15/15**
 (`.freebuff/mutate_caller_armament.py`).
 
+### The two readings are compared, and a disagreement is refused
+
+That three-state read makes the checker *safe* for a caller that cannot read a conf,
+but it does not make the callers agree — and a box whose armament depends on who asks
+is armed by luck, not checked. So the preflight takes **both readings**, before
+anything is fetched and before any release is staged:
+
+```bash
+bash "$REPO/deploy/arm-auto-deploy.sh" --check                      # as root
+runuser -u "$OWNER" -- bash "$REPO/deploy/arm-auto-deploy.sh" --check   # as the app sees it
+```
+
+The second is the caller the app's own construct probe reads it as, so this is one
+question asked twice rather than two implementations of one question. What is
+compared is the **verdict each caller reached**, not the report: a root-only conf
+reads `present — enforcement on` to root and `present (cannot read it)` to the service
+user, which is the three-state read working as designed, and comparing the reports
+would refuse every release on every correctly-configured box. A test holds exactly
+that case, because it is the false positive this check would otherwise ship with.
+
+When the two verdicts differ, the run is refused with the same exit 15 as an unarmed
+box — nothing fetched, nothing reloaded, nothing quarantined — and the refusal names
+both readings:
+
+```
+TWO READINGS — REFUSING TO DEPLOY: the armament checker answers differently
+    for the two callers on this box, so whether this box is armed depends on
+    who asks.
+        as root (uid 0): ARMED — every gate has what it needs.
+        as scangrade: NOT ARMED — see the lines above. Arm it with:
+    Nothing was merged and nothing was reloaded. Both reports are in
+        /var/lib/scangrade-deploy/unarmed
+```
+
+That file is what `/super-admin/deploy-status` shows, and it carries both reports,
+each under the caller that took it, plus the line saying they disagree — "which of the
+two said so" is the first question anyone asks of it. Nothing picks a side: which of
+two readings of "is this box armed" is the true one is not a question the runner can
+answer, and answering it is how a box gets armed by luck in the first place.
+
+**A reading that could not be taken is not a disagreement.** A missing `runuser`, a
+user that cannot execute the checker, a hand-run as somebody who is not root: there is
+no second verdict, so there is nothing to compare, and the run is judged as root with a
+line saying so. Refusing there would take the deploy down on a box whose only fault is
+the tool it would use to ask a second time — and the box that needs the check most is
+the one where the two *do* answer differently, not the one where `as_owner` is absent.
+
+**Why here as well as in the app.** The app's construct probe already refuses a
+release when *its* reading is unarmed ("The same checker, read before it refuses"), but
+by then the release has been merged, constructed and rolled back — and it reports one
+side of the disagreement. The preflight refuses before anything moves and prints both,
+which is the difference between "the app refused" and "this box answers differently
+depending on who asks". The limit is the same as the mechanism: the two readings are
+the two callers a root runner can reach, so a box where `runuser` is unavailable
+compares nothing and says so rather than assuming agreement. Guard:
+`tests/unit/test_caller_armament.py`, mutation-checked **15/15**
+(`.freebuff/mutate_caller_armament.py`).
+
 ### Seeing it without a shell
 
 The refusal writes the checker's report to

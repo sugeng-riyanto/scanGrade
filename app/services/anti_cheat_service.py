@@ -246,6 +246,35 @@ def events_for_student(supabase, exam_id: str, user_id: str) -> list[dict]:
         return []
 
 
+def recorded_violations(supabase, exam_id: str) -> int:
+    """How many violation rows this paper already holds — the ones that stay.
+
+    The question the builder's anti-cheat card asks before it lets a teacher believe
+    that a switched-off paper has been tidied up. Deliberately **not**
+    `count_penalized_violations`: that one answers what the ladder *charges*, and for
+    a paper the school switched off it answers 0 without looking — which is exactly
+    the number that would make this warning say there is nothing to keep. What is in
+    `violation_logs` is evidence of when it was taken, and `enabled()` governs what
+    happens *from now on*: it cancels nothing that was already recorded, and the
+    marking page and the printed sheet go on showing it. No kind filter, for the same
+    reason — a recorded `orientation_shift` is not charged either, and it is still on
+    the record.
+
+    A log that cannot be read is 0 with the failure logged, never an exception: this
+    is a reader, and the page that asks it is one whose only sin would be warning
+    somebody — the discipline `events_for_exam` above is written to.
+    """
+    try:
+        res = (supabase.table("violation_logs")
+               .select("id", count="exact")
+               .eq("exam_id", exam_id)
+               .execute())
+        return int(res.count or 0)
+    except Exception:
+        logger.exception("Could not count the recorded violations for exam %s", exam_id)
+        return 0
+
+
 def unmonitored_report(supabase, *, school_id: str | None = None,
                        exam_ids: list[str] | None = None) -> dict:
     """The violations already recorded on papers whose anti-cheat is switched off.
