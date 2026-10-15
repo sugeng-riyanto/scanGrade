@@ -14,7 +14,7 @@ from app.utils import failure
 from app.utils.helpers import read_with_retry, row_or_none
 from app.decorators.security import require_school_access
 from app.decorators.year_lock import open_year_required
-from app.decorators.subscription import require_subscription
+from app.services.subscription_service import check_feature_limit, exam_quota
 from app.utils.exam_access import (
     can_manage_exam, can_read_exam, exam_class_ids,
     managed_exam, EXAM_OK, EXAM_MISSING, EXAM_UNVERIFIABLE,
@@ -1246,10 +1246,14 @@ def _recorded_violations_for_builder(supabase, exam_row, exam_id) -> int:
     return recorded_violations(supabase, exam_id)
 
 
+# The plan's exam allowance is *not* a decorator here, and that is the point: this
+# one route both mints a paper and writes a paper that already exists, so a check on
+# the door charged every draft save, every edit and every publish to a quota that is
+# about creating exams. It is asked in the POST handler, only where the row is new —
+# see the `_owned_draft` branch below.
 @teacher_bp.route("/exams/new", methods=["GET", "POST"])
 @subscription_write_required
 @teacher_or_admin_required
-@require_subscription("create_exam")
 def exam_form():
     supabase = get_supabase()
     if request.method == "GET":
@@ -1459,6 +1463,14 @@ def exam_form():
     # one. `_owned_draft` decides, so a `draft_id` naming another school's paper —
     # or a published one — is ignored rather than written.
     draft_row = _owned_draft(supabase, draft_id, g.get("user_school_id"), g.user_id)
+    # A minted paper spends the school's year; a paper that already exists does not,
+    # whatever the save is called (draft, save, publish). `school_id` here is the
+    # school this request is *verified* in, so the allowance is charged to the tenant
+    # the paper is actually filed under — see `filing_school_for_request` above.
+    if not draft_row:
+        allowed, refusal = check_feature_limit(school_id, "create_exam")
+        if not allowed:
+            return _exam_save_refused(autosave, refusal)
     try:
         if draft_row:
             res = supabase.table("exams").update(data).eq("id", draft_row["id"]).execute()
@@ -2131,9 +2143,14 @@ def my_exams():
     # reachable from the page a teacher is already looking at, not only from a URL
     # nobody told them about.
     ambiguous_ids = {e["id"] for e in exams if _has_ambiguous_key(e)}
+    # The allowance the page prints, from the same reader the refusal is made of:
+    # "0 ujian tersisa" on the page a teacher starts a paper from, rather than after a
+    # save that failed. Two reads (the plan, then this year's papers), not one per row.
+    quota = exam_quota(g.get("user_school_id"))
     return render_template("teacher/exams.html", exams=exams,
                            unassigned_ids=unassigned_ids,
-                           ambiguous_ids=ambiguous_ids)
+                           ambiguous_ids=ambiguous_ids,
+                           exam_quota=quota)
 
 
 #: The three sizes a paper is checked at, and each one's two orientations. A real

@@ -34,6 +34,43 @@
     </div>
     {% endif %}
 
+    {# The plan's exam allowance, on the page where a paper is started: the refusal
+       used to be the first a teacher heard of it, after a save that failed. The labels
+       are `t()` pairs marked with `:lang`, the shape the count line above already uses
+       — this page pins the *document* to Indonesian (`content_lang = 'id'`) and each
+       part of it that switches declares its own language. A single-language literal
+       here would also lower the page's coverage floor, which the language gate refuses. #}
+    {% if exam_quota %}
+    {% if exam_quota.remaining == 0 %}
+    <div class="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2.5 flex flex-wrap items-center gap-2 text-xs"
+         data-exam-quota-used="{{ exam_quota.used }}" data-exam-quota-limit="{{ exam_quota.limit }}">
+        <i class="fas fa-list-check text-rose-600"></i>
+        <span class="font-bold text-rose-700" :lang="lang"
+              x-text="t('Kuota ujian tahun ini','Exam quota this year')"></span>
+        <span class="text-rose-700" :lang="lang"
+              x-text="t('{{ exam_quota.used }} dari {{ exam_quota.limit }} sudah dipakai','{{ exam_quota.used }} of {{ exam_quota.limit }} used')"></span>
+        <span class="text-rose-600" :lang="lang"
+              x-text="t('Paket sudah penuh — upgrade untuk batas tak terbatas','Plan is full — upgrade for unlimited exams')"></span>
+    </div>
+    {% else %}
+    <div class="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-2.5 flex flex-wrap items-center gap-2 text-xs"
+         data-exam-quota-used="{{ exam_quota.used }}" data-exam-quota-limit="{{ exam_quota.limit or '' }}">
+        <i class="fas fa-list-check text-sky-600"></i>
+        <span class="font-bold text-sky-900" :lang="lang"
+              x-text="t('Kuota ujian tahun ini','Exam quota this year')"></span>
+        {% if exam_quota.unlimited %}
+        <span class="text-sky-800" :lang="lang"
+              x-text="t('Tak terbatas di paket ini','Unlimited on this plan')"></span>
+        {% else %}
+        <span class="text-sky-800" :lang="lang"
+              x-text="t('{{ exam_quota.used }} dari {{ exam_quota.limit }} sudah dipakai','{{ exam_quota.used }} of {{ exam_quota.limit }} used')"></span>
+        <span class="text-sky-600" :lang="lang"
+              x-text="t('sisa {{ exam_quota.remaining }}','{{ exam_quota.remaining }} left')"></span>
+        {% endif %}
+    </div>
+    {% endif %}
+    {% endif %}
+
     <!-- Header -->
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
