@@ -44,6 +44,15 @@ class _Query:
         self.rows = [r for r in self.rows if r.get(col) == val]
         return self
 
+    def neq(self, col, val):
+        # The exam allowance reader asks this one (`status != 'draft'`), and a
+        # stand-in that does not understand a filter would answer it with *every*
+        # row or with none — either way the quota it computes here is not the
+        # quota under test. A row with no `status` key is not a draft, so the
+        # five papers below keep counting.
+        self.rows = [r for r in self.rows if r.get(col) != val]
+        return self
+
     def in_(self, col, vals):
         self.rows = [r for r in self.rows if r.get(col) in vals]
         return self
