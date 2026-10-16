@@ -420,11 +420,21 @@ class TestTheOperatorSeesIt:
         assert "09:12" in body or "since" in body.lower(), (
             "a single timestamp with no run length cannot tell a blip from an outage")
 
+    #: The traffic section the dashboard now includes. Handed an *empty* reading
+    #: rather than a fabricated one, so the mail assertions below are read on a page
+    #: whose other panels are blank — a number here could only help a `in body` check
+    #: pass for the wrong reason.
+    EMPTY_TRAFFIC = {"days": 30, "series": [], "hourly": [], "groups": [],
+                     "schools": [], "status": {}, "device": {}, "totals": {},
+                     "heat": [], "quiet_window": {}, "rising": [], "recent": {},
+                     "previous": {}, "last_flush": {}, "sentry_url": None}
+
     def _dash(self, page, mail):
         return page("super_admin/dashboard.html", total_schools=0, total_users=0,
                     total_teachers=0, total_students=0, total_exams=0, total_subs=0,
                     pending_requests=0, schools=[], recent_logs=[], requests=[],
-                    mail=mail)
+                    mail=mail, analytics=self.EMPTY_TRAFFIC, school_names={},
+                    health={}, cache_sweep={}, worst_page={})
 
     def test_the_dashboard_shows_a_broken_mail_path(self, page):
         body = self._dash(page, BROKEN)

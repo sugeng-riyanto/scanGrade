@@ -45,6 +45,34 @@ def cache_set(key, value):
     _lru_cache_ttl[key] = time.time()
 
 
+#: The age past which an entry in the page cache above cannot be a hit any more.
+#: `cache_get(key, ttl)` compares the entry's **age** against the ttl the *caller*
+#: passes, so nothing here records the ttl an entry was written under; 3600 s is
+#: comfortably above the largest one any caller in this repository passes (300 s,
+#: `ANALYTICS_TTL`/`REPORT_TTL`), and being generous is the safe direction — an
+#: entry kept too long is a few kilobytes, an entry dropped too early is a cache
+#: miss the weekly sweep invented.
+PAGE_CACHE_MAX_AGE = 3600
+
+
+def drop_expired_page_cache() -> int:
+    """Remove page-cache entries that can no longer be a hit, and return how many.
+
+    Called by the weekly sweep. Stated plainly: **this cache holds nothing today** —
+    nothing imports these two functions, so every entry it has ever held was put
+    there by a caller that no longer exists. It is swept anyway, for two reasons: the
+    sweep's contract is "no process cache may grow without a reader", and a
+    reintroduced caller would otherwise inherit a dictionary with no eviction path.
+    """
+    cutoff = time.time() - PAGE_CACHE_MAX_AGE
+    dropped = 0
+    for key in [k for k, stamped in _lru_cache_ttl.items() if stamped < cutoff]:
+        _lru_cache.pop(key, None)
+        _lru_cache_ttl.pop(key, None)
+        dropped += 1
+    return dropped
+
+
 # served-commit:start
 #
 # What this *process* is serving, published so a deploy can ask it.
@@ -696,6 +724,32 @@ def create_app(env=None):
         except Exception as e:
             app.logger.warning("Failed to start period reconcile sweep: %s", e)
 
+        # Roll the platform's own traffic counters into the summary tables. Same
+        # shape as the loops above — a daemon thread in each worker, started here
+        # and only here — because this app has no Celery beat process and nothing
+        # depends on one (see `docs/features/analytics-dashboard.md`). It flushes
+        # its own worker's buffer, which is the arithmetic being done correctly:
+        # three workers carry three disjoint shares of the same hour.
+        try:
+            from app.services.traffic_rollup_service import start_rollup_scheduler
+            start_rollup_scheduler(
+                interval=app.config.get("TRAFFIC_ROLLUP_INTERVAL_SECONDS"), app=app)
+        except Exception as e:
+            app.logger.warning("Failed to start traffic rollup: %s", e)
+
+        # The weekly cache sweep: expired process-cache entries and the Redis keys
+        # in this app's own namespace that have no expiry at all. It stands down
+        # while a sitting is in progress — the full reasoning is in
+        # app/services/cache_maintenance_service.py, and the short version is that
+        # clearing a school's cached rows mid-exam costs a round-trip per row for
+        # every pupil in it.
+        try:
+            from app.services.cache_maintenance_service import (
+                start_cache_sweep_scheduler)
+            start_cache_sweep_scheduler(app=app)
+        except Exception as e:
+            app.logger.warning("Failed to start cache sweep: %s", e)
+
         # Start the deploy-staleness alert loop. It mails the super admins when the
         # runner falls behind the checkout, so staleness is noticed the day it
         # happens instead of the day somebody opens the status page. It never
@@ -986,6 +1040,30 @@ def _register_request_logging(app):
             _metrics["response_times"].append(duration * 1000)
             if len(_metrics["response_times"]) > _max_times:
                 _metrics["response_times"] = _metrics["response_times"][-500:]
+            # The platform's own traffic rollup, counted here rather than scraped
+            # from a log: this is the one place a request already knows its route,
+            # its status, its cost and *which school it was for* — the access log
+            # has no school in it, which is why the live source is this hook and the
+            # log is only the backfill. It costs a dict lookup and a few integer
+            # adds, and it is wrapped so a statistics failure can never be the
+            # reason a page does not answer. See app/services/traffic_rollup_service.py.
+            try:
+                from app.services import traffic_rollup_service as traffic
+                school_id = g.get("user_school_id")
+                traffic.note_request(request.path, response.status_code,
+                                     duration * 1000.0,
+                                     request.headers.get("User-Agent", ""),
+                                     school_id)
+                # Sessions are counted for signed-in sessions only, and by hash. An
+                # anonymous visitor has no session token to count and is not given
+                # one to make this number move: minting an identifier for somebody
+                # who did not ask for one is the tracking this page deliberately
+                # does not do.
+                visitor = g.get("user_token") or request.cookies.get("access_token")
+                if visitor:
+                    traffic.note_session(visitor, school_id)
+            except Exception:
+                app.logger.debug("traffic rollup note failed", exc_info=True)
         # Set refreshed access_token cookie if token was refreshed. Through the
         # shared helper so it carries Secure on HTTPS like the session cookie.
         new_token = getattr(g, "_new_access_token", None)

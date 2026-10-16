@@ -123,6 +123,31 @@ def _replay_cost(key):
         query_meter.trip(cost)
 
 
+def drop_expired() -> int:
+    """Remove the in-memory entries whose TTL has passed, and return how many.
+
+    This is the one thing a TTL on a process cache cannot do for itself. `cache_get`
+    checks an entry's expiry when it *reads* it, so an entry nobody reads again is
+    never removed and sits in the worker's heap for the life of the worker. Called
+    by the weekly sweep (`app/services/cache_maintenance_service.py`) rather than on
+    every request, because a scan of up to `_mem_max` entries per request would cost
+    more than the memory it returns.
+
+    Only **expired** entries go. An entry that is still live is by definition still
+    the answer to its question, and dropping it would hand the next reader a cache
+    miss — which on this box is a 100-165 ms Supabase round-trip per entry.
+    """
+    now = time.time()
+    dropped = 0
+    with _mem_lock:
+        for key in [k for k, entry in _mem_cache.items() if entry[1] <= now]:
+            del _mem_cache[key]
+            dropped += 1
+        for key in [k for k, entry in _mem_cost.items() if entry[1] <= now]:
+            del _mem_cost[key]
+    return dropped
+
+
 def cache_get(key):
     """Get value from cache. Returns None on miss."""
     r = _get_redis()

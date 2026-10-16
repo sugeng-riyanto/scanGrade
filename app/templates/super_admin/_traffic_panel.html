@@ -1,0 +1,334 @@
+{# ── Traffic & errors ────────────────────────────────────────────────────────
+   Every figure below comes from the pre-computed rollup tables, read once and
+   cached for two minutes by the route. Nothing here aggregates on the fly: a page
+   whose job is to report the load must not add to it, which is why the counts live
+   in `traffic_rollup_hourly`/`_daily` (migration 065) and are filled by a timer on
+   the box rather than by a third-party analytics service.
+
+   Privacy, stated on the page rather than only in the code: the numbers are
+   counts. No pupil, no IP, no cookie and no raw device string is stored anywhere
+   this page reads — which is what makes it publishable to a super admin at all.
+#}
+<div class="mt-8" id="traffic">
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+        <div>
+            <h2 class="text-lg font-bold text-slate-800" x-text="t('Lalu lintas &amp; kesalahan','Traffic &amp; errors')"></h2>
+            <p class="text-xs text-slate-500"
+               x-text="t('Agregat saja — tidak ada data per murid, tidak ada pelacakan pihak ketiga.',
+                        'Aggregate only — no per-student data, no third-party tracking.')"></p>
+        </div>
+        <div class="flex items-center gap-1">
+            {% for option in [7, 30, 90] %}
+            <a href="?days={{ option }}#traffic"
+               class="px-3 py-1.5 rounded-lg text-xs font-bold {% if analytics.days == option %}bg-primary-600 text-white{% else %}bg-slate-100 text-slate-600 hover:bg-slate-200{% endif %}">{{ option }}d</a>
+            {% endfor %}
+        </div>
+    </div>
+
+    {# The reading's own age, so a cached or stale rollup is never passed off as live. #}
+    <p class="text-[11px] text-slate-400 mb-4">
+        {% if analytics.last_day %}
+        <span x-text="t('Rentang:','Range:')"></span>
+        <span class="font-mono">{{ analytics.first_day }} → {{ analytics.last_day }}</span>
+        {% else %}
+        <span x-text="t('Belum ada data ringkasan. Timer pengisi berjalan tiap menit di kotak; baris pertama muncul setelah satu menit berlalu.',
+                        'No rollup data yet. The filling timer runs every minute on the box; the first row appears after a minute has passed.')"></span>
+        {% endif %}
+        {% if analytics.last_flush.at %}
+        <span class="ml-2">· <span x-text="t('flush terakhir','last flush')"></span>
+            <span class="font-mono">{{ analytics.last_flush.at | tz }}</span></span>
+        {% endif %}
+    </p>
+
+    {% set totals = analytics.totals or {} %}
+    {% set status = analytics.status or {} %}
+    {% set device = analytics.device or {} %}
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+        <div class="bg-white rounded-xl border border-slate-200 p-4">
+            <p class="text-[11px] font-bold text-slate-400 uppercase" x-text="t('Permintaan','Requests')"></p>
+            <p class="text-2xl font-bold text-slate-800">{{ totals.requests | default(0) }}</p>
+        </div>
+        <div class="bg-white rounded-xl border border-slate-200 p-4">
+            <p class="text-[11px] font-bold text-slate-400 uppercase" x-text="t('Kesalahan 5xx','5xx errors')"></p>
+            {% set err_rate = (totals.errors / totals.requests * 100) if totals.requests else 0 %}
+            <p class="text-2xl font-bold {% if err_rate >= 1 %}text-red-600{% else %}text-emerald-600{% endif %}">{{ '%.2f'|format(err_rate) }}%</p>
+            <p class="text-[11px] text-slate-400">{{ totals.errors | default(0) }} 5xx</p>
+        </div>
+        <div class="bg-white rounded-xl border border-slate-200 p-4">
+            <p class="text-[11px] font-bold text-slate-400 uppercase" x-text="t('Sesi unik (hari tersibuk)','Unique sessions (busiest day)')"></p>
+            <p class="text-2xl font-bold text-slate-800">{{ totals.sessions | default(0) }}</p>
+            <p class="text-[11px] text-slate-400" x-text="t('dihitung sebagai cacah, bukan daftar','counted, never a list')"></p>
+        </div>
+        <div class="bg-white rounded-xl border border-slate-200 p-4">
+            <p class="text-[11px] font-bold text-slate-400 uppercase" x-text="t('Kueri halaman terberat','Worst page queries')"></p>
+            {% if worst_page and worst_page.roundtrips is not none %}
+            <p class="text-2xl font-bold text-slate-800">{{ worst_page.roundtrips }}</p>
+            <p class="text-[11px] text-slate-400 font-mono truncate">{{ worst_page.roundtrips_endpoint }}</p>
+            {% else %}
+            <p class="text-2xl font-bold text-slate-300">—</p>
+            <p class="text-[11px] text-slate-400" x-text="t('belum ada rilis terukur','no measured release yet')"></p>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+        <div class="lg:col-span-2 bg-white rounded-xl border border-slate-200 p-4">
+            <h3 class="text-sm font-bold text-slate-700 mb-2" x-text="t('Permintaan per hari','Requests per day')"></h3>
+            <canvas id="trafficTrend" height="120"></canvas>
+        </div>
+        <div class="bg-white rounded-xl border border-slate-200 p-4">
+            <h3 class="text-sm font-bold text-slate-700 mb-2" x-text="t('Kelas status','Status classes')"></h3>
+            <canvas id="trafficStatus" height="180"></canvas>
+            <p class="text-[11px] text-slate-400 mt-2">2xx {{ status['2xx']|default(0) }} ·
+                3xx {{ status['3xx']|default(0) }} · 4xx {{ status['4xx']|default(0) }} ·
+                5xx {{ status['5xx']|default(0) }}</p>
+        </div>
+    </div>
+
+    {# ── the error summary ────────────────────────────────────────────────────
+       Two halves, and neither is a new error tracker. The rollup answers "how
+       many, and on which route group" without anyone opening Sentry; the link
+       answers "what happened" from the tracker that is already installed. The
+       rising list is descriptive: the page names both rates and lets the reader
+       disagree, because a 0.4% error rate on a route group can be one person.
+    #}
+    <div class="bg-white rounded-xl border border-slate-200 p-4 mb-6">
+        <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <h3 class="text-sm font-bold text-slate-700" x-text="t('Ringkasan kesalahan','Error summary')"></h3>
+            {% if analytics.sentry_url %}
+            <a href="{{ analytics.sentry_url }}" target="_blank" rel="noopener noreferrer"
+               class="text-xs font-bold text-primary-600 hover:text-primary-800">
+                <i class="fas fa-arrow-up-right-from-square mr-1"></i>
+                <span x-text="t('Buka Sentry','Open Sentry')"></span>
+            </a>
+            {% else %}
+            <span class="text-xs text-slate-400"
+                  x-text="t('SENTRY_DSN belum diisi, jadi tidak ada tautan pelacak kesalahan.',
+                           'No SENTRY_DSN is set, so there is no error-tracker link.')"></span>
+            {% endif %}
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
+            <div class="bg-slate-50 rounded-lg p-3">
+                <p class="text-[11px] font-bold text-slate-400 uppercase" x-text="t('5xx','5xx')"></p>
+                <p class="text-xl font-bold text-slate-800">{{ status['5xx']|default(0) }}</p>
+            </div>
+            <div class="bg-slate-50 rounded-lg p-3">
+                <p class="text-[11px] font-bold text-slate-400 uppercase" x-text="t('4xx','4xx')"></p>
+                <p class="text-xl font-bold text-slate-800">{{ status['4xx']|default(0) }}</p>
+            </div>
+            <div class="bg-slate-50 rounded-lg p-3">
+                <p class="text-[11px] font-bold text-slate-400 uppercase" x-text="t('Rute menanjak','Rising routes')"></p>
+                <p class="text-xl font-bold text-slate-800">{{ analytics.rising | length }}</p>
+            </div>
+        </div>
+        {% if analytics.rising %}
+        <ul class="space-y-1">
+            {% for row in analytics.rising %}
+            <li class="text-xs text-slate-600">
+                <span class="font-mono font-bold">{{ row.group }}</span> —
+                <span x-text="t('tingkat kesalahan naik dari','error rate up from')"></span>
+                <span class="font-mono">{{ '%.2f'|format(row.baseline_error_rate * 100) }}%</span>
+                <span x-text="t('ke','to')"></span>
+                <span class="font-mono font-bold text-red-600">{{ '%.2f'|format(row.error_rate * 100) }}%</span>
+                <span class="text-slate-400">({{ row.requests }} <span x-text="t('permintaan','requests')"></span>)</span>
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p class="text-xs text-slate-400"
+           x-text="t('Tidak ada rute yang tingkat kesalahannya naik jelas dibanding paruh awal rentang ini.',
+                    'No route group shows a clear rise against the first half of this range.')"></p>
+        {% endif %}
+    </div>
+
+    {# Six columns: the wrapper and the min-width are not decoration. Without the
+       min-width a table this wide squeezes its columns on a phone instead of
+       scrolling, and the numbers become unreadable rather than merely off-screen.
+       Guarded by tests/unit/test_mobile_layout.py. #}
+    <div class="bg-white rounded-xl border border-slate-200 p-4 mb-6">
+        <h3 class="text-sm font-bold text-slate-700 mb-3" x-text="t('Per kelompok rute','By route group')"></h3>
+        <div class="overflow-x-auto">
+            <table class="w-full min-w-[640px] text-sm">
+                <thead>
+                    <tr class="text-left text-[11px] uppercase text-slate-400 border-b border-slate-200">
+                        <th class="py-2" x-text="t('Rute','Route')"></th>
+                        <th class="py-2 text-right" x-text="t('Permintaan','Requests')"></th>
+                        <th class="py-2 text-right" x-text="t('Kesalahan','Errors')"></th>
+                        <th class="py-2 text-right" x-text="t('p50','p50')"></th>
+                        <th class="py-2 text-right" x-text="t('p95','p95')"></th>
+                        <th class="py-2 text-right" x-text="t('p99','p99')"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for group in analytics.groups[:12] %}
+                    <tr class="border-b border-slate-100">
+                        <td class="py-2 font-mono text-xs text-slate-700">{{ group.group }}</td>
+                        <td class="py-2 text-right text-slate-600">{{ group.requests }}</td>
+                        <td class="py-2 text-right {% if group.error_rate >= 0.01 %}text-red-600 font-bold{% else %}text-slate-400{% endif %}">{{ group.errors }}</td>
+                        <td class="py-2 text-right text-slate-500">{{ group.p50 | int }} ms</td>
+                        <td class="py-2 text-right text-slate-500">{{ group.p95 | int }} ms</td>
+                        <td class="py-2 text-right text-slate-500">{{ group.p99 | int }} ms</td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="6" class="text-center py-6 text-slate-400 text-xs" x-text="t('Belum ada data.','No data yet.')"></td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <p class="text-[11px] text-slate-400 mt-2"
+           x-text="t('Persentil adalah batas atas ember durasi yang ditempati — bukan hasil interpolasi, karena sampelnya tidak disimpan.',
+                    'Percentiles are the upper bound of the duration bucket they fall in — not interpolated, because the samples are not kept.')"></p>
+    </div>
+
+    {# ── when the box is quiet ────────────────────────────────────────────────
+       This is the panel that answers "when is it safe to deploy", which is why it
+       exists rather than living in a notebook: the answer moves with the school
+       calendar. The weekly cache sweep's own window is read from the same
+       constants the sweep uses, not retyped here.
+    #}
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+        <div class="bg-white rounded-xl border border-slate-200 p-4">
+            <h3 class="text-sm font-bold text-slate-700 mb-1" x-text="t('Jam sibuk','Peak hours')"></h3>
+            <p class="text-[11px] text-slate-400 mb-3"
+               x-text="t('Permintaan per jam dan hari, WIB — inilah yang menjawab kapan aman melakukan deploy.',
+                        'Requests by hour and weekday, WIB — this is what answers when it is safe to deploy.')"></p>
+            <div class="overflow-x-auto">
+                <table class="min-w-[560px] text-[10px] border-collapse">
+                    <thead>
+                        <tr>
+                            <th class="pr-1"></th>
+                            {% for hour in range(24) %}
+                            <th class="px-0.5 text-slate-400 font-normal">{{ hour }}</th>
+                            {% endfor %}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% set day_names = ['Sen','Sel','Rab','Kam','Jum','Sab','Min'] %}
+                        {% for row in analytics.heat %}
+                        {% set peak = row | max if row else 0 %}
+                        <tr>
+                            <td class="pr-1 text-right font-bold text-slate-500 whitespace-nowrap">{{ day_names[loop.index0] }}</td>
+                            {% for value in row %}
+                            {# A shade per cell, chosen from the value only — no utility
+                               name is built here, so Tailwind's scan sees every class
+                               it must generate. #}
+                            {% set level = 0 if not peak else (value * 4 // peak) %}
+                            <td class="p-0">
+                                <div class="w-4 h-4 m-[1px] rounded-sm
+                                    {% if level == 0 %}bg-slate-100
+                                    {% elif level == 1 %}bg-primary-100
+                                    {% elif level == 2 %}bg-primary-300
+                                    {% elif level == 3 %}bg-primary-500
+                                    {% else %}bg-primary-700{% endif %}"
+                                     title="{{ value }}"></div>
+                            </td>
+                            {% endfor %}
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% if analytics.quiet_window and analytics.quiet_window.hour is not none %}
+            <p class="text-xs text-slate-500 mt-3">
+                <span x-text="t('Jam paling sepi menurut data:','Quietest hour in the data:')"></span>
+                <span class="font-bold">{{ '%02d:00'|format(analytics.quiet_window.hour) }}</span>
+                WIB —
+                {{ analytics.quiet_window.requests }}
+                <span x-text="t('permintaan sepanjang minggu','requests across the week')"></span>
+            </p>
+            {% endif %}
+        </div>
+
+        <div class="bg-white rounded-xl border border-slate-200 p-4">
+            <h3 class="text-sm font-bold text-slate-700 mb-3" x-text="t('Perangkat','Devices')"></h3>
+            <p class="text-3xl font-bold text-slate-800">{{ device.mobile | default(0) }}</p>
+            <p class="text-xs text-slate-500 mb-2" x-text="t('permintaan dari perangkat mobile — mayoritas murid memakai HP',
+                                                                'requests from mobile devices — most pupils are on phones')"></p>
+            <p class="text-xs text-slate-400">
+                <span x-text="t('Desktop','Desktop')"></span>: {{ device.desktop | default(0) }} ·
+                <span x-text="t('Lainnya','Other')"></span>: {{ device.other | default(0) }}
+            </p>
+            <p class="text-[11px] text-slate-400 mt-3"
+               x-text="t('Klasifikasi kasar dari user-agent (mobile/desktop/lainnya). Tidak ada sidik jari perangkat yang disimpan.',
+                        'A coarse user-agent split (mobile/desktop/other). No device fingerprint is stored.')"></p>
+        </div>
+    </div>
+
+    {# ── adoption, per school ─────────────────────────────────────────────────
+       Four columns, so the same wrapper + min-width rule applies.
+    #}
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+        <div class="bg-white rounded-xl border border-slate-200 p-4">
+            <h3 class="text-sm font-bold text-slate-700 mb-3" x-text="t('Pemakaian per sekolah','Usage per school')"></h3>
+            <div class="overflow-x-auto">
+                <table class="w-full min-w-[420px] text-sm">
+                    <thead>
+                        <tr class="text-left text-[11px] uppercase text-slate-400 border-b border-slate-200">
+                            <th class="py-2" x-text="t('Sekolah','School')"></th>
+                            <th class="py-2 text-right" x-text="t('Permintaan','Requests')"></th>
+                            <th class="py-2 text-right" x-text="t('5xx','5xx')"></th>
+                            <th class="py-2 text-right" x-text="t('Sesi unik','Unique sessions')"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for school in analytics.schools[:11] %}
+                        {% set name = school_names.get(school.school_id) %}
+                        <tr class="border-b border-slate-100">
+                            <td class="py-2 text-xs text-slate-700">{{ name or school.school_id[:8] }}</td>
+                            <td class="py-2 text-right text-slate-600">{{ school.requests }}</td>
+                            <td class="py-2 text-right {% if school.errors %}text-red-600 font-bold{% else %}text-slate-400{% endif %}">{{ school.errors }}</td>
+                            <td class="py-2 text-right text-slate-500">{{ school.unique_sessions or '—' }}</td>
+                        </tr>
+                        {% else %}
+                        <tr><td colspan="4" class="text-center py-6 text-slate-400 text-xs" x-text="t('Belum ada data per sekolah.','No per-school data yet.')"></td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <p class="text-[11px] text-slate-400 mt-2"
+               x-text="t('Baris tanpa sekolah berasal dari data yang diisi ulang dari access-log, yang memang tidak memuat sekolah.',
+                        'Rows without a school come from the access-log backfill, which carries no school.')"></p>
+        </div>
+
+        <div class="space-y-4">
+            <div class="bg-white rounded-xl border border-slate-200 p-4">
+                <h3 class="text-sm font-bold text-slate-700 mb-2" x-text="t('Kesehatan kotak','Box health')"></h3>
+                <p class="text-xs text-slate-500">
+                    <span x-text="t('Commit','Commit')"></span>:
+                    <span class="font-mono">{{ (health.commit or '—')[:7] }}</span>
+                </p>
+                <p class="text-xs text-slate-500">
+                    <span x-text="t('Worker','Workers')"></span>: <span class="font-mono">{{ health.workers }}</span>
+                </p>
+                <p class="text-xs text-slate-500">
+                    <span x-text="t('Redis','Redis')"></span>:
+                    <span class="font-mono">{{ 'siap' if health.redis else ('tidak terbaca' if health.redis is none else 'tidak aktif') }}</span>
+                </p>
+                <p class="text-[11px] text-slate-400 mt-2"
+                   x-text="t('Nilai yang sama yang dibaca /health — dihitung di proses yang sama, bukan lewat panggilan HTTP ke diri sendiri.',
+                            'The same inputs /health reads — resolved in this process, not by an HTTP call to itself.')"></p>
+            </div>
+
+            <div class="bg-white rounded-xl border border-slate-200 p-4">
+                <h3 class="text-sm font-bold text-slate-700 mb-2" x-text="t('Pembersihan cache mingguan','Weekly cache sweep')"></h3>
+                {% if cache_sweep.at %}
+                <p class="text-xs text-slate-500">
+                    <span class="font-mono">{{ cache_sweep.at | tz }}</span> —
+                    {% if cache_sweep.ran %}
+                    <span x-text="t('dijalankan','ran')"></span>
+                    {% else %}
+                    <span x-text="t('ditunda','deferred')"></span>
+                    {% endif %}
+                </p>
+                {% if cache_sweep.reason %}
+                <p class="text-[11px] text-slate-400">{{ cache_sweep.reason }}</p>
+                {% endif %}
+                {% else %}
+                <p class="text-[11px] text-slate-400"
+                   x-text="t('Belum pernah berjalan di proses ini. Jadwal mingguannya ditentukan konfigurasi, bukan dari data di atas — data itu yang memakainya sebagai alasan.',
+                            'Has not run in this process yet. Its weekly window comes from configuration, not from the data above — the data is what that choice is argued from.')"></p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>

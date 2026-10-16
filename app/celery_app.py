@@ -23,6 +23,11 @@ celery_app.conf.update(
 # Import task modules to register them with Celery
 import app.services.omr_tasks  # noqa: register OMR tasks
 import app.services.ai_grading  # noqa: register AI grading (for future async tasks)
+# Register the traffic-rollup jobs (backfill, retention) and the cache sweep as
+# *tasks* — an operator's one-shot, not a schedule. There is no `beat_schedule` in
+# this file and nothing depends on one; the periodic halves of all three run as
+# daemon threads in the app's own workers (see docs/features/analytics-dashboard.md).
+import app.services.traffic_tasks  # noqa: register rollup/sweep tasks
 
 
 # ── Which commit this worker is running ───────────────────────────────────────

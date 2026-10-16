@@ -463,6 +463,12 @@
       "coverage": 0.0,
       "frozen": false
     },
+    "super_admin/_traffic_panel.html": {
+      "pairs": 57,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
     "super_admin/activation_codes.html": {
       "pairs": 0,
       "leftovers": 10,
@@ -470,7 +476,7 @@
       "frozen": false
     },
     "super_admin/dashboard.html": {
-      "pairs": 120,
+      "pairs": 122,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false

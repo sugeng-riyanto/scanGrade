@@ -462,9 +462,70 @@
         </div>
     </div>
 </div>
+
+{% include 'super_admin/_traffic_panel.html' %}
 {% endblock %}
 {% block scripts %}
 <script>
+// ── the two charts ────────────────────────────────────────────────────────
+// Built on DOMContentLoaded, not inline: base.html loads Chart.js as a classic
+// script at the *end* of the body, after this block, so at parse time there is no
+// `Chart` to call. A chart created here would throw and the panel would be a blank
+// canvas with no error the page shows — the trap `tests/unit/test_exam_script_order.py`
+// was written from.
+//
+// The theme is not set here either: `sgApplyChartTheme` in base.html reads the same
+// CSS tokens every other element uses, so these two inherit dark mode for free.
+document.addEventListener('DOMContentLoaded', function () {
+    var series = {{ (analytics.series or []) | tojson }};
+    var status = {{ (analytics.status or {}) | tojson }};
+    if (typeof Chart === 'undefined') return;
+
+    var trend = document.getElementById('trafficTrend');
+    if (trend) {
+        new Chart(trend, {
+            type: 'line',
+            data: {
+                labels: series.map(function (row) { return row.date; }),
+                datasets: [{
+                    label: sgT('Permintaan', 'Requests'),
+                    data: series.map(function (row) { return row.requests; }),
+                    borderColor: '#2563eb', backgroundColor: 'rgba(37,99,235,0.12)',
+                    fill: true, tension: 0.3, pointRadius: 2, borderWidth: 2
+                }, {
+                    label: sgT('Kesalahan 5xx', '5xx errors'),
+                    data: series.map(function (row) { return row.errors; }),
+                    borderColor: '#dc2626', backgroundColor: 'rgba(220,38,38,0.10)',
+                    fill: false, tension: 0.3, pointRadius: 2, borderWidth: 2
+                }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                interaction: {mode: 'index', intersect: false},
+                scales: {y: {beginAtZero: true}}
+            }
+        });
+    }
+
+    var mix = document.getElementById('trafficStatus');
+    if (mix) {
+        new Chart(mix, {
+            type: 'doughnut',
+            data: {
+                labels: ['2xx', '3xx', '4xx', '5xx'],
+                datasets: [{
+                    data: [status['2xx'] || 0, status['3xx'] || 0,
+                           status['4xx'] || 0, status['5xx'] || 0],
+                    backgroundColor: ['#16a34a', '#0ea5e9', '#f59e0b', '#dc2626'],
+                    borderWidth: 0
+                }]
+            },
+            options: {responsive: true, maintainAspectRatio: false,
+                      plugins: {legend: {position: 'bottom'}}}
+        });
+    }
+});
+
 function resetDemoPasswords() {
     if (!confirm(sgT('Yakin reset SEMUA password demo ke default?\n\nSuper Admin: superadmin123\nGuru/Murid/Admin: demo123',
                        'Reset ALL demo passwords to default?\n\nSuper Admin: superadmin123\nTeacher/Student/Admin: demo123'))) return;

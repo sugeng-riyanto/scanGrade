@@ -1,6 +1,7 @@
 """Super Admin — full access to all schools, teachers, exams, submissions."""
 import json
 import os
+import re
 import secrets
 from datetime import datetime, timezone, timedelta
 from flask import (Blueprint, render_template, g, request, jsonify, redirect, flash,
@@ -31,6 +32,13 @@ from app.services.deploy_alert_service import (
     send_test as deploy_alert_send_test,
     summary as deploy_alert_summary,
 )
+# The platform's own traffic reading, and the weekly cache sweep's last run. Both
+# are added to this dashboard rather than given pages of their own — see the comment
+# in `dashboard()` — and both are read from services that already exist rather than
+# beside them (the rollup tables are the only new storage; the error half is Sentry,
+# which was already wired, and the round-trip half is the perf gate's own record).
+from app.services import cache_maintenance_service as cache_sweep
+from app.services import traffic_rollup_service as rollup
 from app.services.question_types import objective_result
 from app.services.demo_schools import demo_school_npsns
 from app.services.school_reset import (
@@ -95,6 +103,71 @@ def _safe_select(supabase, table, columns="*", limit=20, order_col="created_at",
         return []
 
 
+def sentry_issues_url() -> str | None:
+    """The Sentry issues page for the project this box reports to, or None.
+
+    A **link**, because the error half of this dashboard is deliberately not a
+    second error tracker: Sentry already receives every unhandled exception and
+    every `ScanGradeException` (`app/handlers/error_handlers.py`), with the user,
+    the school and the request context attached by `sentry_sdk` — the app never
+    needs Sentry's API key to answer "how many", it counts those itself in the
+    rollup, and the link is what answers "what".
+
+    Two sources, in this order, because guessing is the failure mode:
+
+    * `SENTRY_ISSUES_URL`, set by whoever armed the box — a self-hosted Sentry or a
+      region endpoint this derivation would get wrong;
+    * derived from the DSN, which carries the project id as its last path segment
+      and the organisation id inside its hostname (`o123.ingest.sentry.io`).
+
+    Nothing is returned when neither is available, and the page then says so rather
+    than showing a link that 404s. That is the same rule the rest of this file's
+    readings follow: a missing answer is stated, not invented.
+    """
+    explicit = (current_app.config.get("SENTRY_ISSUES_URL") or "").strip()
+    if explicit:
+        return explicit
+    dsn = (current_app.config.get("SENTRY_DSN") or "").strip()
+    match = re.match(r"https?://[^@]+@(o\d+)\.(?:ingest\.)?sentry\.io/(\d+)", dsn)
+    if not match:
+        return None
+    return (f"https://sentry.io/organizations/{match.group(1)}"
+            f"/issues/?project={match.group(2)}")
+
+
+def platform_health() -> dict:
+    """On `/health`'s inputs, read in-process.
+
+    Not an HTTP call to the app's own `/health`: that would be a request the box
+    makes to itself to learn something it already has, and it would need the port
+    and the scheme. The same functions the endpoint uses are called here instead —
+    `get_redis_status()` and `served_commit()` — so the two can never disagree about
+    what "health" means, because there is one implementation and two readers.
+
+    Every field may be absent. The page shows what is known and says nothing about
+    the rest, which is the rule this repository follows everywhere a reading can
+    fail (see `process_sampler`, `deploy_status_service`).
+    """
+    health = {}
+    try:
+        from app.utils.rate_limiter import get_redis_status
+        health["redis"] = get_redis_status()
+    except Exception:
+        health["redis"] = None
+    try:
+        from app import served_commit
+        health["commit"] = served_commit()
+    except Exception:
+        health["commit"] = None
+    health["workers"] = os.environ.get("GUNICORN_WORKERS", "1")
+    try:
+        from app import _lru_cache
+        health["page_cache"] = len(_lru_cache)
+    except Exception:
+        health["page_cache"] = None
+    return health
+
+
 @super_bp.route("/dashboard")
 @_sa_required
 def dashboard():
@@ -155,7 +228,50 @@ def dashboard():
     # string, so the operator sees the counts they just produced rather than a
     # bare page. The outcome is a key and two numbers; the sentences are in the
     # template, where the language toggle can reach them.
+    # ── the platform's own traffic and error reading ─────────────────────────
+    # Added to this page rather than given one of its own, because this is the page
+    # an operator already opens and "is it being used, and is it getting slower"
+    # belongs beside "how many schools are there".
+    #
+    # **Two queries, cached for two minutes.** Every panel below is computed in
+    # Python from those two reads (see `traffic_rollup_service.build_report`), which
+    # is the whole reason the rollup tables exist: a page whose job is to report the
+    # load must not be part of it. The cache is the shared `ttl`, so two operators
+    # opening the page in the same minute cost one read between them.
+    analytics_days = request.args.get("days", 30, type=int) or 30
+    try:
+        analytics = ttl(f"traffic_report:{analytics_days}", 120,
+                        lambda: rollup.build_report(supabase, days=analytics_days))
+    except Exception as exc:  # a statistics failure must not blank the page
+        current_app.logger.warning("traffic report unavailable: %s", exc)
+        analytics = {"series": [], "groups": [], "schools": [], "hourly": [],
+                     "status": {}, "device": {}, "totals": {}, "heat": [],
+                     "quiet_window": {}, "days": analytics_days, "recent": {},
+                     "previous": {}}
+    analytics["rising"] = rollup.rising_groups(analytics)
+    analytics["last_flush"] = rollup.last_flush()
+    # Names for the per-school rows. The rollup stores an id because that is what
+    # the hook has; a page a human reads shows the school. One read, and only when
+    # there are per-school rows at all — an empty window costs nothing.
+    school_names = {}
+    try:
+        ids = [row["school_id"] for row in analytics.get("schools") or []
+               if row.get("school_id")]
+        if ids:
+            rows = supabase.table("schools").select("id, name").in_("id", ids).execute().data or []
+            school_names = {str(row["id"]): (row.get("name") or "") for row in rows}
+    except Exception:
+        school_names = {}
+    # The error half reuses Sentry rather than building a second error tracker: the
+    # rollup says *how many* and *which route group*, and the link answers *what*.
+    analytics["sentry_url"] = sentry_issues_url()
+
     return render_template("super_admin/dashboard.html",
+        analytics=analytics,
+        school_names=school_names,
+        health=platform_health(),
+        cache_sweep=cache_sweep.last_sweep(),
+        worst_page=ttl("deploy_status:report", 30, deploy_status_report).get("perf", {}),
         integrity=integrity,
         total_schools=total_schools, total_users=total_users,
         total_teachers=total_teachers, total_students=total_students,

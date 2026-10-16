@@ -146,6 +146,13 @@ class Config:
     NGROK_DOMAIN = env_str("NGROK_DOMAIN", "")
     SENTRY_DSN = env_str("SENTRY_DSN", "")
     SENTRY_ENVIRONMENT = env_str("SENTRY_ENVIRONMENT", "development")
+    #: Where a reader should go to see *what* broke, when the rollup's count says
+    #: something did. Set it for a self-hosted Sentry or a regional endpoint, where
+    #: no URL can be derived from the DSN; left empty, `/super-admin/dashboard`
+    #: derives it from `SENTRY_DSN`'s own hostname and project path, and shows no
+    #: link at all rather than one that 404s. Nothing *reports* to Sentry through
+    #: this — the SDK is configured from the DSN, and this is only the link.
+    SENTRY_ISSUES_URL = env_str("SENTRY_ISSUES_URL", "")
     APP_VERSION = env_str("APP_VERSION", "1.0.0")
     # Midtrans keys get pasted with stray whitespace or a glued comment — a key
     # with either authenticates as 401, so normalise both away.
@@ -241,6 +248,28 @@ class Config:
         "PERIOD_RECONCILE_INTERVAL_SECONDS", 86400)
     #: Where the last-alert record is kept. Defaults to Flask's instance folder.
     DEPLOY_ALERT_STATE_DIR = env_str("SCANGRADE_ALERT_STATE_DIR", "") or None
+
+    #: How often each worker rolls its own traffic counters into the summary tables
+    #: (app/services/traffic_rollup_service.py). A minute: the write is one small
+    #: RPC per worker, and a minute is fine enough that the dashboard's hourly bars
+    #: are never a visible estimate — while being long enough that the 1 vCPU box
+    #: spends nothing measurable on the instrument.
+    TRAFFIC_ROLLUP_INTERVAL_SECONDS = env_int("TRAFFIC_ROLLUP_INTERVAL_SECONDS", 60)
+    #: Retention for the rollup tables. Hourly buckets are for reading shape within
+    #: a fortnight; the daily rows are what a term-over-term comparison needs, so
+    #: they are kept for a little over a year. Both are *aggregates* — the retention
+    #: question here is disk, not personal data, because there is none in them.
+    TRAFFIC_KEEP_HOURLY_DAYS = env_int("TRAFFIC_KEEP_HOURLY_DAYS", 14)
+    TRAFFIC_KEEP_DAILY_DAYS = env_int("TRAFFIC_KEEP_DAILY_DAYS", 400)
+
+    #: The weekly cache sweep (app/services/cache_maintenance_service.py): the day
+    #: of the week and the hour of the day it is allowed to run, in the school's own
+    #: clock. Sunday 03:00 WIB is the default because the hourly rollup says the box
+    #: is quietest then, and because a term-time exam is not sat at three in the
+    #: morning. Both are configurable because the answer changes per school.
+    CACHE_SWEEP_WEEKDAY = env_int("CACHE_SWEEP_WEEKDAY", 6)   # Monday=0 … Sunday=6
+    CACHE_SWEEP_HOUR = env_int("CACHE_SWEEP_HOUR", 3)
+    CACHE_SWEEP_INTERVAL_SECONDS = env_int("CACHE_SWEEP_INTERVAL_SECONDS", 900)
 
     #: The variables this app cannot run without, in the order a reader should try
     #: them. Named here rather than inline in `validate()` because a *second* reader
