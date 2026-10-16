@@ -392,7 +392,12 @@ class TestTheWayIn:
             self, route_source):
         assert ('ambiguous_ids = {e["id"] for e in exams if _has_ambiguous_key(e)}'
                 in route_source)
-        assert "ambiguous_ids=ambiguous_ids)" in route_source
+        # Handed to the page, and *not* necessarily last: the call has since gained
+        # the plan's exam allowance after it, which is no defect here. The trailing
+        # parenthesis this guard used to demand pinned argument order in Python,
+        # where position carries nothing — and it is the template half below that
+        # makes the link real, and that half is still asserted in full.
+        assert "ambiguous_ids=ambiguous_ids" in route_source
         html = EXAMS.read_text(encoding="utf-8")
         assert "{% if ambiguous_ids %}" in html
         assert 'href="/teacher/answer-key-review"' in html

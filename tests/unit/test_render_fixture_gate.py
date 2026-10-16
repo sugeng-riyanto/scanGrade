@@ -194,6 +194,7 @@ def _reading(module, **overrides):
     reading.contexts = overrides.pop("contexts", {"print_reports.report_card": {"a": 1}})
     reading.capture_errors = overrides.pop("capture_errors", {})
     reading.rendered = overrides.pop("rendered", {})
+    reading.unparseable = overrides.pop("unparseable", {})
     return reading
 
 
@@ -288,6 +289,89 @@ class TestTheExitContract:
     def test_the_codes_are_the_repositorys_own(self):
         module = gate()
         assert (module.EXIT_OK, module.EXIT_FINDING, module.EXIT_CANNOT_MEASURE) == (0, 1, 2)
+
+
+class TestAFixtureFileThisInterpreterCannotParse:
+    """The box's venv is 3.10 and a fixture's source uses 3.12 syntax.
+
+    The gate called that a finding — "the fixture no longer renders through the Jinja
+    environment this gate watches" — and five commits on `main` were quarantined over a
+    file that renders perfectly under the floor the project declares. The distinction
+    is `python_requires`': below the floor it is the box's property (exit 2, named);
+    at or above it, the same file stays the finding it is.
+    """
+
+    def _source(self, module):
+        """The fixture the whole class is about, and the file it comes from."""
+        fixture = next(f for f in module.FIXTURES if f.source.endswith("test_reports_hub.py"))
+        return fixture
+
+    def test_a_fixtures_syntax_error_is_kept_apart_from_a_broken_context(self, app):
+        module = gate()
+        fixture = self._source(module)
+        bad = module.Fixture(fixture.name, fixture.template,
+                             lambda app_: (_ for _ in ()).throw(
+                                 SyntaxError("f-string expression part cannot include a backslash")),
+                             fixture.source)
+        with pytest.raises(module.FixtureUnparseable):
+            module.capture_context(app, bad)
+
+    def test_measure_records_it_as_an_unparseable_file(self, app, monkeypatch):
+        module = gate()
+        fixture = self._source(module)
+        bad = module.Fixture(fixture.name, fixture.template,
+                             lambda app_: (_ for _ in ()).throw(
+                                 SyntaxError("f-string expression part cannot include a backslash")),
+                             fixture.source)
+        monkeypatch.setattr(module, "FIXTURES", (bad,))
+        with app.test_request_context("/"):
+            reading = module.measure(app)
+        assert list(reading.unparseable) == [fixture.name]
+        assert list(reading.capture_errors) == [fixture.name], (
+            "the matrix no longer shows the fixture as unmeasured, so the reader is "
+            "told nothing at all")
+
+    def test_below_the_floor_it_is_not_a_finding_of_the_release(self, app, monkeypatch):
+        module = gate()
+        fixture = self._source(module)
+        reading = _reading(module, capture_errors={fixture.name: "SyntaxError: x"},
+                           unparseable={fixture.name: "SyntaxError: x"})
+        monkeypatch.setattr(module, "_app", lambda: app)
+        monkeypatch.setattr(module, "measure", lambda app_: reading)
+        monkeypatch.setattr(module, "below_the_floor", lambda: (True, "3.12"))
+        assert module.main(["--quiet"]) == module.EXIT_CANNOT_MEASURE, (
+            "a file this interpreter cannot parse was charged to the release")
+
+    def test_at_or_above_the_floor_it_is_still_a_finding(self, app, monkeypatch):
+        """Then nothing but the release can explain a file that will not parse."""
+        module = gate()
+        fixture = self._source(module)
+        reading = _reading(module, capture_errors={fixture.name: "SyntaxError: x"},
+                           unparseable={fixture.name: "SyntaxError: x"})
+        monkeypatch.setattr(module, "_app", lambda: app)
+        monkeypatch.setattr(module, "measure", lambda app_: reading)
+        monkeypatch.setattr(module, "below_the_floor", lambda: (False, "3.12"))
+        assert module.main(["--quiet"]) == module.EXIT_FINDING
+
+    def test_a_real_finding_outranks_a_file_that_will_not_parse(self, app, monkeypatch):
+        module = gate()
+        fixture = self._source(module)
+        reading = _reading(module,
+                           capture_errors={fixture.name: "SyntaxError: x",
+                                           "print_reports.report_card": "ImportError: x"},
+                           unparseable={fixture.name: "SyntaxError: x"})
+        monkeypatch.setattr(module, "_app", lambda: app)
+        monkeypatch.setattr(module, "measure", lambda app_: reading)
+        monkeypatch.setattr(module, "below_the_floor", lambda: (True, "3.12"))
+        assert module.main(["--quiet"]) == module.EXIT_FINDING, (
+            "an unparseable file excused a fixture that genuinely broke")
+
+    def test_the_floor_and_its_comparison_live_in_python_requires(self):
+        """One floor in the repository: this gate asks, it does not spell 3.12 again."""
+        source = GATE_PATH.read_text(encoding="utf-8")
+        assert "below_floor" in source and "python_requires" in source, (
+            "the gate answered the interpreter question by itself")
+        assert "MINIMUM" in source
 
 
 class TestTheThemeGateRunsIt:

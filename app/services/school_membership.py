@@ -1067,12 +1067,16 @@ def switchable_schools(user_id, token, active_school_id=None, supabase=None) -> 
     is identical for everyone in it. A role that cannot hold two memberships reads
     nothing at all — the partition `is_cross_school_role` draws everywhere else.
 
-    Returns ``{"schools": [{"school_id", "name", "active"}], "away": bool}``, where
-    ``away`` means a per-session choice is in force, so the control also offers the
-    way back to the account's own school. The list is **empty rather than an error**
-    when a read fails, and empty when there is nothing to switch to: a reader with
-    one membership, currently in it, has no second school to choose, and the header
-    is not the place to find that out loudly.
+    Returns ``{"schools": [{"school_id", "name", "npsn", "active"}], "away": bool}``,
+    where ``away`` means a per-session choice is in force, so the control also offers
+    the way back to the account's own school. `npsn` is here because the school a
+    teacher is switching to is a *school*, and two schools in one district often
+    carry the same short name — the number is what the ministry, the `.seb` file and
+    the school's own letterhead all call it by, and it is the field a teacher reads
+    when the names are the same. The list is **empty rather than an error** when a
+    read fails, and empty when there is nothing to switch to: a reader with one
+    membership, currently in it, has no second school to choose, and the header is
+    not the place to find that out loudly.
     """
     empty = {"schools": [], "away": False}
     if not user_id:
@@ -1100,12 +1104,20 @@ def switchable_schools(user_id, token, active_school_id=None, supabase=None) -> 
         return empty
     schools = []
     for school_id in ids:
-        name = ""
+        name, npsn = "", ""
         try:
-            name = _text((school_row(school_id, "name") or {}).get("name"))
+            # The **whole** row, never a narrowed column list. `school_row` caches one
+            # row per school under one key whatever set was asked for, so the two
+            # fields this control needs used to decide what *every other reader in the
+            # TTL window* got: the switcher ran early on the page, and the logo, the
+            # whiteboard feature flag and the school's `npsn` came back missing
+            # elsewhere for the next two minutes. The default set is one query either
+            # way — reading all of it costs nothing and cannot poison the cache.
+            row = school_row(school_id) or {}
+            name, npsn = _text(row.get("name")), _text(row.get("npsn"))
         except Exception:
-            logger.debug("switcher name read failed; showing the id", exc_info=True)
-        schools.append({"school_id": school_id, "name": name,
+            logger.debug("switcher school read failed; showing the id", exc_info=True)
+        schools.append({"school_id": school_id, "name": name, "npsn": npsn,
                         "active": school_id == _text(active_school_id)})
     schools.sort(key=lambda s: (s["name"] or s["school_id"]).lower())
     return {"schools": schools, "away": away}

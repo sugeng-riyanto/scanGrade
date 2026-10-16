@@ -22,7 +22,7 @@ from app.services.audit_service import log_activity, log_create, log_update, log
 from app.services import trial_settings as trial_cfg
 from app.services.student_import import create_student_account, owned_class_id
 from app.utils.req_cache import (invalidate_class, invalidate_school,
-                                 invalidate_teacher_assignments)
+                                 invalidate_teacher_assignments, school_classes)
 from app.services import teacher_assignments as ta_service
 from app.services import school_membership as membership_service
 from app.services.teacher_import import create_teacher_account
@@ -34,6 +34,8 @@ from app.services import attempt_timeline
 from app.services import exam_codes
 from app.services import invigilation
 from app.services import invigilation_matrix as inv_matrix
+from app.services import seb_door_log
+from app.services import exam_targets
 from app.services import sitting_unlock
 from app.services import login_cards
 from app.services import account_emails
@@ -4279,6 +4281,100 @@ def _invigilation_refused(out: dict) -> bool:
         flash(out["reason"], "error")
         return False
     return True
+
+
+# ── who could not get in: one school, ranked by class and by paper ──────────
+#
+# The half of the SEB door question a teacher's panel cannot answer. A teacher sees
+# their own paper's refusals; an admin running a morning of sittings needs the
+# *pattern* across the school — which class keeps being turned away, and which file
+# reached nobody — before the room fills rather than after it. Migration 064 left
+# the index for exactly this read (`idx_seb_door_refusal_school_created`) and said
+# so; the arithmetic is `seb_door_log.rank_refusals`.
+#
+# It is a reading and not a charge, and the page says so in as many words: the most
+# common refusal is a pupil who opened the link in Chrome, or a `.seb` file the
+# teacher edited after handing it out — so an admin who reads this page as an
+# accusation punishes the wrong person. Nothing in this route touches the score, the
+# ladder or the lockout path, and the school comes from the session, never the query.
+
+
+def _seb_readiness(supabase, school_id, refusals, classes, wanted):
+    """Who is at risk on one paper, from rows the page already holds.
+
+    The half of the page that acts before a sitting: `seb_door_log.upcoming_papers`
+    offers the papers a school can still prepare for (decided by
+    `exam_window.window_state`, never by a second comparison of timestamps), the
+    roster comes from `exam_targets` — the same reader the teacher's target list is
+    written from, and the year table first, `profiles.class_id` as its fallback — and
+    `seb_door_log.at_risk` joins that roster to the refusals in the window.
+
+    Three reads, and only when there is a paper to prepare for: the papers, the
+    roster, and (per-student papers only) the included ids. The refusals are the
+    caller's, so this half cannot answer for a different window than the ranking
+    above it.
+
+    Every key the template reads is present even with no paper at all: the empty
+    shape comes from `at_risk` over an empty roster, so a school with nothing
+    scheduled renders the same page with an empty panel rather than raising.
+    """
+    found = seb_door_log.upcoming_papers(supabase, school_id)
+    papers = found["papers"]
+    paper = seb_door_log.pick_paper(papers, wanted)
+    roster, targets = [], None
+    if paper:
+        roster = exam_targets.roster_for_classes(supabase, school_id,
+                                                 paper.get("class_ids"))
+        if paper.get("target_mode") == "students":
+            # A per-student paper's included list, and only then: a class paper is
+            # the roster, and asking for targets it does not have would narrow the
+            # panel to nobody.
+            targets = exam_targets.included_student_ids(supabase, paper["id"])
+    return {"papers": papers, "paper": paper, "truncated": found["truncated"],
+            **seb_door_log.at_risk(roster, refusals, classes=classes,
+                                   targets=targets)}
+
+
+@admin_sekolah_bp.route("/seb-refusals")
+@admin_sekolah_required
+def seb_refusals_page():
+    """Who could not get in, and who is about to be turned away.
+
+    Two halves, one page, one window. The ranking is the historical pattern; the
+    readiness panel above it is the paper an admin is preparing for, named pupil by
+    pupil with the device each of them was refused on, so the morning of a sitting
+    the answer is a name rather than a trend.
+
+    Reads: the refusals in the window, the school's classes (through `req_cache`, so
+    several admins open share one query), the titles of the papers the window
+    mentions, and — only when there is a paper to prepare for — its papers, its
+    roster and (for a per-student paper) its included ids. The arithmetic is pure
+    over those rows, so it costs nothing per pupil and is testable without a
+    database.
+    """
+    sid = _school_id()
+    if not sid:
+        return redirect(login_door_for(g.get("user_role"), request.path))
+    supabase = get_supabase()
+    days = seb_door_log.window_days(request.args.get("days"))
+    classes = school_classes(sid)
+    refusals = seb_door_log.refusals_for_school(supabase, sid, days=days)
+    ranking = seb_door_log.rank_refusals(
+        refusals,
+        classes=classes,
+        exams=seb_door_log.exam_titles(
+            supabase,
+            {row.get("exam_id") for row in refusals if row.get("exam_id")}),
+    )
+    readiness = _seb_readiness(supabase, sid, refusals, classes,
+                               request.args.get("exam"))
+    # `class_unknown` rides beside the ranking because the fallback sentence belongs
+    # to the page, not to the arithmetic: a school whose class list has gaps must read
+    # "class unknown" in the language the reader chose.
+    return render_template("admin_sekolah/seb_refusals.html", days=days,
+                           windows=seb_door_log.WINDOWS,
+                           class_unknown=seb_door_log.NO_CLASS_LABEL,
+                           readiness=readiness, **ranking)
 
 
 # ── the invigilation MATRIX: slot x room, one teacher per cell ───────────────

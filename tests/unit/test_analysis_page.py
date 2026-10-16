@@ -697,7 +697,57 @@ class TestTheScoringGuideIsTrue:
             not in GUIDE
 
     def test_it_states_the_formula_the_code_uses(self):
-        assert "max(0, min(Poin Terkumpul, 100) &minus; Penalti)" in GUIDE
+        assert "max(0, min(Skor Mentah, 100) &minus; Total Penalti)" in GUIDE
+
+    def test_it_speaks_the_same_vocabulary_as_the_panel_it_points_at(self):
+        """One number, one name.
+
+        `app/services/final_score.py` computes the mark. The teacher's own review
+        panel (`teacher/submission_violations.html`) — the page this guide's step
+        3 sends them to — names the first term **Skor Mentah** and the second
+        **Total Penalti**, beside its *Diterapkan*/*Diabaikan* counts, and the
+        printed report (`teacher/print_exam_report.html`) files the first term
+        under the same name. This guide called it "Poin Terkumpul" and the second
+        term "penalti", so the page a teacher reads to check those numbers used
+        other words for them. That is the MCQ/Esai pool defect in its first stage:
+        the page and the code drift in vocabulary before they drift in arithmetic.
+        """
+        for label in ("Skor Mentah", "Total Penalti"):
+            assert label in GUIDE, f"the guide does not name {label}"
+        # The copy, not the source: this file's own explanation of the rename
+        # quotes the old name, and a check that cannot tell a comment from copy is
+        # a check that deletes the explanation.
+        copy_only = re.sub(r"\{#.*?#\}", "", GUIDE, flags=re.S)
+        assert "Poin Terkumpul" not in copy_only, (
+            "the guide went back to a name no sheet prints")
+        # The panel the guide's step 3 sends a teacher to, and the sheet a school
+        # files, name the same two numbers.
+        panel = (TEMPLATES / "teacher" / "submission_violations.html").read_text(
+            encoding="utf-8")
+        for label in ("Skor Mentah", "Total Penalti", "Diterapkan", "Diabaikan"):
+            assert label in panel, f"the review panel stopped naming {label}"
+        report = (TEMPLATES / "teacher" / "print_exam_report.html").read_text(
+            encoding="utf-8")
+        assert "Skor Mentah" in report, (
+            "the printed report stopped naming the raw score the guide subtracts "
+            "from the penalty")
+
+    def test_it_says_the_penalty_counts_only_applied_violations(self):
+        """The second term is not the sum of the log.
+
+        `final_score.penalty_breakdown` charges the ladder over the violations
+        whose status is *applied* and ignores the rest, so a sheet that subtracts
+        everything the student did is wrong by exactly the charges a teacher
+        forgave. The teacher's copy of this guide names both outcomes, so the
+        page that explains the number also explains what is not in it.
+        """
+        from app.services.final_score import breakdown
+        assert breakdown(90, 5)["final"] == 85
+        teacher_tab = GUIDE.split("x-show=\"tab==='student'\"", 1)[0]
+        assert "diterapkan" in teacher_tab, \
+            "the teacher's tab does not say the penalty counts only applied charges"
+        assert "diabaikan" in teacher_tab, \
+            "the teacher's tab does not say what an ignored charge does"
 
     def test_it_names_every_question_type_the_scheme_prices(self):
         for label in ("Pilihan ganda", "Benar/Salah", "Menjodohkan",
@@ -721,7 +771,7 @@ class TestTheScoringGuideIsTrue:
             "the guide declares a document language while its copy switches")
         assert "t('Pilihan ganda','Multiple choice')" in GUIDE, (
             "the scheme table's type names are not paired")
-        assert "'Final mark = max(0, min(points earned, 100)" in GUIDE, (
+        assert "'Final mark = max(0, min(Raw score, 100)" in GUIDE, (
             "the formula the page teaches has no English side")
         # The tab state is internal, and an Indonesian identifier is still an
         # Indonesian word to the sweep that reads Alpine expressions — it would

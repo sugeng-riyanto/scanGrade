@@ -487,6 +487,12 @@ TRANSLATED = [
     # on this one page, so it was also the largest block of Indonesian left.
     "teacher/exam_form.html",
     "admin_sekolah/students.html",
+    # The school-wide SEB door reading: which classes and which papers keep turning
+    # pupils away. It is born bilingual rather than added later — every heading,
+    # both rankings, the empty state and the refusal causes (which arrive from
+    # `seb_door_log` as `(id, en)` pairs) — because the admin who reads it in
+    # English has to be able to read the *reason* in English too.
+    "admin_sekolah/seb_refusals.html",
     "student/settings.html",
     "teacher/ai_settings.html",
     # The one page whose default is English rather than Indonesian, because it is
@@ -1006,7 +1012,12 @@ def test_the_translated_list_only_grows_with_intent():
     # unchanged: bumping the number is the deliberate act for a page that is
     # *added*, and a page that no longer exists has to leave the list, or the
     # existence check above fails on a file that is not there.
-    assert len(TRANSLATED) == 59, (
+    # 60, and this movement is a page being *added*: `admin_sekolah/seb_refusals.html`
+    # is the school-wide SEB door reading, written with pairs from its first line
+    # rather than translated afterwards. The rule is unchanged: bumping the number is
+    # the deliberate act for a page that is added, and a page that no longer exists
+    # has to leave the list.
+    assert len(TRANSLATED) == 60, (
         f"{len(TRANSLATED)} pages are on the translated list. Bump this number when "
         f"you translate another one — and if you *removed* a page, put it back, "
         f"because dropping it turns the sweep off for that page: {TRANSLATED}")

@@ -358,6 +358,7 @@ window.sgSavePrefs = function (patch) {
             <a href="/admin-sekolah/assessment-periods" class="nav-item {% if request.path == '/admin-sekolah/assessment-periods' %}active{% endif %}"><i class="fas fa-calendar-check"></i><span x-text="t('Periode Penilaian','Assessment Periods')"></span></a>
             {# Matriks pengawas ujian, di pintu admin: sekolah tanpa wakil kepala tetap bisa menugaskan pengawas. #}
             <a href="/admin-sekolah/invigilation" class="nav-item {% if request.path == '/admin-sekolah/invigilation' %}active{% endif %}"><i class="fas fa-clipboard-check"></i><span x-text="t('Jadwal Pengawasan','Invigilation')"></span></a>
+            <a href="/admin-sekolah/seb-refusals" class="nav-item {% if request.path == '/admin-sekolah/seb-refusals' %}active{% endif %}"><i class="fas fa-door-closed"></i><span x-text="t('Tidak Bisa Masuk','Could Not Get In')"></span></a>
             <div class="nav-section-title pt-2"><span x-text="t('Pengguna','Users')"></span></div>
             <a href="/admin-sekolah/teachers" class="nav-item {% if request.path == '/admin-sekolah/teachers' %}active{% endif %}"><i class="fas fa-chalkboard-teacher"></i><span x-text="t('Guru','Teachers')"></span></a>
             <a href="/admin-sekolah/students" class="nav-item {% if request.path == '/admin-sekolah/students' %}active{% endif %}"><i class="fas fa-user-graduate"></i><span x-text="t('Murid','Students')"></span></a>
@@ -579,6 +580,11 @@ window.sgSavePrefs = function (patch) {
                     'murid': ('Murid', 'Student'),
                     'super_admin': ('Super Admin', 'Super Admin')
                 } %}
+                {# `seb-refusals` is *named* here rather than dropped, and the two are
+                   not the same act: unnamed, the trail prints the URL segment
+                   title-cased ("Seb Refusals"), a name no reader chose. The pair is a
+                   Jinja `{% set %}` dict literal, so no comment may sit inside it —
+                   that is a syntax error, not a style rule. #}
                 {% set _crumb_labels = {
                     'account': ('Akun', 'Account'),
                     'accounts': ('Email & Aktivasi', 'Email & Activation'),
@@ -621,6 +627,7 @@ window.sgSavePrefs = function (patch) {
                     'import': ('Impor', 'Import'),
                     'seb': ('Safe Exam Browser', 'Safe Exam Browser'),
                     'seb-claim': ('Buka dengan SEB', 'Open with SEB'),
+                    'seb-refusals': ('Tidak Bisa Masuk', 'Could Not Get In'),
                     'invigilation': ('Pengawasan Ujian', 'Invigilation'),
                     'invoices': ('Tagihan', 'Invoices'),
                     'logs': ('Log Audit', 'Audit Log'),

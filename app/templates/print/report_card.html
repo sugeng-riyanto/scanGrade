@@ -212,8 +212,8 @@
    own copy prints them whatever the status, because they are the marking. #}
 {% set graded = submission.status in ('graded', 'published') %}
 {# The key belongs to the teacher's own copy whatever the status, but a release
-   is what makes it part of the student's. #}{% set show_key = show_key_page if show_key_page is not none else graded %}
- %}
+   is what makes it part of the student's. #}
+{% set show_key = show_key_page if show_key_page is not none else graded %}
 
 <div class="sheet">
 

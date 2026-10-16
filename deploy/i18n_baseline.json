@@ -116,13 +116,13 @@
       "frozen": true
     },
     "admin_sekolah/membership.html": {
-      "pairs": 28,
+      "pairs": 34,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
     },
     "admin_sekolah/officials.html": {
-      "pairs": 31,
+      "pairs": 43,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -163,8 +163,14 @@
       "coverage": 18.2,
       "frozen": true
     },
+    "admin_sekolah/seb_refusals.html": {
+      "pairs": 39,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
     "admin_sekolah/students.html": {
-      "pairs": 58,
+      "pairs": 67,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -183,7 +189,7 @@
     },
     "admin_sekolah/teachers.html": {
       "pairs": 0,
-      "leftovers": 68,
+      "leftovers": 77,
       "coverage": 0.0,
       "frozen": false
     },
@@ -272,7 +278,7 @@
       "frozen": false
     },
     "base.html": {
-      "pairs": 181,
+      "pairs": 185,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -314,7 +320,7 @@
       "frozen": false
     },
     "guide/skor.html": {
-      "pairs": 210,
+      "pairs": 219,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -344,7 +350,7 @@
       "frozen": false
     },
     "principal/invigilation.html": {
-      "pairs": 61,
+      "pairs": 62,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -428,7 +434,7 @@
       "frozen": false
     },
     "student/seb_claim.html": {
-      "pairs": 12,
+      "pairs": 13,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -650,13 +656,13 @@
       "frozen": false
     },
     "teacher/dashboard.html": {
-      "pairs": 71,
+      "pairs": 75,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
     },
     "teacher/exam_form.html": {
-      "pairs": 273,
+      "pairs": 280,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -704,13 +710,13 @@
       "frozen": false
     },
     "teacher/invigilation.html": {
-      "pairs": 49,
+      "pairs": 51,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
     },
     "teacher/membership.html": {
-      "pairs": 23,
+      "pairs": 29,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -758,7 +764,7 @@
       "frozen": true
     },
     "teacher/seb_panel.html": {
-      "pairs": 49,
+      "pairs": 52,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false

@@ -484,6 +484,8 @@ else
   # five) and a sentence that has to be re-typed for each new gate is one that will
   # describe the box wrongly on the release that adds it.
   echo "ARMED — the runner renders from the checkout and every gate above has what"
-  echo "it needs. Prove it bites with the drill in docs/AUTO_DEPLOY.md."
+  echo "it needs. Prove it bites with the shipped drill:"
+  echo "    python deploy/drill_seb_armed_rollback.py"
+  echo "    (docs/deploy/VPS_ARM_AND_UNQUARANTINE_RUNBOOK.md, section 6)"
 fi
 exit "$rc"

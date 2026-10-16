@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Does the code, the SQL this repository carries, and the API agree about the data?
 
-Three answers, and they are three ways to be wrong quietly.
+Four answers, and they are four ways to be wrong quietly.
 
 **1. A name nothing creates.** PostgREST answers an unknown *table* with `PGRST205`
 and an unknown *column* with `42703` — and a route that wraps its query in
@@ -36,6 +36,21 @@ migration 028 can close a hole 002 opened and this check stops reporting it.
 and migration 007 moved the vocabulary from `student`/`teacher`/`admin` to
 `murid`/`guru`/`admin_sekolah`/`super_admin`. A comparison against a legacy name is not
 a typo anyone sees: the branch never runs, so whatever guard it held is not there.
+
+**4. A number two files claim.** Every sentence about a migration names a number — this
+check's own list, a ledger record's file stem, a comment in a service, a heading in
+`docs/RBAC.md`, a line in `AGENTS.md` — so two files answering to `064` makes all of them
+ambiguous, and the tool that applies them reads the directory in name order and would run
+whichever the sort put first. It happened here: `064_membership_closure_canonical.sql`
+and `064_seb_door_refusals.sql` both claimed 064 on `main`, and the repair moved the
+closure canonicalisation to 066 — the SEB file could not move, because the ledger keys a
+record by the file's stem and proves its undo point by the stem inside the archive's name,
+so renumbering a file that has been applied orphans its record. The pairs that already
+shared a number before this rule existed are named in `LEGACY_SHARED_NUMBERS` and are not
+findings — but a *sixth* claim on one of them is, so a pair can be repaired and never
+extended. A file whose numeric prefix is not a sequence number at all (`064a_x.sql`,
+`0640_x.sql`) is reported too: it reads as 064 to a person and cannot be read as a number
+by anything.
 
 ## What the contract is made of
 
@@ -601,6 +616,92 @@ def optional_tables(directory: pathlib.Path | None = None) -> set[str]:
     return guarded_names - created
 
 
+# ── the numbers, which are how every other sentence names a migration ───────
+
+#: `NNN_name.sql` — one to three digits, zero-padded, then the underscore. Deliberately
+#: not `^(\d+)_`: this repository also carries dated names from before the convention
+#: (`20260608_usage_tracking.sql` and its neighbours), and reading one of those as
+#: "migration 20260608" would be a number no other sentence in the tree agrees with.
+_SEQUENCE_NAME = re.compile(r"^(\d{1,3})_(.+)$")
+
+#: Numbers more than one migration file in this repository claims **already**, with the
+#: files that claim them. They are recorded rather than repaired: the ledger keys a
+#: record by the file's stem, so giving an applied file a new number orphans its record
+#: and its undo point at once, and these five pairs are everywhere at once (this file's
+#: own docstring above, comments in services, test fixtures, `docs/RBAC.md`) — which is
+#: exactly why the number is the thing to freeze rather than the spelling of a filename.
+#: A *new* claim on one of these numbers is a finding: the pairs may be repaired, never
+#: extended. Shrink-only, and the guard asserts each entry is still genuinely shared, so
+#: a repaired pair forces its entry out of this table.
+LEGACY_SHARED_NUMBERS: dict[int, frozenset[str]] = {
+    1: frozenset({"001_enable_rls_and_policies.sql", "001_initial_schema.sql"}),
+    2: frozenset({"002_add_is_published.sql", "002_school_classes_nisn.sql"}),
+    3: frozenset({"003_add_storage_rls.sql", "003_submission_hidden_retracted.sql"}),
+    12: frozenset({"012_allow_calculator.sql", "012_subscription_system.sql"}),
+    13: frozenset({"013_fix_missing_columns.sql", "013_whiteboard.sql"}),
+}
+
+#: Dated names from before the numbering convention, which claim no sequence number and
+#: are named here one by one rather than skipped as "a prefix of eight digits": a rule
+#: that skips a *shape* is a rule the next file of that shape walks straight through, and
+#: two of these already share one date (`20260608`), which is a date and not a collision.
+DATED_LEGACY = frozenset({
+    "20260608_fix_rls_policies.sql",
+    "20260608_usage_tracking.sql",
+    "20260614_question_pages.sql",
+})
+
+
+def migration_number(path: pathlib.Path | str) -> int | None:
+    """The number a migration file claims, or None when it claims none."""
+    match = _SEQUENCE_NAME.match(pathlib.Path(path).name)
+    return int(match.group(1)) if match else None
+
+
+def migration_number_findings(paths) -> list[dict]:
+    """Two files on one number, or a name no number can be read out of.
+
+    The direction of the check matters. It does not say "these names are wrong" — the
+    five pairs in `LEGACY_SHARED_NUMBERS` are wrong and unrepairable, which is why they
+    are a table rather than a finding. It says "two files claim this number **and this
+    repository has never accepted that**", so the ten files named as historical are each
+    still checked against the number they claim, and a third file arriving on 001 fails
+    while the two that were always there do not.
+
+    The numbers are read from the file *names*, which is the only thing that orders
+    them: `sql_files()` sorts by name, the ledger keys its row by the stem, and every
+    comment that says "migration 030" is a sentence about that name. A migration that
+    adds a column needs no number and gets none; a file that carries one must carry it
+    alone.
+    """
+    findings: list[dict] = []
+    claims: dict[int, list[str]] = {}
+    for path in paths:
+        name = pathlib.Path(path).name
+        if name in DATED_LEGACY:
+            continue
+        number = migration_number(name)
+        if number is None:
+            # Only a *numeric* prefix is a finding. `combined_021_024_RUN_ME.sql`,
+            # `schema.sql` and `_RUN_ALL_AT_ONCE.sql` claim no number at all, and
+            # neither does any file a downstream fork adds beside them.
+            if name[:1].isdigit():
+                findings.append({
+                    "kind": "migration name", "name": name,
+                    "where": "a numeric prefix that is not a migration number "
+                             "(NNN_name.sql), so no file order, no `migration NNN` "
+                             "sentence and no ledger record can name this file"})
+            continue
+        claims.setdefault(number, []).append(name)
+    for number, names in sorted(claims.items()):
+        if len(names) < 2 or set(names) <= LEGACY_SHARED_NUMBERS.get(number, frozenset()):
+            continue
+        findings.append({
+            "kind": "migration number", "name": f"{number:03d}",
+            "where": f"{len(names)} files claim it: {', '.join(sorted(names))}"})
+    return findings
+
+
 # ── the role vocabulary, which is also a database fact ──────────────────────
 
 ROLE_CHECK = re.compile(r"CHECK\s*\(\s*role\s+IN\s*\(([^)]*)\)\s*\)", re.I)
@@ -734,7 +835,7 @@ def applied_note(undeclared: list[str]) -> None:
     if not undeclared:
         return
     print(f"the live schema has {len(undeclared)} object(s) no file here declares "
-          "(the other direction — `--live` reports it as a failure; this mode asks "
+          "(the other direction - `--live` reports it as a failure; this mode asks "
           "only whether the SQL this repository carries has been applied):")
     for name in undeclared:
         print(f"  + {name}")
@@ -835,11 +936,13 @@ def main(argv: list[str]) -> int:
     vocab = role_vocabulary()
     role_problems = role_mismatches(vocab)
     unrunnable_stmts = unrunnable()
+    numbers = migration_number_findings(sql_files())
     print(f"schema contract: {len(schema)} table(s) in the migrations, "
           f"{len(refs)} reference(s) in the code, "
           f"{len(open_pols)} policy/view open to PUBLIC, "
           f"{len(unrunnable_stmts)} statement(s) on a table nothing creates, "
-          f"{len(vocab)} role(s) in the CHECK constraint")
+          f"{len(vocab)} role(s) in the CHECK constraint, "
+          f"{len(numbers)} migration naming finding(s)")
 
     if "--json" in argv:
         path = pathlib.Path(argv[argv.index("--json") + 1])
@@ -847,7 +950,7 @@ def main(argv: list[str]) -> int:
                                     "problems": problems}, indent=1), encoding="utf-8")
         print("wrote", path)
 
-    if problems or open_pols or role_problems or unrunnable_stmts:
+    if problems or open_pols or role_problems or unrunnable_stmts or numbers:
         for ref in problems[:60]:
             print(f"  {ref['kind']} `{ref['name']}`  -  {ref['where']}")
         if len(problems) > 60:
@@ -864,6 +967,8 @@ def main(argv: list[str]) -> int:
         for ref in unrunnable_stmts:
             print(f"  {ref['statement']}  -  {ref['where']}: nothing in this repository "
                   f"creates `{ref['name']}`")
+        for ref in numbers:
+            print(f"  {ref['kind']} `{ref['name']}`  -  {ref['where']}")
         if problems:
             print(f"\nschema contract: FAILED  -  {len(problems)} name(s) no SQL in this "
                   "repository creates. At runtime PostgREST refuses the request "
@@ -884,8 +989,18 @@ def main(argv: list[str]) -> int:
                   "cannot see: every name resolves and the migration still stops at "
                   "that line, so nothing after it is ever applied. Write the migration "
                   "that creates the table, or wrap the statement in "
-                  "`DO $$ … EXCEPTION WHEN undefined_table … END $$` the way "
+                  "`DO $$ ... EXCEPTION WHEN undefined_table ... END $$` the way "
                   "001_enable_rls_and_policies.sql does.")
+        if numbers:
+            print(f"schema contract: FAILED - {len(numbers)} migration number(s)/name(s) "
+                  "are not exclusive to one file. Every sentence about a migration names "
+                  "a number - this check's own list, a ledger record's file stem, a "
+                  "comment in a service, `docs/RBAC.md` - so two files on one number "
+                  "makes all of them ambiguous, and the apply tool reads the directory "
+                  "in name order and would run whichever the sort put first. Renumber "
+                  "the file that has *not* been applied: a file that has been applied "
+                  "keeps its number, because the ledger keys its record by the stem and "
+                  "proves its undo point by the stem inside the archive's name.")
         return 1
 
     if "--anon" in argv:

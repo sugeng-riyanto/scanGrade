@@ -40,6 +40,42 @@ CLASS_NOT_ASSIGNED = ("Kelas itu tidak termasuk kelas yang mengikuti ujian ini. 
 NO_PAPERS_TO_PRINT = ("Belum ada lembar jawaban yang bisa dicetak untuk ujian ini. "
                       "Kartu hasil dibuat dari lembar yang sudah masuk.")
 
+# ── your own paper, in another of your schools ───────────────────────────────
+#
+# A teacher who works at two schools writes papers in both, and a session is only ever in
+# one of them. A *write* on a paper filed in the other school is refused — the weighting,
+# the pupils and the marks follow that paper's school, not the session's — and the refusal
+# has to say which school to move back to, because "not available to your account" is a
+# sentence about the wrong thing: the paper is theirs.
+
+OTHER_SCHOOL_PAPER = (
+    "Kertas ini milik {paper}, sedangkan sesi Anda sedang di {acting}. "
+    "Pindah ke {paper} dulu untuk menyimpan, mengirim, atau menilainya.")
+OTHER_SCHOOL_PAPER_MOVING = (
+    "Kertas ini milik {paper}. Pindah ke sekolah itu dulu untuk menyimpan, mengirim, "
+    "atau menilainya.")
+OTHER_SCHOOL_PAPER_UNNAMED = (
+    "Kertas ini milik sekolah lain dari yang sedang Anda gunakan. Pindah ke sekolah "
+    "kertas itu dulu untuk menyimpan, mengirim, atau menilainya.")
+
+
+def other_school_paper(paper_school: str = "", acting_school: str = "") -> str:
+    """The sentence for a write refused because the session is in another school.
+
+    Both names when both are known; only the paper's, when the acting school could not be
+    named; neither, when the names could not be read at all — a lookup that failed may not
+    turn a refusal into a 500, and a sentence without a name is still actionable ("move to
+    the school the paper belongs to").
+    """
+    paper = (paper_school or "").strip()
+    acting = (acting_school or "").strip()
+    if not paper:
+        return OTHER_SCHOOL_PAPER_UNNAMED
+    if acting:
+        return OTHER_SCHOOL_PAPER.format(paper=paper, acting=acting)
+    return OTHER_SCHOOL_PAPER_MOVING.format(paper=paper)
+
+
 # ── an account that is not attached to a school ──────────────────────────────
 
 NO_SCHOOL = "Akun Anda belum terhubung ke sekolah mana pun. Silakan hubungi admin sekolah."

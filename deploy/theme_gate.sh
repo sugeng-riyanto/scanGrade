@@ -56,6 +56,15 @@
 #     that goes backwards. It reads templates, not pages, so a partial that
 #     renders inside a translated page is counted too.
 #
+#   deploy/school_authority_gate.py
+#     whether every teacher-facing write route files its rows under the school of
+#     *this* request. A teacher can be an active member of more than one NPSN, so a
+#     route has two schools it could name, and `school_id` is the column that scopes
+#     a paper's weighting, its pupils, its marks and its reports: a write that
+#     resolves it from a body, the profile's school or the session crosses a tenant
+#     boundary while every page still answers 200. Four releases shipped that defect
+#     and each was found by hand; this is the general check.
+#
 #   deploy/schema_contract.py
 #     whether the code, the repository's SQL and the API agree about the data.
 #     A `select` naming a column that does not exist is not a `None`: PostgREST
@@ -141,6 +150,13 @@
 #      the box, and it is refused like any other finding: a gate someone can
 #      delete is a gate that stops running, silently, from that commit onwards.
 #
+#   tests/unit/test_template_artifacts.py
+#     a Jinja closer left in a template's *text* — an edit that replaces a tag and
+#     keeps its `%}`. Jinja has no opener to consume it, so it renders: the reader
+#     sees `%}` on the sheet. It is checked here rather than trusted to the suites
+#     because presence is asserted everywhere and absence nowhere: the print suite
+#     renders this document and passes with a stray line of punctuation on it.
+#
 #   deploy/render_fixture_gate.py
 #     whether the report documents and the fixtures that render them still agree.
 #     A sheet that starts reading a key its fixture never supplies draws the hole as
@@ -154,7 +170,7 @@ set -uo pipefail
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # Word-split on purpose: pytest takes them as separate paths.
-TESTS="tests/unit/test_dark_theme_contrast.py tests/unit/test_tailwind_class_names.py tests/unit/test_theme_stylesheet.py tests/unit/test_language_toggle.py tests/unit/test_i18n_coverage.py tests/unit/test_css_freshness.py tests/unit/test_landing_facilities.py tests/unit/test_static_tree.py tests/unit/test_no_committed_secrets.py tests/unit/test_render_fixture_gate.py"
+TESTS="tests/unit/test_dark_theme_contrast.py tests/unit/test_tailwind_class_names.py tests/unit/test_theme_stylesheet.py tests/unit/test_language_toggle.py tests/unit/test_i18n_coverage.py tests/unit/test_css_freshness.py tests/unit/test_landing_facilities.py tests/unit/test_static_tree.py tests/unit/test_no_committed_secrets.py tests/unit/test_render_fixture_gate.py tests/unit/test_template_artifacts.py"
 
 # The app's own refusal markers, and the reason they are named here rather than
 # spelled out in the block that reads them: they are literals in
@@ -173,7 +189,7 @@ ALLOW_DIRTY_VAR="SCANGRADE_ALLOW_DIRTY_CHECKOUT"
 # next defect, and every release after it ships unexamined. So the list is
 # checked up front, and a missing file is exit 3 (about the release), not exit 2
 # (about the box).
-ARMAMENT="$TESTS deploy/i18n_coverage.py deploy/css_freshness.py deploy/schema_contract.py deploy/render_fixture_gate.py"
+ARMAMENT="$TESTS deploy/i18n_coverage.py deploy/css_freshness.py deploy/schema_contract.py deploy/render_fixture_gate.py deploy/school_authority_gate.py"
 for check in $ARMAMENT; do
   # `-s` and not `-f`: a file that exists and holds nothing is the same release
   # as one where it was deleted, only quieter.
@@ -381,6 +397,32 @@ if [ "$APPLIED_RC" -eq 0 ]; then
 fi
 # applied_check:end
 
+# ── The tenant half: which school is this write *for*? ──────────────────────
+# Every teacher-facing write route files its rows under the school of *this* request.
+# A teacher can be an active member of more than one NPSN since migration 044, so a
+# route has two schools it could name — the one this request acts in
+# (`g.user_school_id`) and the one their profile names — and `school_id` is the column
+# that scopes a paper's weighting, its pupils, its marks and its reports. Four
+# releases shipped a route that resolved it from a request body, from the profile's
+# school or from the session, and every one was found by reading a diff. This is the
+# general check, so the fifth is refused by the build instead of by a reader.
+#
+# Its exit codes are its own and the tool explains them: 0 clean, 1 a route that
+# resolves its school from somewhere else, 2 could not measure (no route modules, or
+# one that will not parse) — the box's property, relayed as such rather than as a
+# finding.
+SCHOOL_OUT=$("$PY" "$REPO/deploy/school_authority_gate.py" 2>&1)
+SCHOOL_RC=$?
+if [ "$SCHOOL_RC" -eq 1 ]; then
+  echo >&2
+  echo "theme gate: FAILED — a teacher-facing write route resolves the school it files" >&2
+  echo "            a row under from somewhere other than this request's active school." >&2
+  echo "            Every page still answers 200 and the app still starts; the row lands" >&2
+  echo "            in the wrong tenant, where it scopes that school's weighting, pupils," >&2
+  echo "            marks and reports." >&2
+  echo "$SCHOOL_OUT" | sed 's/^/    /' >&2
+  exit 1
+fi
 if [ "$RC" -ne 0 ] && [ "$RC" -ne 5 ] && [ "$CSS_RC" -eq 0 ]; then
   echo "$CSS_OUT"   # the stylesheet half is fine; say so before the failure
 fi
@@ -405,11 +447,20 @@ if [ "$RC" -eq 0 ]; then
     echo "$SCHEMA_OUT" | sed 's/^/    /' >&2
     exit 2
   fi
+  if [ "$SCHOOL_RC" -eq 2 ]; then
+    echo >&2
+    echo "theme gate: the school authority check COULD NOT RUN — this release is NOT" >&2
+    echo "            checked for teacher writes that resolve the wrong school. Nothing" >&2
+    echo "            about the release is wrong; this box cannot answer the question." >&2
+    echo "$SCHOOL_OUT" | sed 's/^/    /' >&2
+    exit 2
+  fi
   if [ "$CSS_RC" -eq 0 ]; then
     echo "$SCHEMA_OUT"
     echo "$CSS_OUT"
     echo "$FIXTURES_OUT"
-    echo "theme gate: OK — readable in both themes, every named utility is compiled, the committed stylesheet is the one the templates produce, the app's own stylesheet stays a cached file, every file under /static/ is one the app asks for and in a commit, every page declares the language of its own copy, no template translates less than it did, no tracked file carries a service-role key or a hard-coded Flask secret, and every table, column and policy the code names is one this repository declares, with every role it compares against one the database holds${APPLIED_CLAIM}${FIXTURES_CLAIM}, and every facility the landing page advertises one this repository can show"
+    echo "$SCHOOL_OUT"
+    echo "theme gate: OK — readable in both themes, every named utility is compiled, the committed stylesheet is the one the templates produce, the app's own stylesheet stays a cached file, every file under /static/ is one the app asks for and in a commit, every page declares the language of its own copy, no template prints a Jinja closer as text, no template translates less than it did, no tracked file carries a service-role key or a hard-coded Flask secret, and every table, column and policy the code names is one this repository declares, with every role it compares against one the database holds${APPLIED_CLAIM}${FIXTURES_CLAIM}, and every facility the landing page advertises one this repository can show, and every teacher-facing write route files its rows under the school of this request"
     exit 0
   fi
   echo >&2
@@ -478,6 +529,14 @@ The check names every offender, and the fix depends on which rule failed:
   * translate the page and add it to TRANSLATED in tests/unit/test_language_toggle.py;
     or, if its copy is Indonesian and the toggle cannot change that, declare it:
     `{% set content_lang = 'id' %}` above the page's `{% extends %}`.
+
+  a teacher-facing write route that resolves a school from somewhere else:
+  * take the school from the request's own resolution — `filing_school_for_request()`
+    for a create, `g.get("user_school_id")` for a row in this request's school — and
+    never from the body, the session, or the profile's school; if the route is meant
+    to write into a row, guard the row with `@require_school_access` so its school is
+    known to be this caller's. The tool names the kind it found and the line it is on:
+        .venv/bin/python deploy/school_authority_gate.py
 
   a template that translates less than the last release:
   * bind the string as a pair — `x-text="t('Indonesia','English')"` — and see which

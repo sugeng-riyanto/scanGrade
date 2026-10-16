@@ -359,7 +359,7 @@ its `seb` line is the only place in the app that reports it.
 ## 6. Prove the armed gate bites (laptop, not the box)
 
 ```bash
-python .freebuff/drill_seb_armed_rollback.py
+python deploy/drill_seb_armed_rollback.py
 ```
 
 It runs the **shipped** Gate 4c block and the **shipped** refusal path from

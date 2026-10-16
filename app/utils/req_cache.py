@@ -38,6 +38,11 @@ logger = logging.getLogger(__name__)
 # that a classroom full of students shares one query, short enough that an
 # administrative change is not stuck behind it. Writes invalidate explicitly.
 SCHOOL_TTL = 120
+#: The school fields the shared row carries, and the set every caller must ask for:
+#: the row is cached under **one key per school** whatever `columns` was passed, so a
+#: narrower read is not a narrower read — it is what every other reader in the TTL
+#: window gets. See `school_row`.
+SCHOOL_ROW_COLUMNS = "name, npsn, logo_url, features, status"
 CLASS_TTL = 300
 ASSIGNMENT_TTL = 60
 
@@ -88,12 +93,19 @@ def school_key(school_id):
     return f"school:{school_id}"
 
 
-def school_row(school_id, columns="name, npsn, logo_url, features, status"):
+def school_row(school_id, columns=SCHOOL_ROW_COLUMNS):
     """One school row, reused by every student and teacher in it.
 
     Header text, the logo and the whiteboard feature flag all come from this one
     row, so the three separate selects the pages used to make collapse into one
     query per school per TTL.
+
+    **One key per school, whatever `columns` was asked for.** So a caller that asks
+    for a narrower set does not get a narrower read of its own — it decides what
+    every other reader in the TTL window gets, and the fields it left out come back
+    missing there. Ask for the default set unless there is no other reader of that
+    school at all; the only reason the parameter exists is a row with columns this
+    default does not know about.
     """
     if not school_id:
         return {}
@@ -390,6 +402,22 @@ def teachers_for_class(school_id, class_id):
             return {}
 
     return ttl(class_teachers_key(class_id), ASSIGNMENT_TTL, load)
+
+
+def teacher_dashboard_key(user_id, school_id=None) -> str:
+    """The teacher dashboard's cached payload: one teacher **in one school**.
+
+    The school is part of the key because the payload is the active NPSN's: the
+    classes, subjects, assignments and invigilation duties on that page are all read
+    for `g.user_school_id`. Keyed by the teacher alone, a teacher who used the school
+    switcher kept being served the *previous* school's page until the 20-second TTL
+    ran out — so the control they had just used looked like it had done nothing, and
+    the one page that should confirm the switch was the one that denied it.
+
+    Written through this one builder so the reader in `routes/teacher.py` and every
+    invalidation site cannot disagree about the key's shape.
+    """
+    return f"t_dash:{user_id}:{school_id or ''}"
 
 
 def teacher_assignments_key(teacher_id, school_id):

@@ -30,6 +30,15 @@ fixture in `tests/unit` — the grid the two are asked to agree about.
   what is worth reading is which keys exist across the set, which is what `--show`
   prints.
 
+A fixture whose *file* this interpreter cannot even parse is the third answer, and it
+belongs to the box. `python_requires` declares the floor, and the production box's venv
+is 3.10 while one fixture's source uses a f-string 3.12 added; refused as a finding,
+that quarantined five commits on `main` over a file that is valid under the floor the
+project declares — a site that keeps serving the release it already had and says
+nothing. Below the floor it is `could not measure` (exit 2) and it names the file and
+the floor; at or above the floor the same file stays the finding it is, because then
+nothing but the release can explain it. A real finding still outranks it.
+
 Usage::
 
     python deploy/render_fixture_gate.py               # the matrix and the verdict
@@ -194,6 +203,18 @@ def _recording(app):
         app.jinja_env.get_template = original
 
 
+class FixtureUnparseable(Exception):
+    """The fixture's own module cannot be parsed by the interpreter running here.
+
+    Kept apart from every other capture failure because the answer is different, and
+    the difference cost five quarantined releases: the box's venv is Python 3.10,
+    `tests/unit/test_reports_hub.py` uses a PEP 701 f-string that 3.12 added, and the
+    gate answered "the fixture no longer renders through the Jinja environment this
+    gate watches" — a finding about a commit — for a file that renders perfectly under
+    the floor the project declares.
+    """
+
+
 def capture_context(app, fixture: Fixture) -> tuple[dict | None, str]:
     """The context a fixture hands Jinja, taken from the call it already makes.
 
@@ -206,6 +227,11 @@ def capture_context(app, fixture: Fixture) -> tuple[dict | None, str]:
     with _recording(app) as seen:
         try:
             fixture.build(app)
+        except SyntaxError as exc:
+            # The fixture's *module* did not parse: a page that does not parse raises
+            # TemplateSyntaxError, so this is the interpreter and the file, not the
+            # document. Answered by the caller against the floor. (read on: 3.12 here)
+            raise FixtureUnparseable(f"{type(exc).__name__}: {exc}") from exc
         except Exception as exc:  # noqa: BLE001 - answered as a finding by the caller
             return None, f"{type(exc).__name__}: {exc}"
     if "context" not in seen:
@@ -253,6 +279,7 @@ class Reading:
     documents: list[str]
     contexts: dict = field(default_factory=dict)        # fixture -> captured context
     capture_errors: dict = field(default_factory=dict)  # fixture -> why not measurable
+    unparseable: dict = field(default_factory=dict)     # fixture -> its file will not parse
     rendered: dict = field(default_factory=dict)        # (fixture, document) -> page
 
     def cell(self, fixture: str, document: str) -> str:
@@ -274,9 +301,16 @@ class Reading:
         named = {fixture.template for fixture in FIXTURES}
         return [name for name in self.documents if name not in named]
 
-    def findings(self) -> list[str]:
+    def findings(self, skip: set[str] = frozenset()) -> list[str]:
+        """The release's defects. *skip* names fixtures whose entry is about the box.
+
+        Only the caller may decide which those are: it needs the floor, and the floor
+        is `python_requires`'. The default is the strict reading — nothing skipped.
+        """
         lines = []
         for name, reason in sorted(self.capture_errors.items()):
+            if name in skip:
+                continue
             source = next(f.source for f in FIXTURES if f.name == name)
             lines.append(
                 f"the fixture {name!r} ({source}) could not be measured: {reason} — it "
@@ -299,7 +333,16 @@ class Reading:
 def measure(app) -> Reading:
     reading = Reading(documents=report_documents())
     for fixture in FIXTURES:
-        context, error = capture_context(app, fixture)
+        try:
+            context, error = capture_context(app, fixture)
+        except FixtureUnparseable as exc:
+            # Recorded twice on purpose: once as the reason this fixture has no
+            # context (which the matrix and `--show` print), and once as a file this
+            # interpreter cannot parse, which `answer` weighs against the floor.
+            reason = str(exc)
+            reading.capture_errors[fixture.name] = reason
+            reading.unparseable[fixture.name] = reason
+            continue
         if context is None:
             reading.capture_errors[fixture.name] = error
         else:
@@ -342,6 +385,50 @@ def _app():
     from app import create_app
 
     return create_app("app.config.TestingConfig")
+
+
+def below_the_floor() -> tuple[bool, str]:
+    """Whether this interpreter is older than the floor, and the floor's own text.
+
+    Asked of `python_requires` rather than spelled out again: that module owns the
+    comparison and the message, and this gate is the second caller that needs the
+    answer. The import is local because `deploy/` is run as a script, with the
+    checkout's root put on the path by `_app`.
+    """
+    sys.path.insert(0, str(ROOT))
+    import python_requires
+
+    return python_requires.below_floor(), ".".join(str(p) for p in python_requires.MINIMUM)
+
+
+def answer(reading: Reading, below: bool, floor: str) -> tuple[int, list[str]]:
+    """The gate's answer and the lines that carry it, decided in one place.
+
+    A finding wins: something in the release is wrong, and the inability to look at
+    one file does not excuse it. Only when the *only* thing in the way is a fixture
+    file this interpreter cannot parse — below the floor — is the answer ``could not
+    measure``, because then the release is not the thing that failed. Split out of
+    `main` so a test asks what the gate would answer without building an app again.
+    """
+    problems = reading.findings(skip=set(reading.unparseable) if below else set())
+    if problems:
+        lines = ["render fixture gate: FAILED — a report fixture and a report document "
+                 "no longer agree, and the page draws the gap as a blank:"]
+        lines += [f"    - {problem}" for problem in problems]
+        return EXIT_FINDING, lines
+    if reading.unparseable and below:
+        here = f"{sys.version_info.major}.{sys.version_info.minor}"
+        lines = [f"render fixture gate: could not measure — this interpreter is {here}, "
+                 f"below the {floor} floor, so the files these fixtures come from do "
+                 f"not parse here and their documents are NOT checked:"]
+        for name, reason in sorted(reading.unparseable.items()):
+            source = next(f.source for f in FIXTURES if f.name == name)
+            lines.append(f"    - the fixture {name!r} ({source}): {reason}")
+        lines.append(f"    Nothing about the release is wrong; recreate the venv with a "
+                     f"{floor} interpreter to have it measured. That is a property of "
+                     f"this box, not of the release, so nothing is refused.")
+        return EXIT_CANNOT_MEASURE, lines
+    return EXIT_OK, []
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -387,13 +474,11 @@ def main(argv: list[str] | None = None) -> int:
               f"report document(s), {reading.rendered_pairs()} of "
               f"{len(reading.rendered)} pair(s) rendered strictly")
 
-    problems = reading.findings()
-    if problems:
-        print("render fixture gate: FAILED — a report fixture and a report document no "
-              "longer agree, and the page draws the gap as a blank:")
-        for problem in problems:
-            print(f"    - {problem}")
-        return EXIT_FINDING
+    code, lines = answer(reading, *below_the_floor())
+    if lines:
+        print("\n".join(lines))
+    if code != EXIT_OK:
+        return code
 
     print("render fixture gate: OK — every report document is rendered by at least one "
           "fixture under StrictUndefined, and every fixture supplies every key its own "

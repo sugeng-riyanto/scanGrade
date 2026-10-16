@@ -362,6 +362,110 @@ def test_issuing_stores_both_halves_and_the_key_on_the_exam(app_ctx):
     assert out["config_key"] == ck.config_key(out["settings"])
 
 
+class _KeyWriteFails:
+    """A PostgREST stand-in whose ``exams`` write lands nowhere.
+
+    The credential row it is handed is remembered (and matched on ``exam_id``), so a
+    test can ask the only question that matters after a failed key write: what does
+    the row now hold?
+    """
+
+    def __init__(self, previous=None):
+        self.store = {"exam_seb_credential": [dict(previous)] if previous else []}
+        self.writes = []
+
+    def table(self, name):
+        return _Statement(self, name)
+
+
+class _Statement:
+    def __init__(self, sb, table):
+        self.sb, self.table = sb, table
+        self.filters, self.pending = [], None
+
+    def select(self, *a, **k):
+        return self
+
+    def eq(self, column, value):
+        self.filters.append((column, value))
+        return self
+
+    def upsert(self, payload, **kwargs):
+        self.pending = ("upsert", dict(payload))
+        return self
+
+    def update(self, patch):
+        self.pending = ("update", dict(patch))
+        return self
+
+    def _matched(self):
+        return [row for row in self.sb.store.setdefault(self.table, [])
+                if all(row.get(column) == value for column, value in self.filters)]
+
+    def execute(self):
+        if self.pending is None:
+            # A read answers with **copies**, the way postgrest does over the wire: a
+            # caller that keeps the row it read must not have later writes appear
+            # inside it. (The first version of this fake handed out the stored dict,
+            # so the "previous" row `issue` read was mutated by the upsert and the
+            # restore it performed wrote the new values back — the test's own aliasing,
+            # not the code's behaviour.)
+            return SimpleNamespace(data=[dict(row) for row in self._matched()])
+        kind, payload = self.pending
+        self.sb.writes.append((self.table, kind, payload))
+        if self.table == "exams":
+            return SimpleNamespace(data=[])          # the write that failed
+        rows = self._matched()
+        if kind == "upsert" and not rows:
+            self.sb.store[self.table].append(dict(payload))
+            rows = self.sb.store[self.table]
+        for row in rows:
+            row.update(payload)
+        return SimpleNamespace(data=rows or [payload])
+
+
+def test_a_failed_key_write_gives_the_previous_passwords_back(app_ctx):
+    """The two halves must not disagree, so a failed key write undoes the rotation.
+
+    PostgREST has no transaction across `exam_seb_credential` and `exams`, and the
+    file a pupil holds is checked against the key on the *exam* while the panel reads
+    the passwords out of the *credential*. Rotating the row and then failing to store
+    the key leaves the paper in the one state that is worse than a refusal: the panel
+    reads out a password that no file the school holds accepts, the download answers
+    `stale_config` (409) for good, and nothing in the UI says why. So the previous
+    row is read first and handed back when the key write fails.
+    """
+    previous = {"exam_id": "ex-1", "quit_password_hash": "old-quit-hash",
+                "quit_password_enc": "old-quit-enc",
+                "admin_password_hash": "old-admin-hash",
+                "admin_password_enc": "old-admin-enc"}
+    sb = _KeyWriteFails(previous)
+    out = seb_service.issue(sb, _exam(), start_url="https://s.test/e/1")
+    assert out["ok"] is False
+    row = sb.store["exam_seb_credential"][0]
+    assert row["quit_password_hash"] == "old-quit-hash", (
+        "the exam kept its old Config Key while the passwords were rotated")
+    assert row["quit_password_enc"] == "old-quit-enc"
+    assert row["admin_password_enc"] == "old-admin-enc"
+    assert [(table, kind) for table, kind, _ in sb.writes if table == "exam_seb_credential"] == [
+        ("exam_seb_credential", "upsert"), ("exam_seb_credential", "update")], sb.writes
+
+
+def test_a_failed_key_write_with_no_previous_row_is_survivable(app_ctx):
+    """A first issue whose key write fails has nothing to restore — and must not raise.
+
+    An orphan credential with no key is a state the panel already tolerates (`live`
+    requires the key) and `disable` deliberately keeps, so there is nothing to undo;
+    what the caller gets is `ok: False`, not an exception in a request.
+    """
+    sb = _KeyWriteFails()
+    out = seb_service.issue(sb, _exam(), start_url="https://s.test/e/1")
+    assert out["ok"] is False
+    assert [kind for table, kind, _ in sb.writes if table == "exams"] == ["update"]
+    assert len(sb.store["exam_seb_credential"]) == 1, (
+        "a first-issue row is left where it is; removing it is `disable`'s business")
+
+
 def test_the_two_passwords_are_different_and_unique_per_issue(app_ctx):
     sb = _Sb()
     first = seb_service.issue(sb, _exam(), start_url="https://s.test/e/1")

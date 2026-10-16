@@ -28,6 +28,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -382,6 +383,57 @@ class TestExceptionReading:
 # ── the deploy runs it on every release ──────────────────────────
 
 
+def _render_case_arm(code, *, body_only=True):
+    """One arm of the runner's `case "$RENDER_RC"`, read out of the runner.
+
+    Scoped to the arm on purpose: the exit-1 arm already carries `RENDER_ENFORCE`,
+    so a whole-file reading of the same question is satisfied while the exit-2 arm
+    is unconditional again — the check and the defect would agree with each other.
+    """
+    script = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+    body = script.split('case "$RENDER_RC" in', 1)[1].split("\n  esac", 1)[0]
+    # Split on the *labels* (`    *)`) and not on every four-space indent: an arm's
+    # body is indented six spaces, so a plain split cuts it off from its own label.
+    for chunk in re.split(r"\n    (?=\S+\))", body):
+        if chunk.startswith(f"{code})"):
+            arm = chunk.split("\n", 1)[1]
+            # A `case` arm's `;;` terminates it rather than belonging to it, and
+            # the executed half below splices the body into a plain script.
+            stripped = arm.rstrip()
+            if stripped.endswith(";;"):
+                arm = stripped[:-2]
+            return arm if body_only else chunk
+    raise AssertionError(f"the render gate's case has no {code}) arm")
+
+
+def _run_render_arm(enforce):
+    """Run the real exit-2 arm under bash, with a stub `log`, and report the box.
+
+    Written to a file rather than passed through `bash -c`: the arm's own copy
+    carries an em dash, and this suite already learned (in `test_caller_armament`)
+    that the Windows command line mangles exactly that, so a failure would show up
+    as a comparison against damaged text rather than as behaviour.
+    """
+    script = (
+        "log () { printf '%s\\n' \"$*\"; }\n"
+        "HEALTHY=1\n"
+        "BEFORE=before123\n"
+        "AFTER=after456\n"
+        "SMOKE_CONF=/etc/scangrade-smoke.conf\n"
+        f"RENDER_ENFORCE={enforce}\n"
+        "RENDER_RC=2\n"
+        "RENDER_OUT='exam render gate: could not measure — no browser found'\n"
+        + _render_case_arm(2)
+        + "\nprintf 'HEALTHY=%s REASON=%s\\n' \"$HEALTHY\" \"${FAIL_REASON:-none}\"\n"
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "arm.sh"
+        path.write_text(script, encoding="utf-8")
+        result = subprocess.run(["bash", str(path)], capture_output=True, text=True,
+                                encoding="utf-8", errors="replace", timeout=60)
+    return result.stdout + result.stderr
+
+
 class TestTheDeployRunsIt:
     def test_the_runner_invokes_the_gate(self):
         script = DEPLOY_SCRIPT.read_text(encoding="utf-8")
@@ -407,6 +459,56 @@ class TestTheDeployRunsIt:
             "the finding arm must be gated on RENDER_ENFORCE, so a box that cannot "
             "run the gate cannot reject good releases"
         )
+
+    def test_the_could_not_measure_arm_refuses_on_an_enforcing_box(self):
+        """Exit 2 used to keep the release, and that is how the gate stopped guarding.
+
+        Every cause of exit 2 — no browser, no credentials, no sittable demo exam, a
+        sign-in that failed — means the page was never looked at, and the journal
+        carries what keeping the release cost: `could not measure (exit 2)` followed
+        by `DEPLOY OK`. On a box that armed the gate the release is unverified and
+        must not be kept, through the same rollback path a blank page takes.
+
+        Asserted against the **2) arm itself**, not the file: the exit-1 arm already
+        says `RENDER_ENFORCE`, so a whole-file check would pass with this arm made
+        unconditional again — which is the defect, not a detail of it.
+        """
+        arm = _render_case_arm(2, body_only=True)
+        assert "RENDER_ENFORCE" in arm, (
+            "the could-not-measure arm is not gated on the box's own enforcement "
+            "switch, so it would either block a box with no browser or keep an "
+            "unverified release"
+        )
+        assert "HEALTHY=0" in arm and "FAIL_REASON=" in arm, (
+            "the could-not-measure arm names the switch but does not refuse: the "
+            "shared rollback path is only entered through HEALTHY/FAIL_REASON"
+        )
+        assert "$RENDER_OUT" in arm, (
+            "the refusal must carry the gate's own reading, or the journal says "
+            "'unverified' without saying why"
+        )
+
+    def test_both_answers_of_that_arm_are_what_they_claim(self):
+        """Run the real arm under bash, with the box armed and with it not.
+
+        The source assertions above can be satisfied by a body that logs the right
+        words and keeps the release anyway, so the two outcomes are measured: an
+        enforcing box ends unhealthy with a reason, and a box that never armed the
+        gate keeps the release and says so.
+        """
+        armed = _run_render_arm("true")
+        assert "HEALTHY=0" in armed, (
+            f"an enforcing box kept an unverified release\n{armed}")
+        assert "could not measure" in armed, (
+            f"the refusal does not say what could not be measured\n{armed}")
+        assert "rolling back" in armed, armed
+
+        unarmed = _run_render_arm("false")
+        assert "HEALTHY=1" in unarmed, (
+            f"a box that never armed the gate rolled a release back for a reading "
+            f"it cannot take — every release would be refused\n{unarmed}")
+        assert "could not measure" in unarmed, (
+            f"the kept release must still say the page was not looked at\n{unarmed}")
 
 
 # ── the installer arms it, on the same proving rule as the others ─
@@ -485,9 +587,10 @@ class TestItPollsForThePageInsteadOfSleepingOnce:
         """The poll's first look can land before `document.body` exists.
 
         Reading `.innerText` off a null body threw `TypeError: Cannot read
-        properties of null`, the gate answered "could not measure" (exit 2), and
-        exit 2 does **not** stop a release — so the gate silently stopped
-        guarding anything. The read must be null-safe.
+        properties of null`, the gate answered "could not measure" (exit 2) — and a
+        run that answers could-not-measure is a release in which nothing looked at
+        the page, which the runner now refuses on an enforcing box. The read must
+        be null-safe, or the gate reports its own crash as an unmeasured release.
         """
         src = GATE_PATH.read_text(encoding="utf-8")
         assert "d.body && d.body.innerText" in src, (

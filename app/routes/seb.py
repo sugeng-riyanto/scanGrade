@@ -31,7 +31,7 @@ import io
 import re
 from datetime import datetime, timezone
 
-from flask import (Blueprint, Response, abort, flash, g, jsonify, redirect,
+from flask import (Blueprint, abort, flash, g, jsonify, redirect,
                    render_template, request, send_file, session, url_for)
 
 from app.services import (seb_access, seb_config_key, seb_crypto, seb_door_log,
@@ -172,9 +172,9 @@ def panel(exam_id):
         # that decides whether it should be are both *on this page*, so refusing the
         # owner here made the whole feature unreachable — the only way in was to type
         # a URL that answered 403, which is exactly the dead end this page is meant
-        # to remove. That state is judged by ownership alone, and it is judged
-        # narrowly: no credential is shown, no file, and nobody but the owner gets
-        # past this line.
+        # to remove. That state is judged by `_may_configure` alone, and it is judged
+        # narrowly: no credential is shown, no file, and nobody who may not configure
+        # the paper gets past this line.
         if not (out.get("reason") in ("not_gated", "no_credential")
                 and _may_configure(exam)):
             abort(403)
@@ -501,16 +501,30 @@ def _seb_response(exam: dict, exam_id: str):
 
 
 def _may_configure(exam: dict) -> bool:
-    """Whether this caller owns the paper — the toggle is the owner's to flip.
+    """Whether this caller may act on the paper — the toggle is the paper's own.
 
-    Deliberately narrower than the read matrix: an invigilator may *read* a password
-    to help a pupil, and must not be able to turn the requirement off, on, or
-    re-issue the file that every other pupil is holding.
+    The rule is ``exam_access.can_manage_exam``, the predicate the builder's own
+    doors already apply (``teacher._guard_exam``): the paper's **owner** — a guru,
+    and a head of school or their deputy who teaches, which ``OWN_PAPER_ROLES``
+    names explicitly — or the **admin of the paper's school**. The SEB requirement
+    is a property of the exam row (``exams.require_seb``, migration 062) and not a
+    resource of its own, so a reader who may change that row's anti-cheat switches,
+    its answer key and its published results may change this one too. Asking a
+    second, narrower question here was the one switch out of reach for the admin
+    who manages the whole paper and for the official who built it.
+
+    Every *reader* the matrix grants stays a reader: the invigilator on duty and
+    the officials of the school on a paper they did not build never own it, so
+    `can_manage_exam` refuses them, and a pupil never reaches this at all. The
+    toggle turns the class's entry and exit keys off and re-issues the file every
+    pupil is holding, which is why it must not follow the *read* matrix outward.
+
+    ``super_admin`` is refused, exactly as :func:`app.services.seb_access.decide`
+    refuses them on a read: the keys belong to the school, and a platform
+    administrator has no operational need for one exam's.
     """
     from app.utils.exam_access import can_manage_exam
-    if g.get("user_role") != "guru":
-        # Admins are not offered the toggle: they cannot run the paper, and the
-        # brief gives them visibility, not authorship.
+    if g.get("user_role") == "super_admin":
         return False
     return can_manage_exam(g.get("user_id"), g.get("user_role"),
                            g.get("user_school_id"), exam)
