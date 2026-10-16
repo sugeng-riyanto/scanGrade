@@ -401,6 +401,26 @@ def below_the_floor() -> tuple[bool, str]:
     return python_requires.below_floor(), ".".join(str(p) for p in python_requires.MINIMUM)
 
 
+def not_measurable_here(reading: Reading, below: bool | None = None) -> set[str]:
+    """The fixtures this interpreter cannot look at, and only when it is too old to.
+
+    One rule, three readers. `answer` below is the first: a fixture file this
+    interpreter cannot parse is a property of the box, never a finding about a
+    release. The other two are the guards that read this same matrix
+    (`tests/unit/test_render_fixture_gate.py`, `tests/unit/test_rendered_absence.py`),
+    and they have to reach the same conclusion — a test-time guard that can refuse a
+    release *for the interpreter it is running under* is the deadlock
+    `python_requires` was written to end, and it is the shape that quarantined five
+    commits on `main` while the site kept serving the release it already had.
+
+    At or above the floor the answer is empty, so a fixture that captured nothing
+    stays the finding it is: then nothing but the release can explain it.
+    """
+    if below is None:
+        below = below_the_floor()[0]
+    return set(reading.unparseable) if below else set()
+
+
 def answer(reading: Reading, below: bool, floor: str) -> tuple[int, list[str]]:
     """The gate's answer and the lines that carry it, decided in one place.
 
@@ -410,7 +430,7 @@ def answer(reading: Reading, below: bool, floor: str) -> tuple[int, list[str]]:
     measure``, because then the release is not the thing that failed. Split out of
     `main` so a test asks what the gate would answer without building an app again.
     """
-    problems = reading.findings(skip=set(reading.unparseable) if below else set())
+    problems = reading.findings(skip=not_measurable_here(reading, below))
     if problems:
         lines = ["render fixture gate: FAILED — a report fixture and a report document "
                  "no longer agree, and the page draws the gap as a blank:"]

@@ -43,6 +43,21 @@ def gate():
     return module
 
 
+def unmeasurable(reading, below=None) -> set[str]:
+    """The fixtures the tool refuses to charge to the release — its rule, asked of it.
+
+    Not re-derived here: below the floor a fixture whose own source file this
+    interpreter cannot parse is a property of the box, and this file is exactly where
+    a second copy of that rule would do damage — the guards below read the *same*
+    matrix the tool answers from, so one of them that reached its own conclusion would
+    quarantine a release for the interpreter it is running under, which is the
+    deadlock `python_requires` was written to end. `below` is passed through for the
+    direction tests at the bottom of this file, where the floor itself is the thing
+    being moved.
+    """
+    return gate().not_measurable_here(reading, below)
+
+
 @pytest.fixture(scope="module")
 def reading(app):
     """The real matrix, measured once: 8 fixtures against every report document."""
@@ -179,9 +194,11 @@ class TestTheContextIsCapturedNotCopied:
         assert context is None and "RuntimeError" in error
 
     def test_the_real_fixtures_captured_a_non_empty_context_each(self, reading):
-        assert set(reading.contexts) == {fixture.name for fixture in gate().FIXTURES}, (
+        skipped = unmeasurable(reading)
+        assert set(reading.contexts) | skipped == {fixture.name for fixture in gate().FIXTURES}, (
             f"fixtures that captured nothing: "
-            f"{sorted(reading.capture_errors)} — {reading.capture_errors}")
+            f"{sorted(set(reading.capture_errors) - skipped)} — "
+            f"{ {k: v for k, v in reading.capture_errors.items() if k not in skipped} }")
         for name, context in reading.contexts.items():
             assert context, f"{name} captured an empty context"
 
@@ -258,15 +275,18 @@ class TestThisTreeIsGreen:
                 f"{fixture.template}: {page[len(gate().ERROR):]}")
 
     def test_this_tree_is_green(self, reading):
-        assert reading.findings() == [], (
+        assert reading.findings(skip=unmeasurable(reading)) == [], (
             "the report fixtures and the report documents disagree; run "
             "`python deploy/render_fixture_gate.py` for the matrix")
 
     def test_the_matrix_rendered_every_fixtures_own_document(self, reading):
-        expected = len(gate().FIXTURES)
+        skipped = unmeasurable(reading)
+        expected = len(gate().FIXTURES) - len(skipped)
         assert reading.rendered_pairs() >= expected, (
             f"{reading.rendered_pairs()} pair(s) rendered strictly, and there are "
-            f"{expected} fixtures — their own documents must render at least")
+            f"{expected} fixture(s) this interpreter can look at "
+            f"({len(gate().FIXTURES)} registered, {len(skipped)} unparseable here) — "
+            f"their own documents must render at least")
 
 
 # ── the exit contract, and the wiring ────────────────────────────────────────
@@ -372,6 +392,79 @@ class TestAFixtureFileThisInterpreterCannotParse:
         assert "below_floor" in source and "python_requires" in source, (
             "the gate answered the interpreter question by itself")
         assert "MINIMUM" in source
+
+    def test_the_same_question_whichever_way_it_is_asked(self):
+        """`not_measurable_here` is the rule, and `below` is the only thing it varies on.
+
+        One place: the tool's own answer below, and the guards that read the same
+        matrix, must not be able to disagree about which fixtures the *interpreter*
+        excuses.
+        """
+        module = gate()
+        reading = _reading(module, capture_errors={"x": "SyntaxError: y"},
+                           unparseable={"x": "SyntaxError: y"})
+        assert module.not_measurable_here(reading, below=True) == {"x"}
+        assert module.not_measurable_here(reading, below=False) == set()
+
+
+class TestTheMatrixGuardsKeepTheFloorsRule:
+    """The three tree guards above excuse a fixture the *interpreter* cannot look at.
+
+    They read the same matrix the tool answers from, so one of them that reached its
+    own conclusion would refuse exactly what the tool declined to charge to the
+    release — on the box, for the interpreter the box happens to run. That is the
+    shape that quarantined five commits on `main` while the site kept serving the
+    release it already had, so both directions are measured here.
+
+    The direction is chosen by moving the *floor* rather than by pretending to be an
+    older interpreter: `python_requires.MINIMUM` is the one value `below_floor()`
+    compares against, so a high floor means "this run is below it" and a low one the
+    opposite — on 3.10 and on 3.12 alike, which is what lets this file run on the box.
+    """
+
+    def _reading_with_one_fixture_that_will_not_parse(self):
+        module = gate()
+        fixture = next(f for f in module.FIXTURES if f.source.endswith("test_reports_hub.py"))
+        reading = module.Reading(documents=module.report_documents())
+        for other in module.FIXTURES:
+            if other.name == fixture.name:
+                continue
+            reading.contexts[other.name] = {"a": 1}
+            reading.rendered[(other.name, other.template)] = "<html>"
+        reason = "SyntaxError: f-string expression part cannot include a backslash"
+        reading.capture_errors[fixture.name] = reason
+        reading.unparseable[fixture.name] = reason
+        return reading, fixture
+
+    def _guards(self):
+        """The three assertions above, which are the ones that read the real matrix."""
+        return (
+            TestTheContextIsCapturedNotCopied().
+                test_the_real_fixtures_captured_a_non_empty_context_each,
+            TestThisTreeIsGreen().test_this_tree_is_green,
+            TestThisTreeIsGreen().test_the_matrix_rendered_every_fixtures_own_document,
+        )
+
+    def _move_the_floor(self, monkeypatch, minimum):
+        import python_requires
+        monkeypatch.setattr(python_requires, "MINIMUM", minimum, raising=True)
+
+    def test_below_the_floor_the_guards_excuse_it(self, monkeypatch):
+        self._move_the_floor(monkeypatch, (99, 0))
+        reading, fixture = self._reading_with_one_fixture_that_will_not_parse()
+        assert unmeasurable(reading) == {fixture.name}, (
+            "a file this interpreter cannot parse was not read as unmeasurable, so the "
+            "tool and these guards disagree about what this box may refuse")
+        for guard in self._guards():
+            guard(reading)
+
+    def test_at_or_above_the_floor_the_guards_still_fail_on_it(self, monkeypatch):
+        self._move_the_floor(monkeypatch, (3, 0))
+        reading, _ = self._reading_with_one_fixture_that_will_not_parse()
+        assert unmeasurable(reading) == set()
+        for guard in self._guards():
+            with pytest.raises(AssertionError):
+                guard(reading)
 
 
 class TestTheThemeGateRunsIt:
