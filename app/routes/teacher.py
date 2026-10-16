@@ -16,8 +16,8 @@ from app.decorators.security import require_school_access
 from app.decorators.year_lock import open_year_required
 from app.services.subscription_service import check_feature_limit, exam_quota
 from app.utils.exam_access import (
-    can_manage_exam, can_read_exam, exam_class_ids,
-    managed_exam, EXAM_OK, EXAM_MISSING, EXAM_UNVERIFIABLE,
+    ACCESS_MANAGE, ACCESS_READ, can_manage_exam, can_read_exam, exam_class_ids,
+    managed_exam, EXAM_OK, EXAM_MISSING, EXAM_UNVERIFIABLE, EXAM_DENIED_ELSEWHERE,
 )
 from app.services.export_service import export_to_xlsx, export_to_pdf
 from app.services.answer_sheet_generator import generate_answer_sheet
@@ -130,8 +130,28 @@ def _deny(message, as_json, redirect_to="/teacher/exams"):
     return redirect(redirect_to)
 
 
+def _school_names(supabase, *school_ids):
+    """The names of these schools, `""` for one that could not be read.
+
+    Only ever called on a refusal that has to name where to move to, which is why a
+    lookup that fails leaves the sentence shorter instead of turning a refusal into a 500
+    — the same reason a count that fails is not a refusal in the quota reader.
+    """
+    wanted = [str(school_id).strip() for school_id in school_ids
+              if str(school_id or "").strip()]
+    names = {}
+    if wanted:
+        try:
+            rows = (supabase.table("schools").select("id,name")
+                    .in_("id", wanted).execute().data or [])
+            names = {str(row.get("id")): row.get("name") or "" for row in rows}
+        except Exception:
+            current_app.logger.warning("school names for a refusal failed", exc_info=True)
+    return [names.get(str(school_id or "").strip(), "") for school_id in school_ids]
+
+
 def _guard_exam(supabase, exam_id, columns="id,teacher_id,school_id", as_json=True,
-                redirect_to="/teacher/grading"):
+                redirect_to="/teacher/grading", access=ACCESS_MANAGE):
     """Return ``(exam, None)`` when the caller may act on it, else ``(None, response)``.
 
     ``columns`` is passed through, so a route can fetch everything it needs and let
@@ -144,9 +164,16 @@ def _guard_exam(supabase, exam_id, columns="id,teacher_id,school_id", as_json=Tr
     The lookup and the rule are `exam_access.managed_exam` — the *same* function
     the API guard uses — so a teacher route and a scan route cannot end up asking
     two slightly different questions about the same paper.
+
+    ``access`` is which question is asked. The default is `ACCESS_MANAGE`, and a route
+    that only *reports* on a paper — a print, an export, a preview, an analysis — passes
+    `ACCESS_READ`, because a paper's own author may read it from any of their schools.
+    A write attempted from another of the author's schools is refused with both schools
+    named: `EXAM_DENIED_ELSEWHERE` is the one refusal that has a next step.
     """
     exam, verdict = managed_exam(
-        supabase, exam_id, g.user_id, g.get("user_role"), g.get("user_school_id"), columns
+        supabase, exam_id, g.user_id, g.get("user_role"), g.get("user_school_id"),
+        columns, access,
     )
     if verdict == EXAM_OK:
         return exam, None
@@ -157,6 +184,12 @@ def _guard_exam(supabase, exam_id, columns="id,teacher_id,school_id", as_json=Tr
             return None, (jsonify({"error": NO_SUCH_EXAM}), 404)
         flash(NO_SUCH_EXAM, "error")
         return None, redirect(redirect_to)
+    if verdict == EXAM_DENIED_ELSEWHERE:
+        # The paper is the caller's own; the session is standing in another of their
+        # schools. Name both schools, because the way forward *is* the sentence.
+        paper, acting = _school_names(supabase, exam.get("school_id"),
+                                      g.get("user_school_id"))
+        return None, _deny(denials.other_school_paper(paper, acting), as_json, redirect_to)
     return None, _deny(NO_EXAM_ACCESS, as_json, redirect_to)
 
 
@@ -1451,6 +1484,14 @@ def exam_form():
     # one. `_owned_draft` decides, so a `draft_id` naming another school's paper —
     # or a published one — is ignored rather than written.
     draft_row = _owned_draft(supabase, draft_id, g.get("user_school_id"), g.user_id)
+    # A paper's school is decided when it is minted, and this door cannot move it. Not a
+    # promise, an arrangement: `school_id` above comes from `filing_school_for_request`,
+    # which answers the school this request is *verified* in and refuses a form field
+    # naming any other (`FILING_OTHER_SCHOOL`), and `_owned_draft` finds a draft only
+    # under that same school — so the value an edit writes is the paper's own by
+    # construction, and `exam_detail` (which keeps the row's own school and writes one
+    # only for a row that has none) has no second version of this rule to disagree with.
+    # Asserted in `tests/unit/test_cross_school_reads.py`.
     # A minted paper spends the school's year; a paper that already exists does not,
     # whatever the save is called (draft, save, publish). `school_id` here is the
     # school this request is *verified* in, so the allowance is charged to the tenant
@@ -2169,7 +2210,7 @@ def exam_preview(exam_id):
     supabase = get_supabase()
     exam, err = _guard_exam(supabase, exam_id,
                             columns="id,title,teacher_id,school_id,total_questions",
-                            as_json=_wants_json())
+                            as_json=_wants_json(), access=ACCESS_READ)
     if err:
         return err
     return render_template(
@@ -2210,7 +2251,8 @@ def exam_preview_paper(exam_id):
     )
 
     supabase = get_supabase()
-    exam, err = _guard_exam(supabase, exam_id, columns="*", as_json=_wants_json())
+    exam, err = _guard_exam(supabase, exam_id, columns="*", as_json=_wants_json(),
+                            access=ACCESS_READ)
     if err:
         return err
     # JSON columns arrive as text often enough that the pupil's door parses them
@@ -2911,7 +2953,7 @@ def results():
     # exam_id comes from the query string and the submissions used to be fetched
     # before any check, so another school's names and scores were rendered on demand.
     _, err = _guard_exam(supabase, exam_id, as_json=_wants_json(),
-                         redirect_to="/teacher/results")
+                         redirect_to="/teacher/results", access=ACCESS_READ)
     if err:
         return err
 
@@ -2941,7 +2983,7 @@ def results_print():
     # Same guard as the screen page: the sheet carries every student's name and
     # mark, so it cannot be the route that is easier to reach.
     exam, err = _guard_exam(supabase, exam_id, columns="*", as_json=False,
-                            redirect_to="/teacher/results")
+                            redirect_to="/teacher/results", access=ACCESS_READ)
     if err:
         return err
 
@@ -3037,7 +3079,7 @@ def _analysis_of(supabase, exam_id, as_json=False, redirect_to="/teacher/results
     `as_json=_wants_json()`, the way the other routes in this file already do.
     """
     exam, err = _guard_exam(supabase, exam_id, columns="*", as_json=as_json,
-                            redirect_to=redirect_to)
+                            redirect_to=redirect_to, access=ACCESS_READ)
     if err:
         return None, None, err
     exam = _json_fields(exam)
@@ -3697,7 +3739,8 @@ def results_report_cards():
     # second answer to that question.
     exam, err = _guard_exam(supabase, exam_id,
                             columns="id,teacher_id,school_id,class_ids",
-                            as_json=False, redirect_to="/teacher/results")
+                            as_json=False, redirect_to="/teacher/results",
+                            access=ACCESS_READ)
     if err:
         return err
 
@@ -4593,7 +4636,7 @@ def export_xlsx():
     supabase = get_supabase()
     # exam_id came straight from the query string with no check, and select("*")
     # includes the answer key — any teacher could download any school's results.
-    exam, err = _guard_exam(supabase, exam_id, columns="*")
+    exam, err = _guard_exam(supabase, exam_id, columns="*", access=ACCESS_READ)
     if err:
         return err
     subs = supabase.table("submissions").select("*, profiles(full_name)").eq("exam_id", exam_id).execute().data or []
@@ -4609,7 +4652,7 @@ def export_xlsx():
 def export_pdf():
     exam_id = request.args.get("exam_id")
     supabase = get_supabase()
-    exam, err = _guard_exam(supabase, exam_id, columns="*")
+    exam, err = _guard_exam(supabase, exam_id, columns="*", access=ACCESS_READ)
     if err:
         return err
     subs = supabase.table("submissions").select("*, profiles(full_name)").eq("exam_id", exam_id).execute().data or []
@@ -4627,7 +4670,8 @@ def bubble_sheet(exam_id):
     # Restricted to the columns actually used, so the answer key is never fetched
     # — and the exam must belong to the caller.
     exam, err = _guard_exam(supabase, exam_id,
-                            columns="total_questions,question_types,subject")
+                            columns="total_questions,question_types,subject",
+                            access=ACCESS_READ)
     if err:
         return err
     qtypes = exam.get("question_types") or {}
@@ -5724,7 +5768,7 @@ def exam_sessions(exam_id):
     exam, err = _guard_exam(
         get_supabase(), exam_id, as_json=_wants_json(), redirect_to="/teacher/exams",
         columns="id,teacher_id,school_id,title,subject,total_questions,"
-                "duration_minutes,start_at,status,class_ids")
+                "duration_minutes,start_at,status,class_ids", access=ACCESS_READ)
     if err:
         return err
     return render_template("teacher/session_review.html", exam=exam, exam_id=exam_id)
@@ -5736,7 +5780,7 @@ def exam_proctoring(exam_id):
     """The live room moved into the session page. A bookmark is a promise."""
     _, err = _guard_exam(get_supabase(), exam_id, as_json=_wants_json(),
                          redirect_to="/teacher/exams",
-                         columns="id,teacher_id,school_id")
+                         columns="id,teacher_id,school_id", access=ACCESS_READ)
     if err:
         return err
     return redirect(url_for("teacher.exam_sessions", exam_id=exam_id), code=301)
@@ -5754,7 +5798,8 @@ def exam_sessions_data(exam_id):
     supabase = get_supabase()
     exam, err = _guard_exam(
         supabase, exam_id,
-        columns="id,teacher_id,school_id,title,class_ids,total_questions")
+        columns="id,teacher_id,school_id,title,class_ids,total_questions",
+        access=ACCESS_READ)
     if err:
         return err
     out = session_review.review_for_exam(supabase, exam)
@@ -5922,7 +5967,7 @@ def generate_remedial(exam_id):
 def cheat_analysis(exam_id):
     """The pattern page was the same sitting seen twice. It also left a link."""
     _, err = _guard_exam(get_supabase(), exam_id, as_json=_wants_json(),
-                         redirect_to="/teacher/exams")
+                         redirect_to="/teacher/exams", access=ACCESS_READ)
     if err:
         return err
     return redirect(url_for("teacher.exam_sessions", exam_id=exam_id), code=301)

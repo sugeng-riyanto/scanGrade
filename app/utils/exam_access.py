@@ -40,6 +40,15 @@ def result_released(submission) -> bool:
 OWN_PAPER_ROLES = ("guru", "principal", "vice_principal")
 
 
+#: Which question a guard is asking, and the two are not interchangeable. A route that
+#: *changes* a paper needs the paper's own school to be the school the session is acting
+#: in; a route that only *reports* on it is answered for the paper's author wherever that
+#: author is, because reading what you wrote is not touching a school's data. Named
+#: rather than defaulted per call site, so a new route has to say which one it is.
+ACCESS_MANAGE = "manage"
+ACCESS_READ = "read"
+
+
 def can_manage_exam(user_id, user_role, user_school_id, exam) -> bool:
     """May this staff member act on this exam at all?
 
@@ -78,11 +87,21 @@ def can_manage_exam(user_id, user_role, user_school_id, exam) -> bool:
         # still its owner's to manage, not a stranger's and not nobody's either.
         if not (bool(user_id) and bool(user_school_id)):
             return False
-        if str(exam.get("teacher_id") or "") != str(user_id):
+        if not owns_paper(user_id, exam):
             return False
         exam_school = exam.get("school_id")
         return (not exam_school) or str(exam_school) == str(user_school_id)
     return False
+
+
+def owns_paper(user_id, exam) -> bool:
+    """Is this caller the paper's author?
+
+    The one fact about a paper a session cannot move: ``teacher_id`` is the paper's own
+    record of who wrote it. Two questions lean on it — whether a write belongs to this
+    school, and whether a refusal is one that has a way forward.
+    """
+    return bool(user_id) and str((exam or {}).get("teacher_id") or "") == str(user_id)
 
 
 #: The answers `managed_exam` can give. Named rather than bare strings so a caller
@@ -90,6 +109,11 @@ def can_manage_exam(user_id, user_role, user_school_id, exam) -> bool:
 EXAM_OK = "ok"
 EXAM_MISSING = "missing"
 EXAM_DENIED = "denied"
+#: The caller owns the paper and the session is standing in another of their schools. Its
+#: own answer, because it has a way forward — the refusal names both schools — and
+#: because collapsing it into `EXAM_DENIED` is how a teacher is sent to their admin for a
+#: paper that is already theirs.
+EXAM_DENIED_ELSEWHERE = "denied_elsewhere"
 EXAM_UNVERIFIABLE = "unverifiable"
 
 
@@ -122,7 +146,7 @@ def _select_with_rule_columns(columns) -> str:
 
 
 def managed_exam(supabase, exam_id, user_id, user_role, user_school_id,
-                 columns="id,teacher_id,school_id"):
+                 columns="id,teacher_id,school_id", access=ACCESS_MANAGE):
     """``(exam, EXAM_OK)`` when this caller may act on the exam, else ``(None, why)``.
 
     The lookup and the decision in one place, so a route cannot check a column the
@@ -133,9 +157,17 @@ def managed_exam(supabase, exam_id, user_id, user_role, user_school_id,
     pays for the lookup rather than a second query.
 
     A failed lookup is `EXAM_UNVERIFIABLE`, not a pass: a check that fails open is
-    worse than none, because it looks like one. The four answers are distinct so the
+    worse than none, because it looks like one. The five answers are distinct so the
     caller can say which happened instead of collapsing "no such paper" and "not
     yours" into one refusal.
+
+    ``access`` is which question is being asked. `ACCESS_MANAGE` is the default, and the
+    one a route that *writes* must use; `ACCESS_READ` is for a report or a print, which
+    the paper's own author is answered for from any of their schools (see
+    `can_read_own_paper`). The row comes back whenever it was read,
+    `EXAM_DENIED_ELSEWHERE` included — the refusal that names two schools needs the
+    paper's own — and the *verdict* is the answer: every caller refuses on anything but
+    `EXAM_OK`.
     """
     try:
         exam = row_or_none(
@@ -147,7 +179,14 @@ def managed_exam(supabase, exam_id, user_id, user_role, user_school_id,
         return None, EXAM_UNVERIFIABLE
     if not exam:
         return None, EXAM_MISSING
-    if not can_manage_exam(user_id, user_role, user_school_id, exam):
+    allowed = (can_read_own_paper(user_id, user_role, user_school_id, exam)
+               if access == ACCESS_READ
+               else can_manage_exam(user_id, user_role, user_school_id, exam))
+    if not allowed:
+        if owns_paper(user_id, exam) and exam.get("school_id"):
+            logger.info("Refused an exam in another school: exam=%s user=%s access=%s",
+                        exam_id, user_id, access)
+            return exam, EXAM_DENIED_ELSEWHERE
         logger.warning("Denied exam access: exam=%s user=%s role=%s",
                        exam_id, user_id, user_role)
         return None, EXAM_DENIED
@@ -182,6 +221,30 @@ def can_read_exam(user_id, user_role, user_school_id, exam) -> bool:
     if user_role in OFFICIAL_READ_ROLES:
         return bool(user_school_id) and str((exam or {}).get("school_id") or "") == str(user_school_id)
     return False
+
+
+def can_read_own_paper(user_id, user_role, user_school_id, exam) -> bool:
+    """May this caller read this paper's report from *any* of their schools?
+
+    Everything :func:`can_read_exam` allows, plus the paper's own author wherever the
+    session is acting. The gap this closes was measured in production: a teacher with
+    memberships in two schools switched to one of them and could no longer print the LJK,
+    open the results or read the analysis of a paper **they had written** in the other,
+    while ``/teacher/exams`` went on offering all of it — that list is scoped by
+    ``teacher_id`` alone. The offer and the rule disagreed, and the teacher whose paper it
+    was is the one who saw the disagreement.
+
+    Reading your own paper is not a school's data being touched. Writing it still is, and
+    that stays with :func:`can_manage_exam`: the rows that follow the paper — its
+    weighting, its pupils, its marks — keep belonging to the school that owns them. A
+    paper with no school on file is answered by ``can_manage_exam`` alone; this predicate
+    adds a reader, never an authority over a row whose school nobody recorded.
+    """
+    if can_read_exam(user_id, user_role, user_school_id, exam):
+        return True
+    if not (bool(user_id) and bool(user_school_id)):
+        return False
+    return owns_paper(user_id, exam)
 
 
 def exam_class_ids(exam) -> list[str]:
