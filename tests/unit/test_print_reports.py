@@ -411,6 +411,25 @@ class TestWhoMayPrint:
         assert resp.status_code == 302
         assert "Ahmad Pratama" not in body_of(resp)
 
+    def test_the_served_card_carries_no_template_leftover(self, app):
+        """The document as the reader gets it, from both doors that serve it.
+
+        A `%}` on a page is an edit that replaced a tag and left its closer: Jinja has no
+        opener to consume it, so it is *text*, and a sheet that carries one is the sheet a
+        school hands a family. Every other test in this file asserts what the document
+        carries, and a stray line of punctuation satisfies all of them — so this one
+        asserts what it must **not** carry, on the response rather than on a render.
+        """
+        # One sign-in at a time: the helper installs a single `_session_for`, so a second
+        # caller replaces the first and a client kept for later is somebody else.
+        for who, role, url in (("guru-a", "guru", "/teacher/submissions/sub-released/print"),
+                               ("murid-1", "murid", "/student/results/sub-released/print")):
+            resp = sign_in(app, who, role, "school-a").get(url)
+            assert resp.status_code == 200, url
+            html = body_of(resp)
+            assert "Dokumen siap dicetak" in html, url
+            assert "%}" not in html, f"{url} serves a stray Jinja closer"
+
     def test_the_exam_sheet_belongs_to_the_exam_owner(self, app):
         owner = sign_in(app, "guru-a", "guru", "school-a")
         resp = owner.get("/teacher/results/print?exam_id=exam-1")

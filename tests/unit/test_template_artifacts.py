@@ -15,9 +15,8 @@ Two readings, because they fail differently:
 
 * the **templates**, lexed by Jinja itself. A `%}` that lands in a *text* token has no opener
   to consume it, so it renders — 148 files, no fixture needed, nothing to keep in step;
-* the **document the report came from**, rendered through the same fixture the print suite
-  uses, since a template can also print a closer that arrived in a *value* (the sweep cannot
-  see that, and it is the shape that survives a naive fix).
+The *document* half lives in `test_print_reports.py`, beside the fixtures that sign in and
+fetch both routes that serve it: this file reads templates, and the suite owns the page.
 
 The honest limit is the marker list. `%}` is swept because it is not a sequence any language
 this app writes inline produces — not HTML, not CSS, not JavaScript. `}}` is deliberately
@@ -102,29 +101,24 @@ class TestNoTemplatePrintsACloser:
                 f"{relative} is exempt from the sweep and does not exist")
             assert reason.strip(), f"{relative} is exempt without a reason"
 
+class TestTheGateRunsTheSweep:
+    """A guard only the suite runs is one a release can outrun.
 
-class TestTheReportedDocument:
-    """The page the report came from, rendered — the reader's own view of it."""
+    The pre-commit hook and the VPS auto-deploy run `deploy/theme_gate.sh`, so a finding
+    this file makes has to be a finding *there* or it never refuses anything. Scoped to the
+    `TESTS=` assignment on purpose: the gate's header names this suite too, and a check that
+    reads the whole file is satisfied by the sentence describing the run after the run itself
+    is deleted — the trap `tests/unit/test_i18n_coverage.py` records.
+    """
 
-    def test_the_report_card_renders_without_a_stray_closer(self, app):
-        from tests.unit import test_print_reports as reports
+    def test_the_theme_gate_runs_this_file(self):
+        gate = (ROOT / "deploy" / "theme_gate.sh").read_text(encoding="utf-8")
+        line = next((line for line in gate.splitlines()
+                     if line.startswith("TESTS=")), "")
+        assert line, "the gate no longer lists any suite"
+        # Unquoted first: the assignment ends with `...test_template_artifacts.py"`.
+        listed = line.split("=", 1)[1].strip().strip('"').split()
+        assert "tests/unit/test_template_artifacts.py" in listed, (
+            "the gate does not run this sweep, so a release can ship a stray closer")
 
-        html = reports.TestTheReportCard().render(app)
-        assert "Dokumen siap dicetak" in html, (
-            "the card came back without its toolbar copy, so this render proves nothing "
-            "about the document the report was about")
-        assert "%}" not in html, (
-            "the printed card still shows a Jinja closer to whoever is handed it")
 
-    def test_a_class_set_renders_without_one_either(self, app):
-        """The same template in a loop is the other way this document is served.
-
-        A class set takes the `cards|length > 1` branch of the toolbar — the branch
-        the single sheet never renders — so one card passing does not cover it.
-        """
-        from tests.unit import test_class_report_cards as class_set
-
-        html = class_set._render(app, class_set._cards())
-        assert "kertas, urut menurut nama" in html, (
-            "this is not the multi-card branch, so it is the single sheet again")
-        assert "%}" not in html
