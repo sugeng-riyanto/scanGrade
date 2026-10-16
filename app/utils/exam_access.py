@@ -93,14 +93,44 @@ EXAM_DENIED = "denied"
 EXAM_UNVERIFIABLE = "unverifiable"
 
 
+#: The fields the rule itself reads. A caller's ``columns`` is *added to* these, never
+#: used instead: ``can_manage_exam`` reads ``teacher_id`` and ``school_id``, and a route
+#: that asked for a narrower list handed it a row where both were absent. That is not
+#: "no such paper" — it is a permanent refusal for every role but ``super_admin``, with
+#: nothing in any log to say why. It was ``/teacher/export/bubble-sheet/<exam_id>``: the
+#: printed LJK needs four other columns and nothing about ownership, so the one route for
+#: printing an answer sheet denied every teacher who pressed it. This module's own
+#: docstring already named the failure — "a route cannot check a column the rule never
+#: saw" — and this is the collection that makes it unrepresentable.
+RULE_COLUMNS = ("id", "teacher_id", "school_id")
+
+
+def _select_with_rule_columns(columns) -> str:
+    """The caller's columns ∪ the rule's own, as one PostgREST select list.
+
+    ``*`` stays ``*`` (it already carries everything), a duplicate is not repeated, and
+    the caller's columns keep their order so a route that reads positionally still can.
+    """
+    text = "" if columns is None else str(columns).strip()
+    if text == "*":
+        return "*"
+    wanted = [column.strip() for column in text.split(",") if column.strip()]
+    for column in RULE_COLUMNS:
+        if column not in wanted:
+            wanted.append(column)
+    return ",".join(wanted)
+
+
 def managed_exam(supabase, exam_id, user_id, user_role, user_school_id,
                  columns="id,teacher_id,school_id"):
     """``(exam, EXAM_OK)`` when this caller may act on the exam, else ``(None, why)``.
 
     The lookup and the decision in one place, so a route cannot check a column the
-    rule never saw — or, the failure this replaces, check nothing at all. `columns`
-    is passed through, so a route fetches what it needs and the guard pays for the
-    lookup rather than a second query.
+    rule never saw — or, the failure this replaces, check nothing at all. `columns` is
+    what the *route* needs; the fields the rule reads are added to it by
+    `_select_with_rule_columns`, because a caller that named only its own columns used
+    to hand the rule a row it could not judge (see `RULE_COLUMNS`). The guard still
+    pays for the lookup rather than a second query.
 
     A failed lookup is `EXAM_UNVERIFIABLE`, not a pass: a check that fails open is
     worse than none, because it looks like one. The four answers are distinct so the
@@ -109,7 +139,8 @@ def managed_exam(supabase, exam_id, user_id, user_role, user_school_id,
     """
     try:
         exam = row_or_none(
-            supabase.table("exams").select(columns).eq("id", exam_id).maybe_single().execute()
+            supabase.table("exams").select(_select_with_rule_columns(columns))
+            .eq("id", exam_id).maybe_single().execute()
         )
     except Exception:
         logger.exception("Access check failed for exam %s", exam_id)
