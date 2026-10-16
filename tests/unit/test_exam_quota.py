@@ -260,8 +260,14 @@ class TestThePageShowsTheAllowance:
         block = source(PAGE).split("{% if exam_quota %}", 1)[1].split("<!-- Header -->", 1)[0]
         assert "Kuota ujian tahun ini" in block, "blok kuotanya tidak ditemukan"
         assert "Exam quota this year" in block, "labelnya tidak punya separuh Inggris"
-        assert block.count(":lang=\"lang\"") >= 4, block
-        assert block.count("x-text=\"t(") >= 4, "labelnya bukan pasangan pada satu binding"
+        # *Every* label, not "at least four": a floor let one of the seven lose its
+        # pair and still pass (measured — the mutation check's last entry). The three
+        # counts are one number, or a label switches without a pair, or switches
+        # without declaring the language it switched to.
+        assert block.count("x-text=\"") == block.count("x-text=\"t("), (
+            "ada label di blok ini yang bukan pasangan `t()`", block)
+        assert block.count(":lang=\"lang\"") == block.count("x-text=\""), (
+            "ada label yang berganti bahasa tanpa menyatakan bahasanya", block)
 
 
 def _quota_block(html: str) -> str:
