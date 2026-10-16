@@ -294,3 +294,133 @@ def _render_page(app, quota):
         g.show = {}
         return app.jinja_env.get_template("teacher/exams.html").render(
             exams=[], unassigned_ids=set(), ambiguous_ids=set(), exam_quota=quota)
+
+
+# ── pintu simpan, dijalankan: kuota penuh tidak menahan kertas lama ──────────
+
+class _Resp:
+    def __init__(self, data=None):
+        self.data = data
+
+
+class _Query:
+    """A Supabase stand-in that records what was written and honours its filters."""
+
+    def __init__(self, store, table):
+        self.store, self.table = store, table
+        self.filters, self.mode, self.payload = [], "select", None
+
+    def select(self, *a, **k):
+        return self
+
+    def eq(self, column, value):
+        self.filters.append((column, value))
+        return self
+
+    def order(self, *a, **k):
+        return self
+
+    def limit(self, *a, **k):
+        return self
+
+    def insert(self, payload):
+        self.mode, self.payload = "insert", payload
+        return self
+
+    def update(self, payload):
+        self.mode, self.payload = "update", payload
+        return self
+
+    def _matches(self, row):
+        return all(str(row.get(k)) == str(v) for k, v in self.filters)
+
+    def execute(self):
+        self.store.calls.append((self.table, self.mode))
+        if self.mode == "insert":
+            self.store.inserted.append((self.table, self.payload))
+            row = dict(self.payload)
+            row.setdefault("id", "new-1")
+            return _Resp([row])
+        rows = self.store.rows.get(self.table, [])
+        return _Resp([r for r in rows if self._matches(r)])
+
+
+class _FakeSb:
+    def __init__(self, rows=None):
+        self.rows, self.inserted, self.calls = rows or {}, [], []
+
+    def table(self, name):
+        return _Query(self, name)
+
+    def writes(self, table="exams"):
+        """Every write the route made to a table, in order."""
+        return [m for t, m in self.calls if t == table and m in ("insert", "update")]
+
+
+def _raw(view):
+    while hasattr(view, "__wrapped__"):
+        view = view.__wrapped__
+    return view
+
+
+#: The school is at its cap in both cases below: the point is that the *same*
+#: refusal stops a new paper and does not stop a paper that already exists.
+FULL = ("Kuota ujian tahun ini (10) telah terpenuhi. "
+        "Upgrade paket untuk batas tak terbatas.")
+
+DRAFT = {"id": "draft-1", "teacher_id": "t-1", "school_id": "s1",
+         "status": "draft", "is_published": False}
+
+#: The row that lets a cross-school role file here. `filing_school_for_request` reads
+#: it in the same request, and `None` (unreadable) and `[]` (nothing recorded) are the
+#: two answers a write refuses to guess from.
+MEMBERSHIP = {"user_id": "t-1", "school_id": "s1", "status": "active"}
+
+
+class TestTheSaveDoorWithAFullQuota:
+    def _post(self, app, monkeypatch, *, draft_id):
+        from flask import g, get_flashed_messages
+
+        from app.routes import teacher
+        from app.services import school_membership as membership
+
+        sb = _FakeSb(rows={"exams": [dict(DRAFT)],
+                           "teacher_school_membership": [dict(MEMBERSHIP)]})
+        monkeypatch.setattr(teacher, "get_supabase", lambda: sb)
+        # The filing guard reads the membership rows through the service's own client
+        # selector, not the route's, so both have to be the fake — otherwise the rows
+        # come back unreadable and the request is refused before the quota is asked.
+        monkeypatch.setattr(membership, "_client", lambda: sb)
+        monkeypatch.setattr(
+            teacher, "check_feature_limit",
+            lambda school_id, feature, extra=None: (False, FULL))
+        data = {"title": "UTS", "subject": "MTK", "total_questions": "5",
+                "start_at": "2026-09-03T09:00", "end_at": "2026-09-04T09:00",
+                "action": "save_draft"}
+        if draft_id:
+            data["draft_id"] = draft_id
+        with app.test_request_context("/teacher/exams/new", method="POST", data=data):
+            g.user_id = "t-1"
+            g.user_role = "guru"
+            g.user_school_id = "s1"
+            g.user_home_school_id = "s1"
+            g.tz_offset = 7
+            g.show = {}
+            _raw(teacher.exam_form)()
+            flashed = [message for _category, message in
+                       get_flashed_messages(with_categories=True)]
+        return sb, flashed
+
+    def test_the_same_full_quota_refuses_a_paper_that_does_not_exist(self, app, monkeypatch):
+        sb, flashed = self._post(app, monkeypatch, draft_id=None)
+        assert any("Kuota ujian tahun ini" in message for message in flashed), (
+            "kuota penuh tidak menahan kertas baru", flashed)
+        assert sb.writes() == [], "kertas yang ditolak tetap mencapai tabel exams"
+
+    def test_an_existing_paper_is_saved_with_the_quota_full(self, app, monkeypatch):
+        """The reported bug, run: editing a paper was refused like minting one."""
+        sb, flashed = self._post(app, monkeypatch, draft_id="draft-1")
+        assert not [m for m in flashed if "Kuota" in m], (
+            "menyimpan kertas yang sudah ada ditahan kuota", flashed)
+        assert "update" in sb.writes(), "kertas lama tidak ditulis sama sekali"
+        assert "insert" not in sb.writes(), "kertas lama menjadi baris baru"
