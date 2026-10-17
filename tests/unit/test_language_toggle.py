@@ -500,6 +500,12 @@ TRANSLATED = [
     # `seb_door_log` as `(id, en)` pairs) — because the admin who reads it in
     # English has to be able to read the *reason* in English too.
     "admin_sekolah/seb_refusals.html",
+    # The academic years page. It was pinned Indonesian with nine strings left —
+    # and the pin is what hid the cost: the count above it was a pair, so an
+    # English reader saw "2 academic years" over labels reading "Nama Tahun
+    # Ajaran". Full CRUD on a year is a page a school admin works in, so its
+    # labels, its empty state and both confirm dialogs are pairs now.
+    "admin_sekolah/school_years.html",
     "student/settings.html",
     "teacher/ai_settings.html",
     # The one page whose default is English rather than Indonesian, because it is
@@ -1027,7 +1033,11 @@ def test_the_translated_list_only_grows_with_intent():
     # 61: `teacher/session_review.html` — the session room and its trail — is the
     # page this bump adds. Its copy is pairs in the template *and* pairs from the
     # service, which is what makes the toggle work after the JSON has arrived.
-    assert len(TRANSLATED) == 61, (
+    # 62: `admin_sekolah/school_years.html`, which had been declared Indonesian
+    # with nine strings untranslated; the pin came off with the CRUD work, since
+    # a page an admin manages a school's years on cannot answer only in
+    # Indonesian while the count above it is already a pair.
+    assert len(TRANSLATED) == 62, (
         f"{len(TRANSLATED)} pages are on the translated list. Bump this number when "
         f"you translate another one — and if you *removed* a page, put it back, "
         f"because dropping it turns the sweep off for that page: {TRANSLATED}")

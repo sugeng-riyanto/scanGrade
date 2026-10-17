@@ -1205,6 +1205,43 @@ def export_excel():
 
 
 # ─── SCHOOL YEARS ────────────────────────────────────
+#
+# Four verbs on one page, and the reason the fourth is here at all is what the
+# third costs: deleting a year and creating it again is not a rename. The row is
+# referenced with ON DELETE SET NULL by `classes`, `teacher_assignments`, `exams`
+# and `student_enrollment`, and with ON DELETE CASCADE by `subject_kkm`,
+# `grade_weights` and `grade_component_defaults` (051/057/067) — so a typo fixed by
+# delete-and-recreate detaches the year's classes and wipes the KKM, the weighting
+# and the default distributions configured for it. An edit writes four columns on
+# the row itself and touches nothing that hangs off it.
+
+
+def _year_refusal(supabase, sid, name: str, start_date: str, end_date: str,
+                  exclude_id: str | None = None) -> str | None:
+    """The one place a year's four fields are judged, for create and for edit.
+
+    Two handlers read the same form, and a rule that lives in only one of them is
+    how a page refuses with one button what it accepted with the other. Three
+    refusals, each for a reason the school can read: an empty field, a window that
+    runs backwards, and a name the school already uses — the last because
+    `student_enrollment`, `subject_kkm` and `grade_component_defaults` are keyed by
+    the year, and two rows called "2026/2027" are two years no report can tell apart.
+
+    `exclude_id` is the row being edited: a year that keeps its own name is not a
+    duplicate of itself.
+    """
+    if not name or not start_date or not end_date:
+        return "Nama, tanggal mulai, dan tanggal berakhir wajib diisi"
+    if end_date < start_date:
+        return "Tanggal berakhir tidak boleh sebelum tanggal mulai"
+    rows = (supabase.table("school_years").select("id, name")
+            .eq("school_id", sid).execute().data or [])
+    taken = {(r.get("name") or "").strip().casefold()
+             for r in rows if r.get("id") != exclude_id}
+    if name.strip().casefold() in taken:
+        return f"Tahun ajaran {name} sudah ada"
+    return None
+
 
 @admin_sekolah_bp.route("/school-years", methods=["GET", "POST"])
 @admin_sekolah_required
@@ -1218,8 +1255,9 @@ def school_years():
         end_date = request.form.get("end_date", "").strip()
         is_active = request.form.get("is_active") == "1"
 
-        if not name or not start_date or not end_date:
-            flash("Nama, tanggal mulai, dan tanggal berakhir wajib diisi", "error")
+        refusal = _year_refusal(supabase, sid, name, start_date, end_date)
+        if refusal:
+            flash(refusal, "error")
             return redirect("/admin-sekolah/school-years")
 
         try:
@@ -1329,13 +1367,73 @@ def toggle_school_year(year_id):
     return redirect("/admin-sekolah/school-years")
 
 
+@admin_sekolah_bp.route("/school-years/<year_id>/edit", methods=["POST"])
+@admin_sekolah_required
+@require_school_access("school_years", "year_id")
+def edit_school_year(year_id):
+    """Rename a year, move its window, or make it the current one.
+
+    Every row is editable, the active one included — a year typed as "2026/2027"
+    when the school meant "2027/2028" is the likeliest reason anyone opens this
+    page, and delete-and-recreate is not the fix (see the section above).
+
+    Unticking the box on the current year is allowed and leaves the school with no
+    current one; the dashboard reads that as setup-incomplete rather than breaking.
+    It is also the only way to remove the year that used to be current, because the
+    delete route below refuses to remove the one the school is running in.
+    """
+    sid = _school_id()
+    supabase = get_supabase()
+    name = request.form.get("name", "").strip()
+    start_date = request.form.get("start_date", "").strip()
+    end_date = request.form.get("end_date", "").strip()
+    is_active = request.form.get("is_active") == "1"
+
+    refusal = _year_refusal(supabase, sid, name, start_date, end_date,
+                            exclude_id=year_id)
+    if refusal:
+        flash(refusal, "error")
+        return redirect("/admin-sekolah/school-years")
+
+    before = (supabase.table("school_years").select("*")
+              .eq("id", year_id).eq("school_id", sid).execute().data or [{}])[0]
+    try:
+        if is_active and not before.get("is_active"):
+            supabase.table("school_years").update({"is_active": False}).eq("school_id", sid).execute()
+        supabase.table("school_years").update({
+            "name": name, "start_date": start_date, "end_date": end_date,
+            "is_active": is_active,
+        }).eq("id", year_id).eq("school_id", sid).execute()
+        log_activity(
+            "update", "school_year", year_id,
+            old_data={k: before.get(k) for k in ("name", "start_date", "end_date", "is_active")},
+            new_data={"name": name, "start_date": start_date,
+                      "end_date": end_date, "is_active": is_active},
+            user_id=g.user_id)
+        flash("Tahun ajaran berhasil diperbarui", "success")
+    except Exception as e:
+        flash(f"Gagal: {failure.sentence(e)}", "error")
+    return redirect("/admin-sekolah/school-years")
+
+
 @admin_sekolah_bp.route("/school-years/<year_id>/delete", methods=["POST"])
 @admin_sekolah_required
 @require_school_access("school_years", "year_id")
 def delete_school_year(year_id):
+    sid = _school_id()
     supabase = get_supabase()
+    row = (supabase.table("school_years").select("is_active")
+           .eq("id", year_id).eq("school_id", sid).execute().data or [])
+    if row and row[0].get("is_active"):
+        # Refused here and not only hidden in the template: a POST is a POST, and
+        # removing the year the school is running in leaves every class, exam and
+        # enrolment pointing at a year that no longer exists. Untick "aktif" on it
+        # (or activate another year) and this route will let it go.
+        flash("Tahun ajaran aktif tidak bisa dihapus. Aktifkan tahun ajaran lain dulu, "
+              "atau ubah tahun ini menjadi tidak aktif.", "error")
+        return redirect("/admin-sekolah/school-years")
     try:
-        supabase.table("school_years").delete().eq("id", year_id).execute()
+        supabase.table("school_years").delete().eq("id", year_id).eq("school_id", sid).execute()
         log_activity("delete", "school_year", year_id, user_id=g.user_id)
         flash("Tahun ajaran berhasil dihapus", "success")
     except Exception as e:

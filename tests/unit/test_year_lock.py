@@ -195,6 +195,9 @@ EXEMPT = {
     "admin_sekolah_bp /import": "creates roster accounts from a spreadsheet",
     "admin_sekolah_bp /school-years":
         "creates or edits a year; a year is the *subject*, not its contents",
+    "admin_sekolah_bp /school-years/<year_id>/edit":
+        "renames a year, moves its window or makes it running; a year is the "
+        "*subject*, not its contents, exactly as create and toggle above",
     "admin_sekolah_bp /school-years/<year_id>/toggle":
         "makes a year running or not; the subject itself",
     "admin_sekolah_bp /school-years/<year_id>/delete":
