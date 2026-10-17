@@ -97,7 +97,7 @@ marking page, the queue **and** the AI prompt (`answer_text_of` delegates to it)
 
 ## Tests
 
-`tests/unit/test_essay_answer_integrity.py` (43 cases):
+`tests/unit/test_essay_answer_integrity.py` (54 cases):
 
 * the reader, for every stored shape (text, paragraphs, boxes, drawing, legacy
   string), and the AI reading the identical text;
@@ -113,8 +113,11 @@ marking page, the queue **and** the AI prompt (`answer_text_of` delegates to it)
   list command anywhere, the module loaded before the component, `seedParagraphs()`
   called before `loadDraft()`, and the list markers present in `theme.css`.
 
-The jsdom half needs the dev-only `jsdom` package (`npm install --no-save jsdom`);
-without it those cases skip, and the Python half still runs.
+The jsdom half needs the dev-only `jsdom` package (`npm install`); without it those
+cases skip and the Python half still runs — but only outside the release gate. Inside
+it, a skipped test is a refusal: `deploy/theme_gate.sh` reads pytest's own summary and
+exits 3 rather than report an editor proven by a run that never executed it, so the
+half that touches a pupil's answer cannot be the half nothing read.
 
 ## Limits
 

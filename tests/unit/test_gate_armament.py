@@ -168,6 +168,57 @@ class TestTheReleaseCannotDisarmTheGate:
         assert f"exit {EXIT_CANNOT_RUN}" not in body, (
             "exit 2 is 'this box cannot answer', and the deploy continues on it")
 
+    def test_the_essay_dom_half_is_one_of_the_checks(self):
+        """The one check whose dependency can silently be absent.
+
+        A file the gate does not name cannot be skipped *by* the gate — but it is
+        not run by it either, which is the same hole one step earlier: the release
+        changes the editor and the only check that executes it never runs.
+        """
+        assert "tests/unit/test_essay_answer_integrity.py" in gate_tests(), (
+            "the check that executes the editor in a real DOM is not in the gate, so "
+            "a release can change it without the test that proves it")
+
+    def test_a_skipped_check_is_refused_and_not_read_as_a_pass(self):
+        """pytest exits 0 for a suite that skipped every case.
+
+        That is the defect this arm exists for, and the reason it cannot be tested
+        by running the gate: the skip needs a real `node_modules` and a real test
+        file at one of the gate's own paths, and the scratch tree's placeholders
+        leave the gate at the coverage tool before pytest is ever reached (the
+        same ordering `test_a_run_that_collects_nothing_is_disarmed_too` explains).
+        So the mapping is asserted where it lives.
+        """
+        src = GATE.read_text(encoding="utf-8")
+        arm = src.split("skip_arm:start", 1)
+        assert len(arm) == 2, (
+            "the gate has no arm for a run that skipped its checks, so a release "
+            "whose JS tooling is absent is reported tested by a run that read "
+            "nothing")
+        body = arm[1].split("skip_arm:end", 1)[0]
+
+        pytest_line = [ln for ln in src.splitlines() if "pytest $TESTS" in ln]
+        assert pytest_line and "-rs" in pytest_line[0], (
+            "the arm names the tests that did not run, so pytest has to print the "
+            "skip summary (`-rs`)")
+        assert '"$RC" -eq 0' in body, (
+            "the arm must only speak for a run that otherwise passed: a real "
+            "failure is refused with its own message, which names the defect")
+        assert '"$SKIPPED" -gt 0' in body, "the arm no longer counts what skipped"
+        assert "[[:space:]]*SKIPPED" in body, (
+            "pytest indents its short summary, so an arm matching `^SKIPPED` names "
+            "no test at all — the refusal then says 'some check' and no more")
+        assert "npm install" in body, (
+            "a refusal that does not say how to install the missing tooling leaves "
+            "its reader to guess")
+        assert f"exit {EXIT_DISARMED}" in body, (
+            "tooling the release declares but does not have is the release's own "
+            "defect, and a check that declines to run is a check that is gone — "
+            "the deploy only rolls back on 1 or 3\n" + body)
+        assert f"exit {EXIT_CANNOT_RUN}" in body, (
+            "a box with no node_modules at all is not a release defect and keeps "
+            "exit 2\n" + body)
+
     def test_every_named_check_is_in_the_armament_list(self):
         """The list and the checks cannot drift: a new check must be covered."""
         src = GATE.read_text(encoding="utf-8")

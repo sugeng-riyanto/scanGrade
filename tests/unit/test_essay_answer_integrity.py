@@ -546,7 +546,7 @@ needs_jsdom = pytest.mark.skipif(
     NODE is None or subprocess.run(
         [NODE, "-e", "require.resolve('jsdom')"], cwd=str(ROOT),
         capture_output=True).returncode != 0,
-    reason="needs the jsdom dev dependency (`npm install --no-save jsdom`)",
+    reason="needs the jsdom dev dependency (`npm install`)",
 )
 
 

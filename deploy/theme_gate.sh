@@ -80,6 +80,14 @@
 #     `student` and `admin` were migrated away by 007, so `role == 'teacher'` is a
 #     branch that never runs and a guard that is not there.
 #
+#   tests/unit/test_essay_answer_integrity.py
+#     the essay editor, executed in a real DOM (jsdom) against the module the page
+#     loads: the list buttons, the stored text, the caret, the plain-text paste. It
+#     is here because it is the one check whose dependency can silently be missing:
+#     without `node_modules` every DOM case skips and the run still exits 0, so the
+#     half of the feature that touches a pupil's answer would be the half nothing
+#     read. A skipped test is refused below, not counted as a pass.
+#
 #   tests/unit/test_landing_facilities.py
 #     whether the landing page's *facility* claims are real, the way
 #     deploy/claims_gate.py holds its performance ones. Each card names the
@@ -145,10 +153,21 @@
 #      commit nobody read, which is the same as having no gate at all (the
 #      preflight refuses the run outright when this box cannot run the gate, so
 #      reaching here with exit 2 means the box changed between the two).
-#   3  the release **removed the check** — one of the files below is gone, or the
-#      named tests collected nothing. That is a property of the release, not of
-#      the box, and it is refused like any other finding: a gate someone can
-#      delete is a gate that stops running, silently, from that commit onwards.
+#   3  the release **removed the check** — one of the files below is gone, the
+#      named tests collected nothing, or a named test *skipped* instead of
+#      running. That is a property of the release, not of the box, and it is
+#      refused like any other finding: a gate someone can delete is a gate that
+#      stops running, silently, from that commit onwards.
+#
+#      A skip is the quieter form of the same thing, and the one this gate used
+#      to wave through: pytest exits 0 for a suite whose dependencies are absent
+#      and whose tests therefore all declined to run, which is the same green a
+#      real pass prints. The essay editor is where that was live — its DOM half
+#      needs node and `jsdom`, so a checkout with no `node_modules` ran the
+#      Python half of `test_essay_answer_integrity.py`, skipped every case that
+#      executes the editor, and reported the release tested. The arm below refuses
+#      it either way: 3 when the box has `node_modules` (the release's own tooling
+#      is incomplete) and 2 when it has none at all (this box never installed it).
 #
 #   tests/unit/test_template_artifacts.py
 #     a Jinja closer left in a template's *text* — an edit that replaces a tag and
@@ -178,7 +197,7 @@ set -uo pipefail
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # Word-split on purpose: pytest takes them as separate paths.
-TESTS="tests/unit/test_dark_theme_contrast.py tests/unit/test_tailwind_class_names.py tests/unit/test_theme_stylesheet.py tests/unit/test_language_toggle.py tests/unit/test_i18n_coverage.py tests/unit/test_css_freshness.py tests/unit/test_landing_facilities.py tests/unit/test_static_tree.py tests/unit/test_no_committed_secrets.py tests/unit/test_render_fixture_gate.py tests/unit/test_template_artifacts.py tests/unit/test_rendered_absence.py"
+TESTS="tests/unit/test_dark_theme_contrast.py tests/unit/test_tailwind_class_names.py tests/unit/test_theme_stylesheet.py tests/unit/test_language_toggle.py tests/unit/test_i18n_coverage.py tests/unit/test_css_freshness.py tests/unit/test_landing_facilities.py tests/unit/test_static_tree.py tests/unit/test_no_committed_secrets.py tests/unit/test_render_fixture_gate.py tests/unit/test_template_artifacts.py tests/unit/test_rendered_absence.py tests/unit/test_essay_answer_integrity.py"
 
 # The app's own refusal markers, and the reason they are named here rather than
 # spelled out in the block that reads them: they are literals in
@@ -231,7 +250,9 @@ fi
 # -p no:cacheprovider keeps the gate from writing .pytest_cache into a checkout
 # the deploy has just declared clean; a dirty tree there blocks the next release.
 cd "$REPO" || exit 2
-OUTPUT=$("$PY" -m pytest $TESTS -q -p no:cacheprovider --no-header 2>&1)
+# `-rs` is not decoration: the skip arm below names each test that declined to
+# run, and a summary count alone sends its reader to the wrong file.
+OUTPUT=$("$PY" -m pytest $TESTS -q -rs -p no:cacheprovider --no-header 2>&1)
 RC=$?
 
 # ── The one refusal that is about the checkout and not the release ───────────
@@ -446,6 +467,45 @@ if [ "$CSS_RC" -eq 1 ]; then
   exit 1
 fi
 
+# ── A test that skipped is a check that did not run ─────────────────────────
+# pytest exits 0 for a suite in which every test skipped, and its summary says
+# "passed" either way. So a checkout whose JS tooling was never installed runs the
+# Python half of `test_essay_answer_integrity.py`, declines every case that
+# executes the editor in a real DOM, and hands back the same green a full run
+# prints — the release is then "tested" by a run that never touched it. The exit-5
+# arm below covers a file that collected nothing; this covers the quieter version,
+# where the tests exist and refused to run.
+skip_arm:start
+SKIPPED=$(printf '%s\n' "$OUTPUT" | grep -oE '[0-9]+ skipped' | grep -oE '[0-9]+' | tail -1 || true)
+SKIPPED=${SKIPPED:-0}
+if [ "$RC" -eq 0 ] && [ "$SKIPPED" -gt 0 ]; then
+  echo >&2
+  echo "theme gate: these checks did not run:" >&2
+  # pytest indents its short summary; matching `^SKIPPED` would print the header
+  # and no test names, which is a refusal that says "some check" and no more.
+  printf '%s\n' "$OUTPUT" | grep -E '^[[:space:]]*SKIPPED' | sed 's/^ */    /' >&2
+  if [ -d "$REPO/node_modules" ]; then
+    echo >&2
+    echo "theme gate: DISARMED — $SKIPPED check(s) skipped while the rest passed." >&2
+    echo "            A skip is not a pass: pytest exits 0 and nothing here read the" >&2
+    echo "            code that test stands for. This box has node_modules, so the" >&2
+    echo "            dependency the check needs is missing from the release's own" >&2
+    echo "            tooling — the check cannot prove what this commit ships." >&2
+    echo "            Install it and run this again:" >&2
+    echo "                npm install" >&2
+    echo "            Refusing (exit 3): a check that declines to run is a check that" >&2
+    echo "            is no longer there." >&2
+    exit 3
+  fi
+  echo >&2
+  echo "theme gate: the checks were NOT all run — $SKIPPED skipped, and this box has" >&2
+  echo "            no node_modules at all, so its JS half cannot run here. Nothing" >&2
+  echo "            about the release is wrong, and nothing about it was proven." >&2
+  echo "                npm install" >&2
+  exit 2
+fi
+skip_arm:end
+
 if [ "$RC" -eq 0 ]; then
   if [ "$SCHEMA_RC" -eq 2 ]; then
     echo >&2
@@ -468,7 +528,7 @@ if [ "$RC" -eq 0 ]; then
     echo "$CSS_OUT"
     echo "$FIXTURES_OUT"
     echo "$SCHOOL_OUT"
-    echo "theme gate: OK — readable in both themes, every named utility is compiled, the committed stylesheet is the one the templates produce, the app's own stylesheet stays a cached file, every file under /static/ is one the app asks for and in a commit, every page declares the language of its own copy, no template prints a Jinja closer as text, no rendered document shows a value only a server-side object could produce, no template translates less than it did, no tracked file carries a service-role key or a hard-coded Flask secret, and every table, column and policy the code names is one this repository declares, with every role it compares against one the database holds${APPLIED_CLAIM}${FIXTURES_CLAIM}, and every facility the landing page advertises one this repository can show, and every teacher-facing write route files its rows under the school of this request"
+    echo "theme gate: OK — readable in both themes, every named utility is compiled, the committed stylesheet is the one the templates produce, the app's own stylesheet stays a cached file, every file under /static/ is one the app asks for and in a commit, every page declares the language of its own copy, no template prints a Jinja closer as text, no rendered document shows a value only a server-side object could produce, no template translates less than it did, the essay editor's behaviour was executed in a real DOM rather than skipped, no tracked file carries a service-role key or a hard-coded Flask secret, and every table, column and policy the code names is one this repository declares, with every role it compares against one the database holds${APPLIED_CLAIM}${FIXTURES_CLAIM}, and every facility the landing page advertises one this repository can show, and every teacher-facing write route files its rows under the school of this request"
     exit 0
   fi
   echo >&2

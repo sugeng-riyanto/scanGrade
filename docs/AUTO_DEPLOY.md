@@ -1029,6 +1029,16 @@ door is measured nowhere. The gate's name is also in the list of blocks a stale
 copy lacks (`no seb_door_gate`), which is the only symptom a box that predates this
 check ever shows.
 
+**A test that skips is the same failure one level down.** pytest exits 0 for a suite
+in which every test skipped, and its summary reads `passed` either way, so a gate whose
+dependency is absent reports green for a run that read nothing. The readability gate
+now reads its own summary and refuses on any skip, naming each test: exit 3 when
+`node_modules` exists (the release's tooling is incomplete, so the check cannot prove
+what it ships) and exit 2 when the box has none at all (nothing was measured, and the
+box is the reason). The essay editor's DOM half is why the arm exists — 30 cases
+execute the editor in jsdom against a pupil's answer, and without `jsdom` every one of
+them skipped while the gate said OK.
+
 ### One file, one verdict — whichever user is asking
 
 The confs hold passwords, so the installer writes them `0600 root:root`. The checker
