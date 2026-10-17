@@ -210,3 +210,63 @@ def test_the_page_still_has_a_visible_failure_state():
     text = _template()
     assert "Gagal memuat" in text, (
         "there must be a user-visible message once every source has failed")
+
+
+# ── the other direction: an eager tag, and the wrong build in production ──────
+#
+# The order rule above reads `SOURCES`, and it says nothing about a `<script
+# src="…midtrans…">` appearing as a *tag* elsewhere on the page. A tag is fetched by the
+# browser before anything on this page runs, has no fallback, and on the connections these
+# schools use it is the request that hangs: a school behind a filter would be stuck with
+# both vendored files present and correct. And it says nothing about which build the two
+# `{% set %}` expressions pick, which is the other silent payment defect in this file's
+# docstring — a production page served the sandbox build takes real card details into test
+# mode, where the payment does not count.
+
+def _snap_set(name: str) -> str:
+    """The right-hand side of `{% set snap_<name> = … %}`."""
+    found = re.search(r"\{%\s*set\s+snap_" + name + r"\s*=\s*(.+?)\s*%\}", _template(), re.S)
+    assert found, f"the page no longer defines `snap_{name}`"
+    return found.group(1)
+
+
+class TestNoEagerTagAndTheRightBuild:
+    def test_the_page_never_loads_the_sdk_as_a_script_tag(self):
+        """The loader is the only thing allowed to fetch either source."""
+        for tag in re.findall(r"<script[^>]*>", _template()):
+            assert "midtrans" not in tag and "snap" not in tag.lower(), (
+                f"the page carries an eager tag for the SDK ({tag.strip()!r}): a browser "
+                "fetches that before the loader runs, with no fallback and no failure "
+                "message — the state vendoring exists to prevent")
+
+    def test_both_sources_and_the_local_path_choose_on_is_production(self):
+        """Neither build may be chosen for a reason other than the app's own mode."""
+        for name in ("local", "remote"):
+            expr = _snap_set(name)
+            assert "is_production" in expr, (
+                f"`snap_{name}` does not consult `is_production`, so a build is chosen by "
+                "something else and one of the two modes gets the wrong host")
+        build = re.search(r"'vendor/midtrans/'\s*~\s*\((.+?)\)\s*~", _snap_set("local"), re.S)
+        assert build, "cannot read how the build directory is chosen"
+        picks = re.findall(r"'([a-z]+)'", build.group(1))
+        assert picks[:1] == ["production"], (
+            f"the local build expression picks {picks} — the *first* name is what a truthy "
+            "`is_production` selects, and it must be the production build: serving the "
+            "sandbox file to a paying school sends the payment where it does not count")
+
+    def test_the_key_rides_on_the_remote_source_and_never_on_the_local_one(self):
+        """The key belongs on the tag the SDK finds; on the local URL it is a leak.
+
+        The local path is recognised by the SDK's own matcher (the rule at the top of this
+        file), so `data-client-key` is read from the tag and the URL needs no key. A CDN
+        request without one is a fallback that loads and comes up without a merchant.
+        """
+        order = _source_order()
+        local = next(entry for entry in order if "snap_local" in entry)
+        remote = next(entry for entry in order if "snap_remote" in entry)
+        assert "client_key" in remote, (
+            "the CDN source no longer carries the key, so the fallback load comes up as an "
+            "unidentified merchant")
+        assert "client_key" not in local, (
+            "the local source carries the merchant key in its URL: the SDK reads it from "
+            "the tag, so there is nothing to add — and nothing to send to a third party")

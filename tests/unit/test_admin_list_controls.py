@@ -8,7 +8,10 @@ order the download depends on.
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
+
+import pytest
 
 from app.routes import admin_sekolah as adm
 from app.services import login_cards
@@ -203,3 +206,86 @@ class TestTheMembershipPageFiltersByName:
         assert "No member matches that search." in html
         assert "No membership is recorded at this school yet." in html
         assert "No request matches that search." in html
+
+
+# ── the other direction: a control nobody reads, and a cap that came back ─────
+#
+# Every rule above asserts a control is *on the page*, and not one of them would notice
+# the failure this file was written for. The two rosters were fixed at 50 rows, ordered by
+# one hard-coded column, with a search box each — so a filter that was added to a page and
+# never read by its route looked exactly like a working one, and a route that went back to
+# a literal page size would break the control the page still offers.
+#
+# `FILTERS` is the vocabulary both halves are judged against, and it is deliberately
+# shorter than `name="…"`: `page` is pagination, driven by links on both sides; the
+# teachers page's `assignment_present` is a hidden field of its *POST* form, read where it
+# is posted; and the membership route's `status` is the flash outcome a redirect sets, not
+# a control. Those three are read, or set, by something other than a filter bar — so
+# judging them here would be a guard that fires on correct code.
+
+FILTERS = ("activation", "class_id", "dir", "per_page", "q", "sort", "subject_id")
+
+ROOT = TEMPLATES.parents[2]
+ROUTES = ROOT / "app" / "routes"
+
+#: (the page, the module its reader lives in, the route that renders it)
+PAGES = (
+    ("teachers.html", ROUTES / "admin_sekolah.py", "def teachers("),
+    ("students.html", ROUTES / "admin_sekolah.py", "def students("),
+    ("officials.html", ROUTES / "admin_sekolah.py", "def officials("),
+    ("membership.html", ROUTES / "membership_routes.py", "def membership_home("),
+)
+
+
+def _route_body(module, fn):
+    src = module.read_text(encoding="utf-8")
+    assert fn in src, f"{module.name} no longer defines {fn.strip('def (')}"
+    return src.split(fn, 1)[1].split("\ndef ", 1)[0].split("\n@", 1)[0]
+
+
+def _offers(page):
+    html = (TEMPLATES / page).read_text(encoding="utf-8")
+    return set(re.findall(r'name="([a-z_]+)"', html)) & set(FILTERS)
+
+
+def _reads(body):
+    return set(re.findall(
+        r"request\.(?:args|values)\.get\(\s*['\"]([a-z_]+)['\"]", body)) & set(FILTERS)
+
+
+class TestNoControlIsADeadFilter:
+    @pytest.mark.parametrize("page,module,fn", PAGES, ids=[p for p, _, _ in PAGES])
+    def test_every_filter_the_page_offers_is_read_by_its_route(self, page, module, fn):
+        unread = _offers(page) - _reads(_route_body(module, fn))
+        assert not unread, (
+            f"{page} offers {sorted(unread)} and {fn.strip('def (')} never reads it, so the "
+            "control sits in the filter bar changing nothing")
+
+    @pytest.mark.parametrize("page,module,fn", PAGES, ids=[p for p, _, _ in PAGES])
+    def test_every_filter_the_route_reads_is_offered_by_the_page(self, page, module, fn):
+        unsettable = _reads(_route_body(module, fn)) - _offers(page)
+        assert not unsettable, (
+            f"{fn.strip('def (')} filters on {sorted(unsettable)} and {page} cannot set it, "
+            "so the filter only exists in a URL somebody types by hand")
+
+    def test_the_filter_vocabulary_still_names_the_controls(self):
+        """An empty vocabulary passes both readings above without looking at anything."""
+        seen = set()
+        for page, _, _ in PAGES:
+            seen |= _offers(page)
+        assert {"q", "dir", "per_page", "sort"} <= seen, (
+            f"the filter vocabulary no longer matches the pages: {sorted(seen)}")
+
+
+class TestNoRosterCapsItselfAtALiteralAgain:
+    def test_no_roster_route_slices_at_a_literal_page_size(self):
+        """The fault this file was written for: 50 rows, hard-coded, on both rosters."""
+        for page, module, fn in PAGES:
+            if page == "membership.html":
+                continue  # a two-list page, not a paginated one
+            body = _route_body(module, fn)
+            found = re.search(r"\[\s*:\s*\d+\s*\]|\.limit\(\s*\d+\s*\)", body)
+            assert not found, (
+                f"{fn.strip('def (')} slices its rows at a literal ({found.group(0)}) again — "
+                "the page size is `_per_page_arg`, and a literal ignores what the reader "
+                "chose in the control the page offers")

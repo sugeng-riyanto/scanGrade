@@ -257,3 +257,66 @@ class TestThePage:
         window = block[:2500]
         assert window.count("x-text=\"t('") >= 3, (
             "the dirty-checkout reading is copy on a bilingual page like every other")
+
+
+# ── the other direction: one state's sentence under another state's key ──────
+#
+# "Every kind has a sentence" is satisfied by four copies of the *same* sentence, and by
+# the blob's sentence pasted under `hand` — a branch chain of five is exactly the shape a
+# copy/paste edit breaks. The reader of the card cannot tell the difference: each one is a
+# fluent sentence about a dirty checkout, and only one of them is about the one in front
+# of them. So the sentences are read back out of their own branch and required to be
+# distinct, and the blob branch may not hold the hand branch's remedy (or the reverse),
+# because a restore provably does not clear a blob — `git checkout HEAD -- <path>` is run
+# in `test_a_checkout_cannot_clear_it` above and the path stays modified.
+
+def _branch(text: str, key: str) -> str:
+    """The window a key's sentence lives in: from its own test to the next one's."""
+    start = text.index(f"dirty_kinds.key == '{key}'")
+    rest = text[start + 1:]
+    nxt = rest.find("dirty_kinds.key == ")
+    return rest[:nxt] if nxt != -1 else rest.split("{% endif %}", 1)[0]
+
+
+def _sentence(html: str) -> str:
+    """The copy inside the branch's one `x-text` pair, both halves, as one string."""
+    import re
+    found = re.search(r"x-text=\"t\('(.*?)','(.*?)'\)\"", html, re.S)
+    return f"{found.group(1)} | {found.group(2)}" if found else ""
+
+
+class TestNoStateShowsAnotherStateSentence:
+    def test_every_branch_carries_exactly_one_sentence(self):
+        text = TEMPLATE.read_text(encoding="utf-8")
+        for key in sorted(status.DIRTY_KIND_KEYS):
+            branch = _branch(text, key)
+            count = branch.count('x-text="t(')
+            assert count == 1, (
+                f"the `{key}` branch carries {count} sentence(s); one state, one sentence")
+
+    def test_no_two_states_share_a_sentence(self):
+        text = TEMPLATE.read_text(encoding="utf-8")
+        sentences = {key: _sentence(_branch(text, key))
+                     for key in sorted(status.DIRTY_KIND_KEYS)}
+        assert all(sentences.values()), f"a branch has no readable sentence: {sentences}"
+        assert len(set(sentences.values())) == len(sentences), (
+            f"two dirty states are described by the same words, so the card tells an "
+            f"operator nothing about which one they are holding: {sentences}")
+
+    def test_the_blob_branch_does_not_offer_the_hand_remedy(self):
+        """The one wrong remedy the page exists to stop: 'set it aside as a patch'.
+
+        The blob branch may *mention* `git restore` — it is there to say the command
+        cannot work — but it may not offer the hand edit's remedy, which is the sentence
+        an operator would act on.
+        """
+        text = TEMPLATE.read_text(encoding="utf-8")
+        blob, hand = _sentence(_branch(text, "blob")), _sentence(_branch(text, "hand"))
+        assert "verbatim" in blob or "apa adanya" in blob, (
+            "the blob branch must name the only heal that works")
+        for phrase in ("set it aside as a patch", "menyingkirkannya sebagai patch",
+                       "keep it, and carry on"):
+            assert phrase not in blob, (
+                f"the blob branch offers the hand edit's remedy ({phrase!r}) — a restore "
+                "does not clear a blob, and this is the sentence an operator acts on")
+        assert blob != hand

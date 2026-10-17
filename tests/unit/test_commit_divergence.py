@@ -149,3 +149,67 @@ def test_the_runner_tells_each_gate_which_unit_it_is_asking():
     script = (DEPLOY / "scangrade-deploy.sh").read_text(encoding="utf-8-sig")
     assert "--unit \"$SERVICE\"" in script and "--unit \"$WORKER_UNIT\"" in script, (
         "the record names the unit, so the runner has to tell the gate which one")
+
+
+# ── the other direction: a sentence naming the wrong remedy ───────────────────
+#
+# Every reading above asserts the right word is *present*. A sentence carrying both
+# remedies satisfies all of them, and it is worse than a sentence carrying neither:
+# an operator told to restart a box that is on the wrong history restarts it, waits
+# out the reload, and reads the same refusal — having spent the one action it offered.
+# The two remedies are exclusive by construction, so the sentences have to be.
+
+def _by_shape(div) -> dict:
+    """One sentence per shape, from the same fake git the readings above use."""
+    behind = _runner(ancestor_pairs={(BEHIND, MERGED)}, counts={BEHIND + ".." + MERGED: 3})
+    ahead = _runner(ancestor_pairs={(MERGED, AHEAD)}, counts={MERGED + ".." + AHEAD: 5})
+    neither = _runner(ancestor_pairs=set(), counts={})
+    return {
+        "same": div.describe(".", MERGED, MERGED, unit="scangrade", run=neither),
+        "behind": div.describe(".", BEHIND, MERGED, unit="scangrade", run=behind),
+        "ahead": div.describe(".", AHEAD, MERGED, unit="scangrade", run=ahead),
+        "diverged": div.describe(".", AHEAD, MERGED, unit="scangrade", run=neither),
+        "unknown": div.describe(".", BEHIND, MERGED, unit="scangrade",
+                                run=lambda args: (128, "boom")),
+    }
+
+
+class TestNoSentenceNamesTheWrongRemedy:
+    def test_behind_never_says_to_rebaseline(self, div):
+        text = _by_shape(div)["behind"]
+        assert "restart" in text
+        assert "re-baseline" not in text, (
+            "a box whose commit is *on* the merged line is fixed by a restart; telling its "
+            "operator to re-baseline sends them to rewrite a correct checkout")
+
+    def test_ahead_never_says_to_restart(self, div):
+        text = _by_shape(div)["ahead"]
+        assert "re-baseline" in text
+        assert "so restart" not in text, (
+            "a box holding code the merge never had is not fixed by a reload — it holds "
+            "the wrong history, and a restart leaves it there")
+
+    def test_diverged_never_says_to_restart(self, div):
+        text = _by_shape(div)["diverged"]
+        assert "re-baseline" in text
+        assert "so restart" not in text, (
+            "a checkout on the wrong history is not stale, it is wrong")
+
+    def test_the_same_commit_offers_no_remedy_at_all(self, div):
+        text = _by_shape(div)["same"]
+        assert "restart" not in text and "re-baseline" not in text, (
+            "nothing is wrong with a process on the merged commit, so there is nothing to "
+            f"do about it: {text!r}")
+
+    def test_a_measurement_that_failed_instructs_nothing(self, div):
+        """`unknown` may *name* both remedies and must not tell the reader to take one.
+
+        The words differ by their frame: \"decide by hand whether to restart X or
+        re-baseline the box\" offers a choice, \"…so restart X\" gives an order. A gate
+        that gives an order it cannot support is how a box is re-baselined over a
+        `git` that was merely slow.
+        """
+        text = _by_shape(div)["unknown"]
+        assert "decide by hand" in text
+        assert "so restart" not in text and "so re-baseline" not in text, (
+            f"a divergence that could not be measured still hands out an instruction: {text!r}")

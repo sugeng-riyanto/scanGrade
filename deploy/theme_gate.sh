@@ -157,6 +157,14 @@
 #     because presence is asserted everywhere and absence nowhere: the print suite
 #     renders this document and passes with a stray line of punctuation on it.
 #
+#   tests/unit/test_rendered_absence.py
+#     what a rendered page must never *show* — a Python `None`, an unrendered
+#     `{{ }}`, a float `NaN`, a traceback, a pasted password — swept over every
+#     document `deploy/render_fixture_gate.py` renders. The suite asserts presence
+#     between three and twenty-four times per file and absence almost nowhere, so a
+#     page that grows an extra value satisfies every one of those assertions; the
+#     marker list is measured against the whole corpus at zero hits before it ships.
+#
 #   deploy/render_fixture_gate.py
 #     whether the report documents and the fixtures that render them still agree.
 #     A sheet that starts reading a key its fixture never supplies draws the hole as
@@ -170,7 +178,7 @@ set -uo pipefail
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # Word-split on purpose: pytest takes them as separate paths.
-TESTS="tests/unit/test_dark_theme_contrast.py tests/unit/test_tailwind_class_names.py tests/unit/test_theme_stylesheet.py tests/unit/test_language_toggle.py tests/unit/test_i18n_coverage.py tests/unit/test_css_freshness.py tests/unit/test_landing_facilities.py tests/unit/test_static_tree.py tests/unit/test_no_committed_secrets.py tests/unit/test_render_fixture_gate.py tests/unit/test_template_artifacts.py"
+TESTS="tests/unit/test_dark_theme_contrast.py tests/unit/test_tailwind_class_names.py tests/unit/test_theme_stylesheet.py tests/unit/test_language_toggle.py tests/unit/test_i18n_coverage.py tests/unit/test_css_freshness.py tests/unit/test_landing_facilities.py tests/unit/test_static_tree.py tests/unit/test_no_committed_secrets.py tests/unit/test_render_fixture_gate.py tests/unit/test_template_artifacts.py tests/unit/test_rendered_absence.py"
 
 # The app's own refusal markers, and the reason they are named here rather than
 # spelled out in the block that reads them: they are literals in
@@ -460,7 +468,7 @@ if [ "$RC" -eq 0 ]; then
     echo "$CSS_OUT"
     echo "$FIXTURES_OUT"
     echo "$SCHOOL_OUT"
-    echo "theme gate: OK — readable in both themes, every named utility is compiled, the committed stylesheet is the one the templates produce, the app's own stylesheet stays a cached file, every file under /static/ is one the app asks for and in a commit, every page declares the language of its own copy, no template prints a Jinja closer as text, no template translates less than it did, no tracked file carries a service-role key or a hard-coded Flask secret, and every table, column and policy the code names is one this repository declares, with every role it compares against one the database holds${APPLIED_CLAIM}${FIXTURES_CLAIM}, and every facility the landing page advertises one this repository can show, and every teacher-facing write route files its rows under the school of this request"
+    echo "theme gate: OK — readable in both themes, every named utility is compiled, the committed stylesheet is the one the templates produce, the app's own stylesheet stays a cached file, every file under /static/ is one the app asks for and in a commit, every page declares the language of its own copy, no template prints a Jinja closer as text, no rendered document shows a value only a server-side object could produce, no template translates less than it did, no tracked file carries a service-role key or a hard-coded Flask secret, and every table, column and policy the code names is one this repository declares, with every role it compares against one the database holds${APPLIED_CLAIM}${FIXTURES_CLAIM}, and every facility the landing page advertises one this repository can show, and every teacher-facing write route files its rows under the school of this request"
     exit 0
   fi
   echo >&2

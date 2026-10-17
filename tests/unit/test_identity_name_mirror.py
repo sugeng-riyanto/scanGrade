@@ -158,3 +158,54 @@ def test_pupils_sharing_a_name_are_not_reported_as_duplicates():
 
 def test_an_apply_without_yes_writes_nothing():
     assert repair_module().main(["--apply"], supabase=object()) == 2
+
+
+# ── the other direction: a second writer, and a blob that is replaced ────────
+#
+# The three rules above assert the rename routes *call* the mirror. Neither of them
+# notices the two ways the Auth copy can still end up wrong: a route that writes
+# `user_metadata` itself — a second writer, with its own idea of which fields survive a
+# rename — and a mirror that writes the name *without* the blob it read, which is how a
+# token loses `role` and a signed-in teacher lands on a page that does not know what
+# they are. The glitch this suite exists for is a credential pasted into a name field;
+# this is the same defect one step later, with the glitch made permanent in Auth.
+
+APP = ROOT / "app"
+
+
+def test_a_rename_changes_exactly_one_claim_and_no_other():
+    """The mirror merges; a rename must not be the write that rewrites a token.
+
+    `role`, `school_id` and everything else in the blob are claims a *different* page
+    owns, and a stale form posting them back is how a teacher's role is reverted by a
+    rename. The existing readings above assert the name arrives; this one asserts
+    nothing else moves — which no assertion about the name can see, because the name is
+    correct either way.
+    """
+    admin = _Admin({"role": "guru", "school_id": "sch-1", "full_name": "old",
+                    "phone": "0812"})
+    before = {key: value for key, value in admin.metadata.items() if key != "full_name"}
+    assert identity_names.mirror_display_name(_Sb(admin), "u-1", "Aji Wahyu") is True
+    after = {key: value for key, value in admin.metadata.items() if key != "full_name"}
+    assert after == before, (
+        f"the rename rewrote claims it does not own: {before} → {after}")
+    assert admin.metadata["full_name"] == "Aji Wahyu"
+
+
+def test_the_mirror_write_carries_the_blob_it_read():
+    """The envelope is the whole protection: a bare name replaces the metadata.
+
+    Nothing in the suite would notice the difference — the glitch this file is about is
+    the *value* written, not the shape of the write — and the shape is what takes `role`
+    out of the next token.
+    """
+    body = (APP / "services" / "identity_names.py").read_text(encoding="utf-8")
+    body = body.split("def mirror_display_name(", 1)[1].split("\ndef ", 1)[0]
+    assert 'current["full_name"] = name' in body, (
+        "the mirror no longer merges the name into the metadata it read")
+    assert 'update_user_by_id(user_id, {"user_metadata": current})' in body, (
+        "the mirror writes the name without the blob it read — with `user_metadata` gone "
+        "from the payload, the write is not a merge and every other claim goes with it")
+    assert '"full_name": name' not in body, (
+        "the mirror builds a bare `full_name` payload: that is the write GoTrue applies as a "
+        "replacement rather than a merge, and the claims it drops are the token's own")

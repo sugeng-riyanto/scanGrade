@@ -180,3 +180,58 @@ class TestTheSubjectCard:
 
     def test_the_card_is_bilingual(self):
         assert "t('" in self._loop()
+
+
+# ── the other direction: a map that could be widened, a name from elsewhere ──
+#
+# The rules above assert the read happens, is scoped, and is handed to the template.
+# None of them notices the two ways the card still names the wrong person: a scope that
+# comes from the *request* rather than from the session (a pupil naming another class),
+# and a second source of names on the card itself, which is how a removed assignment
+# keeps being displayed after the map has correctly forgotten it.
+
+class TestTheReadCannotBeWidened:
+    def _body(self) -> str:
+        return STUDENT_ROUTES.read_text(encoding="utf-8"
+                                        ).split("def dashboard(")[1].split("\ndef ")[0]
+
+    def _loop(self) -> str:
+        html = DASHBOARD.read_text(encoding="utf-8")
+        loop = re.search(
+            r"{%\s*for\s+\w+\s+in\s+class_subjects\s*%}(.*?){%\s*endfor\s*%}",
+            html, re.S)
+        assert loop, "the subject card has no loop over the class's subjects"
+        return loop.group(1)
+
+    def test_the_class_and_the_school_come_from_the_session(self):
+        body = self._body()
+        assert not re.search(r"request\.(?:args|form|values)\.get\(\s*['\"]class_id", body), (
+            "the class whose teachers are shown is read from the request, so a pupil can "
+            "name somebody else's class in the URL")
+        assert not re.search(r"teachers_for_class\(\s*(?!student_school_id)", body), (
+            "the teacher read is not anchored to the pupil's own school")
+
+    def test_there_is_one_teacher_read_in_the_route(self):
+        """A second call site is a second scope, and one of them will be the wrong one."""
+        body = self._body()
+        assert len(re.findall(r"teachers_for_class\(", body)) == 1, (
+            "the dashboard reads the class's teachers more than once — each call is a "
+            "scope to keep in step")
+
+    def test_the_card_names_a_teacher_from_no_other_source(self):
+        """The lookup is `class_teachers.get(...)`; any second source is a stale name.
+
+        A removed assignment is dropped from the map by `_teacher_map` (asserted above),
+        which only holds if the card has no other place to read a name from.
+        """
+        loop = self._loop()
+        for alias in ("teacher_name", "subject_teachers", "teacher_map", "user_name"):
+            assert alias not in loop, (
+                f"the subject card reads a teacher from `{alias}` as well as the map, so a "
+                "pair the admin removed can still be shown")
+        assert loop.count("class_teachers.get(") == 1, (
+            "the card looks the teacher up more than once — each lookup is a scope, and "
+            "one of them will be the wrong one")
+        assert "class_teachers[" not in loop, (
+            "the card indexes the map instead of `.get`-ing it, so a subject nobody is "
+            "assigned raises where it should read as 'no teacher yet'")
