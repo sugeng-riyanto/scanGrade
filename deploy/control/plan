@@ -6,6 +6,6 @@
 #
 # Obeyed once per exact content: the `issued` stamp below is what makes a
 # re-issued command a new plan rather than one already obeyed.
-command: recover
-issued: 2026-10-14T04:54:20Z
-note: run the lever: the box took a8fd7f2 then a post-reload gate refused it and rolled back to f0e6b6d; clear the box state holding the activation chart
+command: release
+issued: 2026-10-17T05:10:57Z
+note: the printed report card's stray %} is fixed on main (77aa922); production still serves 3227772
