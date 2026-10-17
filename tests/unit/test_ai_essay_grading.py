@@ -33,7 +33,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 API = ROOT / "app" / "routes" / "api.py"
 TEACHER = ROOT / "app" / "routes" / "teacher.py"
-MIGRATION = ROOT / "supabase" / "migrations" / "067_ai_essay_grading.sql"
+MIGRATION = ROOT / "supabase" / "migrations" / "068_ai_essay_grading.sql"
 
 
 # ── a fake that really filters, so a missing scope is a real refusal ─────────
