@@ -24,9 +24,14 @@ What is pinned, and why each part has a wrong version that passes without it
 * **Every status the service writes is one of its own constants.** A literal is how
   the vocabulary drifts: `"closed"` typed at a call site is a value the service does
   not know it can produce, and the guard cannot tell it from a typo.
-* **The closure stamps are written in one place.** `close()`/`reopen()` carry both
-  halves — the status *and* who/when — so a route that sets the status alone
-  produces a row nobody can explain.
+* **The closure stamps are written in one place.** `close()` and
+  `reopen_membership()` carry both halves — the status *and* who/when — so a route
+  that sets the status alone produces a row nobody can explain. **One writer each**
+  is a separate claim, and it needed its own guard: the merge left *two* of each
+  (`deactivate` for the membership page's close, and a `reopen` that asked no role),
+  so one transition had two roads with different rules and the road a caller took
+  decided whether a repeat rewrote the closure's stamp or whether a reopen was
+  authorised.
 * **The writes are transitions, not assignments.** Both are scoped to one (school,
   user) pair and guarded on the state they move *from*, so a double press changes
   no stamp and a reopen can never be the way an ordinary revocation is undone. The
@@ -124,6 +129,50 @@ def test_no_module_outside_the_service_names_the_closure_stamps():
         "the closure stamps are written outside the service, so a closure can be "
         "recorded without the status that goes with it (or the reverse):\n  "
         + "\n  ".join(offenders))
+
+
+# ── 1b. one writer for each transition, not two roads to one decision ────────
+
+def _transition_writers(also: str) -> list[str]:
+    """Top-level functions whose own payload writes `status` **and** `also`.
+
+    By AST and not by search: `closed_by` appears in the docstrings of this module
+    and of the service, and a search cannot tell a name that is *written* from one
+    that is merely discussed — which is the mistake this whole section is about.
+    """
+    names = []
+    for node in ast.parse(_read(SERVICE)).body:
+        if not isinstance(node, ast.FunctionDef):
+            continue
+        for inner in ast.walk(node):
+            if isinstance(inner, ast.Dict):
+                keys = {k.value for k in inner.keys if isinstance(k, ast.Constant)}
+                if {"status", also} <= keys:
+                    names.append(node.name)
+                    break
+    return names
+
+
+def test_there_is_exactly_one_closure_writer_and_one_reopen_writer():
+    """The merge is what made two of each; this is what keeps it one.
+
+    Two writers for one transition is not a naming question: the two carried
+    *different rules*. `deactivate` had no guard on the state it moved from, so a
+    repeated press rewrote a closure that had already happened, and `reopen` asked
+    no role, so "only the school admin may reopen" held for the callers that reached
+    the guarded function and not for the ones that reached the other. Both doors now
+    call `close` and `reopen_membership`, and this fails if a second writer — or
+    either removed name — comes back.
+    """
+    assert _transition_writers("closed_by") == ["close"], (
+        "a second closure writer: the stamps and the transition guard live in "
+        "`close()` alone, or a caller picks which rules apply")
+    assert _transition_writers("reopened_by") == ["reopen_membership"], (
+        "a second reopen writer: the role rule lives in `reopen_membership()` alone")
+    for gone in ("deactivate", "reopen"):
+        assert not hasattr(membership, gone), (
+            f"`{gone}` is back — two names for one transition is two sets of rules, "
+            "and the caller decides which set applies")
 
 
 # ── 2. one vocabulary, equal to the database's ──────────────────────────────
@@ -325,30 +374,58 @@ class TestClosingAMembership:
 
 
 class TestReopeningAMembership:
+    """One reopen, and it is the one that asks who is asking.
+
+    These assertions used to drive `reopen`, the unguarded twin that survived the
+    merge: the same two filters, the same two stamps, and no role check at all — so
+    the asymmetry the product decided on (three roles may approve, one may reopen)
+    held only for the callers that happened to reach `reopen_membership`. They are
+    the same row facts, now asserted where the rule lives.
+    """
+
     def test_it_puts_the_membership_back_and_names_the_actor(self):
         row = _row(status=membership.STATUS_CLOSED, closed_by="admin-1",
                    closed_at="2026-01-01T00:00:00+00:00")
-        membership.reopen(_Sb([row]), "sc-1", "u-1", by="admin-1")
+        out = membership.reopen_membership(_Sb([row]), "sc-1", "u-1",
+                                           actor_id="admin-1",
+                                           actor_role="admin_sekolah")
+        assert out["ok"] is True
         assert row["status"] == membership.STATUS_ACTIVE
         assert row["reopened_by"] == "admin-1" and row["reopened_at"]
+
+    def test_a_role_that_may_not_reopen_changes_no_row(self):
+        """The check the twin never made, asserted before any write."""
+        row = _row(status=membership.STATUS_CLOSED)
+        out = membership.reopen_membership(_Sb([row]), "sc-1", "u-1",
+                                           actor_id="principal-1",
+                                           actor_role="principal")
+        assert out == {"ok": False, "reason": "not_authorised"}
+        assert row["status"] == membership.STATUS_CLOSED, (
+            "an unauthorised reopen wrote the row it was refused")
 
     def test_it_keeps_the_closure_as_history(self):
         """Erasing the closure would make "was this teacher ever removed?" unanswerable."""
         row = _row(status=membership.STATUS_CLOSED, closed_by="admin-1")
-        membership.reopen(_Sb([row]), "sc-1", "u-1", by="admin-1")
+        membership.reopen_membership(_Sb([row]), "sc-1", "u-1",
+                                     actor_id="admin-1",
+                                     actor_role="admin_sekolah")
         assert row["closed_by"] == "admin-1", (
             "reopening overwrote the record that a closure happened")
 
     def test_it_only_reverses_a_closure_never_a_revocation(self):
         """`inactive` comes back through the invite flow, not through this door."""
         row = _row(status=membership.STATUS_INACTIVE)
-        assert membership.reopen(_Sb([row]), "sc-1", "u-1", by="admin-1") == {}
+        out = membership.reopen_membership(_Sb([row]), "sc-1", "u-1",
+                                           actor_id="admin-1",
+                                           actor_role="admin_sekolah")
+        assert out == {"ok": False, "reason": "not_closed_or_missing"}
         assert row["status"] == membership.STATUS_INACTIVE, (
             "reopen turned an ordinary revocation into access")
 
     def test_the_query_is_the_close_query_mirrored(self):
         db = _Sb([_row(status=membership.STATUS_CLOSED)])
-        membership.reopen(db, "sc-1", "u-1", by="admin-1")
+        membership.reopen_membership(db, "sc-1", "u-1", actor_id="admin-1",
+                                     actor_role="admin_sekolah")
         assert db.last.filters == [
             ("eq", "school_id", "sc-1"),
             ("eq", "user_id", "u-1"),

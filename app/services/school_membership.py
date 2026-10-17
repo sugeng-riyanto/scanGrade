@@ -629,26 +629,7 @@ def may_reopen(role) -> bool:
     return role in REOPEN_ROLES
 
 
-def deactivate(supabase, school_id, user_id, actor_id=None) -> dict:
-    """Close a membership: the canonical closure, `closed`, never `inactive`.
-
-    `closed_by`/`closed_at` are written so the closure has an author — a closure
-    with no author is the record a school cannot act on. Scoped to the
-    `(school, user)` pair, so a caller cannot close a membership in another school
-    by passing an id alone.
-    """
-    from datetime import datetime, timezone
-    res = (supabase.table(MEMBERSHIPS_TABLE)
-           .update({"status": CLOSED_STATUS,
-                    "closed_by": actor_id,
-                    "closed_at": datetime.now(timezone.utc).isoformat()})
-           .eq("school_id", school_id)
-           .eq("user_id", user_id)
-           .execute())
-    return (res.data or [{}])[0]
-
-
-# ── the same two transitions, as the canonical writers ──────────────────────
+# ── the two transitions, one writer each ────────────────────────────────────
 #
 # Migration 063 reserved these two states and their four stamps; these are the
 # writers that carry both halves — the status *and* who/when — so a route that sets
@@ -657,8 +638,21 @@ def deactivate(supabase, school_id, user_id, actor_id=None) -> dict:
 # bypass this file, the closure stamps, and the vocabulary; the guards in
 # `tests/unit/test_membership_single_writer.py` refuse exactly that.
 #
-# Both writers are scoped to **one (school, user) pair** and guarded on the state
-# they expect to move from, so a double press (or two administrators racing)
+# **There is one closure and one reopen, because the merge left two of each.**
+# `deactivate` (the membership page's own closure) and `reopen` (a second reopen
+# with no role check) both arrived with the membership branches and both survived
+# the merge, so one decision had two roads with *different* rules: only the closure
+# that came from the roster skipped a row already closed, and only the reopen that
+# came from the page asked who was asking. An unguarded twin is not a second name
+# for a writer, it is a second writer — and the road a caller happens to take would
+# decide whether a repeated close rewrote its own stamp, or whether a reopen was
+# authorised. So they are one writer each now: the roster's closure and the page's
+# are `close()`, and every reopen is `reopen_membership()`, which is where the role
+# rule lives. `tests/unit/test_membership_single_writer.py` fails if a second
+# writer for either transition is added back.
+#
+# Both are scoped to **one (school, user) pair** and guarded on the state they
+# expect to move from, so a double press (or two administrators racing)
 # changes the stamps of the second write and not the first: the payload therefore
 # carries a *transition*, never an assignment, which is the difference between
 # "close this membership" and "this membership is closed".
@@ -676,6 +670,12 @@ def close(supabase, school_id, user_id, by=None) -> dict:
     no-op the row can keep its own stamp across — which is why the actor and the
     instant are written by the request that *changed* the row, not by the one that
     repeated it.
+
+    **This is the one closure there is**, for both doors: the roster's Keluarkan
+    (`/admin-sekolah/teachers`) and the membership page's close
+    (`/memberships/<user_id>/close`) call it by name now instead of calling an
+    unguarded twin, so the guard above holds on both rather than on whichever one a
+    route happened to reach for.
     """
     from datetime import datetime, timezone
     res = (supabase.table(MEMBERSHIPS_TABLE)
@@ -689,29 +689,6 @@ def close(supabase, school_id, user_id, by=None) -> dict:
     return (res.data or [{}])[0]
 
 
-def reopen(supabase, school_id, user_id, by=None) -> dict:
-    """Turn a closed membership back on, and record who opened it.
-
-    Guarded on `closed` and not on "any non-active status", which is the same line
-    the database draws: a member who was **revoked** (`inactive`) is brought back by
-    the invite/accept flow, and reopening them here would silently grant access
-    through a door whose whole purpose is undoing a *closure*. The asymmetry — only
-    `admin_sekolah` may reopen, while any destination-school official may approve a
-    new request — is migration 063's product decision, enforced at the route and
-    again in `reopen_membership` below, and deliberately not re-decided here.
-    """
-    from datetime import datetime, timezone
-    res = (supabase.table(MEMBERSHIPS_TABLE)
-           .update({"status": STATUS_ACTIVE,
-                    "reopened_by": by,
-                    "reopened_at": datetime.now(timezone.utc).isoformat()})
-           .eq("school_id", school_id)
-           .eq("user_id", user_id)
-           .eq("status", STATUS_CLOSED)
-           .execute())
-    return (res.data or [{}])[0]
-
-
 def reopen_membership(supabase, school_id, user_id, actor_id=None,
                       actor_role=None) -> dict:
     """Reopen a closed membership — and refuse anyone but `REOPEN_ROLES`.
@@ -720,6 +697,17 @@ def reopen_membership(supabase, school_id, user_id, actor_id=None,
     one door it is written on; this function protects every caller, including a
     future one that forgets the decorator. The refusal happens BEFORE any write, so
     an unauthorised attempt leaves no row changed and no field cleared.
+
+    **This is the one reopen there is.** The merge left a second one (`reopen`) with
+    the same two filters and no role check at all, which meant the asymmetry above
+    held only for the callers that happened to reach this function — so the twin is
+    gone and every reopen goes through the check, whether or not the caller passed a
+    role.
+
+    Guarded on `closed` and not on "any non-active status", which is the same line
+    the database draws: a member who was **revoked** (`inactive`) is brought back by
+    the invite/accept flow, and reopening them here would silently grant access
+    through a door whose whole purpose is undoing a *closure*.
 
     The closure's own history (`closed_by`/`closed_at`) is KEPT: reopening is a new
     fact, not an erasure of the old one.
@@ -831,7 +819,8 @@ def create_request(supabase, user_id, target_school_id, role, *,
     (a pupil, an admin) is told that rather than being told its consent is stale.
 
     A membership this school **closed** cannot be re-applied for. `closed` is answered
-    with `membership_closed` because the way back is the school admin's `reopen` and
+    with `membership_closed` because the way back is the school admin's
+    `reopen_membership` and
     not a new application — without that check a principal could undo an admin's
     offboarding by approving a fresh request, and the asymmetry the product decided on
     would be decorative.

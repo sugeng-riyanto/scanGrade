@@ -520,7 +520,8 @@ kedua. Sekolah yang ditutup:
   sekolah aktif diresolusi ulang tiap request dari pembacaan keanggotaan yang segar
   (`school_membership.resolve_for_request`), sedangkan cache sesi hanya memegang profil;
 - tidak bisa dimasuki kembali lewat permintaan baru maupun lewat persetujuan — jalannya
-  hanya `reopen`.
+  hanya `reopen_membership`, satu-satunya penulis pembukaan kembali (peran yang boleh
+  memanggilnya diperiksa di dalam layanan, sebelum tulisan apa pun).
 
 Dua arah kegagalan dibedakan dengan sadar: **pembacaan yang gagal tidak menyempitkan apa
 pun** (sekolah dari `profiles` tetap dipakai, supaya gangguan database tidak mengunci guru

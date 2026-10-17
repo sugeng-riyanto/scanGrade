@@ -42,6 +42,11 @@ class _Query:
         self.log = log
         self.fail = fail
         self.filters = []
+        #: `(column, value)` pairs from `neq`, kept apart from `filters` because they
+        #: mean the opposite thing: a transition guard excludes rows, while the
+        #: scoping filters select them. `close` builds both, so a fake that ignored
+        #: `neq` would report "the write happened" for a row it must skip.
+        self.narrows = []
         self.mode = None
         self.payload = None
         self.limited = None
@@ -54,6 +59,10 @@ class _Query:
 
     def eq(self, col, val):
         self.filters.append((col, val))
+        return self
+
+    def neq(self, col, val):
+        self.narrows.append((col, val))
         return self
 
     def limit(self, n):
@@ -73,7 +82,8 @@ class _Query:
 
     def _matched(self):
         return [r for r in self._all
-                if all(str(r.get(c)) == str(v) for c, v in self.filters)]
+                if all(str(r.get(c)) == str(v) for c, v in self.filters)
+                and all(str(r.get(c)) != str(v) for c, v in self.narrows)]
 
     def execute(self):
         if self.fail:
@@ -144,10 +154,18 @@ def test_no_code_path_still_writes_inactive():
         "still accepts it")
 
 
-def test_deactivate_writes_closed_with_an_author():
+def test_closing_writes_closed_with_an_author():
+    """The membership page closes through the roster's writer, not through a twin.
+
+    `deactivate` was a second closure for this one door: the same payload, and no
+    guard on the state it moved from — so a repeated press rewrote the stamp of a
+    closure that had already happened, and *which* door an admin happened to use was
+    what decided whether the record survived. Both doors call `close` now, so these
+    are the same facts and the guard the twin never had is asserted beside them.
+    """
     sb = _Sb({"teacher_school_membership": [
         {"user_id": "u-1", "school_id": "sc-A", "status": "active"}]})
-    membership.deactivate(sb, "sc-A", "u-1", actor_id="admin-9")
+    membership.close(sb, "sc-A", "u-1", by="admin-9")
 
     writes = sb.writes_to("teacher_school_membership")
     assert len(writes) == 1
@@ -157,6 +175,25 @@ def test_deactivate_writes_closed_with_an_author():
     assert payload["closed_at"], "a closure with no moment cannot be acted on"
     # Scoped to the PAIR: an id alone must not close a membership elsewhere.
     assert filters["school_id"] == "sc-A" and filters["user_id"] == "u-1"
+
+
+def test_closing_again_leaves_the_first_closure_alone():
+    """The transition guard the twin did not have, observed rather than described.
+
+    The fake filters the way Postgres does, so the answer here is the row the write
+    matched: an already-closed membership matches *nothing*, `close` reports an empty
+    row, and the stamp a school can act on stays the first one. A version without the
+    guard returns the row and this assertion fails.
+    """
+    sb = _Sb({"teacher_school_membership": [
+        {"user_id": "u-1", "school_id": "sc-A", "status": "closed",
+         "closed_by": "admin-1", "closed_at": "2026-01-01T00:00:00+00:00"}]})
+    assert membership.close(sb, "sc-A", "u-1", by="admin-9") == {}, (
+        "a second press rewrote a closure that had already happened")
+    _, _, payload, _ = sb.writes_to("teacher_school_membership")[0]
+    assert payload["closed_by"] == "admin-9", (
+        "the write is still a move away from `active` on the row, and only the row's "
+        "state decides whether it lands")
 
 
 def test_the_migration_moves_inactive_to_closed_and_is_idempotent():

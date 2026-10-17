@@ -12,7 +12,7 @@ three places, and each answers a different question:
   only for the reader who may use it: a button that would refuse its reader teaches
   people that buttons lie;
 * **the rule is uniform for every kind of closure.** There are two provenances in
-  this codebase — the admin's `deactivate` (which now writes the canonical `closed`)
+  this codebase — the admin's `close` (which writes the canonical `closed`)
   and the join-request flow from migration 063 — and they are the *same state*, so
   they must answer to the same reopen rule. A rule that only covered the flow this
   feature added would be the exact leak the canonicalisation exists to close.
@@ -33,7 +33,7 @@ TEMPLATES = ROOT / "app" / "templates"
 
 
 def _closed_by_admin(**extra) -> dict:
-    """A closure from the admin's own offboarding path: `deactivate` was run."""
+    """A closure from the admin's own offboarding path: `close` was run."""
     return mrow(school_id="sc-1", status="closed", closed_by="a-1",
                 closed_at="2026-09-01T00:00:00+00:00", **extra)
 

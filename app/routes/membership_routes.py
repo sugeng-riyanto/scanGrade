@@ -231,7 +231,11 @@ def membership_close(user_id):
         if _wants_json():
             return jsonify({"error": "no_school"}), 403
         return redirect(login_door_for(g.get("user_role"), request.path))
-    membership.deactivate(get_supabase(), sid, user_id, actor_id=g.get("user_id"))
+    # One closure, not two names for it: this route used to call `deactivate`, a
+    # twin with no guard on the state it moved from, so a repeat of this press
+    # rewrote the stamp of a closure that had already happened. `close` is the
+    # roster's writer too, which is what makes the guard below hold on both doors.
+    membership.close(get_supabase(), sid, user_id, by=g.get("user_id"))
     # The table's name comes from the service, not from this file: the audit trail's
     # entity *is* that table, and a second spelling of it here is the one the
     # single-writer guard exists to refuse (`test_only_the_service_names_the_
