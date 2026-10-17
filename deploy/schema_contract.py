@@ -113,7 +113,11 @@ Exit codes, like the other gates: 0 pass · 1 a real disagreement (a name nothin
 creates, a policy open to PUBLIC, a role the constraint cannot hold, an object the API
 serves that no file declares, or — under `--require-applied` — an object this
 repository declares that the live schema does not have) · 2 could not measure (no SQL
-found, unreadable, or no credentials to ask the live schema).
+found, unreadable, no credentials to ask the live schema, or an API that did not
+answer — DNS, a refused connection, a rejected key, HTML where JSON was expected).
+Every one of those used to leave `requests`' exception as a traceback, which exits 1:
+the code this tool reserves for a schema gap. The reason is printed with the exit 2,
+so a box that could not ask says *why* instead of saying nothing.
 """
 from __future__ import annotations
 
@@ -762,14 +766,33 @@ def role_mismatches(vocab: set[str], app: pathlib.Path | None = None) -> list[di
     return [p for p in out if not (p["where"] in seen or seen.add(p["where"]))]
 
 
+#: Why the last `live_schema()` call could not answer, if it could not. Empty when it
+#: did answer, and empty when it never tried (no credentials at all) — the two are
+#: different sentences and `cannot_measure()` says which one happened. Shared through
+#: a module global rather than a second return value because every caller already
+#: reads `None` as "cannot measure" and the reason is only ever printed once.
+LIVE_ERROR = ""
+
+
 def live_schema() -> dict[str, set[str]] | None:
-    """{table: {column, …}} as PostgREST serves it, or None without credentials.
+    """{table: {column, …}} as PostgREST serves it, or None when it cannot be asked.
 
     This is the API's own description of the database — the same document a client
     sees at `/rest/v1/` — so comparing the code with it is comparing the code with
     **the database as the API exposes it**, which is the only version of it any
     query here can reach.
+
+    "Cannot be asked" covers more than a missing credential, and every one of those
+    cases has to stay *cannot measure* (exit 2) rather than become a finding: a host
+    that does not resolve, a connection refused, a certificate a box does not trust,
+    a key the API rejects, a proxy that answers HTML. Each is a property of the box,
+    not of the schema, and each used to escape as a traceback — `InvalidURL`,
+    `ConnectionError`, or a `JSONDecodeError` from a login page — which exits 1: the
+    exact code this check reserves for "a migration was never applied". A gate that
+    reports a schema gap when its network is down teaches its reader to ignore it.
     """
+    global LIVE_ERROR
+    LIVE_ERROR = ""
     url = (os.environ.get("SUPABASE_URL") or "").rstrip("/")
     key = os.environ.get("SUPABASE_SERVICE_KEY") or os.environ.get("SUPABASE_SECRET_KEY") or ""
     if not (url and key):
@@ -777,12 +800,51 @@ def live_schema() -> dict[str, set[str]] | None:
     try:
         import requests
     except ImportError:                                # pragma: no cover
+        LIVE_ERROR = "the `requests` package is not installed here"
         return None
-    spec = requests.get(f"{url}/rest/v1/",
-                        headers={"apikey": key, "Authorization": f"Bearer {key}"},
-                        timeout=60).json()
-    defs = spec.get("definitions") or spec.get("components", {}).get("schemas") or {}
+    try:
+        response = requests.get(f"{url}/rest/v1/",
+                                headers={"apikey": key, "Authorization": f"Bearer {key}"},
+                                timeout=60)
+        # A rejected key or a 5xx is not an empty schema. Without this, a bad key
+        # answered `{}` and every declared table came back as an unapplied migration.
+        response.raise_for_status()
+        spec = response.json()
+    except Exception as exc:                           # noqa: BLE001
+        # The class name is the part a reader can search for; the key is never part
+        # of the sentence, and the text is clipped so a page of HTML cannot bury it.
+        detail = " ".join(str(exc).split())
+        if len(detail) > 200:
+            detail = detail[:200].rstrip() + "..."
+        LIVE_ERROR = f"{url} did not answer ({exc.__class__.__name__}: {detail})"
+        return None
+    if not isinstance(spec, dict):
+        LIVE_ERROR = f"{url} answered something that is not the API description"
+        return None
+    # PostgREST serves Swagger 2 (`definitions`); a proxy in front of it may serve
+    # OpenAPI 3 (`components.schemas`). Anything else is a document this cannot read,
+    # and reading it as an empty schema would report every table as unapplied.
+    defs = spec.get("definitions")
+    components = spec.get("components")
+    if not isinstance(defs, dict) and isinstance(components, dict):
+        defs = components.get("schemas")
+    if not isinstance(defs, dict):
+        LIVE_ERROR = f"{url} answered an API description with no definitions"
+        return None
     return {name: set((body.get("properties") or {}).keys()) for name, body in defs.items()}
+
+
+def cannot_measure() -> str:
+    """The sentence a `cannot measure` exit carries.
+
+    Two causes, two sentences: a box that never tried (no URL or no service key) and
+    a box that tried and could not reach the API. Saying "set SUPABASE_URL" to
+    somebody who set it and whose DNS is broken is a sentence they cannot act on.
+    """
+    if LIVE_ERROR:
+        return f"{LIVE_ERROR}. Nothing was judged."
+    return ("set SUPABASE_URL and SUPABASE_SERVICE_KEY (or put them in .env) to ask "
+            "the live schema which objects it has. Nothing was judged.")
 
 
 def live_differences(schema: dict[str, set[str]], live: dict[str, set[str]]) -> tuple[list, list]:
@@ -893,7 +955,7 @@ def probe_anon(timeout: int = 45) -> tuple[list[tuple[str, str, str]], set[str],
         return None
     catalogue = live_schema()
     if not catalogue:
-        return [], set(), "could not read the API description with the service key"
+        return [], set(), LIVE_ERROR or "could not read the API description with the service key"
     leaked: list[tuple[str, str, str]] = []
     for key_name, key in keys:
         headers = {"apikey": key, "Authorization": f"Bearer {key}"}
@@ -1046,9 +1108,7 @@ def main(argv: list[str]) -> int:
         # failing a release over it would take a working site down for it.
         live = live_schema()
         if live is None:
-            print("schema contract: cannot measure  -  set SUPABASE_URL and "
-                  "SUPABASE_SERVICE_KEY (or put them in .env) to ask the live schema "
-                  "which objects it has. Nothing was judged.")
+            print(f"schema contract: cannot measure  -  {cannot_measure()}")
             return 2
         declared_pending, undeclared = live_differences(schema, live)
         pending, optional_pending = applied_gap(declared_pending)
@@ -1076,6 +1136,11 @@ def main(argv: list[str]) -> int:
     if "--live" in argv:
         live = live_schema()
         if live is None:
+            if LIVE_ERROR:
+                # It was asked and could not be answered. Reporting "OK (offline)"
+                # here would be a pass invented out of a failure to measure.
+                print(f"schema contract: cannot measure  -  {cannot_measure()}")
+                return 2
             print("schema contract: OK (offline)  -  set SUPABASE_URL and "
                   "SUPABASE_SERVICE_KEY to also ask the database")
             return 0

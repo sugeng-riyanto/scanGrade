@@ -518,6 +518,108 @@ class TestTheAppliedCheck:
         assert "cannot measure" in out and "Nothing was judged" in out, out
 
 
+class TestACheckThatCannotReachTheApi:
+    """Exit 2 is the contract for "could not measure", and the network is the loudest
+    way to arrive there. Every case below used to leave `live_schema()` as a traceback
+    — the caller saw `exit 1`, the code this check reserves for *a migration was never
+    applied* — so a laptop with no DNS, a rotated key, or a captive portal that answers
+    a login page all read as a schema gap. A gate whose failure message depends on
+    whether its network is up is a gate people learn to ignore, and the one failure it
+    is meant to catch is the quiet one.
+    """
+
+    @pytest.fixture
+    def box(self, monkeypatch):
+        monkeypatch.setenv("SUPABASE_URL", "https://test.supabase.co")
+        monkeypatch.setenv("SUPABASE_SERVICE_KEY", "not-a-real-key")
+        return monkeypatch
+
+    def test_a_host_that_does_not_resolve_is_two_and_names_the_cause(self, box, capsys):
+        import requests
+
+        def refuse(*_a, **_k):
+            raise requests.exceptions.ConnectionError(
+                "HTTPSConnectionPool(host='test.supabase.co', port=443): "
+                "Name or service not known")
+
+        box.setattr(requests, "get", refuse)
+        assert sc.main(["--require-applied"]) == 2
+        out = capsys.readouterr().out
+        assert "unapplied migrations" not in out, (
+            f"a box that cannot ask must not report a gap: {out}")
+        assert "cannot measure" in out, out
+        assert "did not answer" in out and "ConnectionError" in out, (
+            f"the cause is the actionable half of the sentence: {out}")
+        assert "not-a-real-key" not in out, "the key must not reach the output"
+
+    def test_a_key_the_api_rejects_is_cannot_measure_not_every_table_missing(
+            self, box, capsys):
+        """A 401 has no definitions. Read as a schema, that is an empty database and
+        every declared table "unapplied" — a false alarm over the whole repository in
+        the situation where the check is least able to be believed."""
+        import requests
+
+        class Unauthorised:
+            status_code = 401
+
+            def raise_for_status(self):
+                raise requests.exceptions.HTTPError("401 Client Error: Unauthorized")
+
+            def json(self):                             # pragma: no cover - never reached
+                return {"definitions": {}}
+
+        box.setattr(requests, "get", lambda *_a, **_k: Unauthorised())
+        assert sc.main(["--require-applied"]) == 2
+        out = capsys.readouterr().out
+        assert "unapplied migrations" not in out, out
+        assert "HTTPError" in out and "cannot measure" in out, out
+
+    def test_a_login_page_instead_of_json_is_cannot_measure(self, box, capsys):
+        class Html:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                raise ValueError("Expecting value: line 1 column 1 (char 0)")
+
+        box.setattr(__import__("requests"), "get", lambda *_a, **_k: Html())
+        assert sc.main(["--require-applied"]) == 2
+        out = capsys.readouterr().out
+        assert "cannot measure" in out and "ValueError" in out, out
+
+    def test_live_that_could_not_ask_is_not_a_pass_offline(self, box, capsys):
+        """`--live` exits 0 when there is no credential to ask with — correct, it is a
+        report. With a credential set and no answer, "OK (offline)" would be a pass
+        invented out of a failed measurement."""
+        import requests
+
+        box.setattr(requests, "get", lambda *_a, **_k: (_ for _ in ()).throw(
+            requests.exceptions.ReadTimeout("read timed out")))
+        assert sc.main(["--live"]) == 2
+        out = capsys.readouterr().out
+        assert "OK (offline)" not in out and "ReadTimeout" in out, out
+
+    def test_an_answer_clears_the_previous_failure(self, box, monkeypatch):
+        """The reason lives in one place, so a stale sentence must not outlive the
+        failure that wrote it."""
+        import requests
+
+        box.setattr(requests, "get", lambda *_a, **_k: (_ for _ in ()).throw(
+            requests.exceptions.ConnectionError("down")))
+        assert sc.live_schema() is None and sc.LIVE_ERROR
+
+        class Answer:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {"definitions": {"a": {"properties": {"id": {}}}}}
+
+        box.setattr(requests, "get", lambda *_a, **_k: Answer())
+        assert sc.live_schema() == {"a": {"id"}}
+        assert sc.LIVE_ERROR == "", sc.LIVE_ERROR
+
+
 # ── the repository as it stands ─────────────────────────────────────────────
 
 class TestThisRepositoryPasses:
