@@ -1406,7 +1406,11 @@ def main() -> int:
     args = parser.parse_args()
 
     repo = Path(args.repo)
-    ledger = Path(args.ledger)
+    # Both durable directories go through one resolver: on Windows a
+    # `/var/...` path has no drive and follows whichever one the shell is on, so
+    # an apply and a later `--status` could read two different ledgers.
+    out = db_snapshot.durable_path(args.out)
+    ledger = db_snapshot.durable_path(args.ledger)
     migrations = repo / "supabase" / "migrations"
 
     if args.status:
@@ -1437,7 +1441,7 @@ def main() -> int:
         print("=" * 74)
         print(f"   repo:    {repo}")
         print(f"   ledger:  {ledger}")
-        print(f"   out:     {Path(args.out)}")
+        print(f"   out:     {out}")
         print(f"   target:  project {ref}")
         print("   session: read-only — this mode writes no DDL, anywhere")
         print()
@@ -1447,7 +1451,7 @@ def main() -> int:
                 live = schema_snapshot(cur, extra_schemas=("storage",))
         finally:
             conn.close()
-        return reconcile(ledger, Path(args.out), migrations, live)
+        return reconcile(ledger, out, migrations, live)
 
     if args.adopt:
         if not args.file:
@@ -1467,7 +1471,7 @@ def main() -> int:
         print(f"ADOPTING  {path.name}")
         print("=" * 74)
         print(f"   from:    {archive}")
-        print(f"   into:    {Path(args.out)}")
+        print(f"   into:    {out}")
         print(f"   ledger:  {ledger}")
         print(f"   target:  project {ref}")
         print("   session: read-only — this mode applies no DDL, anywhere")
@@ -1481,7 +1485,7 @@ def main() -> int:
                 live = schema_snapshot(cur, extra_schemas=("storage",))
         finally:
             conn.close()
-        return adopt(ledger, Path(args.out), path, archive, live,
+        return adopt(ledger, out, path, archive, live,
                      applied_at=args.applied_at, prune_source=args.prune_source)
 
     if not args.file:
@@ -1512,7 +1516,7 @@ def main() -> int:
     print()
     print("   dry run passed — now applying")
     label = path.stem
-    delta, archive = commit_run(url, path, sql, repo, Path(args.out), args.keep,
+    delta, archive = commit_run(url, path, sql, repo, out, args.keep,
                                 label, snapshot=not args.no_snapshot)
 
     print()

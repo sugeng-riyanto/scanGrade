@@ -1206,3 +1206,23 @@ def test_the_cli_offers_reconcile_and_status_points_at_it():
         "`--status` still tells the reader to adopt by hand and nothing else — on "
         "the box that has no shell, that advice is a dead end")
 
+
+
+def test_both_durable_directories_are_resolved_by_one_helper():
+    """The ledger and the snapshot directory cannot drift apart on Windows.
+
+    A `/var/...` default has no drive on Windows, so the path follows whichever
+    drive the shell is on: the measured `--commit` recorded an apply in one
+    directory while `--status` read another and answered `no record`. Both go
+    through `db_snapshot.durable_path` now, so the two halves of one command name
+    the same place.
+    """
+    assert "ledger = db_snapshot.durable_path(args.ledger)" in SOURCE, (
+        "the ledger default is taken literally, so on Windows it lands on the "
+        "current drive and a later --status on another drive reads no record")
+    assert "out = db_snapshot.durable_path(args.out)" in SOURCE, (
+        "the snapshot directory is taken literally, so a recovery point can be "
+        "written on a drive no reader looks at")
+    assert "ledger = Path(args.ledger)" not in SOURCE
+    assert "Path(args.out)" not in SOURCE, (
+        "a call site still resolves --out without the helper")

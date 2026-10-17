@@ -69,8 +69,68 @@ PAGE_SIZE = 1000
 UPSERT_BATCH = 500
 DEFAULT_OUT = "/var/backups/scangrade"
 DEFAULT_KEEP = 5
+
+#: The two durable directories this repository's tools agree on, and the folder
+#: each one stands for on Windows. Every reader and writer goes through
+#: :func:`durable_path`, so "the box's backup directory" and "the box's ledger"
+#: cannot mean two different places depending on which shell ran the tool.
+DURABLE_DIRS = {
+    "/var/lib/scangrade-migrations": "migrations",
+    "/var/backups/scangrade": "backups",
+}
 REQUEST_TIMEOUT = 120
 ARCHIVE_PREFIX = "scangrade-db-"
+
+
+def windows_state_root() -> Path:
+    """Where a durable directory lives on a Windows machine.
+
+    ``%PROGRAMDATA%`` is the machine-wide, durable location Windows offers;
+    ``%LOCALAPPDATA%`` and then the user's home are fallbacks for a session that
+    has no ``PROGRAMDATA`` at all. None of them is a temp directory, which is the
+    property that matters: the measured failure was a recovery point taken into
+    ``%TEMP%`` that Windows was free to delete and no reader was looking in.
+    """
+    base = (os.environ.get("PROGRAMDATA") or os.environ.get("LOCALAPPDATA")
+            or str(Path.home()))
+    return Path(base) / "scangrade"
+
+
+def durable_path(value: str | Path, platform_name: str | None = None) -> Path:
+    r"""Resolve a durable directory so the same command names one place.
+
+    On POSIX a rooted path is already absolute and nothing changes. On Windows it
+    is not: ``/var/lib/scangrade-migrations`` and ``\var\lib\...`` carry no
+    drive, so Windows resolves them against **the current drive**. Measured, that
+    is two ledgers: the same ``--commit`` run from ``C:`` records an apply in
+    ``C:\var\lib\...`` while ``--status`` run from ``D:`` reads an empty
+    ``D:\var\lib\...`` and reports ``no record`` — an applied migration that the
+    tool cannot see, which is the one answer an operator cannot act on.
+
+    The two directories the box's tools share are therefore mapped to their
+    Windows counterpart under :func:`windows_state_root`; every other
+    drive-less rooted path is anchored to the system drive so at least the shell
+    cannot move it. Relative paths are left alone: ``--ledger .freebuff/ledger``
+    is a deliberate, checkout-scoped choice.
+    """
+    text = str(value)
+    if (platform_name or os.name) != "nt":
+        return Path(text)
+
+    normalized = text.replace("\\", "/")
+    folder = DURABLE_DIRS.get(normalized.rstrip("/"))
+    if folder:
+        return windows_state_root() / folder
+
+    # A UNC share (`\\server\share`) already names its own place and must not be
+    # rewritten to a drive. Everything else that starts at a root without one is
+    # the drive-relative case this function exists for.
+    if normalized.startswith("//"):
+        return Path(text)
+    if normalized.startswith("/"):
+        drive = os.environ.get("SystemDrive", "C:")
+        return Path(f"{drive}/{normalized.lstrip('/')}")
+    return Path(text)
 
 #: Archives that rotation must never delete, one filename per line, kept *beside*
 #: the archives they protect so the list and what it names cannot be separated.
@@ -953,8 +1013,8 @@ def main() -> int:
                            pre_snapshot=not args.no_pre_snapshot)
 
         print(f"snapshotting {base} (label {args.label})")
-        archive = make_snapshot(base, key, Path(args.out), args.label, args.keep,
-                                quiet=args.quiet)
+        archive = make_snapshot(base, key, durable_path(args.out), args.label,
+                                args.keep, quiet=args.quiet)
         print(f"   written to {archive} (mode 0600)")
         return 0
     except requests.RequestException as exc:

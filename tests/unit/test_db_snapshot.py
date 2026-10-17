@@ -746,3 +746,41 @@ def test_the_deploy_pins_the_recovery_point_a_migration_release_takes():
         "a pin that cannot be written now refuses a release whose recovery point "
         "already exists"
     )
+
+
+class TestWhereADurableDirectoryIs:
+    """One command must name one place, on every platform it runs on."""
+
+    def test_posix_paths_are_left_exactly_as_they_were(self):
+        assert snap.durable_path("/var/backups/scangrade", "posix") == \
+            Path("/var/backups/scangrade")
+        assert snap.durable_path(".freebuff/ledger", "posix") == \
+            Path(".freebuff/ledger")
+
+    def test_windows_maps_the_box_directories_under_programdata(self, monkeypatch,
+                                                               tmp_path):
+        monkeypatch.setenv("PROGRAMDATA", str(tmp_path / "ProgramData"))
+        root = tmp_path / "ProgramData" / "scangrade"
+        assert snap.durable_path("/var/backups/scangrade", "nt") == root / "backups"
+        assert snap.durable_path("\\var\\lib\\scangrade-migrations", "nt") == \
+            root / "migrations", (
+            "the ledger is written on the drive the shell happens to be on")
+
+    def test_a_drive_less_rooted_path_is_anchored_to_the_system_drive(
+            self, monkeypatch):
+        monkeypatch.setenv("SystemDrive", "Q:")
+        assert str(snap.durable_path("\\elsewhere\\ledger", "nt")).startswith("Q:")
+
+    def test_a_drive_lettered_path_is_not_rewritten(self):
+        assert str(snap.durable_path("D:/backups", "nt")) == "D:/backups"
+
+    def test_a_network_share_is_not_rewritten(self):
+        assert str(snap.durable_path("\\\\server\\share\\backups", "nt")) == \
+            "\\\\server\\share\\backups", (
+            "a UNC share names its own place and must not become a local drive")
+
+    def test_the_snapshot_cli_resolves_its_output_through_the_helper(self):
+        source = (DEPLOY / "db_snapshot.py").read_text(encoding="utf-8")
+        assert "make_snapshot(base, key, durable_path(args.out)" in source, (
+            "the CLI passes --out through unresolved, so on Windows the archive "
+            "lands relative to the shell's drive")
