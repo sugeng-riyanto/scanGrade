@@ -1805,8 +1805,11 @@ def file_management():
         # Clear Supabase Storage bucket
         elif action == "clear_storage":
             try:
-                from app.services.pdf_service import _ensure_bucket
-                _ensure_bucket(supabase)
+                # Nothing is ensured here: `_ensure_bucket` was imported from a
+                # module that never defined it, so this action failed before it
+                # listed anything. Listing and removing is what "clear" means;
+                # a bucket that is absent has nothing to clear and answers with
+                # its own error below.
                 deleted = 0
                 # List all items recursively using Supabase prefix search
                 prefixes = [""]
