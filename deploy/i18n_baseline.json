@@ -92,7 +92,7 @@
       "frozen": false
     },
     "admin_sekolah/grade_weights.html": {
-      "pairs": 103,
+      "pairs": 109,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": true
@@ -164,7 +164,7 @@
       "frozen": true
     },
     "admin_sekolah/seb_refusals.html": {
-      "pairs": 39,
+      "pairs": 72,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -668,7 +668,7 @@
       "frozen": false
     },
     "teacher/exam_form.html": {
-      "pairs": 280,
+      "pairs": 281,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -680,9 +680,9 @@
       "frozen": false
     },
     "teacher/exams.html": {
-      "pairs": 23,
+      "pairs": 30,
       "leftovers": 5,
-      "coverage": 82.1,
+      "coverage": 85.7,
       "frozen": true
     },
     "teacher/grade_detail.html": {
@@ -776,9 +776,9 @@
       "frozen": false
     },
     "teacher/session_review.html": {
-      "pairs": 0,
-      "leftovers": 34,
-      "coverage": 0.0,
+      "pairs": 52,
+      "leftovers": 0,
+      "coverage": 100.0,
       "frozen": false
     },
     "teacher/settings.html": {

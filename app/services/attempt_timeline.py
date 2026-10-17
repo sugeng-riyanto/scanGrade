@@ -95,7 +95,7 @@ def _clock(value) -> str:
     return text[11:16] or "?"
 
 
-def _gap_detail(meta: dict) -> str:
+def _gap_detail(meta: dict, lang: str = "id") -> str:
     """How long the connection was away, from the meta the writer stamped."""
     try:
         seconds = int((meta or {}).get("gap_seconds") or 0)
@@ -104,8 +104,10 @@ def _gap_detail(meta: dict) -> str:
     if seconds <= 0:
         return ""
     if seconds >= 60:
+        if lang == "en":
+            return f"{seconds // 60} min {seconds % 60:02d} s"
         return f"{seconds // 60} mnt {seconds % 60:02d} dtk"
-    return f"{seconds} dtk"
+    return f"{seconds} s" if lang == "en" else f"{seconds} dtk"
 
 
 def _whole(value):
@@ -151,17 +153,26 @@ def entry(row: dict, lang: str = "id") -> dict:
     if isinstance(meta, str):
         meta = {}
     if kind == "connection_gap":
-        detail = _gap_detail(meta)
+        detail_pair = {"id": _gap_detail(meta, "id"), "en": _gap_detail(meta, "en")}
     elif kind in MEDIA_KINDS:
-        detail = _media_detail(kind, meta, (row or {}).get("question_index"), lang)
+        question = (row or {}).get("question_index")
+        detail_pair = {"id": _media_detail(kind, meta, question, "id"),
+                       "en": _media_detail(kind, meta, question, "en")}
     else:
-        detail = ""
+        detail_pair = {"id": "", "en": ""}
+    # `label`/`detail` are the caller's language (the invigilation sheet asks for one
+    # and prints one); the `_pair` keys are for a page whose reader can switch after
+    # the JSON arrived, which is this app's session page. Both are sent because a
+    # string assembled server-side is frozen in the language it was built in.
+    label_pair = EVENT_LABELS.get(kind) or {"id": kind, "en": kind}
     return {
         "kind": kind,
         "seq": (row or {}).get("seq"),
         "label": describe(kind, lang),
+        "label_pair": label_pair,
         "at": _clock((row or {}).get("server_at") or (row or {}).get("occurred_at")),
-        "detail": detail,
+        "detail": detail_pair.get(lang) or "",
+        "detail_pair": detail_pair,
         "offline": bool((row or {}).get("offline")),
     }
 

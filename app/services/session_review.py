@@ -56,15 +56,28 @@ SHARED_SHARE = 0.5
 FAR_MULTIPLE = 2.0
 FAR_FLOOR = 2.0
 
+def pair(id_text: str, en_text: str) -> dict:
+    """One sentence in both languages, the choice left to the page.
+
+    The toggle lives in `localStorage`, so a server-built sentence cannot know which
+    language to send — the same reason `app/utils/auth_messages.py` carries both
+    halves. A dict rather than a tuple because it names its halves at the call site
+    and a JSON reader can take one without knowing an index.
+    """
+    return {"id": id_text, "en": en_text}
+
+
 #: The metrics worth a reading, and how to say them. Ordered: the reader meets the
-#: plainest one first.
+#: plainest one first. The label is a pair, like every other sentence this module
+#: sends, because this page is read in either language.
 FACTS = (
-    ("away_count", "Jumlah meninggalkan halaman", ""),
-    ("away_total_ms", "Total waktu di luar halaman", "ms"),
-    ("sync_gap_count", "Jeda sinkronisasi", ""),
-    ("offline_ms", "Waktu tanpa koneksi", "ms"),
-    ("answer_change_count", "Perubahan jawaban", ""),
-    ("effective_active_ms", "Waktu aktif efektif", "ms"),
+    ("away_count", pair("Jumlah meninggalkan halaman", "Times the page was left"), ""),
+    ("away_total_ms", pair("Total waktu di luar halaman",
+                           "Total time away from the page"), "ms"),
+    ("sync_gap_count", pair("Jeda sinkronisasi", "Sync gaps"), ""),
+    ("offline_ms", pair("Waktu tanpa koneksi", "Time without a connection"), "ms"),
+    ("answer_change_count", pair("Perubahan jawaban", "Answer changes"), ""),
+    ("effective_active_ms", pair("Waktu aktif efektif", "Effective active time"), "ms"),
 )
 
 #: Columns of `attempt_summary` this page reads. An explicit list, not `*`, so a
@@ -111,17 +124,24 @@ def _measured(summary: dict) -> bool:
     return attempt_summary.EVENT_TABLE in _as_list(summary.get("sources"))
 
 
-def fmt(value, unit: str = "") -> str:
-    """A number as a person reads it. `None` is a real answer here."""
+def fmt(value, unit: str = "") -> dict:
+    """A number as a person reads it, in both languages. `None` is a real answer here.
+
+    The unit is a word (`mnt`/`dtk`), so this cannot be language-free the way a bare
+    count can: `3 mnt 05 dtk` and `3 min 05 s` are one instant, and the page has to
+    be able to say either one.
+    """
     number = _number(value)
     if number is None:
-        return "belum terukur"
+        return pair("belum terukur", "not measured")
     if unit == "ms":
         seconds = number / 1000.0
         if seconds >= 60:
-            return f"{int(seconds // 60)} mnt {int(seconds % 60):02d} dtk"
-        return f"{seconds:.0f} dtk"
-    return str(int(number)) if number == int(number) else f"{number:.1f}"
+            whole, rest = int(seconds // 60), int(seconds % 60)
+            return pair(f"{whole} mnt {rest:02d} dtk", f"{whole} min {rest:02d} s")
+        return pair(f"{seconds:.0f} dtk", f"{seconds:.0f} s")
+    text = str(int(number)) if number == int(number) else f"{number:.1f}"
+    return pair(text, text)
 
 
 # ── the room ─────────────────────────────────────────────────────────────────
@@ -181,22 +201,28 @@ def facts_for(summary: dict | None, baseline_by_metric: dict) -> list[dict]:
         p90 = row.get("p90")
         value = _number((summary or {}).get(metric))
         small = bool(row.get("small_sample"))
+        comparison = (pair("kelas terlalu kecil untuk dibandingkan",
+                           "the class is too small to compare against")
+                      if small else
+                      pair(f"median kelas {fmt(median, unit)['id']}"
+                           f" · p90 {fmt(p90, unit)['id']}",
+                           f"class median {fmt(median, unit)['en']}"
+                           f" · p90 {fmt(p90, unit)['en']}"))
         rows.append({
             "metric": metric,
             "label": label,
             "value": fmt(value),
-            "comparison": ("kelas terlalu kecil untuk dibandingkan" if small
-                           else f"median kelas {fmt(median, unit)}"
-                                f" · p90 {fmt(p90, unit)}"),
+            "comparison": comparison,
             "measured": value is not None,
             "far": is_far(value, p90) and not small,
         })
     if summary is not None:
         rows.append({
             "metric": "clock_drift_max_ms",
-            "label": "Selisih jam perangkat",
+            "label": pair("Selisih jam perangkat", "Device clock drift"),
             "value": fmt(summary.get("clock_drift_max_ms"), "ms"),
-            "comparison": "perangkat yang jamnya bergeser mudah terlihat di sini",
+            "comparison": pair("perangkat yang jamnya bergeser mudah terlihat di sini",
+                               "a device whose clock has drifted shows up here"),
             "measured": _number(summary.get("clock_drift_max_ms")) is not None,
             "far": bool(summary.get("clock_suspect")),
         })
@@ -236,41 +262,68 @@ def observations(*, summaries, baseline, names=None, sample_size,
 
     if shared_window:
         share = shared_window.get("share") or 0.0
+        start = _clock(shared_window.get("start"))
+        end = _clock(shared_window.get("end"))
         found.append(_observation(
-            SHARED_KEY, "Gangguan bersama di satu jendela waktu",
-            f"{share:.0%} kelas punya kejadian antara "
-            f"{_clock(shared_window.get('start'))} dan {_clock(shared_window.get('end'))}",
-            "jendela ini milik kelas, bukan milik satu murid",
-            "Jaringan sekolah yang goyah, satu perangkat ruangan, atau kejadian di "
-            "dalam kelas — pada jam yang sama, dan bukan pilihan murid.",
+            SHARED_KEY,
+            pair("Gangguan bersama di satu jendela waktu",
+                 "A disturbance the whole class shared"),
+            pair(f"{share:.0%} kelas punya kejadian antara {start} dan {end}",
+                 f"{share:.0%} of the class has an event between {start} and {end}"),
+            pair("jendela ini milik kelas, bukan milik satu murid",
+                 "this window belongs to the class, not to one pupil"),
+            pair("Jaringan sekolah yang goyah, satu perangkat ruangan, atau kejadian "
+                 "di dalam kelas — pada jam yang sama, dan bukan pilihan murid.",
+                 "The school's network wavering, one device in the room, or something "
+                 "happening in class — in the same minute, and not a pupil's choice."),
             "high" if share >= 0.8 else "medium",
-            "Tanyakan ke pengawas apa yang terjadi di ruangan pada jam itu sebelum "
-            "membaca catatan siapa pun."))
+            pair("Tanyakan ke pengawas apa yang terjadi di ruangan pada jam itu "
+                 "sebelum membaca catatan siapa pun.",
+                 "Ask the invigilator what happened in the room at that hour before "
+                 "reading anyone's record.")))
 
     if sample_size < attempt_summary.MIN_BASELINE_N:
         found.append(_observation(
-            SMALL_KEY, "Kelas terlalu kecil untuk dibandingkan",
-            f"{sample_size} kertas masuk, dan pembanding kelas baru bermakna mulai "
-            f"{attempt_summary.MIN_BASELINE_N}",
-            "tidak ada pembanding yang bisa dibuat dari kelas sekecil ini",
-            "Sebaran dari beberapa murid saja dipengaruhi satu orang, jadi angka "
-            "yang tampak menonjol di sini bisa hanya satu kertas.",
+            SMALL_KEY,
+            pair("Kelas terlalu kecil untuk dibandingkan",
+                 "The class is too small to compare against"),
+            pair(f"{sample_size} kertas masuk, dan pembanding kelas baru bermakna "
+                 f"mulai {attempt_summary.MIN_BASELINE_N}",
+                 f"{sample_size} papers in, and a class comparison only means "
+                 f"something from {attempt_summary.MIN_BASELINE_N}"),
+            pair("tidak ada pembanding yang bisa dibuat dari kelas sekecil ini",
+                 "no comparison can be made from a class this small"),
+            pair("Sebaran dari beberapa murid saja dipengaruhi satu orang, jadi angka "
+                 "yang tampak menonjol di sini bisa hanya satu kertas.",
+                 "A distribution built from a few pupils is moved by one of them, so "
+                 "a number that looks remarkable here can be a single paper."),
             "high",
-            "Baca kertasnya satu per satu; halaman ini tidak bisa membandingkannya."))
+            pair("Baca kertasnya satu per satu; halaman ini tidak bisa "
+                 "membandingkannya.",
+                 "Read the papers one by one; this page cannot compare them.")))
         return found
 
     for summary in summaries or []:
         sid = summary.get("student_id")
         if not _measured(summary):
             found.append(_observation(
-                "unmeasured_sitting", "Sitting tanpa catatan kejadian",
-                f"tidak ada baris kejadian untuk {names.get(sid, sid)}",
-                "hanya penalti yang tercatat untuk kertas ini",
-                "Kertas ini ditulis sebelum pencatatan kejadian berjalan, atau "
-                "penyimpanan kejadiannya gagal — keduanya soal waktu, bukan perilaku.",
+                "unmeasured_sitting",
+                pair("Sitting tanpa catatan kejadian",
+                     "A sitting with no event record"),
+                pair(f"tidak ada baris kejadian untuk {names.get(sid, sid)}",
+                     f"no event row for {names.get(sid, sid)}"),
+                pair("hanya penalti yang tercatat untuk kertas ini",
+                     "only the penalties were recorded for this paper"),
+                pair("Kertas ini ditulis sebelum pencatatan kejadian berjalan, atau "
+                     "penyimpanan kejadiannya gagal — keduanya soal waktu, bukan "
+                     "perilaku.",
+                     "This paper was written before event recording ran, or its event "
+                     "storage failed — both are about timing, not behaviour."),
                 "low",
-                "Jika metrik konektivitas penting untuk kelas ini, ulangi ujiannya "
-                "dengan rilis yang mencatat kejadian.", student_id=sid))
+                pair("Jika metrik konektivitas penting untuk kelas ini, ulangi "
+                     "ujiannya dengan rilis yang mencatat kejadian.",
+                     "If connectivity metrics matter for this class, run the exam "
+                     "again on a release that records events."), student_id=sid))
             continue
 
         for metric, label, unit in FACTS:
@@ -279,39 +332,71 @@ def observations(*, summaries, baseline, names=None, sample_size,
             if row.get("small_sample") or not is_far(value, row.get("p90")):
                 continue
             found.append(_observation(
-                f"far_{metric}", f"{label} jauh di atas kebiasaan kelas",
-                f"{fmt(value, unit)} untuk {names.get(sid, sid)}",
-                f"median kelas {fmt(row.get('p50'), unit)} · p90 {fmt(row.get('p90'), unit)}",
-                "Notifikasi ponsel, panggilan masuk, popup izin, perpindahan aplikasi "
-                "yang tidak disengaja, layar yang tidur, atau jaringan yang buruk di "
-                "satu perangkat — semuanya menghasilkan angka seperti ini.",
+                f"far_{metric}",
+                pair(f"{label['id']} jauh di atas kebiasaan kelas",
+                     f"{label['en']} is far above this class's usual"),
+                pair(f"{fmt(value, unit)['id']} untuk {names.get(sid, sid)}",
+                     f"{fmt(value, unit)['en']} for {names.get(sid, sid)}"),
+                pair(f"median kelas {fmt(row.get('p50'), unit)['id']}"
+                     f" · p90 {fmt(row.get('p90'), unit)['id']}",
+                     f"class median {fmt(row.get('p50'), unit)['en']}"
+                     f" · p90 {fmt(row.get('p90'), unit)['en']}"),
+                pair("Notifikasi ponsel, panggilan masuk, popup izin, perpindahan "
+                     "aplikasi yang tidak disengaja, layar yang tidur, atau jaringan "
+                     "yang buruk di satu perangkat — semuanya menghasilkan angka "
+                     "seperti ini.",
+                     "A phone notification, an incoming call, a permission prompt, an "
+                     "accidental app switch, a sleeping screen, or one device on a bad "
+                     "connection — all of them produce a number like this."),
                 "medium" if metric in ("away_count", "away_total_ms") else "low",
-                "Tanyakan ke murid apa yang terjadi pada jam itu; bandingkan dengan "
-                "catatan kelas, bukan dengan satu kertas.", student_id=sid))
+                pair("Tanyakan ke murid apa yang terjadi pada jam itu; bandingkan "
+                     "dengan catatan kelas, bukan dengan satu kertas.",
+                     "Ask the pupil what happened at that hour; compare with the "
+                     "class's record, not with a single paper."), student_id=sid))
 
         if _number(summary.get("away_unknown_count")):
             found.append(_observation(
-                "unknown_absence", "Ketidakhadiran yang lamanya tidak diukur",
-                f"{fmt(summary.get('away_unknown_count'))} kejadian untuk "
-                f"{names.get(sid, sid)}",
-                "penalti dijatuhkan saat kejadian terlihat, jadi durasinya tidak dicatat",
-                "Tidak ada yang salah dengan muridnya di sini: yang hilang adalah "
-                "*pengukurannya*. Kejadian yang lewat tenggang dihitung seketika, dan "
-                "jamnya tidak sempat berjalan.",
+                "unknown_absence",
+                pair("Ketidakhadiran yang lamanya tidak diukur",
+                     "An absence whose length was not measured"),
+                pair(f"{fmt(summary.get('away_unknown_count'))['id']} kejadian untuk "
+                     f"{names.get(sid, sid)}",
+                     f"{fmt(summary.get('away_unknown_count'))['en']} events for "
+                     f"{names.get(sid, sid)}"),
+                pair("penalti dijatuhkan saat kejadian terlihat, jadi durasinya tidak "
+                     "dicatat",
+                     "the penalty was charged the moment the absence was seen, so its "
+                     "length was never recorded"),
+                pair("Tidak ada yang salah dengan muridnya di sini: yang hilang adalah "
+                     "*pengukurannya*. Kejadian yang lewat tenggang dihitung seketika, "
+                     "dan jamnya tidak sempat berjalan.",
+                     "Nothing is wrong with the pupil here: what is missing is the "
+                     "*measurement*. An absence past the grace is charged on sight, and "
+                     "its clock never ran."),
                 "low",
-                "Kalau lamanya penting, tanyakan langsung — halaman ini tidak bisa "
-                "mengatakannya.", student_id=sid))
+                pair("Kalau lamanya penting, tanyakan langsung — halaman ini tidak "
+                     "bisa mengatakannya.",
+                     "If the length matters, ask directly — this page cannot say it."),
+                student_id=sid))
 
         if summary.get("truncated"):
             found.append(_observation(
-                "truncated_log", "Catatan kejadian terpotong",
-                f"lebih dari {attempt_summary.MAX_EVENTS} kejadian tercatat untuk "
-                f"{names.get(sid, sid)}",
-                "yang tersimpan adalah batas bacaannya, bukan jumlah kejadiannya",
-                "Perangkat atau koneksi yang membanjiri log — sering justru tanda "
-                "masalah teknis, bukan aktivitas.",
+                "truncated_log",
+                pair("Catatan kejadian terpotong", "The event record was truncated"),
+                pair(f"lebih dari {attempt_summary.MAX_EVENTS} kejadian tercatat "
+                     f"untuk {names.get(sid, sid)}",
+                     f"more than {attempt_summary.MAX_EVENTS} events recorded for "
+                     f"{names.get(sid, sid)}"),
+                pair("yang tersimpan adalah batas bacaannya, bukan jumlah kejadiannya",
+                     "what was stored is the read limit, not the number of events"),
+                pair("Perangkat atau koneksi yang membanjiri log — sering justru tanda "
+                     "masalah teknis, bukan aktivitas.",
+                     "A device or a connection flooding the log — often the sign of a "
+                     "technical problem rather than of activity."),
                 "low",
-                "Jangan membaca jumlah kejadiannya sebagai ukuran; baca urutannya.",
+                pair("Jangan membaca jumlah kejadiannya sebagai ukuran; baca "
+                     "urutannya.",
+                     "Do not read the event count as a measure; read the order."),
                 student_id=sid))
 
     if shared_window:

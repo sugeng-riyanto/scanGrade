@@ -253,11 +253,17 @@ class TestBothDashboardsRenderTheTimeline:
             "the teacher invigilation page's route reads no timeline")
 
     def test_every_new_string_is_bilingual(self):
+        """The three pages that show a timeline all follow the toggle."""
         for template in (SESSION_TEMPLATE, TEACHER_INVIG, OFFICIAL_INVIG):
             text = template.read_text(encoding="utf-8")
-            if template is SESSION_TEMPLATE:
-                # The session page is Indonesian-only by design (printed surfaces
-                # are excluded from the toggle); it must not pretend otherwise.
-                assert "content_lang = 'id'" in text
-                continue
             assert "t('" in text, f"{template.name} carries no i18n helper"
+        # The session page's labels and details arrive from `entry()` as `(id, en)`
+        # pairs, because its reader can switch *after* the JSON landed: a string
+        # `describe()` froze in one language stays in it for the life of the page.
+        session = SESSION_TEMPLATE.read_text(encoding="utf-8")
+        assert "label_pair" in session, (
+            "the session page renders the frozen label, so a toggle after load "
+            "leaves half the trail in the other language")
+        assert "content_lang" not in session, (
+            "the session page is translated now; a pin would freeze its document "
+            "language while the copy switched")

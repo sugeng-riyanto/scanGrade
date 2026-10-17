@@ -408,3 +408,98 @@ class TestTheRouteIsGuardedAndTidied:
     def test_the_breadcrumb_knows_the_page(self):
         text = BASE.read_text(encoding="utf-8")
         assert "'sessions'" in text, "the breadcrumb has no label for the session page"
+# ── the copy follows the toggle, including the part the server builds ────────
+
+def _pairs(value, path="root"):
+    """Every `(id, en)` pair in a structure, with where it was found."""
+    if isinstance(value, dict):
+        if set(value) == {"id", "en"}:
+            yield path, value
+            return
+        for key, inner in value.items():
+            yield from _pairs(inner, f"{path}.{key}")
+    elif isinstance(value, list):
+        for index, inner in enumerate(value):
+            yield from _pairs(inner, f"{path}[{index}]")
+
+
+class TestTheCopyFollowsTheToggle:
+    """The page is read in either language, and half its copy is built in Python.
+
+    A sentence assembled by the service is frozen in the language it was built in —
+    the reason `auth_messages` carries both halves — so the labels, the durations and
+    every observation have to arrive as `(id, en)` and the page has to pick one at
+    render time. The durations are the case that makes this non-trivial: `3 mnt 05
+    dtk` and `3 min 05 s` are one instant in two languages, so a bare number cannot
+    carry the unit.
+    """
+
+    def test_every_sentence_the_service_builds_carries_both_halves(self):
+        summary = _summary("s1", away_count=9, away_total_ms=65_000,
+                           away_unknown_count=1)
+        baseline = _baseline({"away_count": 1, "away_total_ms": 1000})
+        facts = session_review.facts_for(
+            summary, {row["metric"]: row for row in baseline})
+        observations = session_review.observations(
+            summaries=[summary], baseline=baseline, names={"s1": "Ayu"},
+            sample_size=30,
+            shared_window={"start": "2026-10-17 08:05:00",
+                           "end": "2026-10-17 08:05:59", "share": 0.9})
+        found = list(_pairs({"facts": facts, "observations": observations}))
+        assert found, "nothing bilingual came back at all"
+        for where, pair in found:
+            assert pair["id"].strip() and pair["en"].strip(), f"{where} has an empty half"
+        # A count is the same string in both languages; a sentence is not. Asserting
+        # this on the sentences only is what keeps the check from demanding a
+        # translation of `9`.
+        for row in observations:
+            assert row["title"]["id"] != row["title"]["en"], row["title"]
+            assert row["explanation"]["id"] != row["explanation"]["en"]
+
+    def test_a_duration_is_words_in_both_languages(self):
+        assert session_review.fmt(65_000, "ms") == {"id": "1 mnt 05 dtk",
+                                                    "en": "1 min 05 s"}
+        assert session_review.fmt(45_000, "ms") == {"id": "45 dtk", "en": "45 s"}
+        assert session_review.fmt(None)["en"] == "not measured"
+
+    def test_the_page_renders_the_pairs_rather_than_the_frozen_strings(self):
+        text = PAGE.read_text(encoding="utf-8")
+        for binding in ("P(o.title)", "P(o.evidence)", "P(o.comparison)",
+                        "P(o.explanation)", "P(o.follow_up)", "P(f.label)",
+                        "P(f.value)", "P(f.comparison)", "P(ev.label_pair)",
+                        "P(ev.detail_pair)"):
+            assert binding in text, (
+                f"the page renders `{binding}` nowhere, so that string stays in "
+                f"whichever language the server built it in")
+        assert "content_lang" not in text, (
+            "a pin would freeze the document language while the copy switched")
+
+
+class TestTheRoomIsLive:
+    """A room a teacher watches has to show the sitting as it happens."""
+
+    def test_polling_is_on_by_default(self):
+        text = PAGE.read_text(encoding="utf-8")
+        assert "autoRefresh: true" in text, (
+            "the room starts frozen, so a teacher who does not spot the checkbox "
+            "reads the numbers from the moment the page opened")
+
+    def test_a_hidden_tab_does_not_poll(self):
+        text = PAGE.read_text(encoding="utf-8")
+        assert "!document.hidden" in text, (
+            "every hidden tab keeps asking, which is load nobody is looking at")
+        assert "visibilitychange" in text, (
+            "a tab that comes back waits for the next tick instead of refreshing")
+
+    def test_the_reader_can_see_when_it_last_refreshed(self):
+        text = PAGE.read_text(encoding="utf-8")
+        assert "updatedAt" in text and "toLocaleTimeString" in text, (
+            "without a stamp the reader cannot tell live numbers from stale ones")
+
+    def test_a_status_is_a_word_in_the_readers_language(self):
+        text = PAGE.read_text(encoding="utf-8")
+        assert "statusLabel(s)" in text, (
+            "the row prints the raw status key (`not_started`), which is neither "
+            "language")
+        for word in ("Belum mulai", "Dikumpulkan", "Dinilai"):
+            assert word in text, f"the status map lost `{word}`"

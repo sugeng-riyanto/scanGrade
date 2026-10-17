@@ -465,6 +465,13 @@ TRANSLATED = [
     # child's page in English reads *all* of it — the states, the level names, the
     # strengths and the remediation all arrive from the service as pairs.
     "teacher/analysis_student.html",
+    # The one page that describes a sitting: the room, each paper, and the trail of
+    # transitions. It was pinned to Indonesian (`content_lang = 'id'`) because its
+    # copy had no English half — and its copy is not only in the template: the
+    # labels, the durations (`3 mnt 05 dtk`) and every observation are built by
+    # `session_review`, so those arrive as `(id, en)` pairs now and the page picks a
+    # half at render time. The pin is gone; the page switches.
+    "teacher/session_review.html",
     "admin_sekolah/dashboard.html",
     "admin_sekolah/import.html",
     # The officials roster: where a school admin creates and manages its kepala
@@ -1017,7 +1024,10 @@ def test_the_translated_list_only_grows_with_intent():
     # rather than translated afterwards. The rule is unchanged: bumping the number is
     # the deliberate act for a page that is added, and a page that no longer exists
     # has to leave the list.
-    assert len(TRANSLATED) == 60, (
+    # 61: `teacher/session_review.html` — the session room and its trail — is the
+    # page this bump adds. Its copy is pairs in the template *and* pairs from the
+    # service, which is what makes the toggle work after the JSON has arrived.
+    assert len(TRANSLATED) == 61, (
         f"{len(TRANSLATED)} pages are on the translated list. Bump this number when "
         f"you translate another one — and if you *removed* a page, put it back, "
         f"because dropping it turns the sweep off for that page: {TRANSLATED}")
