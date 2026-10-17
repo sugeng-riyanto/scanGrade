@@ -113,6 +113,27 @@
             </div>
         </div>
 
+            <!-- Step 7 — the school's side of the same door. The page named here is
+                 `/admin-sekolah/seb-refusals`; it is ranked worst first, which is the
+                 difference between this step and the teacher's panel: the panel answers
+                 about one paper after the fact, this answers about the school before
+                 the next sitting. -->
+            <div class="demo-card bg-white rounded-2xl p-6 lg:p-8 shadow-lg shadow-surface-200/40 border border-surface-100 flex flex-col lg:flex-row gap-6 items-start">
+                <div class="step-num bg-gradient-to-br from-rose-500 to-rose-600 text-white shadow-lg shadow-rose-500/20 flex items-center justify-center shrink-0"><span>7</span></div>
+                <div class="flex-1">
+                    <h3 class="text-xl font-extrabold text-surface-800" x-text="t('Memantau Pintu SEB','Watching the SEB Door')"></h3>
+                    <p class="mt-2 text-surface-500" x-text="t('Kalau sekolah mewajibkan SEB pada sebagian ujian, halaman SEB menampilkan siapa yang tidak bisa masuk, di kelas mana, dan pada ujian mana, diurutkan dari yang paling sering — supaya polanya terlihat sebelum ujian berikutnya, bukan sesudahnya. Halaman yang sama juga menyiapkan ujian berikutnya: satu panel menyebut nama murid dan perangkat tempat mereka ditolak, jadi pagi hari ujian jawabannya sebuah nama, bukan tren. Satu catatan untuk kebijakan sekolah: penolakan bukan pelanggaran. Penyebab paling umum adalah murid yang membuka tautan di browser biasa, atau berkas .seb yang diubah guru setelah dibagikan.','When the school requires SEB on some papers, the SEB page shows who could not get in, in which class and on which paper, ranked worst first — so the pattern is visible before the next sitting rather than after it. The same page prepares the coming paper: one panel names the pupils and the device each of them was refused on, so on the morning of a sitting the answer is a name, not a trend. One note for school policy: a refusal is not a violation. The most common cause is a pupil opening the link in an ordinary browser, or a .seb file a teacher edited after handing it out.')"></p>
+                    <div class="mt-4 flex flex-wrap gap-2">
+                        <span class="px-3 py-1.5 bg-rose-50 text-rose-700 rounded-lg text-xs font-bold flex items-center gap-1"><i class="fas fa-door-closed"></i> <span x-text="t('Siapa yang tidak bisa masuk','Who could not get in')"></span></span>
+                        <span class="px-3 py-1.5 bg-blue-50 text-blue-700 rounded-lg text-xs font-bold flex items-center gap-1"><i class="fas fa-table-list"></i> <span x-text="t('Per kelas dan per ujian','Per class and per paper')"></span></span>
+                        <span class="px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-lg text-xs font-bold flex items-center gap-1"><i class="fas fa-user-check"></i> <span x-text="t('Nama sebelum ujian, bukan tren sesudahnya','A name before, not a trend after')"></span></span>
+                    </div>
+                    <div class="mt-3 p-4 bg-amber-50 rounded-xl flex items-start gap-3">
+                        <i class="fas fa-circle-info text-amber-500 mt-0.5"></i>
+                        <p class="text-sm text-amber-800 font-medium"><span x-text="t('Halaman ini ada di menu sekolah sebagai Daftar SEB. Panduan murid ada di','This page sits in the school menu as the SEB list. The student guide is at')"></span> <a href="/panduan/seb" class="font-bold underline">/panduan/seb</a><span x-text="t('.','.')"></span></p>
+                    </div>
+                </div>
+            </div>
         <!-- CTA -->
         <div class="mt-12 text-center bg-gradient-to-r from-blue-500 to-blue-600 rounded-2xl p-8 lg:p-12 shadow-xl">
             <h2 class="text-2xl font-extrabold text-white" x-text="t('Kelola sekolah Anda','Manage your school')"></h2>

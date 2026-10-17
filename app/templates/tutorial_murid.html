@@ -149,6 +149,26 @@
                     </div>
                 </div>
             </div>
+            <!-- Step 6 — the locked paper. Last on the page and *before* step 1 in a
+                 real sitting: a pupil reaches this page because the door already
+                 turned them away, so the card is written for someone who is looking
+                 at the wrong screen right now. -->
+            <div class="demo-card bg-white rounded-2xl p-6 lg:p-8 shadow-lg shadow-surface-200/40 border border-surface-100 flex flex-col lg:flex-row gap-6 items-start">
+                <div class="step-num bg-gradient-to-br from-amber-500 to-amber-600 text-white shadow-lg shadow-amber-500/20 flex items-center justify-center shrink-0"><span>6</span></div>
+                <div class="flex-1">
+                    <h3 class="text-xl font-extrabold text-surface-800" x-text="t('Kalau Ujiannya Wajib Safe Exam Browser','If the Exam Requires Safe Exam Browser')"></h3>
+                    <p class="mt-2 text-surface-500" x-text="t('Sebagian ujian hanya bisa dibuka lewat Safe Exam Browser (SEB). Kamu tidak perlu mengatur apa pun: buka berkas .seb yang diberikan guru atau pengawas, lalu ujian terbuka sendiri dalam keadaan terkunci. Kalau kamu sudah membukanya di SEB, kembali ke halaman ini, dan masih melihat pesan yang sama, tekan Periksa lagi — tautan ujiannya tidak perlu dicari lagi. Kalau tetap tidak bisa, panggil pengawas: kata sandi keluar SEB hanya dipegang guru dan pengawas, tidak pernah diberikan ke murid.','Some exams can only be opened in Safe Exam Browser (SEB). You do not configure anything: open the .seb file your teacher or invigilator gave you, and the exam opens itself, locked. If you already opened it in SEB, came back to this page and still see the same message, press Check again — there is no link to hunt for. If it still does not work, call your invigilator: the SEB quit password is held by teachers and invigilators and is never given to students.')"></p>
+                    <div class="mt-4 flex flex-wrap gap-2">
+                        <span class="px-3 py-1.5 bg-amber-50 text-amber-700 rounded-lg text-xs font-bold flex items-center gap-1"><i class="fas fa-file-shield"></i> <span x-text="t('Berkas .seb dari sekolah','The .seb file from your school')"></span></span>
+                        <span class="px-3 py-1.5 bg-blue-50 text-blue-700 rounded-lg text-xs font-bold flex items-center gap-1"><i class="fas fa-rotate-right"></i> <span x-text="t('Tombol Periksa lagi','The Check again button')"></span></span>
+                        <span class="px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-lg text-xs font-bold flex items-center gap-1"><i class="fas fa-user-shield"></i> <span x-text="t('Pengawas memegang kata sandinya','The invigilator holds the password')"></span></span>
+                    </div>
+                    <div class="mt-3 p-4 bg-amber-50 rounded-xl flex items-start gap-3">
+                        <i class="fas fa-circle-info text-amber-500 mt-0.5"></i>
+                        <p class="text-sm text-amber-800 font-medium"><span x-text="t('Panduan lengkap untuk murid dan orang tua ada di','The full guide for students and parents is at')"></span> <a href="/panduan/seb" class="font-bold underline">/panduan/seb</a> <span x-text="t('dan bisa dibaca tanpa masuk.','and needs no sign-in.')"></span></p>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- CTA -->

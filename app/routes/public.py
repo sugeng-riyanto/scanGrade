@@ -2,8 +2,8 @@
 
 import io
 from datetime import datetime, timezone
-from flask import (Blueprint, abort, jsonify, render_template, request,
-                   send_file)
+from flask import (Blueprint, abort, current_app, jsonify, redirect,
+                   render_template, request, send_file)
 from app.utils.auth import get_supabase
 from app.utils.helpers import row_or_none
 from app.utils.logger import get_logger
@@ -35,35 +35,83 @@ def pricing():
     return render_template("pricing.html", plans=plans)
 
 
+# ── the demo request: to a person, not into a table ─────────────────────────
+#
+# This route used to write an `audit_logs` row and answer `{"success": true}` — a
+# green tick for the school and nothing at all for the team, because nobody watches
+# an audit table for leads. It now mails the request to the address the team actually
+# reads and hands the visitor straight to WhatsApp, which are the two things the form
+# has always appeared to do.
+#
+# Two callers, one handler: a browser form posts here and is **redirected** to the
+# WhatsApp deep link (`wa.me` carries the typed details as the message text), while a
+# JSON caller gets the same facts as JSON, `whatsapp_url` included. One route rather
+# than two, so the validation, the audit row and the mail cannot drift apart.
+#
+# The rate limit is not decoration: this endpoint sends mail, so an unthrottled POST
+# loop is a way to fill somebody else's inbox. The limit is on the public host, and a
+# refused request is refused before any mail is built.
 @public_bp.route("/api/demo-request", methods=["POST"])
+@_rate_limit("5 per minute; 20 per hour")
 def demo_request():
-    data = request.get_json()
-    if not data:
-        return jsonify({"success": False, "message": "Data tidak boleh kosong"}), 400
+    from app.services import demo_leads
+
+    submitted = request.get_json(silent=True) if request.is_json else request.form
+    data = submitted or {}
+    wants_json = request.is_json
+
+    def fail(message: str, status: int = 400):
+        """The refusal in the shape the caller used."""
+        if wants_json:
+            return jsonify({"success": False, "message": message}), status
+        return redirect("/?demo=invalid")
 
     school_name = (data.get("school_name") or "").strip()
     email = (data.get("email") or "").strip()
     phone = (data.get("phone") or "").strip()
-    message = (data.get("message") or "").strip()
+    note = (data.get("message") or "").strip()
 
     if not school_name:
-        return jsonify({"success": False, "message": "Nama sekolah wajib diisi"}), 400
+        return fail("Nama sekolah wajib diisi")
     if not email or "@" not in email:
-        return jsonify({"success": False, "message": "Email tidak valid"}), 400
+        return fail("Email tidak valid")
 
-    supabase = get_supabase()
+    # The request is recorded first, so a mail that fails still leaves the lead
+    # somewhere a human can find it — the one part of this route that was already
+    # working is kept working.
     try:
-        supabase.table("audit_logs").insert({
+        get_supabase().table("audit_logs").insert({
             "action": "demo_request",
             "entity_type": "lead",
-            "new_data": {"school_name": school_name, "email": email, "phone": phone, "message": message},
+            "new_data": {"school_name": school_name, "email": email,
+                         "phone": phone, "message": note},
             "created_at": datetime.now(timezone.utc).isoformat(),
         }).execute()
-        logger.info("Demo request from %s (%s)", school_name, email)
-        return jsonify({"success": True, "message": "Terima kasih! Tim kami akan menghubungi Anda."})
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — a lost audit row must not lose the lead
         logger.warning("Failed to save demo request: %s", e)
-        return jsonify({"success": True, "message": "Terima kasih! Kami akan menghubungi Anda."})
+
+    outcome = demo_leads.notify(school_name, email, phone, note)
+    # The app's own logger, not the module's: `get_logger("public")` propagates to a
+    # root logger nothing configures, so its INFO lines are dropped — and this is the
+    # one line an operator reads to answer "did the team get told?". Measured on a
+    # local box: the route answered `emailed: true` and the journal had no such line.
+    current_app.logger.info("Demo request from %s (%s): mailed=%s to %s went=%s",
+                            school_name, email, outcome["sent"], outcome["to"] or "-",
+                            outcome.get("why") or "ok")
+    whatsapp = demo_leads.whatsapp_url(school_name, email, phone)
+
+    if wants_json:
+        return jsonify({
+            "success": True,
+            "emailed": outcome["sent"],
+            "message": "Terima kasih! Tim kami akan menghubungi Anda.",
+            "whatsapp_url": whatsapp,
+        })
+    # Straight to WhatsApp when the deployment has a number — that is the fastest
+    # answer a school can get, and the request is already with the team either way.
+    # Without a number there is nowhere to send them, so they land back on the form
+    # with the confirmation the page renders for `?demo=sent`.
+    return redirect(whatsapp or "/?demo=sent#demo")
 
 
 @public_bp.route("/capacity")

@@ -418,6 +418,81 @@ automated message, replies are not read.
     return {"subject": subject, "html": html_body, "text": text}
 
 
+def demo_request(*, school_name, email, phone="", message="", submitted_at="") -> dict:
+    """A demo request, as the ScanGrade team reads it.
+
+    The only body here whose reader is *us* rather than a school, and it is written
+    the same way for the same reason: the request used to reach nobody at all — the
+    form POSTed to a route that wrote an `audit_logs` row and returned "thank you",
+    so a school that asked for a demo got a green tick and the team got nothing to
+    answer. It now goes to the mailbox the team actually reads (see
+    `app/services/demo_leads.py`) with `Reply-To` set to the school's own address, so
+    answering it is one press rather than a lookup.
+
+    Bilingual like every other body, because the two people who read it are the same
+    two people the product has: the Indonesian half is the one that gets acted on and
+    the English half is what keeps the module's own contract honest ("every body is a
+    pair", held by `tests/unit/test_email_bodies.py`).
+    """
+    subject = _header_line(f"[ScanGrade] Permintaan Demo — {school_name}")
+    rows = [("Sekolah", school_name), ("Email", email), ("WhatsApp", phone or "—")]
+    if submitted_at:
+        rows.append(("Diterima", submitted_at))
+    note = ("Balas email ini untuk menjawab langsung ke sekolah tersebut. / "
+            "Reply to this email to answer the school directly.")
+    html_body = layout(
+        title="Permintaan Demo",
+        preheader=f"{school_name} meminta demo ScanGrade.",
+        indonesian=(
+            _paragraph(f"<strong>{escape(school_name)}</strong> meminta demo ScanGrade "
+                       "lewat formulir di halaman depan.")
+            + details(rows)
+            + (_paragraph(f"Pesan dari sekolah:<br><em>{escape(message)}</em>")
+               if message else "")
+            + _paragraph(f'<span style="color:{MUTED};font-size:13px;">{escape(note)}</span>')
+        ),
+        english=(
+            _paragraph(f"<strong>{escape(school_name)}</strong> asked for a ScanGrade "
+                       "demo through the form on the landing page.")
+            + details(rows)
+            + (_paragraph(f"Message from the school:<br><em>{escape(message)}</em>")
+               if message else "")
+            + _paragraph(f'<span style="color:{MUTED};font-size:13px;">The WhatsApp '
+                         "number above is the school's own, given for this request."
+                         "</span>")
+        ),
+    )
+    text = f"""Permintaan demo ScanGrade
+
+{school_name} meminta demo lewat formulir di halaman depan.
+
+Sekolah             : {school_name}
+Email               : {email}
+WhatsApp            : {phone or '-'}
+{('Diterima            : ' + submitted_at) if submitted_at else ''}
+{('Pesan               : ' + message) if message else ''}
+
+Balas email ini untuk menjawab langsung ke sekolah tersebut.
+
+------------------------------------------------------------------
+English
+
+{school_name} asked for a ScanGrade demo through the form on the landing page.
+
+School        : {school_name}
+Email         : {email}
+WhatsApp      : {phone or '-'}
+
+Reply to this email to answer the school directly.
+
+--
+{BRAND_NAME} · {BRAND_URL}
+{SUPPORT_ADDRESS} — pesan otomatis, balasan ke alamat ini tidak dibaca /
+automated message, replies are not read.
+"""
+    return {"subject": subject, "html": html_body, "text": text}
+
+
 def registration_received(*, name, school_name, npsn, position=None) -> dict:
     """The acknowledgement `/auth/register` sends the school that just signed up.
 

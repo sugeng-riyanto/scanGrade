@@ -589,7 +589,14 @@ def create_app(env=None):
         # asking for it here would be a second source of truth — and the one that
         # could silently disagree. The toggle writes `sg_lang`, so a visitor who
         # picks Indonesian keeps it across the whole app.
-        resp = make_response(render_template("landing.html"))
+        # The one figure the landing page prints that is a *behaviour* rather than a
+        # measurement: the countdown the exam screen gives before it records an
+        # absence. Read from the constant the screen counts with, the same way the
+        # student tutorial reads it — a page that promises a number it does not count
+        # with is how this class of drift reads.
+        from app.services.anti_cheat_service import AWAY_GRACE_SECONDS
+        resp = make_response(render_template("landing.html",
+                                             away_grace_seconds=AWAY_GRACE_SECONDS))
         resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
         resp.headers["Pragma"] = "no-cache"
         return resp

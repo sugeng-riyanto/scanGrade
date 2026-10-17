@@ -168,6 +168,46 @@ EVIDENCE: dict[str, list[tuple[str, list[str]]]] = {
         ("supabase/migrations/038_school_officials_roles.sql",
          [r"\bprofiles_role_check\b"]),
     ],
+    # The lockdown: a paper that may only be opened in Safe Exam Browser. Three
+    # claims and each is anchored on the artifact that *is* the claim — the door
+    # that decides, the file plus key that make it possible, and the page a pupil
+    # lands on when they opened the wrong thing (whose two buttons are the whole
+    # remedy: check again, or fetch the file the school meant to hand over).
+    "seb": [
+        ("app/services/seb_service.py",
+         [r"\bdef gated\b", r"\bdef verify\b", r"\bdef issue\b",
+          r"\bdef file_is_current\b"]),
+        ("app/services/seb_access.py",
+         [r"\bdef decide\b", r"\bdef in_duty_window\b"]),
+        ("app/services/seb_config_key.py", [r"\bCONFIG_KEY_HEADER\b"]),
+        ("app/routes/seb.py", [r"/student/exams/<exam_id>/seb-file"]),
+        ("app/templates/student/seb_claim.html",
+         [r"Periksa lagi", r"Unduh berkas .seb saya"]),
+    ],
+    # The half of the analytics picture the results pages never showed: what the
+    # class did *per question*, both families of it — classical item statistics and
+    # a Rasch calibration. The point-biserial/alpha/KR-20 half and the logit scale
+    # with its standard errors and t-values are separate functions, so both are
+    # anchored rather than the module merely existing.
+    "item-analysis": [
+        ("app/services/item_analysis.py",
+         [r"\bdef analyse\b", r"\bdef compare_measures\b",
+          r"\bstudent_t_two_sided_p\b"]),
+    ],
+    # "No pupil-to-pupil conversations and no broadcasts from a pupil" is a rule,
+    # not a layout, so the artifact is the function that answers which roles a
+    # caller may open a conversation with — and the student's list, which is the
+    # line that makes the rule true. The table and the unread counter are the other
+    # two claims on the card.
+    "comms": [
+        ("app/routes/api.py",
+         [r"\bdef _get_allowed_recipient_roles\b",
+          r"return \[\"guru\", \"admin_sekolah\"\]",
+          r'@api_bp\.route\("/percakapan"']),
+        ("supabase/migrations/022_pengumuman_chat.sql",
+         [r"CREATE TABLE IF NOT EXISTS percakapan"]),
+        ("supabase/migrations/017_notifications.sql", [r"\bread_at\b"]),
+    ],
     "bilingual-dark": [
         ("app/templates/base.html", [r"\bsetLang\b", r"\btoggleDark\b"]),
         # "a release is refused if any text fails a contrast check" is a deploy

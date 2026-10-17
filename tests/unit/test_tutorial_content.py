@@ -286,6 +286,13 @@ class TestTheAdminTutorialNamesRealWork:
         "Kode Aktivasi": [("/subscription", "admin_sekolah.py")],
         "Tugaskan": [("teacher_assignments", "admin_sekolah.py")],
         "Pengumuman": [("/comms", "admin_sekolah.py")],
+        # The SEB step is three promises, so it carries three proofs: the school's own
+        # ranked list of refusals, the teacher's per-paper panel, and the public guide
+        # the card links to. The link is the reason the last one is here at all — a
+        # tutorial that sends a parent to a 404 has described nothing.
+        "SEB": [("/seb-refusals", "admin_sekolah.py"),
+                ("/teacher/exams/<exam_id>/seb", "seb.py"),
+                ("/panduan/seb", "seb.py")],
     }
 
     @pytest.mark.parametrize("label,proofs", sorted(SECTIONS.items()),
@@ -296,3 +303,40 @@ class TestTheAdminTutorialNamesRealWork:
             assert route in text, (
                 f"the admin tutorial teaches '{label}' and {module} has no route "
                 f"for it ({route!r}) — the page describes work the app cannot do.")
+
+
+# ── the SEB step is on the page, not only in the map above ───────────────────
+#
+# The three tutorials each gained a card about the locked paper, written for the
+# reader that card is for: a teacher turning it on, a pupil who was just turned
+# away, an admin deciding what to do about a class that keeps being refused. A
+# page that lost its card would still render, still pass every guard above, and
+# would quietly stop explaining the one thing that makes a refused door make
+# sense. Both halves are checked, so a card whose English half was dropped cannot
+# pass as a translated one.
+
+SEB_HALVES = {
+    "tutorial_guru.html": ("Kunci Ujian dengan", "Lock an Exam with"),
+    "tutorial_murid.html": ("Kalau Ujiannya Wajib", "If the Exam Requires"),
+    "tutorial_admin_sekolah.html": ("Memantau Pintu SEB", "Watching the SEB Door"),
+}
+
+
+class TestEveryTutorialExplainsTheSEBDoor:
+
+    @pytest.mark.parametrize("name", ALL_TUTORIALS)
+    def test_both_halves_of_its_own_card_are_rendered(self, app, name):
+        body = render(app, name)
+        for half in SEB_HALVES[name]:
+            assert half in body, (
+                f"{name} no longer carries its SEB step ({half!r}). The card is the "
+                "only place these three pages explain a refused door.")
+
+    @pytest.mark.parametrize("name", ALL_TUTORIALS)
+    def test_it_points_at_the_guide_that_exists(self, app, name):
+        """The link is the step's only action, so a dead one is worth a test.
+
+        `/panduan/seb` is anonymous and bilingual; it is the page a parent reads.
+        """
+        assert 'href="/panduan/seb"' in render(app, name), (
+            f"{name} lost its link to /panduan/seb")

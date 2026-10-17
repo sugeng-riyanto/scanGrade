@@ -92,7 +92,7 @@
       "frozen": false
     },
     "admin_sekolah/grade_weights.html": {
-      "pairs": 109,
+      "pairs": 118,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": true
@@ -158,10 +158,10 @@
       "frozen": true
     },
     "admin_sekolah/school_years.html": {
-      "pairs": 2,
-      "leftovers": 9,
-      "coverage": 18.2,
-      "frozen": true
+      "pairs": 23,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
     },
     "admin_sekolah/seb_refusals.html": {
       "pairs": 72,
@@ -326,7 +326,7 @@
       "frozen": false
     },
     "landing.html": {
-      "pairs": 78,
+      "pairs": 82,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -854,19 +854,19 @@
       "frozen": false
     },
     "tutorial_admin_sekolah.html": {
-      "pairs": 38,
+      "pairs": 45,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
     },
     "tutorial_guru.html": {
-      "pairs": 38,
+      "pairs": 45,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
     },
     "tutorial_murid.html": {
-      "pairs": 43,
+      "pairs": 50,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false

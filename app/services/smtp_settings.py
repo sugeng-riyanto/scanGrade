@@ -192,7 +192,8 @@ def _message_id_domain(sender: str) -> str:
 
 
 def send(to_email: str, subject: str, body: str, html: bool = False,
-         text: str | None = None, important: bool = False):
+         text: str | None = None, important: bool = False,
+         reply_to: str | None = None):
     """Send one message through the resolved mailbox. Returns ``(ok, error)``.
 
     A tuple rather than a bare bool because "it failed" and "it failed because the
@@ -244,7 +245,13 @@ def send(to_email: str, subject: str, body: str, html: bool = False,
     # A reset code is one-way: the sending mailbox is not watched, so a reply must not
     # land in it. Set unconditionally, because a null header is what makes a mail
     # client answer the address in `From`.
-    msg["Reply-To"] = settings["reply_to"]
+    #
+    # `reply_to` is for the one mail whose reader *should* answer it without looking
+    # anything up: an incoming demo request, where the address to answer is the
+    # school's own and is known only to this call site. The resolved value stays the
+    # default, so a caller that passes nothing gets exactly the behaviour above — and
+    # the header is still never left empty.
+    msg["Reply-To"] = (reply_to or "").strip() or settings["reply_to"]
     msg["To"] = to_email
 
     try:

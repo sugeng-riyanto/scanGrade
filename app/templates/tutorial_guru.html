@@ -127,6 +127,26 @@
                     </div>
                 </div>
             </div>
+            <!-- Step 7 — the locked paper. Last, because it is the one step a teacher
+                 turns on for *some* papers rather than for every lesson, and the
+                 sentence that prevents the mistake this screen exists for (wearing it
+                 on a class of Android phones) has to be in the step, not in a manual. -->
+            <div class="demo-card bg-white rounded-2xl p-6 lg:p-8 shadow-lg shadow-surface-200/40 border border-surface-100 flex flex-col lg:flex-row gap-6 items-start">
+                <div class="step-num bg-gradient-to-br from-rose-500 to-rose-600 text-white shadow-lg shadow-rose-500/20 flex items-center justify-center shrink-0"><span>7</span></div>
+                <div class="flex-1">
+                    <h3 class="text-xl font-extrabold text-surface-800" x-text="t('Kunci Ujian dengan Safe Exam Browser','Lock an Exam with Safe Exam Browser')"></h3>
+                    <p class="mt-2 text-surface-500" x-text="t('Panel SEB ada di tiap ujian, dan diaktifkan per ujian — hanya untuk ujian yang dikerjakan di laptop Windows/Mac atau iPad: SEB tidak berjalan di HP Android atau Chromebook, dan ujian yang mewajibkannya akan memblokir murid yang hanya punya HP. Setelah diwajibkan, murid yang membuka ujian dari browser biasa ditolak, dan hanya berkas .seb yang bisa membukanya. Unduh berkasnya dari panel yang sama lalu bagikan ke murid atau pengawas. Kata sandi keluar dipegang guru dan pengawas, tidak pernah diberikan ke murid, dan dibuka dari panel saat dibutuhkan. Kalau pengaturan ujian diubah setelah berkas dibagikan, terbitkan berkas baru: berkas lama masih berjalan sampai itu dilakukan.','The SEB panel lives on each exam and is turned on per paper — only for a paper sat on a Windows/Mac laptop or an iPad: SEB does not run on Android phones or Chromebooks, and a paper that requires it will block pupils who only have a phone. Once it is on, a pupil who opens the exam from an ordinary browser is refused, and only the .seb file opens it. Download the file from the same panel and hand it to the pupils or the invigilator. The quit password is held by teachers and invigilators, is never given to pupils, and is opened from the panel when needed. If the exam settings change after the file was shared, issue a new one: the old file keeps working until you do.')"></p>
+                    <div class="mt-4 flex flex-wrap gap-2">
+                        <span class="px-3 py-1.5 bg-rose-50 text-rose-700 rounded-lg text-xs font-bold flex items-center gap-1"><i class="fas fa-laptop"></i> <span x-text="t('Laptop atau iPad, bukan HP','A laptop or iPad, not a phone')"></span></span>
+                        <span class="px-3 py-1.5 bg-blue-50 text-blue-700 rounded-lg text-xs font-bold flex items-center gap-1"><i class="fas fa-file-arrow-down"></i> <span x-text="t('Satu berkas .seb per ujian','One .seb file per exam')"></span></span>
+                        <span class="px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-lg text-xs font-bold flex items-center gap-1"><i class="fas fa-key"></i> <span x-text="t('Kata sandi keluar di guru dan pengawas','The quit password stays with staff')"></span></span>
+                    </div>
+                    <div class="mt-3 p-4 bg-amber-50 rounded-xl flex items-start gap-3">
+                        <i class="fas fa-circle-info text-amber-500 mt-0.5"></i>
+                        <p class="text-sm text-amber-800 font-medium"><span x-text="t('Panduan untuk murid dan orang tua ada di','The guide for students and parents is at')"></span> <a href="/panduan/seb" class="font-bold underline">/panduan/seb</a> <span x-text="t('dan bisa dibaca tanpa masuk.','and needs no sign-in.')"></span></p>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- CTA -->
