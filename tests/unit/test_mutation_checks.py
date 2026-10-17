@@ -137,6 +137,46 @@ class TestEveryHarnessHoldsTogether:
             "which is how restoration and the CRLF translation drift apart")
 
 
+class TestAKilledRunIsRepaired:
+    """`finally` does not run under SIGKILL, so a stranded mutation needs a repair.
+
+    Observed rather than imagined: a caller with a timeout killed a harness during its
+    first mutation, the injected defect stayed in the source, and the guards then went
+    green over a rule that could no longer fire. The harness keeps the pristine bytes
+    in the system temp dir before the first mutation, and the next run restores them
+    before it reads an anchor.
+    """
+
+    def test_a_stranded_mutation_is_put_back_before_anything_is_read(self, tmp_path):
+        from tests.mutation import harness
+
+        relative = "app/stranded.py"
+        target = tmp_path / relative
+        target.parent.mkdir(parents=True)
+        target.write_text("mutated\n", encoding="utf-8")
+        copy = harness._copy_for(relative)
+        copy.write_bytes(b"pristine\n")
+        try:
+            restored = harness.recover([relative], root=tmp_path)
+
+            assert restored == [relative], "a stranded mutation was left in place"
+            assert target.read_text(encoding="utf-8") == "pristine\n"
+            assert not copy.exists(), "the copy outlived the repair"
+        finally:
+            copy.unlink(missing_ok=True)
+
+    def test_a_clean_checkout_is_not_touched(self, tmp_path):
+        from tests.mutation import harness
+
+        relative = "app/clean.py"
+        target = tmp_path / relative
+        target.parent.mkdir(parents=True)
+        target.write_text("current\n", encoding="utf-8")
+
+        assert harness.recover([relative], root=tmp_path) == []
+        assert target.read_text(encoding="utf-8") == "current\n"
+
+
 class TestTheRunner:
     def test_check_passes_on_the_tree_and_says_what_it_read(self):
         done = _runner("--check")

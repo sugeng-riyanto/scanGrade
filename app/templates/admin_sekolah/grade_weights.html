@@ -91,6 +91,13 @@ function gradeWeights() {
         weights: {{ matrix|tojson }},
         totals: {{ totals|tojson }},
         defaults: {{ defaults|tojson }},
+        // Which year this editor writes for, and where its numbers came from
+        // (067). A year with no default of its own shows the one it inherits —
+        // `defaultSource` is what stops that from reading as "already set".
+        yearId: {{ (year.get('id') if year else '')|tojson }},
+        defaultSource: {{ default_source|tojson }},
+        defaultFromYear: {{ default_from_year|tojson }},
+        inherited: {{ default_inherited|tojson }},
         customSubjects: {{ custom_subjects|tojson }},
         compNames: {{ comp_names|tojson }},
         required: {{ required_total }},
@@ -519,25 +526,59 @@ function gradeWeights() {
             const n = parseInt(value, 10);
             if (isNaN(n) || n <= 0) { delete this.defaults[compId]; } else { this.defaults[compId] = n; }
         },
+        // The editor writes **this year's** default (067). The year rides on the
+        // request because that is the whole point: a new academic year saves its own
+        // policy while the years before it keep the weights their marks were graded
+        // under. The server answers with the resolved snapshot, so the page shows the
+        // distribution that is now in force rather than the one it hoped for.
+        applyDefault(saved) {
+            const snap = (saved && saved.default) || {};
+            if (snap.weights) { this.defaults = Object.assign({}, snap.weights); }
+            if (snap.source) { this.defaultSource = snap.source; }
+            this.defaultFromYear = (snap.from_year || {}).name || '';
+            this.subjects.forEach(s => {
+                if (!this.isCustom(s.id)) {
+                    this.weights[s.id] = Object.assign({}, this.defaults);
+                    this.totals[s.id] = this.defaultTotal();
+                }
+            });
+        },
         async saveDefaults() {
             // The default binds every subject that follows it, so the check is run
             // against the default's own policy before it is written.
             if (!(await this.confirmKkm('default', null, this.defaults))) { return; }
             if (!(await this.confirmReportedMoves('default', null, this.defaults))) { return; }
             this.saving = 'defaults'; this.msg = '';
-            this.post('/admin-sekolah/grade-weights/defaults', { weights: this.defaults })
+            this.post('/admin-sekolah/grade-weights/defaults',
+                      { weights: this.defaults, school_year_id: this.yearId })
                 .then(d => {
                     if (d.ok) {
                         // Every subject still following the default moves with it,
                         // so the matrix below never shows a stale policy.
-                        this.subjects.forEach(s => {
-                            if (!this.isCustom(s.id)) {
-                                this.weights[s.id] = Object.assign({}, this.defaults);
-                                this.totals[s.id] = this.defaultTotal();
-                            }
-                        });
+                        this.applyDefault(d.data);
                     }
                     this.flash(d.ok, d.ok ? this.t('Default tersimpan.','Default saved.') : (d.data.error || this.t('Gagal.','Failed.')));
+                    this.saving = '';
+                });
+        },
+        async clearThisYearDefault() {
+            // Removing the override is not "no weights": the year returns to the
+            // policy it was following before, so the impact check runs against that
+            // map (`inherited`) instead of an empty one — which the server would read
+            // as the simple mean and warn about a movement that is not going to
+            // happen.
+            if (!confirm(this.t('Hapus default tahun ini? Mapel yang mengikuti default kembali ke default tahun sebelumnya atau default sekolah.', 'Remove this year’s default? Subjects following it go back to the previous year’s default, or the school default.'))) { return; }
+            const back = Object.assign({}, this.inherited);
+            if (!(await this.confirmKkm('default', null, back))) { return; }
+            if (!(await this.confirmReportedMoves('default', null, back))) { return; }
+            this.saving = 'defaults'; this.msg = '';
+            this.post('/admin-sekolah/grade-weights/defaults',
+                      { weights: {}, school_year_id: this.yearId })
+                .then(d => {
+                    if (d.ok) { this.applyDefault(d.data); }
+                    this.flash(d.ok, d.ok
+                        ? this.t('Default tahun ini dihapus; tahun ini mengikuti default sebelumnya.','This year\u2019s default was removed; the year follows the previous one again.')
+                        : (d.data.error || this.t('Gagal.','Failed.')));
                     this.saving = '';
                 });
         },
@@ -616,7 +657,7 @@ function gradeWeights() {
     <div class="card p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
         <div>
             <h2 class="text-lg font-extrabold text-slate-800" x-text="t('Komponen & Bobot Nilai','Grade Components & Weights')"></h2>
-            <p class="text-xs text-slate-500 font-medium" x-text="t('Atur default sekolah sekali, lalu tiap mapel mengikutinya. Default diatur per tahun ajaran; totalnya harus 100%.','Set the school default once; each subject follows it. The default is per subject per year; the total must reach 100%.')"></p>
+            <p class="text-xs text-slate-500 font-medium" x-text="t('Atur default sekolah sekali, lalu tiap mapel mengikutinya. Bobot default ditetapkan per tahun ajaran; totalnya harus 100%.','Set the school default once; each subject follows it. A default is set per academic year; the total must reach 100%.')"></p>
             <!-- How much of the school is on the default and how much carries its
                  own distribution — the question the flat subject list never
                  answered. -->
@@ -673,9 +714,32 @@ function gradeWeights() {
                     <div>
                         <h3 class="text-sm font-extrabold text-slate-700"><i class="fas fa-star text-brand-500 mr-1"></i><span x-text="t('Bobot Default Sekolah','School Default Weights')"></span></h3>
                         <p class="text-xs text-slate-500 font-medium" x-text="t('Semua mapel mengikuti ini sampai diubah di bawah.','Every subject follows this until changed below.')"></p>
+                        {# Where the numbers above came from: this year's own policy, the
+                           one it inherits, or the pre-version school default. Without
+                           this line an inherited default reads as one this year already
+                           set, and "Save" then looks like a no-op when it is in fact the
+                           act that pins the year. #}
+                        <p class="text-xs font-medium mt-0.5" data-default-source="{{ default_source }}">
+                            <span x-show="defaultSource === 'year'" class="text-emerald-600"
+                                  x-text="t('Default khusus tahun ini. Tahun ajaran lain tidak ikut berubah.','This year has its own default. Other years do not move with it.')"></span>
+                            <span x-show="defaultSource === 'inherited'" class="text-amber-600">
+                                <span x-text="t('Belum ada default tahun ini — mengikuti','No default for this year yet — following')"></span>
+                                <span class="font-bold" x-text="defaultFromYear"></span>
+                                <span x-text="t('Menyimpan di sini menetapkan default tahun ini','Saving here makes it this year’s own')"></span>
+                            </span>
+                            <span x-show="defaultSource === 'school'" class="text-amber-600"
+                                  x-text="t('Dari default sekolah sebelum bobot default punya tahun. Menyimpan di sini menetapkan default tahun ini.','From the school-wide default set before defaults were per year. Saving here sets this year’s default.')"></span>
+                            <span x-show="defaultSource === 'none'" class="text-slate-400"
+                                  x-text="t('Belum ada default — mapel dihitung dengan rata-rata sederhana.','No default yet — subjects fall back to the simple mean.')"></span>
+                        </p>
                     </div>
                     <div class="flex items-center gap-2" x-show="!closed">
                         <span class="text-sm font-extrabold" :class="defaultTotal() === required ? 'text-emerald-600' : 'text-red-500'" x-text="defaultTotal() + '%'"></span>
+                        <button type="button" x-show="defaultSource === 'year'" @click="clearThisYearDefault()"
+                                :disabled="saving==='defaults'"
+                                class="px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-600 text-xs font-bold hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed">
+                            <i class="fas fa-rotate-left mr-1"></i><span x-text="t('Hapus default tahun ini','Remove this year’s default')"></span>
+                        </button>
                         <button type="button" @click="saveDefaults()" :disabled="!defaultCanSave() || saving==='defaults'"
                                 class="px-3 py-1.5 rounded-lg bg-brand-600 text-white text-xs font-bold hover:bg-brand-700 disabled:opacity-40 disabled:cursor-not-allowed">
                             <i class="fas fa-save mr-1"></i><span x-text="t('Simpan Default','Save Default')"></span>

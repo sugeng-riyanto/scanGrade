@@ -5377,7 +5377,10 @@ def _grade_components_by_subject(supabase, school_id):
         return {}
     year = ta_service.active_school_year(supabase, school_id) or {}
     custom = grade_weighting.configs_for_school(supabase, school_id, year.get("id"))
-    defaults = grade_weighting.default_config(supabase, school_id)
+    # The default this year is under (067): the year's own, else the one in force
+    # when it opened, else the school floor. Read with the year, because the picker
+    # is offering categories for a paper being built in *this* year.
+    defaults = grade_weighting.default_config(supabase, school_id, year.get("id"))
     if not custom and not defaults:
         return {}
     comps = {str(c["id"]): c for c in grade_weighting.list_components(supabase, school_id)

@@ -34,8 +34,11 @@ Two properties of the loop are deliberate:
 """
 from __future__ import annotations
 
+import hashlib
+import signal
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 __all__ = ["ROOT", "PY", "main", "read", "describe"]
@@ -86,6 +89,49 @@ def translate(anchor: str, text: str) -> str:
     return anchor.replace("\n", "\r\n") if "\r\n" in text else anchor
 
 
+def _copy_for(relative: str) -> Path:
+    """Where a killed run's pristine copy of one mutated file lives."""
+    digest = hashlib.sha1(relative.encode("utf-8")).hexdigest()[:12]
+    return Path(tempfile.gettempdir()) / f"scangrade-mutation-{digest}.orig"
+
+
+def recover(paths, *, root: Path | None = None) -> list[str]:
+    """Put back any file a killed previous run left mutated, and name what moved.
+
+    `finally` restores after every mutation and **does not run when the process is
+    killed** - which is not hypothetical: a caller with a timeout killed a harness
+    during its first mutation, the mutation stayed in the source, and the guards then
+    went green over a rule that could no longer fire. That is the one failure a
+    mutation harness cannot report, because every later mutation is then measured
+    against a broken baseline. So the pristine bytes go to a scratch copy before the
+    first mutation, and the next run puts them back before it reads a single anchor.
+
+    The copy lives in the system temp dir on purpose: a file inside the checkout is a
+    dirty tree, and a deploy refuses those.
+    """
+    root = root or ROOT
+    restored = []
+    for relative in dict.fromkeys(paths):
+        copy = _copy_for(relative)
+        if not copy.exists():
+            continue
+        saved = copy.read_bytes()
+        target = root / relative
+        if not target.is_file() or target.read_bytes() != saved:
+            target.write_bytes(saved)
+            restored.append(relative)
+        copy.unlink()
+    return restored
+
+
+def _restore_then_die(copies, signum, _frame) -> None:
+    for relative, copy in copies:
+        if copy.exists():
+            (ROOT / relative).write_bytes(copy.read_bytes())
+            copy.unlink()
+    raise SystemExit(128 + signum)
+
+
 def describe(guards, mutations, *, root: Path | None = None) -> dict:
     """What a harness claims, and whether each anchor still matches its target.
 
@@ -130,6 +176,9 @@ def main(name: str, guards, mutations, *, guards_pass=None) -> int:
     that no longer matches, 2 when the baseline is red or could not be measured —
     the same three-way contract the other tools in `deploy/` use.
     """
+    restored = recover([entry[1] for entry in mutations])
+    if restored:
+        print(f"{name}: restored after a killed previous run: {chr(44).join(restored)}")
     check = describe(guards, mutations)
     if check["missing_guards"]:
         print(f"{name}: a guard file this harness names does not exist: "
@@ -141,6 +190,20 @@ def main(name: str, guards, mutations, *, guards_pass=None) -> int:
     if not runner(guards):
         print(f"{name}: BASELINE IS RED — refusing to report (fix the guard first)")
         return 2
+
+    copies = []
+    for relative in dict.fromkeys(entry[1] for entry in mutations):
+        copy = _copy_for(relative)
+        if not copy.exists():
+            copy.write_bytes((ROOT / relative).read_bytes())
+        copies.append((relative, copy))
+    for _name in ("SIGTERM", "SIGINT", "SIGBREAK"):
+        if hasattr(signal, _name):
+            try:
+                signal.signal(getattr(signal, _name),
+                              lambda s, f: _restore_then_die(copies, s, f))
+            except (OSError, ValueError):
+                pass
 
     survivors, unmatched, caught = [], [], 0
     for label, relative, anchor, replacement in mutations:
@@ -166,6 +229,8 @@ def main(name: str, guards, mutations, *, guards_pass=None) -> int:
                                      relative))
         sys.stdout.flush()
 
+    for _relative, copy in copies:
+        copy.unlink(missing_ok=True)
     print(f"\n{name}: {caught}/{len(mutations)} injected defects caught")
     for label in survivors:
         print("  survivor:", label, "— the guard still passed")
