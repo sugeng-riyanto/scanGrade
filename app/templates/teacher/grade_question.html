@@ -235,6 +235,8 @@
                                             <span x-show="s.aiConfidence !== undefined" class="text-[10px] font-bold"
                                                   :class="s.aiConfidence >= 0.7 ? 'text-emerald-600' : s.aiConfidence >= 0.4 ? 'text-amber-600' : 'text-red-500'"
                                                   x-text="'Keyakinan: ' + Math.round((s.aiConfidence || 0) * 100) + '%'"/>
+                                            <button x-show="s._aiPercent !== undefined" @click="applyEssayAi(s)"
+                                                    class="text-[10px] font-bold text-emerald-600 hover:text-emerald-700 underline">Terapkan skor ini</button>
                                         </div>
                                     </div>
                                     <div x-show="s.aiConfidence !== undefined" class="shrink-0 w-10 h-10 rounded-full flex items-center justify-center text-xs font-extrabold border-2"
@@ -695,26 +697,59 @@ function graderApp() {
         aiGradeEssay(s) {
             if (s._aiLoading) return;
             s._aiLoading = true;
+            s.aiReasoning = '';
+            s._aiPercent = undefined;
             fetch('/api/ai/grade-essay', {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
+                headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
                 body: JSON.stringify({
                     submission_id: s.submission_id,
                     question_index: this.currentQ,
-                    question_text: '',
-                    student_answer: s.essayText || '',
-                    max_score: 100,
                 })
             })
+            .then(r => r.json().then(d => ({ok: r.ok, d})))
+            .then(({ok, d}) => {
+                if (!ok || d.error) { s.aiReasoning = d.error || 'Gagal meminta saran'; return; }
+                this._pollAi(s, d.suggestion_id, 0);
+            })
+            .catch(() => { s.aiReasoning = 'Gagal terhubung ke server AI'; })
+            .finally(() => { s._aiLoading = false; });
+        },
+
+        _pollAi(s, id, tries) {
+            if (tries > 80) { s.aiReasoning = 'AI belum selesai. Coba lagi.'; return; }
+            fetch('/api/ai/suggestion/' + id, {headers: {'Accept': 'application/json'}})
             .then(r => r.json())
             .then(d => {
-                if (d.score !== undefined) { s.scoreVal = d.score; }
-                if (d.feedback) { s.feedbackVal = d.feedback; }
-                if (d.reasoning) { s.aiReasoning = d.reasoning; }
-                if (d.confidence !== undefined) { s.aiConfidence = d.confidence; }
-                this.saveEssayScore(s);
+                if (d.status === 'done') {
+                    // Saran TIDAK langsung masuk ke field: guru menekan Terapkan.
+                    s._aiSuggestionId = d.suggestion_id;
+                    s._aiPercent = d.percent;
+                    s._aiScore = d.score;
+                    s.aiReasoning = 'Skor saran: ' + d.score + ' / ' + d.points +
+                        ' poin (' + Math.round(d.percent) + '%)' +
+                        (d.reason ? ' — ' + d.reason : '');
+                    s.aiConfidence = d.confidence;
+                    return;
+                }
+                if (d.status === 'failed') { s.aiReasoning = d.error || 'Gagal'; return; }
+                s.aiReasoning = 'AI sedang menilai…';
+                setTimeout(() => this._pollAi(s, id, tries + 1), 1500);
             })
-            .catch(() => {}) .finally(() => { s._aiLoading = false; });
+            .catch(() => setTimeout(() => this._pollAi(s, id, tries + 1), 2000));
+        },
+
+        applyEssayAi(s) {
+            if (s._aiPercent === undefined) return;
+            s.scoreVal = s._aiPercent;
+            if (s._aiSuggestionId) {
+                fetch('/teacher/api/ai/suggestion/' + s._aiSuggestionId + '/apply', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
+                    body: '{}'
+                }).catch(() => {});
+            }
+            this.saveEssayScore(s);
         },
 
         gradeAllMCQ() {

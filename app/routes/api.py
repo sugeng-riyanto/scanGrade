@@ -30,7 +30,7 @@ from app.services.question_types import (
 )
 from app.services.student_import import create_student_account, owned_class_id
 from app.utils.logger import get_logger
-from app.errors import ValidationError, NotFoundError, GradingError, AIProcessingError
+from app.errors import ValidationError, NotFoundError, GradingError
 from app.utils.rate_limiter import limiter
 from app.decorators.year_lock import open_year_required
 
@@ -2033,23 +2033,24 @@ def ai_test_key_raw():
 @api_bp.route("/grade/ai-suggest", methods=["POST"])
 @login_required
 def ai_suggest():
-    """AI grading suggestion — teachers/admins only."""
-    if g.user_role not in ("guru", "admin_sekolah", "super_admin"):
-        return jsonify({"error": "Forbidden"}), 403
-    data = request.get_json()
-    if not data:
-        raise ValidationError("request body", "Data tidak boleh kosong")
-    question = data.get("question", "")
-    answer = data.get("answer", "")
-    max_score = data.get("max_score", 100)
-    rubric = data.get("rubric", "")
-    if not answer:
-        raise ValidationError("answer", "Jawaban siswa kosong")
-    from app.services.ai_service import suggest_grade
-    result = suggest_grade(g.user_id, question, answer, max_score, rubric)
-    if result.get("error"):
-        raise AIProcessingError(result.get("provider", "unknown"), result["error"])
-    return jsonify(result)
+    """Retired: essay advice has one door now.
+
+    This was the first AI marking call, and it is closed rather than kept for
+    compatibility because it cannot be made safe by adding a guard. It pasted the
+    answer into the teacher's own template as ordinary prose — the exact shape the
+    prompt-injection envelope exists to remove — it held the request open while a
+    third-party API answered, and it was the one grading call with no subscription
+    check. Nothing in this app posts to it any more.
+
+    A caller that still does is told where the call went, so an old integration
+    fails with a sentence rather than with a silently different kind of mark.
+    """
+    return jsonify({
+        "success": False,
+        "error": "ENDPOINT_RETIRED",
+        "message": "Gunakan POST /api/ai/grade-essay: saran AI kini asinkron, "
+                   "dibatasi langganan, dan jawaban murid dikirim sebagai data.",
+    }), 410
 
 
 # ═══════════════════════════════════════════════════════════
@@ -2334,46 +2335,199 @@ def _generate_report_excel(exam, students, stats):
 
 
 # ── AI Essay Grading API ──
+#
+# Every route here *queues* work. The provider call runs in the Celery worker
+# (`app/services/ai_grading_tasks.py`): it takes seconds, its latency is
+# unbounded, and this box is one vCPU, so a teacher waiting on it would hold a
+# gunicorn worker for the length of a third-party request. The row in
+# `ai_grading_suggestion` is the job record, so polling survives a worker restart.
+#
+# The score is never read from the request. The maximum and the question come
+# from the exam row, and the answer from the submission — with one deliberate
+# exception, `answer_override`, for a canvas whose text a teacher has just OCR'd
+# (that text exists nowhere else yet, and it is still fenced as data).
+
+#: How many essays one bulk request may queue. Not a cost cap — the subscription
+#: tier is that — but a bound on one HTTP request's database work, and a queue a
+#: one-vCPU worker can actually drain. A class larger than this is two clicks.
+MAX_BULK_SUGGESTIONS = 60
+
+#: How long a batch id stays claimable by the caller that started it.
+AI_BATCH_TTL_SECONDS = 3600
+
+
+def _answers_of(value):
+    """A jsonb column as an object, whether it arrived parsed or as text."""
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
+def _ai_exam_of(submission_id, columns="id,question_types,question_weights,"
+                                          "question_texts,question_rubrics,"
+                                          "total_questions,subject"):
+    """``(submission, exam, error_response)`` for an essay request.
+
+    The submission is read first because the exam id lives on it; the exam is
+    then checked with the same owner-or-school-admin rule the scan routes use.
+    A submission whose exam the caller does not manage is refused rather than
+    answered with an empty suggestion.
+    """
+    supabase = get_supabase()
+    sub = row_or_none(
+        supabase.table("submissions").select("id,exam_id,answers")
+        .eq("id", submission_id).maybe_single().execute()
+    )
+    if not sub:
+        return None, None, (jsonify({"error": "Submission tidak ditemukan"}), 404)
+    exam, err = _guard_managed_exam(sub["exam_id"], columns=columns)
+    if err:
+        return None, None, err
+    return sub, exam, None
+
+
+def _queue_one(*, submission, exam, question_index, answer_override=None,
+               batch_id=None, force=False):
+    """Queue one suggestion, and say why it was not queued when it was not."""
+    from app.services import ai_grading_suggestion as suggestions
+    from app.services.ai_grading_prompt import clean_answer_text
+
+    if not suggestions.is_essay_question(exam, question_index):
+        return None, "not_essay"
+    maximum = suggestions.question_points(exam, question_index)
+    if maximum <= 0:
+        return None, "no_points"
+
+    answers = _answers_of(exam.get("_answers"))
+    entry = answers.get(str(question_index))
+    text = answer_override if answer_override is not None else suggestions.answer_text_of(entry)
+    if not clean_answer_text(text).strip():
+        return None, "no_answer"
+
+    supabase = get_supabase()
+    prompt = suggestions.resolve_prompt(supabase, g.user_id, exam.get("subject"))
+    row, should_queue = suggestions.queue_suggestion(
+        supabase, attempt_id=submission["id"], question_index=int(question_index),
+        poin_maks=maximum, requested_by=g.user_id,
+        prompt_version=prompt["version"], prompt_subject=prompt["subject_key"],
+        batch_id=batch_id, force=force,
+    )
+    if not should_queue:
+        return row, "already"
+    return row, "queued"
+
+
+def _enqueue(suggestion_id):
+    """Hand one row to the worker. A broker that is down is a teacher message."""
+    try:
+        from app.services.ai_grading_tasks import request_essay_suggestion
+        request_essay_suggestion.delay(str(suggestion_id))
+        return True
+    except Exception as exc:
+        logger.error("could not enqueue AI suggestion %s: %s", suggestion_id, exc)
+        return False
+
+
+def _broker_down(suggestion_id):
+    """Record the truth on the row: no worker picked this up."""
+    try:
+        from app.services.ai_grading_suggestion import fail
+        fail(get_supabase(), suggestion_id,
+             "Antrean AI sedang tidak tersedia. Coba lagi sebentar lagi.")
+    except Exception:
+        logger.exception("could not record the AI queue failure for %s", suggestion_id)
+
 
 @api_bp.route("/ai/grade-essay", methods=["POST"])
 @login_required
 @require_subscription("ai_grading")
 @open_year_required("submission_id")
 def ai_grade_essay():
-    """Grade a single essay answer."""
+    """Queue one AI suggestion for one essay. Returns 202, never a score."""
     if g.get("user_role") not in ("guru", "admin_sekolah", "super_admin"):
         return jsonify({"error": "Hanya guru/admin yang boleh mengoreksi esai"}), 403
-    data = request.get_json()
-    if not data:
-        return jsonify({"error": "No data"}), 400
-
+    data = request.get_json(silent=True) or {}
     submission_id = data.get("submission_id")
-    question_index = data.get("question_index", 0)
-    question_text = data.get("question_text", "")
-    student_answer = data.get("student_answer", "")
-    max_score = int(data.get("max_score", 100))
-    rubric = data.get("rubric", "")
-    diagram_context = data.get("diagram_context", "")
-    lang = data.get("lang", "en")
+    if not submission_id:
+        return jsonify({"error": "submission_id wajib"}), 400
+    try:
+        question_index = int(data.get("question_index", 0))
+    except (TypeError, ValueError):
+        return jsonify({"error": "question_index tidak valid"}), 400
 
-    if not student_answer:
-        return jsonify({"error": "Tidak ada jawaban siswa"}), 400
+    sub, exam, err = _ai_exam_of(submission_id)
+    if err:
+        return err
+    exam["_answers"] = sub.get("answers") or {}
 
-    from app.services.ai_grading import grade_essay as ai_grade
-    result = ai_grade(
-        teacher_id=g.user_id,
-        submission_id=submission_id,
-        question_index=question_index,
-        question_text=question_text,
-        student_answer=student_answer,
-        max_score=max_score,
-        rubric=rubric,
-        diagram_context=diagram_context,
-        lang=lang,
+    from app.services import ai_grading_suggestion as suggestions
+    row, reason = _queue_one(
+        submission=sub, exam=exam, question_index=question_index,
+        answer_override=data.get("answer_override"),
+        force=bool(data.get("refresh")),
     )
-    if "error" in result:
-        return jsonify(result), 422
-    return jsonify(result)
+    if reason == "not_essay":
+        return jsonify({"error": "Soal ini bukan soal esai"}), 400
+    if reason == "no_points":
+        return jsonify({"error": "Soal ini tidak punya bobot poin"}), 400
+    if reason == "no_answer":
+        return jsonify({"error": "Tidak ada jawaban teks untuk dikoreksi"}), 400
+
+    if reason == "queued" and not _enqueue(row["id"]):
+        _broker_down(row["id"])
+        return jsonify({"error": "Antrean AI sedang tidak tersedia. Coba lagi sebentar lagi.",
+                        "suggestion_id": row["id"]}), 503
+
+    return jsonify({
+        "success": True,
+        "suggestion_id": row["id"],
+        "status": "queued" if reason == "queued" else row.get("status"),
+        "queued": reason == "queued",
+        "points": suggestions.question_points(exam, question_index),
+    }), 202
+
+
+@api_bp.route("/ai/suggestion/<suggestion_id>", methods=["GET"])
+@login_required
+def ai_suggestion_status(suggestion_id):
+    """What the worker has (or has not) produced for one essay."""
+    if g.get("user_role") not in ("guru", "admin_sekolah", "super_admin"):
+        return jsonify({"error": "Hanya guru/admin yang boleh mengoreksi esai"}), 403
+    supabase = get_supabase()
+    from app.services import ai_grading_suggestion as suggestions
+
+    row = row_or_none(
+        supabase.table(suggestions.TABLE).select("*")
+        .eq("id", suggestion_id).maybe_single().execute()
+    )
+    if not row:
+        return jsonify({"error": "Saran AI tidak ditemukan"}), 404
+    _sub, _exam, err = _ai_exam_of(row["attempt_id"])
+    if err:
+        return err
+
+    payload = {
+        "suggestion_id": row["id"],
+        "status": row.get("status"),
+        "points": row.get("poin_maks"),
+        "score": row.get("skor_saran"),
+        "percent": suggestions.percent_of(row),
+        "reason": row.get("alasan"),
+        "confidence": row.get("tingkat_keyakinan"),
+        "prompt_version": row.get("prompt_version"),
+        "anomaly": row.get("anomaly"),
+        "applied": bool(row.get("applied_at")),
+    }
+    if row.get("status") == "failed":
+        payload["error"] = row.get("error_message") or \
+            "Layanan AI gagal memproses jawaban ini. Coba lagi."
+    return jsonify(payload)
 
 
 @api_bp.route("/ai/grade-bulk", methods=["POST"])
@@ -2381,26 +2535,125 @@ def ai_grade_essay():
 @require_subscription("ai_grading")
 @open_year_required("exam_id")
 def ai_grade_bulk():
-    """Grade all pending essay questions for an exam or submission list."""
+    """Queue suggestions for every unmarked essay of an exam, bounded.
+
+    Concurrency is the worker's own setting (`--concurrency=1` in
+    `deploy/celery.service`), so this route cannot flood the provider even if it
+    enqueues everything at once. What it *can* do is make one HTTP request do
+    unbounded database work, which is why a single call stops at
+    `MAX_BULK_SUGGESTIONS` and says so.
+    """
     if g.get("user_role") not in ("guru", "admin_sekolah", "super_admin"):
         return jsonify({"error": "Hanya guru/admin yang boleh mengoreksi esai"}), 403
-    data = request.get_json()
-    if not data:
-        return jsonify({"error": "No data"}), 400
-
+    data = request.get_json(silent=True) or {}
     exam_id = data.get("exam_id")
-    submission_ids = data.get("submission_ids")
-
     if not exam_id:
         return jsonify({"error": "exam_id required"}), 400
 
-    from app.services.ai_grading import grade_bulk_essays
-    result = grade_bulk_essays(
-        teacher_id=g.user_id,
-        exam_id=exam_id,
-        submission_ids=submission_ids,
-    )
-    return jsonify(result)
+    exam, err = _guard_managed_exam(
+        exam_id, columns="id,teacher_id,school_id,question_types,question_weights,"
+                         "question_texts,question_rubrics,total_questions,subject")
+    if err:
+        return err
+
+    from app.services.question_types import is_essay
+    supabase = get_supabase()
+
+    query = supabase.table("submissions").select("id,answers,status").eq("exam_id", exam_id)
+    wanted = data.get("submission_ids")
+    if isinstance(wanted, list) and wanted:
+        query = query.in_("id", [str(x) for x in wanted][:500])
+    else:
+        query = query.in_("status", ["submitted", "graded", "published"])
+    submissions = query.execute().data or []
+
+    types = _answers_of(exam.get("question_types"))
+    total = int(exam.get("total_questions") or 0)
+    essay_indices = [i for i in range(total) if is_essay(types.get(str(i)))]
+
+    batch_id = str(uuid.uuid4())
+    refresh = bool(data.get("refresh"))
+    queued = skipped = failed = 0
+    queued_ids = []
+    truncated = False
+
+    for sub in submissions:
+        if len(queued_ids) >= MAX_BULK_SUGGESTIONS:
+            truncated = True
+            break
+        exam_for_sub = dict(exam, _answers=sub.get("answers") or {})
+        for index in essay_indices:
+            if len(queued_ids) >= MAX_BULK_SUGGESTIONS:
+                truncated = True
+                break
+            row, reason = _queue_one(
+                submission=sub, exam=exam_for_sub, question_index=index,
+                batch_id=batch_id, force=refresh,
+            )
+            if reason != "queued":
+                skipped += 1
+                continue
+            if not _enqueue(row["id"]):
+                _broker_down(row["id"])
+                failed += 1
+                continue
+            queued_ids.append(row["id"])
+            queued += 1
+
+    try:
+        from app.utils.kv_cache import cache_set
+        cache_set(f"ai_batch:{batch_id}",
+                  {"user_id": g.user_id, "exam_id": str(exam_id)}, AI_BATCH_TTL_SECONDS)
+    except Exception:
+        logger.exception("could not register the AI batch %s", batch_id)
+
+    if queued == 0 and failed:
+        return jsonify({"error": "Antrean AI sedang tidak tersedia. Coba lagi sebentar lagi.",
+                        "batch_id": batch_id, "failed": failed}), 503
+
+    return jsonify({
+        "success": True,
+        "batch_id": batch_id,
+        "queued": queued,
+        "skipped": skipped,
+        "failed": failed,
+        "truncated": truncated,
+        # One provider call per queued essay; the owner's cost question is
+        # answered by this number, not by a second billing system.
+        "calls": queued,
+    }), 202
+
+
+@api_bp.route("/ai/suggestion-batch/<batch_id>", methods=["GET"])
+@login_required
+def ai_suggestion_batch(batch_id):
+    """Progress for one bulk request: how many are done, pending, failed."""
+    if g.get("user_role") not in ("guru", "admin_sekolah", "super_admin"):
+        return jsonify({"error": "Hanya guru/admin yang boleh mengoreksi esai"}), 403
+    from app.utils.kv_cache import cache_get
+
+    record = cache_get(f"ai_batch:{batch_id}")
+    if not record or str(record.get("user_id")) != str(g.user_id):
+        return jsonify({"error": "Batch tidak ditemukan"}), 404
+    _exam, err = _guard_managed_exam(record.get("exam_id"))
+    if err:
+        return err
+
+    supabase = get_supabase()
+    rows = (supabase.table("ai_grading_suggestion").select("status")
+            .eq("batch_id", batch_id).execute().data or [])
+    counts = {"queued": 0, "processing": 0, "done": 0, "failed": 0, "ignored": 0}
+    for row in rows:
+        if row.get("status") in counts:
+            counts[row["status"]] += 1
+    return jsonify({
+        "batch_id": batch_id,
+        "total": len(rows),
+        "done": counts["done"],
+        "failed": counts["failed"],
+        "pending": counts["queued"] + counts["processing"],
+        "finished": counts["done"] + counts["failed"],
+    })
 
 
 # ═══════════════════════════════════════════════════════════

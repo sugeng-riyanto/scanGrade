@@ -615,7 +615,7 @@
                             {% endif %}
                         </div>
 
-                        <div class="flex items-center gap-3 px-4 py-3 bg-stone-50 border-t no-print">
+                        <div class="flex flex-wrap items-center gap-3 px-4 py-3 bg-stone-50 border-t no-print">
                             {% set qweight = (exam.question_weights or {}).get(i|string, 0) %}
                             {% set qtype = (exam.question_types or {}).get(i|string, 'mcq') %}
                             {% if qtype == 'essay_text' or qtype == 'essay' %}
@@ -630,8 +630,8 @@
                                             <button type="button" class="px-2 py-1 text-[10px] font-bold bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition" onclick="ocrCanvas({{ i }})" title="Baca tulisan di canvas siswa via Gemini Vision">
                                                 <i class="fas fa-eye mr-0.5"></i>Baca Canvas
                                             </button>
-                                            <button type="button" class="px-2 py-1 text-[10px] font-bold bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition" onclick="aiSuggest({{ i }})">
-                                                <i class="fas fa-robot mr-0.5"></i>Koreksi AI
+                                            <button type="button" class="px-2 py-1 text-[10px] font-bold bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition" onclick="requestAiSuggestion({{ i }})">
+                                                <i class="fas fa-robot mr-0.5"></i>Minta saran AI
                                             </button>
                                         </div>
                                     </div>
@@ -651,6 +651,22 @@
                                 </div>
                             </div>
                             {% endif %}
+                            {% endif %}
+                            {% if q_is_essay(qtype) %}
+                            {# Saran AI: di panel koreksi yang sudah ada, bukan halaman lain.
+                               Skor di sini adalah POIN soal; tombol "Terapkan" mengisi field
+                               nilai guru dengan persentasenya, dan guru tetap menyimpan
+                               sendiri. Tidak ada nilai yang ditulis dari panel ini. #}
+                            <div class="w-full mt-2 rounded-xl border border-violet-200 bg-violet-50 p-2.5" data-ai-panel="{{ i }}">
+                                <div class="flex flex-wrap items-center gap-2">
+                                    <span class="text-[10px] font-extrabold text-violet-700"><i class="fas fa-robot mr-1"></i>Saran AI</span>
+                                    <span id="ai-status-{{ i }}" class="text-[10px] font-bold text-violet-500">Belum diminta</span>
+                                    <button type="button" onclick="requestAiSuggestion({{ i }})"
+                                            class="ml-auto text-[10px] font-bold px-2 py-1 rounded-lg bg-violet-600 text-white hover:bg-violet-700 transition"
+                                            id="ai-request-{{ i }}">Minta saran</button>
+                                </div>
+                                <div id="ai-body-{{ i }}" class="mt-1.5 text-[11px] text-slate-700"></div>
+                            </div>
                             {% endif %}
                             <label class="text-xs font-extrabold text-stone-700">Skor #{{ i+1 }} <span class="text-orange-500">({{ qweight }} poin)</span>:</label>
                             <input type="number" x-model="scoreVal" min="0" max="100"
@@ -1456,45 +1472,156 @@ function calcFinal() {
     return final;
 }
 
-function aiSuggest(qIdx) {
-    const qTypes = {{ (exam.question_types or {}) | tojson | safe }};
-    const studentAns = {{ submission.answers | tojson | safe }};
-    const questionTexts = {{ (exam.question_texts or {}) | tojson | safe }};
-    const questionText = questionTexts[qIdx] || '';
-    const ansData = studentAns[qIdx];
-    let studentAnswer = '';
-    if (typeof ansData === 'string') studentAnswer = ansData;
-    else if (ansData && ansData.text) studentAnswer = ansData.text;
-    else if (ansData && ansData.answer) studentAnswer = ansData.answer;
-    if (!studentAnswer) { alert('Tidak ada jawaban siswa untuk dikoreksi AI'); return; }
-    const maxScore = parseFloat({{ (exam.question_weights or {}) | tojson | safe }}[qIdx] || 100);
-    const btn = event.target;
-    btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-0.5"></i>Mengoreksi...';
+// ── Saran AI: diminta asinkron, diterapkan oleh guru ────────────────────────
+//
+// Permintaan hanya mengantre pekerjaan; skor datang dari polling dan TIDAK
+// pernah langsung mengisi field. Guru menekan "Terapkan skor ini", field terisi
+// persentase soal itu, dan Simpan tetap satu-satunya penulis nilai.
+const AI_ROWS = {{ ai_suggestions|default({}, true) | tojson | safe }};
+
+function _aiStatus(i, text) {
+    const el = document.getElementById('ai-status-' + i);
+    if (el) el.textContent = text;
+}
+
+function _aiLine(parent, text, cls) {
+    const p = document.createElement('p');
+    p.className = cls || '';
+    p.textContent = text;
+    parent.appendChild(p);
+    return p;
+}
+
+function _aiButton(parent, label, cls, onClick) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = cls;
+    b.textContent = label;
+    b.addEventListener('click', onClick);
+    parent.appendChild(b);
+    return b;
+}
+
+function renderAiSuggestion(i, d) {
+    const body = document.getElementById('ai-body-' + i);
+    if (!body) return;
+    body.textContent = '';
+    if (!d || d.status !== 'done') {
+        _aiStatus(i, d && d.status === 'failed' ? 'Gagal' : 'Belum diminta');
+        return;
+    }
+    const points = Number(d.score || 0);
+    const max = Number(d.points || 0);
+    const percent = d.percent !== undefined && d.percent !== null
+        ? Number(d.percent) : (max > 0 ? points / max * 100 : 0);
+    _aiStatus(i, d.applied ? 'Sudah diterapkan' : 'Saran siap');
+    _aiLine(body, 'Skor saran: ' + points + ' / ' + max + ' poin (' + Math.round(percent) + '%)',
+            'font-extrabold text-violet-800');
+    if (d.reason) _aiLine(body, d.reason, 'mt-0.5 whitespace-pre-wrap text-slate-600');
+    const conf = d.confidence !== undefined && d.confidence !== null ? Number(d.confidence) : null;
+    if (conf !== null) _aiLine(body, 'Keyakinan: ' + Math.round(conf * 100) + '%',
+                               'mt-0.5 text-[10px] font-bold text-violet-500');
+    if (d.prompt_version) _aiLine(body, 'Rubrik versi ' + d.prompt_version,
+                                  'text-[10px] text-violet-400');
+    if (d.anomaly) _aiLine(body, 'Catatan: ' + d.anomaly,
+                           'mt-0.5 text-[10px] font-bold text-amber-700');
+    const actions = document.createElement('div');
+    actions.className = 'flex flex-wrap items-center gap-2 mt-1.5';
+    body.appendChild(actions);
+    if (!d.applied) {
+        _aiButton(actions, 'Terapkan skor ini',
+                  'text-[10px] font-bold px-2 py-1 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition',
+                  () => applyAiSuggestion(i, d.suggestion_id, percent));
+    }
+    _aiButton(actions, d.applied ? 'Abaikan' : 'Abaikan saran',
+              'text-[10px] font-bold px-2 py-1 rounded-lg bg-white text-slate-500 border border-slate-200 hover:bg-slate-50 transition',
+              () => ignoreAiSuggestion(i, d.suggestion_id));
+}
+
+function requestAiSuggestion(i, overrideText) {
+    const request = document.getElementById('ai-request-' + i);
+    if (request) request.disabled = true;
+    _aiStatus(i, 'Meminta saran AI…');
+    const payload = { submission_id: '{{ submission.id }}', question_index: i };
+    // Teks hasil OCR canvas hanya ada di browser; ia tetap diperlakukan sebagai
+    // data yang dinilai, dan batas poin tetap dari server.
+    if (overrideText) payload.answer_override = overrideText;
     fetch('/api/ai/grade-essay', {
         method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({
-            submission_id: '{{ submission.id }}',
-            question_index: qIdx,
-            question_text: questionText,
-            student_answer: studentAnswer,
-            max_score: maxScore,
-            rubric: '',
-        })
+        headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
+        body: JSON.stringify(payload)
+    })
+    .then(r => r.json().then(d => ({ok: r.ok, d})))
+    .then(({ok, d}) => {
+        if (request) request.disabled = false;
+        if (!ok || d.error) { _aiStatus(i, d.error || 'Gagal meminta saran'); return; }
+        pollAiSuggestion(i, d.suggestion_id, 0);
+    })
+    .catch(() => {
+        if (request) request.disabled = false;
+        _aiStatus(i, 'Gagal terhubung ke server AI');
+    });
+}
+
+function pollAiSuggestion(i, id, tries) {
+    if (tries > 80) { _aiStatus(i, 'AI belum selesai. Coba lagi.'); return; }
+    fetch('/api/ai/suggestion/' + id, {headers: {'Accept': 'application/json'}})
+    .then(r => r.json())
+    .then(d => {
+        if (d.status === 'done') {
+            AI_ROWS[String(i)] = d;
+            renderAiSuggestion(i, d);
+            return;
+        }
+        if (d.status === 'failed') { _aiStatus(i, d.error || 'Gagal'); return; }
+        _aiStatus(i, d.status === 'processing' ? 'AI sedang menilai…' : 'Menunggu antrean…');
+        setTimeout(() => pollAiSuggestion(i, id, tries + 1), 1500);
+    })
+    .catch(() => setTimeout(() => pollAiSuggestion(i, id, tries + 1), 2000));
+}
+
+function applyAiSuggestion(i, id, percent) {
+    fetch('/teacher/api/ai/suggestion/' + id + '/apply', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
+        body: '{}'
     })
     .then(r => r.json())
     .then(d => {
-        btn.disabled = false; btn.innerHTML = '<i class="fas fa-robot mr-0.5"></i>Koreksi AI';
         if (d.error) { alert(d.error); return; }
-        const inst = QUESTION_INSTANCES[qIdx];
-        if (inst) {
-            if (d.score !== undefined) { inst.scoreVal = d.score; }
-            if (d.feedback) { inst.commentVal = d.feedback; }
-            calcFinal();
-        }
+        const inst = QUESTION_INSTANCES[i];
+        if (inst) { inst.scoreVal = d.percent; calcFinal(); }
+        const row = AI_ROWS[String(i)] || {};
+        row.applied = true;
+        row.percent = d.percent;
+        AI_ROWS[String(i)] = row;
+        renderAiSuggestion(i, row);
     })
-    .catch(() => { btn.disabled = false; btn.innerHTML = '<i class="fas fa-robot mr-0.5"></i>Koreksi AI'; alert('Gagal terhubung ke server AI'); });
+    .catch(() => alert('Gagal menerapkan saran AI'));
 }
+
+function ignoreAiSuggestion(i, id) {
+    fetch('/teacher/api/ai/suggestion/' + id + '/ignore', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
+        body: '{}'
+    })
+    .then(r => r.json())
+    .then(d => {
+        if (d.error) { alert(d.error); return; }
+        const body = document.getElementById('ai-body-' + i);
+        if (body) body.textContent = '';
+        _aiStatus(i, 'Diabaikan');
+    })
+    .catch(() => alert('Gagal mengabaikan saran AI'));
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    Object.keys(AI_ROWS).forEach(key => {
+        const row = AI_ROWS[key];
+        if (row && row.status === 'done') renderAiSuggestion(parseInt(key, 10), row);
+    });
+});
 
 // Vision OCR for student canvas
 function ocrCanvas(qIdx) {
@@ -1546,36 +1673,9 @@ function useOcrForAi(qIdx) {
     else if (ansData && ansData.answer) origAnswer = ansData.answer;
 
     const combined = (origAnswer ? origAnswer + '\n\n---[OCR Canvas]---\n' : '') + ocrText;
-    // Temporarily override and call aiSuggest with combined text
-    const qTypes = {{ (exam.question_types or {}) | tojson | safe }};
-    const questionTexts = {{ (exam.question_texts or {}) | tojson | safe }};
-    const questionText = questionTexts[qIdx] || '';
-    const maxScore = parseFloat({{ (exam.question_weights or {}) | tojson | safe }}[qIdx] || 100);
-
-    fetch('/api/ai/grade-essay', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({
-            submission_id: '{{ submission.id }}',
-            question_index: qIdx,
-            question_text: questionText,
-            student_answer: combined,
-            max_score: maxScore,
-            rubric: '',
-            diagram_context: ocrText,
-        })
-    })
-    .then(r => r.json())
-    .then(d => {
-        if (d.error) { alert(d.error); return; }
-        const inst = QUESTION_INSTANCES[qIdx];
-        if (inst) {
-            if (d.score !== undefined) { inst.scoreVal = d.score; }
-            if (d.feedback) { inst.commentVal = d.feedback; }
-            calcFinal();
-        }
-    })
-    .catch(() => alert('Gagal terhubung ke server AI'));
+    // Teks OCR ikut sebagai data jawaban; batas poin dan format keluaran tetap
+    // ditentukan server.
+    requestAiSuggestion(qIdx, combined);
 }
 
 function clearOcr(qIdx) {
@@ -1584,25 +1684,48 @@ function clearOcr(qIdx) {
 }
 
 function gradeAllEssays() {
-    if (!confirm('Koreksi semua essay dengan AI?')) return;
+    if (!confirm('Minta saran AI untuk semua esai di kertas ini?')) return;
     const btn = event.target;
     const orig = btn.innerHTML;
-    btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>Mengoreksi...';
+    btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>Mengantre...';
     fetch('/api/ai/grade-bulk', {
         method: 'POST',
-        headers: {'Content-Type': 'application/json'},
+        headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
         body: JSON.stringify({
             exam_id: '{{ exam_id }}',
             submission_ids: ['{{ submission.id }}'],
         })
     })
+    .then(r => r.json().then(d => ({ok: r.ok, d})))
+    .then(({ok, d}) => {
+        if (!ok || d.error) {
+            btn.disabled = false; btn.innerHTML = orig;
+            alert(d.error || 'Gagal meminta saran AI');
+            return;
+        }
+        pollAiBatch(d.batch_id, btn, orig, 0);
+    })
+    .catch(() => { btn.disabled = false; btn.innerHTML = orig; alert('Gagal terhubung ke server AI'); });
+}
+
+function pollAiBatch(batchId, btn, orig, tries) {
+    if (tries > 120) {
+        btn.disabled = false; btn.innerHTML = orig;
+        alert('AI belum selesai. Muat ulang halaman sebentar lagi.');
+        return;
+    }
+    fetch('/api/ai/suggestion-batch/' + batchId, {headers: {'Accept': 'application/json'}})
     .then(r => r.json())
     .then(d => {
-        btn.innerHTML = '✅ ' + (d.processed || 0) + ' baru, ' + (d.cached || 0) + ' cache';
-        setTimeout(() => { btn.disabled = false; btn.innerHTML = orig; }, 2000);
-        if (d.processed > 0 || d.cached > 0) calcFinal();
+        if (d.error) { btn.disabled = false; btn.innerHTML = orig; alert(d.error); return; }
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>' + d.finished + '/' + d.total;
+        if (d.finished >= d.total) {
+            window.location.reload();
+            return;
+        }
+        setTimeout(() => pollAiBatch(batchId, btn, orig, tries + 1), 2000);
     })
-    .catch(() => { btn.disabled = false; btn.innerHTML = orig; alert('Gagal'); });
+    .catch(() => setTimeout(() => pollAiBatch(batchId, btn, orig, tries + 1), 2500));
 }
 
 setInterval(() => { calcFinal(); }, 2000);

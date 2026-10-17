@@ -157,17 +157,34 @@ def flags_for(supabase, attempt_id):
 # ── the audit ────────────────────────────────────────────────────────────────
 
 def record_score_change(supabase, attempt_id, question_index, teacher_id,
-                        old_score, new_score):
+                        old_score, new_score, *, source="manual",
+                        suggestion_id=None, note=None):
     """Write one audit row if the mark moved. Returns the row, or None.
 
     A paper re-saved without touching a question must not manufacture an edit:
     `_num` folds `None`/`''` into 'not marked yet' so the comparison is about the
     mark, not about how an empty field was spelled.
+
+    `source` names where the new mark came from: the teacher's own typing
+    (`manual`, the historical behaviour) or an AI suggestion the teacher chose to
+    apply (`ai_suggestion`, with `suggestion_id` naming the advice). The mark is
+    still the teacher's — the row records that they accepted a suggestion, not
+    that a model wrote a score.
     """
     before, after = _num(old_score), _num(new_score)
     if before == after:
         return None
+    if source not in ("manual", "ai_suggestion"):
+        # The table's CHECK constraint would refuse the write and lose the audit
+        # entirely; an unknown source is a programming error, not a reason to
+        # leave no record.
+        source = "manual"
     payload = {"attempt_id": attempt_id, "question_index": int(question_index),
-               "teacher_id": teacher_id, "old_score": before, "new_score": after}
+               "teacher_id": teacher_id, "old_score": before, "new_score": after,
+               "source": source}
+    if suggestion_id:
+        payload["suggestion_id"] = suggestion_id
+    if note:
+        payload["note"] = str(note)[:500]
     supabase.table(AUDIT_TABLE).insert(payload).execute()
     return payload

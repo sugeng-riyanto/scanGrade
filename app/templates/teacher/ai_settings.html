@@ -341,10 +341,47 @@
             </template>
         </div>
 
-        <div class="bg-white rounded-2xl shadow-sm border border-surface-200 p-5">
-            <h3 class="text-sm font-extrabold text-surface-700 mb-3"><i class="fas fa-edit mr-2 text-amber-500"></i><span x-text="t('Prompt Grading AI','AI Grading Prompt')"></span></h3>
-            <p class="text-xs text-surface-500 mb-3" x-text="t('Prompt adalah instruksi untuk AI bagaimana cara mengoreksi. Kamu bisa buat prompt berbeda untuk setiap mapel.','A prompt tells the AI how to grade. You can write a different one for each subject.')"></p>
-            <a href="/teacher/ai-settings#prompts" class="text-xs font-bold text-primary-600 hover:text-primary-700" x-text="t('Atur Prompt →','Edit Prompts →')"></a>
+        <div id="prompts" class="bg-white rounded-2xl shadow-sm border border-surface-200 p-5 scroll-mt-24">
+            <h3 class="text-sm font-extrabold text-surface-700 mb-2"><i class="fas fa-edit mr-2 text-amber-500"></i><span x-text="t('Rubrik penilaian per mapel','Marking rubric per subject')"></span></h3>
+            <p class="text-xs text-surface-500 mb-4" x-text="t('Rubrik ini yang dibaca AI saat mengoreksi esai. Satu rubrik untuk setiap mapel yang kamu ampu; AI tetap memakai format keluaran wajib dan tidak bisa menimpa aturan sistem.','This is the rubric the AI reads when it grades an essay. One per subject you teach; the AI still uses a fixed output format and cannot override the system rules.')"></p>
+
+            {% if saved_prompts %}
+            <div class="space-y-3 mb-5">
+                {% for key, row in saved_prompts.items() %}
+                <form method="POST" action="/teacher/ai-settings/prompt" class="border border-surface-200 rounded-xl p-3 bg-surface-50">
+                    <input type="hidden" name="subject" value="{{ key }}">
+                    <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+                        <span class="text-xs font-extrabold text-surface-700">{{ row.subject_label or key }}</span>
+                        <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary-50 text-primary-700 border border-primary-200">v{{ row.version }}</span>
+                    </div>
+                    <textarea name="prompt_text" rows="4" required maxlength="{{ prompt_max|default(4000, true) }}"
+                              class="w-full px-3 py-2 border border-surface-200 rounded-lg text-xs leading-relaxed focus:border-primary-400 focus:ring-1 focus:ring-primary-200">{{ row.prompt_text }}</textarea>
+                    <div class="flex flex-wrap items-center gap-2 mt-2">
+                        <button type="submit" class="text-[11px] font-bold px-3 py-1.5 rounded-lg bg-primary-600 text-white hover:bg-primary-700 transition" x-text="t('Simpan','Save')"></button>
+                        <button type="submit" formaction="/teacher/ai-settings/prompt/delete" formnovalidate
+                                class="text-[11px] font-bold px-3 py-1.5 rounded-lg bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 transition"
+                                onclick="return confirm(sgT('Hapus rubrik ini?','Delete this rubric?'))" x-text="t('Hapus','Delete')"></button>
+                    </div>
+                </form>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            <form method="POST" action="/teacher/ai-settings/prompt" class="border-t border-surface-200 pt-4 space-y-2">
+                <label class="block text-[11px] font-extrabold text-surface-600" for="prompt-subject" x-text="t('Mapel','Subject')"></label>
+                <select id="prompt-subject" name="subject" required
+                        class="w-full px-3 py-2 border border-surface-200 rounded-lg text-xs font-semibold focus:border-primary-400 focus:ring-1 focus:ring-primary-200">
+                    {% for choice in prompt_choices|default([], true) %}
+                    <option value="{{ choice.key }}">{{ choice.label }}</option>
+                    {% endfor %}
+                </select>
+                <label class="block text-[11px] font-extrabold text-surface-600" for="prompt-text" x-text="t('Rubrik / kriteria penilaian','Rubric / marking criteria')"></label>
+                <textarea id="prompt-text" name="prompt_text" rows="5" required maxlength="{{ prompt_max|default(4000, true) }}"
+                          placeholder="{{ sample_prompt|default('', true) }}"
+                          class="w-full px-3 py-2 border border-surface-200 rounded-lg text-xs leading-relaxed focus:border-primary-400 focus:ring-1 focus:ring-primary-200"></textarea>
+                <p class="text-[11px] text-surface-400" x-text="t('Tulis kriteria, bukan perintah format. Skor tetap saran: kamu yang menyimpan nilai akhir.','Write criteria, not format commands. The score stays a suggestion: you save the final mark.')"></p>
+                <button type="submit" class="text-xs font-bold px-4 py-2 rounded-xl bg-gradient-to-r from-primary-600 to-primary-700 text-white hover:from-primary-700 hover:to-primary-800 transition shadow" x-text="t('Simpan rubrik','Save rubric')"></button>
+            </form>
         </div>
     </div>
 </div>

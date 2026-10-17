@@ -44,7 +44,11 @@ Unathenticated requests return 401.
 | POST | /teacher/ai-settings/add-key | Teacher | Add AI API key |
 | POST | /teacher/ai-settings/<id>/toggle | Teacher | Toggle AI key |
 | POST | /teacher/ai-settings/<id>/delete | Teacher | Delete AI key |
-| POST | /teacher/ai-settings/save-prompt | Teacher | Save prompt template |
+| POST | /teacher/ai-settings/save-prompt | Teacher | Retired: redirects to the per-subject rubric box, writes nothing |
+| POST | /teacher/ai-settings/prompt | Teacher | Save the caller's rubric for one subject (needs `ai_grading`) |
+| POST | /teacher/ai-settings/prompt/delete | Teacher | Delete one subject rubric |
+| POST | /teacher/api/ai/suggestion/<id>/apply | Teacher | Record that the teacher applied a suggestion (audited) |
+| POST | /teacher/api/ai/suggestion/<id>/ignore | Teacher | Dismiss a suggestion |
 
 ### Student (`/student/`)
 
@@ -89,7 +93,11 @@ Unathenticated requests return 401.
 | POST | /api/student/sync-draft | Yes | Sync draft (the exam page's only save path) |
 | POST | /api/grade/auto-save/<sub_id> | Yes | Save grading draft |
 | POST | /api/grade/batch | Yes | Batch grade exam |
-| POST | /api/grade/ai-suggest | Yes | AI essay grading |
+| POST | /api/grade/ai-suggest | Yes | Retired → 410; use /api/ai/grade-essay |
+| POST | /api/ai/grade-essay | Yes | Queue one essay suggestion (202; needs `ai_grading`) |
+| GET | /api/ai/suggestion/<id> | Yes | Poll one suggestion |
+| POST | /api/ai/grade-bulk | Yes | Queue suggestions for an exam (bounded at 60) |
+| GET | /api/ai/suggestion-batch/<id> | Yes | Progress of a bulk request |
 | POST | /api/ai/test-key | Yes | Test AI API key |
 | POST | /api/students/import | Yes | CSV student import |
 | GET | /api/exams/<id>/report | Yes | Exam report (?format=excel) |

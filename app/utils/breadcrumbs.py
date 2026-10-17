@@ -109,6 +109,11 @@ MACHINE = frozenset({
     # deadline, remaining seconds) as JSON for the exam page's own timer and
     # lock screen — a readback, never a page of its own.
     "attempt-status",
+    # `/api/ai/suggestion/<id>` and `/api/ai/suggestion-batch/<id>` hand back a
+    # suggestion's state and a bulk request's progress as JSON while the marking
+    # page polls them. Readbacks, never pages of their own; the crumb is the
+    # paper being marked.
+    "suggestion", "suggestion-batch",
     # `/admin-sekolah/membership-requests` answers the destination school's join
     # queue as JSON — the same rows the membership page renders, for a caller that
     # wants them without the document. It is not a page: the reader's page is

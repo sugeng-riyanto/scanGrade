@@ -13,6 +13,7 @@ from app.utils.cache import cache_get, cache_set, cache_delete
 from app.utils import failure
 from app.utils.helpers import read_with_retry, row_or_none
 from app.decorators.security import require_school_access
+from app.decorators.subscription import require_subscription
 from app.decorators.year_lock import open_year_required
 from app.services.subscription_service import check_feature_limit, exam_quota
 from app.utils.exam_access import (
@@ -4200,9 +4201,15 @@ def grade_detail(submission_id):
         # number is a total: it cannot say *when* the paper left the screen, which
         # is the question a teacher opens this page to answer.
         violation_events = events_for_student(supabase, sub["exam_id"], sub["student_id"])
+        # The advice the AI has already produced for this paper, read once. A
+        # suggestion is *advice*: the page may show it and offer to apply it, but
+        # nothing here writes a mark.
+        from app.services import ai_grading_suggestion as ai_suggestions
+        saved_suggestions = ai_suggestions.for_submission(supabase, submission_id)
         return render_template("teacher/grade_detail.html", submission=sub, exam=exam,
                                exam_id=sub["exam_id"], student=student,
-                               violation_events=violation_events)
+                               violation_events=violation_events,
+                               ai_suggestions=saved_suggestions)
     except Exception as e:
         current_app.logger.error("grade_detail error: %s", str(e), exc_info=True)
         flash(f"Terjadi kesalahan: {failure.sentence(e)}", "error")
@@ -4724,6 +4731,22 @@ def grading_center():
             exam_groups[eid]["pending"].append(s)
         else:
             exam_groups[eid]["graded"].append(s)
+    # Fase 7: which papers already have advice, which are waiting and which
+    # have none — read once for the whole page, because an indicator that costs a
+    # query per row is an indicator that is not opened.
+    try:
+        from app.services import ai_grading_suggestion as ai_suggestions
+        suggestion_counts = ai_suggestions.status_for(
+            supabase, [s["id"] for s in pending_subs + graded_subs])
+        for group in exam_groups.values():
+            total = {"done": 0, "pending": 0, "failed": 0, "total": 0}
+            for submission in group["pending"] + group["graded"]:
+                counts = suggestion_counts.get(str(submission["id"])) or {}
+                for key in total:
+                    total[key] += int(counts.get(key) or 0)
+            group["ai"] = total
+    except Exception:
+        logger.exception("could not read the AI suggestion counts for /teacher/grading")
     return render_template("teacher/grading.html", exam_groups=list(exam_groups.values()))
 
 
@@ -4832,6 +4855,18 @@ def api_grading_queue(exam_id):
             "questions": per_question,
             "teacher_feedback": fb,
         })
+
+    try:
+        from app.services import ai_grading_suggestion as ai_suggestions
+        counts_by_submission = ai_suggestions.status_for(
+            supabase, [r["id"] for r in result])
+        for row in result:
+            row["ai"] = counts_by_submission.get(str(row["id"])) or {
+                "done": 0, "pending": 0, "failed": 0, "total": 0}
+    except Exception:
+        logger.exception("could not read AI suggestion counts for exam %s", exam_id)
+        for row in result:
+            row["ai"] = {"done": 0, "pending": 0, "failed": 0, "total": 0}
 
     return jsonify({
         "submissions": result,
@@ -5231,7 +5266,16 @@ def ai_settings():
                 settings["active_prompt_id"] = "default"
         except Exception as e:
             current_app.logger.error(f"Auto-upgrade prompts error: {e}")
-    return render_template("teacher/ai_settings.html", keys=keys, settings=settings)
+    # The prompt the grading pipeline actually reads. `settings.prompts` above is
+    # the older one-row template store, kept so an existing teacher's text is not
+    # lost; the per-subject table is the one that is in force.
+    from app.services import ai_grading_settings
+    prompt_choices = ai_grading_settings.subject_choices(supabase, g.user_id)
+    saved_prompts = ai_grading_settings.list_prompts(supabase, g.user_id)
+    return render_template("teacher/ai_settings.html", keys=keys, settings=settings,
+                           prompt_choices=prompt_choices, saved_prompts=saved_prompts,
+                           prompt_max=ai_grading_settings.limits()["max_chars"],
+                           sample_prompt=ai_grading_settings.sample_prompt())
 
 
 @teacher_bp.route("/ai-settings/add-key", methods=["POST"])
@@ -5289,19 +5333,152 @@ def ai_delete_key(key_id):
 @teacher_bp.route("/ai-settings/save-prompt", methods=["POST"])
 @teacher_or_admin_required
 def ai_save_prompt():
-    supabase = get_supabase()
-    prompts_raw = request.form.get("prompts", "[]").strip()
-    active_id = request.form.get("active_prompt_id", "default").strip()
+    """Retired: a stored template no grading call reads is worse than none.
+
+    This box used to write a list of whole prompt templates to
+    `teacher_ai_settings`. Marking has not read that list since the rubric moved to
+    one row per subject, so the only thing the box could still do was tell a
+    teacher their rubric was saved while nothing used it. It now says where the
+    rubric lives instead, and writes nothing.
+    """
+    flash("Prompt penilaian kini disimpan per mapel — tulis di kotak mapel pada "
+          "halaman ini.", "info")
+    return redirect("/teacher/ai-settings#prompts")
+
+
+@teacher_bp.route("/ai-settings/prompt", methods=["POST"])
+@teacher_or_admin_required
+@require_subscription("ai_grading")
+def ai_save_subject_prompt():
+    """Save the caller's rubric for one subject.
+
+    The subject is checked against what this teacher actually teaches
+    (`ai_grading_settings.can_write_subject`): a prompt is personal, but a
+    subject is not, and writing a rubric for a subject one does not teach is how
+    a shared browser ends up grading another department's papers.
+    """
+    from app.services import ai_grading_settings
+
+    subject = request.form.get("subject", "").strip()
+    text = request.form.get("prompt_text", "")
+    if not subject:
+        flash("Mapel wajib dipilih", "error")
+        return redirect("/teacher/ai-settings#prompts")
     try:
-        prompts = json.loads(prompts_raw)
-    except json.JSONDecodeError:
-        flash("Data prompts tidak valid", "error")
-        return redirect("/teacher/ai-settings")
-    supabase.table("teacher_ai_settings").upsert({
-        "teacher_id": g.user_id, "prompts": prompts, "active_prompt_id": active_id
-    }).execute()
-    flash("Prompt berhasil disimpan", "success")
-    return redirect("/teacher/ai-settings")
+        row = ai_grading_settings.save_prompt(
+            get_supabase(), teacher_id=g.user_id, subject=subject,
+            prompt_text=text, label=request.form.get("label"),
+            updated_by=g.user_id)
+    except PermissionError as exc:
+        # `failure.sentence` is the one place that decides what a reader is told;
+        # our own message is carried through it rather than pasted into a toast.
+        flash(failure.sentence(exc), "error")
+        return redirect("/teacher/ai-settings#prompts")
+    except ValueError as exc:
+        flash(failure.sentence(exc), "error")
+        return redirect("/teacher/ai-settings#prompts")
+    log_activity("update", "ai_grading_prompt", row.get("id"),
+                 new_data={"subject": row.get("subject_key"),
+                           "version": row.get("version")},
+                 user_id=g.user_id)
+    flash(f"Prompt {row.get('subject_label') or subject} disimpan "
+          f"(versi {row.get('version')})", "success")
+    return redirect("/teacher/ai-settings#prompts")
+
+
+@teacher_bp.route("/ai-settings/prompt/delete", methods=["POST"])
+@teacher_or_admin_required
+@require_subscription("ai_grading")
+def ai_delete_subject_prompt():
+    """Remove one subject's rubric; the default one then applies again."""
+    from app.services import ai_grading_settings
+
+    subject = request.form.get("subject", "").strip()
+    removed = ai_grading_settings.delete_prompt(
+        get_supabase(), teacher_id=g.user_id, subject=subject)
+    flash("Prompt dihapus" if removed else "Prompt tidak ditemukan",
+          "success" if removed else "error")
+    return redirect("/teacher/ai-settings#prompts")
+
+
+@teacher_bp.route("/api/ai/suggestion/<suggestion_id>/apply", methods=["POST"])
+@teacher_or_admin_required
+def ai_suggestion_apply(suggestion_id):
+    """Record that the teacher accepted a suggestion, and hand back its value.
+
+    The mark is *not* written here. The route records the acceptance in the
+    audit with `source='ai_suggestion'` and returns the percentage the teacher's
+    field should hold; the existing save path writes `teacher_feedback.scores`
+    when the teacher presses Simpan. That keeps one writer for a mark, and it
+    keeps the last word with the teacher — they can change the number after
+    applying it, and the save then records that too.
+    """
+    from app.services import ai_grading_suggestion as suggestions
+
+    supabase = get_supabase()
+    row = row_or_none(
+        supabase.table(suggestions.TABLE).select("*")
+        .eq("id", suggestion_id).maybe_single().execute()
+    )
+    if not row:
+        return jsonify({"error": "Saran AI tidak ditemukan"}), 404
+    _gb, err = _guard_submission(supabase, row["attempt_id"], as_json=True)
+    if err:
+        return err
+    if row.get("status") != "done" or row.get("skor_saran") is None:
+        return jsonify({"error": "Saran AI belum selesai"}), 409
+
+    percent = suggestions.percent_of(row)
+    question_index = int(row["question_index"])
+    sub = row_or_none(
+        supabase.table("submissions").select("teacher_feedback")
+        .eq("id", row["attempt_id"]).maybe_single().execute()
+    )
+    feedback = (sub or {}).get("teacher_feedback") or {}
+    if isinstance(feedback, str):
+        try:
+            feedback = json.loads(feedback)
+        except (json.JSONDecodeError, TypeError):
+            feedback = {}
+    before = (feedback.get("scores") or {}).get(str(question_index))
+    try:
+        grading_assist.record_score_change(
+            supabase, row["attempt_id"], question_index, g.user_id,
+            before, percent, source="ai_suggestion", suggestion_id=suggestion_id,
+            note="skor awal dari saran AI, diterapkan oleh guru")
+    except Exception:
+        logger.exception("could not record the AI suggestion application for %s",
+                         suggestion_id)
+
+    supabase.table(suggestions.TABLE).update({
+        "applied_at": datetime.now(timezone.utc).isoformat(),
+        "applied_by": g.user_id,
+        "applied_score": percent,
+    }).eq("id", suggestion_id).execute()
+    return jsonify({"success": True, "percent": percent,
+                    "points": row.get("skor_saran"),
+                    "max_points": row.get("poin_maks")})
+
+
+@teacher_bp.route("/api/ai/suggestion/<suggestion_id>/ignore", methods=["POST"])
+@teacher_or_admin_required
+def ai_suggestion_ignore(suggestion_id):
+    """Dismiss a suggestion. No score moves, so nothing is audited."""
+    from app.services import ai_grading_suggestion as suggestions
+
+    supabase = get_supabase()
+    row = row_or_none(
+        supabase.table(suggestions.TABLE).select("id,attempt_id,status")
+        .eq("id", suggestion_id).maybe_single().execute()
+    )
+    if not row:
+        return jsonify({"error": "Saran AI tidak ditemukan"}), 404
+    _gb, err = _guard_submission(supabase, row["attempt_id"], as_json=True)
+    if err:
+        return err
+    supabase.table(suggestions.TABLE).update({"status": "ignored"}) \
+        .eq("id", suggestion_id).execute()
+    return jsonify({"success": True})
 
 
 @teacher_bp.route("/ai-settings/reset-prompt", methods=["POST"])

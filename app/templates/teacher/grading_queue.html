@@ -62,7 +62,7 @@
             <button @click="bulkAiGrade()" :disabled="bulkAiLoading || pending === 0"
                     class="px-3 py-1.5 bg-gradient-to-r from-violet-500 to-purple-500 text-white text-[11px] font-bold rounded-lg hover:from-violet-600 hover:to-purple-600 disabled:opacity-50 transition shadow-sm flex items-center gap-1.5">
                 <i class="fas shrink-0" :class="bulkAiLoading ? 'fa-spinner fa-spin' : 'fa-wand-magic-sparkles'"></i>
-                <span class="hidden sm:inline" x-text="bulkAiLoading ? 'AI memproses...' : 'AI Koreksi Semua'"></span>
+                <span class="hidden sm:inline" :lang="lang" x-text="bulkAiLoading ? t('AI memproses...','AI drafting...') : t('AI Koreksi Semua','AI grade all')"></span>
             </button>
         </div>
     </div>
@@ -279,9 +279,9 @@
                                                placeholder="Feedback untuk soal ini..."
                                                class="flex-1 px-3 py-1.5 border border-surface-200 rounded-lg text-xs text-surface-700 focus:border-primary-400 focus:ring-1 focus:ring-primary-200">
                                         <!-- AI per-question -->
-                                        <button @click="aiGradeQuestion(q)" :disabled="q._aiLoading"
+                                        <button @click="aiGradeQuestion(q)" :disabled="q._aiLoading" :lang="lang"
                                                 class="px-2.5 py-1.5 bg-violet-50 text-violet-700 hover:bg-violet-100 rounded-lg text-[10px] font-bold transition flex items-center gap-1 shrink-0 disabled:opacity-50"
-                                                :title="'AI koreksi Soal ' + (parseInt(q.index)+1)">
+                                                :title="t('AI koreksi','AI grade') + ' ' + (parseInt(q.index)+1)">
                                             <i class="fas" :class="q._aiLoading ? 'fa-spinner fa-spin' : 'fa-wand-magic-sparkles'"></i>
                                             <span x-text="q._aiLoading ? '' : 'AI'"></span>
                                         </button>
@@ -543,29 +543,57 @@ function gradingApp() {
             q._aiResult = '';
             fetch('/api/ai/grade-essay', {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
+                headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
                 body: JSON.stringify({
                     submission_id: this.current.id,
                     question_index: parseInt(q.index),
                 })
             })
-            .then(r => r.json())
-            .then(d => {
-                q._aiResult = d.feedback || d.suggested_feedback || 'Tidak ada feedback';
-                q._aiScore = d.suggested_score;
-                q._aiConfidence = d.confidence;
+            .then(r => r.json().then(d => ({ok: r.ok, d})))
+            .then(({ok, d}) => {
+                if (!ok || d.error) { q._aiResult = d.error || t('Gagal meminta saran','Could not get a suggestion'); return; }
+                this._pollAi(q, d.suggestion_id, 0);
             })
-            .catch(() => { q._aiResult = 'Gagal memproses'; })
+            .catch(() => { q._aiResult = t('Gagal terhubung ke server AI','Could not reach the AI server'); })
             .finally(() => { q._aiLoading = false; });
         },
 
+        _pollAi(q, id, tries) {
+            if (tries > 80) { q._aiResult = 'AI belum selesai. Coba lagi.'; return; }
+            fetch('/api/ai/suggestion/' + id, {headers: {'Accept': 'application/json'}})
+            .then(r => r.json())
+            .then(d => {
+                if (d.status === 'done') {
+                    q._aiSuggestionId = d.suggestion_id;
+                    q._aiScore = d.score;
+                    q._aiPercent = d.percent;
+                    q._aiConfidence = d.confidence;
+                    q._aiResult = (d.reason || 'Tidak ada feedback') +
+                        ' (' + d.score + '/' + d.points + ' poin)';
+                    return;
+                }
+                if (d.status === 'failed') { q._aiResult = d.error || 'Gagal'; return; }
+                q._aiResult = t('AI sedang menilai…','AI is marking…');
+                setTimeout(() => this._pollAi(q, id, tries + 1), 1500);
+            })
+            .catch(() => setTimeout(() => this._pollAi(q, id, tries + 1), 2000));
+        },
+
         applyAiScore(q) {
-            if (q._aiScore !== undefined) {
-                this.qscores[q.index] = Math.round(q._aiScore);
-                if (q._aiResult) this.qcomments[q.index] = q._aiResult;
-                this.onScoreChange();
-                q._aiResult = '';
+            if (q._aiPercent === undefined) return;
+            // Field nilai guru memakai persen dari bobot soal; saran AI disimpan
+            // dalam poin. Konversinya dari server.
+            this.qscores[q.index] = q._aiPercent;
+            if (q._aiResult) this.qcomments[q.index] = q._aiResult;
+            this.onScoreChange();
+            if (q._aiSuggestionId) {
+                fetch('/teacher/api/ai/suggestion/' + q._aiSuggestionId + '/apply', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
+                    body: '{}'
+                }).catch(() => {});
             }
+            q._aiResult = '';
         },
 
         aiGradeCurrent() {
@@ -580,16 +608,29 @@ function gradingApp() {
             this.bulkAiLoading = true;
             fetch('/api/ai/grade-bulk', {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
+                headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
                 body: JSON.stringify({ exam_id: this.examId })
             })
+            .then(r => r.json().then(d => ({ok: r.ok, d})))
+            .then(({ok, d}) => {
+                if (!ok || d.error) { alert(d.error || 'Gagal menjalankan AI grading'); return; }
+                if (!d.queued) { alert('Tidak ada esai baru untuk dikoreksi.'); return; }
+                this._pollBatch(d.batch_id, 0);
+            })
+            .catch(() => { alert(t('Gagal terhubung ke server AI','Could not reach the AI server')); })
+            .finally(() => { this.bulkAiLoading = false; });
+        },
+
+        _pollBatch(batchId, tries) {
+            if (tries > 120) { this.bulkAiLoading = false; alert('AI belum selesai. Muat ulang sebentar lagi.'); return; }
+            fetch('/api/ai/suggestion-batch/' + batchId, {headers: {'Accept': 'application/json'}})
             .then(r => r.json())
             .then(d => {
-                if (d.graded !== undefined) alert('AI berhasil mengoreksi ' + d.graded + ' esai. Muat ulang untuk melihat hasil.');
-                this.fetchQueue();
+                if (d.error) { this.bulkAiLoading = false; alert(d.error); return; }
+                if (d.finished >= d.total) { window.location.reload(); return; }
+                setTimeout(() => this._pollBatch(batchId, tries + 1), 2000);
             })
-            .catch(() => { alert('Gagal menjalankan AI grading'); })
-            .finally(() => { this.bulkAiLoading = false; });
+            .catch(() => setTimeout(() => this._pollBatch(batchId, tries + 1), 2500));
         },
     };
 }

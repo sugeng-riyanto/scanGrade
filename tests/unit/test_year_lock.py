@@ -67,6 +67,15 @@ EXEMPT = {
     "teacher_bp /ai-settings/<key_id>/delete": "the teacher's own settings",
     "teacher_bp /ai-settings/save-prompt": "the teacher's own settings",
     "teacher_bp /ai-settings/reset-prompt": "the teacher's own settings",
+    "teacher_bp /ai-settings/prompt":
+        "the teacher's own rubric for a subject — configuration, not a year's marks",
+    "teacher_bp /ai-settings/prompt/delete":
+        "removes that same rubric; no paper, answer or mark is touched",
+    "teacher_bp /api/ai/suggestion/<suggestion_id>/apply":
+        "records that the teacher accepted advice; the mark itself is written only "
+        "by the year-locked override route, when the teacher saves",
+    "teacher_bp /api/ai/suggestion/<suggestion_id>/ignore":
+        "dismisses advice; no score moves, so no year's row changes",
     "teacher_bp /subjects/new": "a school subject, not a year's marks",
     "teacher_bp /subjects/<subject_id>/delete": "a school subject, not a year's marks",
     "teacher_bp /analysis/<exam_id>/share": "a share link, not the year's data",

@@ -17,6 +17,15 @@
                 <p class="text-xs text-slate-500 font-medium mt-0.5">
                     <span :lang="lang" x-text="'{{ eg.pending|length }} ' + t('perlu koreksi','need grading') + '  •  ' + '{{ eg.graded|length }} ' + t('selesai','graded')"></span>
                 </p>
+                {# Status saran AI sekilas, tanpa membuka tiap kertas. Halaman ini
+                   memaku bahasa Indonesia (`content_lang = 'id'`), jadi salinannya
+                   satu bahasa. #}
+                {% set ai = eg.ai|default({'done': 0, 'pending': 0, 'failed': 0, 'total': 0}, true) %}
+                <p class="text-[10px] font-bold mt-1 {% if ai.pending %}text-violet-600{% elif ai.done %}text-emerald-600{% else %}text-slate-400{% endif %}"
+                   :lang="lang" x-text="{% if ai.pending %}'{{ ai.pending }} ' + t('saran sedang disusun','suggestion(s) being drafted'){% elif ai.done %}'{{ ai.done }} ' + t('saran AI siap','AI suggestion(s) ready'){% else %}t('Belum ada saran AI','No AI suggestions yet'){% endif %}{% if ai.failed %} + ' · {{ ai.failed }} ' + t('gagal','failed'){% endif %}">
+                    <i class="fas fa-robot mr-1"></i>
+                    {% if ai.pending %}AI memproses {{ ai.pending }} saran{% elif ai.done %}{{ ai.done }} saran AI siap{% else %}Belum ada saran AI{% endif %}
+                </p>
             </div>
             <div class="flex items-center gap-2">
                 {% set total = eg.pending|length + eg.graded|length %}
@@ -50,7 +59,7 @@
         {% else %}
         <div class="px-5 py-8 text-center text-slate-400">
             <i class="fas fa-check-circle text-2xl mb-2"></i>
-            <p class="text-sm font-medium">Semua terkoreksi untuk ujian ini</p>
+            <p class="text-sm font-medium" :lang="lang" x-text="t('Semua terkoreksi untuk ujian ini','Everything here is marked')"></p>
         </div>
         {% endif %}
     </div>
