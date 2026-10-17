@@ -472,6 +472,12 @@ def create_app(env=None):
     app.jinja_env.globals["q_kind"] = question_kind
     app.jinja_env.globals["q_answer_text"] = describe_answer
     app.jinja_env.globals["q_public_options"] = public_options
+    # The pupil's essay as text, from whichever shape the answer was stored in.
+    # The marking page used `student_text[:300]` and the queue `text[:100]`, so a
+    # teacher marked a preview of a paper the database held in full; one reader,
+    # and no surface truncates it on the way to a marker (see the module).
+    from app.services.essay_text import essay_answer_text
+    app.jinja_env.globals["essay_answer_text"] = essay_answer_text
     # The subject a paper is for. `exams.subject` is a legacy text column the
     # builder no longer writes, so a sheet that read `exam.get('subject', '-')`
     # printed the literal word `None` — `.get`'s default only covers an absent

@@ -34,6 +34,7 @@ from app.services.question_types import (
     normalise_key,
     objective_result, question_kind, scheme_in,
 )
+from app.services.essay_text import essay_answer_text
 from app.services import exam_scoring
 from app.services import mark_scheme
 from app.services import assignments as assignments_service
@@ -4821,18 +4822,21 @@ def api_grading_queue(exam_id):
         per_question = []
         for ei in essay_indices:
             ans = answers.get(ei)
-            text = ""
-            if isinstance(ans, dict):
-                text = (ans.get("text") or ans.get("answer", "") or "").strip()
-            elif isinstance(ans, str):
-                text = ans.strip()
+            # One reader for the stored shape (`text`, then paragraphs, then text
+            # typed into boxes on the paper). This block read `.text`/`.answer`
+            # itself and cut the result at 100 characters, which is the whole
+            # essay for most papers: the marking queue showed a preview and the
+            # full answer never reached the marker.
+            text = essay_answer_text(ans)
             if not preview and text:
+                # The row preview in the sidebar is a summary on purpose; the
+                # per-question preview below is the answer itself.
                 preview = text[:150]
             per_question.append({
                 "index": ei,
                 "score": fb_scores.get(ei),
                 "comment": fb_comments.get(ei, ""),
-                "preview": text[:100] if text else "",
+                "preview": text,
             })
         profile = s.get("profiles") or {}
         result.append({

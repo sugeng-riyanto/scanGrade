@@ -34,6 +34,7 @@ import re
 from app.services.ai_grading_prompt import (
     build_grading_prompt, clean_answer_text, points_to_percent,
 )
+from app.services.essay_text import essay_answer_text
 
 logger = logging.getLogger("app")
 
@@ -95,20 +96,15 @@ def _mapping(value):
 def answer_text_of(entry) -> str:
     """The answer's text, from the shapes the exam page actually stores.
 
-    A dict answer carries the toolbar's `text` and possibly `answer`; a plain
-    string is an older paper. Drawing pages are *not* text: an OCR pass has to
-    produce the text first, and pretending a canvas has an answer would send an
-    empty essay to the model and store a zero.
+    Delegates to `essay_text.essay_answer_text`, the same reader the teacher's
+    marking page uses: an AI asked to grade one text while the marker is shown
+    another is an AI grading a different paper. A dict answer carries the
+    toolbar's `text`, the paragraphs behind it, or text typed into boxes on the
+    paper; a plain string is an older paper. Drawing pages are *not* text: an OCR
+    pass has to produce the text first, and pretending a canvas has an answer
+    would send an empty essay to the model and store a zero.
     """
-    if isinstance(entry, dict):
-        for key in ("text", "answer"):
-            value = entry.get(key)
-            if isinstance(value, str) and value.strip():
-                return value
-        return ""
-    if isinstance(entry, str):
-        return entry
-    return ""
+    return essay_answer_text(entry)
 
 
 def question_points(exam, index) -> float:

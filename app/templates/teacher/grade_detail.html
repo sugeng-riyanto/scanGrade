@@ -620,7 +620,11 @@
                             {% set qtype = (exam.question_types or {}).get(i|string, 'mcq') %}
                             {% if qtype == 'essay_text' or qtype == 'essay' %}
                             {% set ans_raw = submission.answers.get(i|string, {}) %}
-                            {% set student_text = ans_raw['text'] if ans_raw is mapping and 'text' in ans_raw else '' %}
+                            {# The whole answer, from whichever shape it was stored in.
+                               This read `.text` and printed 300 characters of it, so a
+                               teacher marked the opening paragraph of a two-page essay and
+                               never saw the rest — the paper was in the database, whole. #}
+                            {% set student_text = essay_answer_text(ans_raw) %}
                             {% if student_text %}
                             <div class="w-full flex items-start gap-3">
                                 <div class="flex-1 p-3 bg-blue-50 rounded-lg border border-blue-200">
@@ -635,7 +639,7 @@
                                             </button>
                                         </div>
                                     </div>
-                                    <p class="text-xs text-slate-700 whitespace-pre-wrap leading-relaxed max-h-32 overflow-y-auto">{{ student_text[:300] }}{% if student_text|length > 300 %}...{% endif %}</p>
+                                    <p class="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">{{ student_text }}</p>
                                     <!-- OCR Canvas Result Area (hidden by default) -->
                                     <div :id="'ocr-area-' + {{ i }}" class="hidden mt-2">
                                         <div class="flex items-center gap-2 mb-1">

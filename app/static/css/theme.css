@@ -774,3 +774,42 @@ html { transition: background-color .3s, color .3s; }
            the same three appear wherever a paragraph is being held open. */
         .sg-skel-line-90 { width: 90%; }
         .sg-skel-line-80 { width: 80%; }
+
+        /* ══ The essay answer sheet (the student exam page) ═══════════════════
+           The surface a pupil writes two pages on, so it is drawn from the theme
+           tokens rather than a bare white box: `--bg-subtle` is a shade off the
+           card in light mode (no glare for a two-hour sitting) and a soft slate
+           in dark mode, and the ink is `--text`, which is the pair the contrast
+           gate measures.
+
+           The list rules are not decoration. Tailwind's preflight sets
+           `ul, ol { list-style: none; margin: 0; padding: 0 }` on every page, so
+           a `<ul><li>` the editor creates rendered as indented lines with **no
+           bullets** — the list existed in the DOM and the pupil saw nothing
+           happen. These rules put the markers back inside the editor only, so
+           every other list in the app keeps the design system's drawing. */
+        .sg-essay-sheet { background: var(--bg-subtle); }
+        .sg-essay-para {
+            color: var(--text);
+            background: transparent;
+            overflow-wrap: anywhere;
+            tab-size: 4;
+        }
+        .sg-essay-para:focus {
+            background: var(--bg-card);
+            box-shadow: inset 3px 0 0 var(--sb-thumb-active);
+        }
+        .sg-essay-para ul,
+        .sg-essay-para ol {
+            margin: .35rem 0;
+            padding-left: 1.6rem;
+        }
+        .sg-essay-para ul { list-style: disc outside; }
+        .sg-essay-para ol { list-style: decimal outside; }
+        .sg-essay-para li { margin: .2rem 0; padding-left: .1rem; }
+        .sg-essay-para li::marker { color: var(--text-dim); font-weight: 600; }
+        /* Nested lists keep their own shape, which is how a pupil outlines an
+           answer: bullets inside a numbered point. */
+        .sg-essay-para ul ul { list-style: circle outside; }
+        .sg-essay-para ul ul ul { list-style: square outside; }
+        .sg-essay-para ol ol { list-style: lower-alpha outside; }

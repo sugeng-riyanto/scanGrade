@@ -1200,7 +1200,7 @@ body.sg-exam .sidebar-overlay { display: none !important; }
                  left, the way an answer sheet is read. One wrapper, so all five
                  kinds move together; see .exam-stage--left above. -->
             <div class="exam-stage sg-exam-zoom" x-ref="examStage"
-                 :class="answersSide === 'left' ? 'exam-stage--left' : ''">
+                 :class="answersSide === 'left' && !isEssayCurrent ? 'exam-stage--left' : ''">
             <!-- MCQ: PDF + drawing canvas + tools — placed BEFORE soal -->
             <div x-show="!submitted" style="display:none" class="mb-3 exam-paper">
                 <template x-for="(q, i) in questions" :key="'mcq-area-'+i">
@@ -1917,33 +1917,88 @@ body.sg-exam .sidebar-overlay { display: none !important; }
                                     </span>
                                     <span class="text-xs text-slate-400" x-text="'(' + ((answersText[i] || '').length) + t(' karakter, ',' characters, ') + ((paragraphs[i]||[]).length) + t(' paragraf)',' paragraphs)')"></span>
                                 </div>
-                                <!-- Rich text toolbar -->
-                                <div class="flex items-center gap-1 px-3 py-1.5 bg-surface-50 border border-surface-200 rounded-t-xl">
-                                    <button type="button" @click="execCmd('bold')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs font-bold text-surface-600" :title="t('Tebal','Bold')">B</button>
-                                    <button type="button" @click="execCmd('italic')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs italic text-surface-600" :title="t('Miring','Italic')">I</button>
-                                    <button type="button" @click="execCmd('underline')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs underline text-surface-600" :title="t('Garis bawah','Underline')">U</button>
-                                    <span class="w-px h-4 bg-surface-300 mx-0.5"></span>
-                                    <button type="button" @click="execCmd('insertUnorderedList')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs text-surface-600" :title="t('Daftar','Bullet list')"><i class="fas fa-list-ul"></i></button>
-                                    <button type="button" @click="execCmd('insertOrderedList')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs text-surface-600" :title="t('Daftar nomor','Numbered list')"><i class="fas fa-list-ol"></i></button>
-                                    <span class="w-px h-4 bg-surface-300 mx-0.5"></span>
-                                    <button type="button" @click="addParagraph(i)" class="px-2 h-7 rounded hover:bg-surface-200 text-xs font-semibold text-primary-600" :title="t('Tambah paragraf','Add paragraph')"><span x-text="t('+ Paragraf','+ Paragraph')"></span></button>
+                                <!-- Rich text toolbar. `@mousedown.prevent` is load-bearing on
+                                     every button: a button outside the editable takes focus on
+                                     mousedown, and a command with no selection in the paragraph
+                                     is a command that does nothing — which is what the list
+                                     buttons did. The list buttons do not call the deprecated
+                                     execCommand at all; SGEssayEditor builds the <ul>/<ol>. -->
+                                <div class="flex flex-wrap items-center gap-1 px-3 py-2 bg-surface-50 border border-surface-200 rounded-t-xl">
+                                    <button type="button" @mousedown.prevent="execCmd('bold')" class="w-8 h-8 rounded-lg hover:bg-surface-200 text-sm font-bold text-surface-700" :title="t('Tebal','Bold')">B</button>
+                                    <button type="button" @mousedown.prevent="execCmd('italic')" class="w-8 h-8 rounded-lg hover:bg-surface-200 text-sm italic text-surface-700" :title="t('Miring','Italic')">I</button>
+                                    <button type="button" @mousedown.prevent="execCmd('underline')" class="w-8 h-8 rounded-lg hover:bg-surface-200 text-sm underline text-surface-700" :title="t('Garis bawah','Underline')">U</button>
+                                    <span class="w-px h-5 bg-surface-300 mx-0.5"></span>
+                                    <button type="button" @mousedown.prevent="applyList(i, 'ul')"
+                                            :class="listState[i] === 'ul' ? 'bg-primary-100 text-primary-700' : 'text-surface-600 hover:bg-surface-200'"
+                                            class="w-8 h-8 rounded-lg transition" :aria-pressed="listState[i] === 'ul'"
+                                            :title="t('Daftar butir','Bullet list')"><i class="fas fa-list-ul"></i></button>
+                                    <button type="button" @mousedown.prevent="applyList(i, 'ol')"
+                                            :class="listState[i] === 'ol' ? 'bg-primary-100 text-primary-700' : 'text-surface-600 hover:bg-surface-200'"
+                                            class="w-8 h-8 rounded-lg transition" :aria-pressed="listState[i] === 'ol'"
+                                            :title="t('Daftar bernomor','Numbered list')"><i class="fas fa-list-ol"></i></button>
+                                    <span class="w-px h-5 bg-surface-300 mx-0.5"></span>
+                                    <!-- A font is how the answer is *drawn*, never what is stored:
+                                         the text sent to the server and read by the teacher carries
+                                         no styling, and the AI reads the same plain text. -->
+                                    <label class="flex items-center gap-1 text-[10px] font-bold text-surface-500"
+                                           :title="t('Huruf mengubah tampilan, bukan isi jawaban','The font changes how the answer looks, never what is stored')">
+                                        <i class="fas fa-font"></i>
+                                        <select :value="essayFont(i)" @change="setEssayFont(i, $event.target.value)"
+                                                :aria-label="t('Huruf jawaban','Answer font')"
+                                                class="h-8 rounded-lg border border-surface-200 bg-white px-1 text-[11px] font-semibold text-surface-700">
+                                            <option value="Nunito, Inter, system-ui, sans-serif">Sans</option>
+                                            <option value="'Times New Roman', Georgia, serif">Serif</option>
+                                            <option value="ui-monospace, SFMono-Regular, Menlo, monospace">Mono</option>
+                                        </select>
+                                    </label>
+                                    <select :value="essaySize(i)" @change="setEssaySize(i, $event.target.value)"
+                                            :aria-label="t('Ukuran huruf','Text size')"
+                                            :title="t('Ukuran huruf','Text size')"
+                                            class="h-8 rounded-lg border border-surface-200 bg-white px-1 text-[11px] font-semibold text-surface-700">
+                                        <option value="14">14</option>
+                                        <option value="16">16</option>
+                                        <option value="18">18</option>
+                                        <option value="20">20</option>
+                                    </select>
+                                    <button type="button" @mousedown.prevent="addParagraph(i)" class="ml-auto px-2.5 h-8 rounded-lg hover:bg-surface-200 text-xs font-semibold text-primary-600" :title="t('Tambah paragraf','Add paragraph')"><span x-text="t('+ Paragraf','+ Paragraph')"></span></button>
                                 </div>
                                 <!-- Paragraphs -->
-                                <div class="border border-t-0 border-surface-200 rounded-b-xl divide-y divide-surface-100 bg-white">
+                                <div class="sg-essay-sheet border border-t-0 border-surface-200 rounded-b-xl divide-y divide-surface-100">
                                     <template x-for="(para, pIdx) in (paragraphs[i] || [{id:'p0',text:'',html:'<p><br></p>',order:0}])" :key="para.id">
                                         <div class="relative group">
                                             <div class="flex items-center justify-between px-3 py-1 bg-surface-50/50">
                                                 <span class="text-[10px] font-semibold text-surface-400" x-text="t('Paragraf ','Paragraph ') + (pIdx + 1)"></span>
                                                 <button type="button" @click="deleteParagraph(i, pIdx)" x-show="(paragraphs[i]||[]).length > 1" class="text-surface-300 hover:text-red-500 text-xs opacity-0 group-hover:opacity-100 transition"><i class="fas fa-times"></i></button>
                                             </div>
+                                            <!-- The content is written once, from the stored
+                                                 paragraph, and never re-bound to the value being
+                                                 typed: an `x-html` on the live value replaced the
+                                                 nodes on every keystroke and dropped the caret.
+                                                 `initialHtml` is kept in step so a re-render (adding
+                                                 or deleting a paragraph) restores what is there. -->
                                             <div :ref="'para_' + para.id"
                                                  contenteditable="true"
+                                                 role="textbox"
+                                                 :aria-label="t('Jawaban paragraf ','Answer paragraph ') + (pIdx + 1)"
                                                  @input="onParagraphInput(i, pIdx, $refs['para_' + para.id])"
-                                                 @keydown.enter.prevent="addParagraph(i, pIdx + 1)"
-                                                 class="min-h-[60px] p-3 text-sm leading-relaxed text-surface-800 focus:outline-none focus:bg-blue-50/30"
-                                                 x-html="para.html || '<p><br></p>'"></div>
+                                                 @focus="focusPara(i, pIdx, $refs['para_' + para.id])"
+                                                 @keyup="rememberPara($refs['para_' + para.id])"
+                                                 @mouseup="rememberPara($refs['para_' + para.id])"
+                                                 @keydown.enter="onParagraphEnter(i, pIdx, $event)"
+                                                 @paste="onParagraphPaste(i, pIdx, $event)"
+                                                 class="sg-essay-para min-h-[3.5rem] px-4 py-2.5 leading-relaxed focus:outline-none"
+                                                 :style="essayStyle(i)"
+                                                 x-init="$el.innerHTML = para.initialHtml || '<p><br></p>'"></div>
                                         </div>
                                     </template>
+                                </div>
+                                <!-- The answer's own save state, where the pupil is looking.
+                                     The exam bar shows it too; this one is beside the text so
+                                     nobody has to hunt for "is my essay safe?". -->
+                                <div class="flex flex-wrap items-center gap-2 px-3 py-2 text-[11px] font-semibold border border-t-0 border-surface-200 rounded-b-xl bg-surface-50 text-surface-500">
+                                    <i class="fas" :class="syncStatus === 'synced' ? 'fa-circle-check text-emerald-500' : syncStatus === 'saving' ? 'fa-arrows-rotate fa-spin text-amber-500' : 'fa-cloud-arrow-up text-surface-400'"></i>
+                                    <span x-text="syncLabel"></span>
+                                    <span class="ml-auto" x-text="t('Tersimpan otomatis di perangkat ini','Saved automatically on this device')"></span>
                                 </div>
                             </div>
                             <!-- Canvas mode -->
@@ -1972,32 +2027,82 @@ body.sg-exam .sidebar-overlay { display: none !important; }
                                     </span>
                                     <span class="text-xs text-slate-400" x-text="'(' + ((answersText[i] || '').length) + t(' karakter, ',' characters, ') + ((paragraphs[i]||[]).length) + t(' paragraf)',' paragraphs)')"></span>
                                 </div>
-                                <div class="flex items-center gap-1 px-3 py-1.5 bg-surface-50 border border-surface-200 rounded-t-xl">
-                                    <button type="button" @click="execCmd('bold')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs font-bold text-surface-600" :title="t('Tebal','Bold')">B</button>
-                                    <button type="button" @click="execCmd('italic')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs italic text-surface-600" :title="t('Miring','Italic')">I</button>
-                                    <button type="button" @click="execCmd('underline')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs underline text-surface-600" :title="t('Garis bawah','Underline')">U</button>
-                                    <span class="w-px h-4 bg-surface-300 mx-0.5"></span>
-                                    <button type="button" @click="execCmd('insertUnorderedList')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs text-surface-600" :title="t('Daftar','Bullet list')"><i class="fas fa-list-ul"></i></button>
-                                    <button type="button" @click="execCmd('insertOrderedList')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs text-surface-600" :title="t('Daftar nomor','Numbered list')"><i class="fas fa-list-ol"></i></button>
-                                    <span class="w-px h-4 bg-surface-300 mx-0.5"></span>
-                                    <button type="button" @click="addParagraph(i)" class="px-2 h-7 rounded hover:bg-surface-200 text-xs font-semibold text-primary-600" :title="t('Tambah paragraf','Add paragraph')"><span x-text="t('+ Paragraf','+ Paragraph')"></span></button>
+                                <div class="flex flex-wrap items-center gap-1 px-3 py-2 bg-surface-50 border border-surface-200 rounded-t-xl">
+                                    <button type="button" @mousedown.prevent="execCmd('bold')" class="w-8 h-8 rounded-lg hover:bg-surface-200 text-sm font-bold text-surface-700" :title="t('Tebal','Bold')">B</button>
+                                    <button type="button" @mousedown.prevent="execCmd('italic')" class="w-8 h-8 rounded-lg hover:bg-surface-200 text-sm italic text-surface-700" :title="t('Miring','Italic')">I</button>
+                                    <button type="button" @mousedown.prevent="execCmd('underline')" class="w-8 h-8 rounded-lg hover:bg-surface-200 text-sm underline text-surface-700" :title="t('Garis bawah','Underline')">U</button>
+                                    <span class="w-px h-5 bg-surface-300 mx-0.5"></span>
+                                    <button type="button" @mousedown.prevent="applyList(i, 'ul')"
+                                            :class="listState[i] === 'ul' ? 'bg-primary-100 text-primary-700' : 'text-surface-600 hover:bg-surface-200'"
+                                            class="w-8 h-8 rounded-lg transition" :aria-pressed="listState[i] === 'ul'"
+                                            :title="t('Daftar butir','Bullet list')"><i class="fas fa-list-ul"></i></button>
+                                    <button type="button" @mousedown.prevent="applyList(i, 'ol')"
+                                            :class="listState[i] === 'ol' ? 'bg-primary-100 text-primary-700' : 'text-surface-600 hover:bg-surface-200'"
+                                            class="w-8 h-8 rounded-lg transition" :aria-pressed="listState[i] === 'ol'"
+                                            :title="t('Daftar bernomor','Numbered list')"><i class="fas fa-list-ol"></i></button>
+                                    <span class="w-px h-5 bg-surface-300 mx-0.5"></span>
+                                    <!-- A font is how the answer is *drawn*, never what is stored:
+                                         the text sent to the server and read by the teacher carries
+                                         no styling, and the AI reads the same plain text. -->
+                                    <label class="flex items-center gap-1 text-[10px] font-bold text-surface-500"
+                                           :title="t('Huruf mengubah tampilan, bukan isi jawaban','The font changes how the answer looks, never what is stored')">
+                                        <i class="fas fa-font"></i>
+                                        <select :value="essayFont(i)" @change="setEssayFont(i, $event.target.value)"
+                                                :aria-label="t('Huruf jawaban','Answer font')"
+                                                class="h-8 rounded-lg border border-surface-200 bg-white px-1 text-[11px] font-semibold text-surface-700">
+                                            <option value="Nunito, Inter, system-ui, sans-serif">Sans</option>
+                                            <option value="'Times New Roman', Georgia, serif">Serif</option>
+                                            <option value="ui-monospace, SFMono-Regular, Menlo, monospace">Mono</option>
+                                        </select>
+                                    </label>
+                                    <select :value="essaySize(i)" @change="setEssaySize(i, $event.target.value)"
+                                            :aria-label="t('Ukuran huruf','Text size')"
+                                            :title="t('Ukuran huruf','Text size')"
+                                            class="h-8 rounded-lg border border-surface-200 bg-white px-1 text-[11px] font-semibold text-surface-700">
+                                        <option value="14">14</option>
+                                        <option value="16">16</option>
+                                        <option value="18">18</option>
+                                        <option value="20">20</option>
+                                    </select>
+                                    <button type="button" @mousedown.prevent="addParagraph(i)" class="ml-auto px-2.5 h-8 rounded-lg hover:bg-surface-200 text-xs font-semibold text-primary-600" :title="t('Tambah paragraf','Add paragraph')"><span x-text="t('+ Paragraf','+ Paragraph')"></span></button>
                                 </div>
                                 <!-- Paragraphs (Canvas mode) -->
-                                <div class="border border-t-0 border-surface-200 rounded-b-xl divide-y divide-surface-100 bg-white">
+                                <div class="sg-essay-sheet border border-t-0 border-surface-200 rounded-b-xl divide-y divide-surface-100">
                                     <template x-for="(para, pIdx) in (paragraphs[i] || [{id:'p0',text:'',html:'<p><br></p>',order:0}])" :key="para.id">
                                         <div class="relative group">
                                             <div class="flex items-center justify-between px-3 py-1 bg-surface-50/50">
                                                 <span class="text-[10px] font-semibold text-surface-400" x-text="t('Paragraf ','Paragraph ') + (pIdx + 1)"></span>
                                                 <button type="button" @click="deleteParagraph(i, pIdx)" x-show="(paragraphs[i]||[]).length > 1" class="text-surface-300 hover:text-red-500 text-xs opacity-0 group-hover:opacity-100 transition"><i class="fas fa-times"></i></button>
                                             </div>
+                                            <!-- The content is written once, from the stored
+                                                 paragraph, and never re-bound to the value being
+                                                 typed: an `x-html` on the live value replaced the
+                                                 nodes on every keystroke and dropped the caret.
+                                                 `initialHtml` is kept in step so a re-render (adding
+                                                 or deleting a paragraph) restores what is there. -->
                                             <div :ref="'para_' + para.id"
                                                  contenteditable="true"
+                                                 role="textbox"
+                                                 :aria-label="t('Jawaban paragraf ','Answer paragraph ') + (pIdx + 1)"
                                                  @input="onParagraphInput(i, pIdx, $refs['para_' + para.id])"
-                                                 @keydown.enter.prevent="addParagraph(i, pIdx + 1)"
-                                                 class="min-h-[60px] p-3 text-sm leading-relaxed text-surface-800 focus:outline-none focus:bg-blue-50/30"
-                                                 x-html="para.html || '<p><br></p>'"></div>
+                                                 @focus="focusPara(i, pIdx, $refs['para_' + para.id])"
+                                                 @keyup="rememberPara($refs['para_' + para.id])"
+                                                 @mouseup="rememberPara($refs['para_' + para.id])"
+                                                 @keydown.enter="onParagraphEnter(i, pIdx, $event)"
+                                                 @paste="onParagraphPaste(i, pIdx, $event)"
+                                                 class="sg-essay-para min-h-[3.5rem] px-4 py-2.5 leading-relaxed focus:outline-none"
+                                                 :style="essayStyle(i)"
+                                                 x-init="$el.innerHTML = para.initialHtml || '<p><br></p>'"></div>
                                         </div>
                                     </template>
+                                </div>
+                                <!-- The answer's own save state, where the pupil is looking.
+                                     The exam bar shows it too; this one is beside the text so
+                                     nobody has to hunt for "is my essay safe?". -->
+                                <div class="flex flex-wrap items-center gap-2 px-3 py-2 text-[11px] font-semibold border border-t-0 border-surface-200 rounded-b-xl bg-surface-50 text-surface-500">
+                                    <i class="fas" :class="syncStatus === 'synced' ? 'fa-circle-check text-emerald-500' : syncStatus === 'saving' ? 'fa-arrows-rotate fa-spin text-amber-500' : 'fa-cloud-arrow-up text-surface-400'"></i>
+                                    <span x-text="syncLabel"></span>
+                                    <span class="ml-auto" x-text="t('Tersimpan otomatis di perangkat ini','Saved automatically on this device')"></span>
                                 </div>
                             </div>
                             <!-- Canvas mode -->
@@ -2044,6 +2149,9 @@ body.sg-exam .sidebar-overlay { display: none !important; }
 <!-- Classic, for the same reason as the two above: `examApp(...)` reads the
      module while it is built, and a deferred helper would not exist yet. -->
 <script src="/static/js/exam-view.js"></script>
+<!-- The essay surface's list/font/paste behaviour. Classic, like the two above,
+     because the component reads `window.SGEssayEditor` while it is built. -->
+<script src="/static/js/essay-editor.js"></script>
 <script>
 // The lightbox is page furniture rather than exam state, so it is wired here and
 // not inside Alpine: the overlay has to work while a panel covers the exam bar.
@@ -2348,7 +2456,18 @@ function examApp(duration, totalQ) {
         // removed again. See `multiHintOn`.
         multiHinted: {},
         answersText: {},
-        paragraphs: {},       // { i: [{id, text, html, order}] } per question
+        paragraphs: {},       // { i: [{id, text, html, initialHtml, order}] } per question
+        // The paragraph the toolbar acts on, the element it lives in, and which
+        // list (if any) that paragraph currently is — read from the DOM, so a
+        // paragraph restored from a draft shows the right button as active.
+        listState: {},
+        _activePara: {},
+        _activeEditor: null,
+        _activeEditorQ: 0,
+        // The pupil's last font/size choice, remembered across sits. It is a
+        // display preference only: no part of it is written into the answer.
+        _rememberedFont: (function () { try { return localStorage.getItem('sg_essay_font') || ''; } catch (e) { return ''; } })(),
+        _rememberedSize: (function () { try { return localStorage.getItem('sg_essay_size') || ''; } catch (e) { return ''; } })(),
         essayMode: {},        // { i: 'text' | 'canvas' }
         matchOpen: null,      // which matching row's candidate list is open, 'i:pi'
         chipDrag: null,       // { i, w } while a chip is being dragged
@@ -2848,6 +2967,7 @@ function examApp(duration, totalQ) {
                 this.initEcCanvas(v);
                 this.initStatusBar();
                 this.updateScrollState();
+                this.seedParagraphs();
                 this.loadDraft();
                 // Navigate to first page of first question's range
                 var rng0 = this.parsePageRange(QUESTION_PAGES[v] || '');
@@ -4088,6 +4208,14 @@ function examApp(duration, totalQ) {
         // a bubble strip that was sized for the matching question beside it would
         // take room the paper is using. Whole class strings per branch, so the
         // compiler and the CSS both see a name rather than a fragment.
+        // An essay needs the page's width. The side-by-side arrangement puts the
+        // answer column at 34rem (45% of the stage) — right for a strip of bubbles,
+        // wrong for two pages of writing — so an essay question always draws the
+        // editor full width under the paper, whatever column the pupil chose.
+        get isEssayCurrent() {
+            const q = this.questions[this.currentQ] || {};
+            return sgKind(q.type) === 'essay';
+        },
         get answerWidthClass() {
             const kind = sgKind((this.questions[this.currentQ] || {}).type);
             if (kind === 'essay') return 'answer-wide';
@@ -5040,7 +5168,8 @@ function examApp(duration, totalQ) {
         addParagraph(qIdx, afterIdx) {
             if (!this.paragraphs[qIdx]) this.paragraphs[qIdx] = [{id:'p0',text:'',html:'<p><br></p>',order:0}];
             const insertAt = afterIdx !== undefined ? afterIdx : this.paragraphs[qIdx].length;
-            const newPara = {id:'p' + Date.now(), text:'', html:'<p><br></p>', order: insertAt};
+            const newPara = {id:'p' + Date.now(), text:'', html:'<p><br></p>', order: insertAt,
+                             initialHtml:'<p><br></p>'};
             this.paragraphs[qIdx].splice(insertAt, 0, newPara);
             this.paragraphs[qIdx].forEach((p, i) => p.order = i);
             this.$nextTick(() => {
@@ -5056,11 +5185,112 @@ function examApp(duration, totalQ) {
             this.onParagraphUpdate(qIdx);
         },
         onParagraphInput(qIdx, pIdx, el) {
-            if (!el || !this.paragraphs[qIdx] || !this.paragraphs[qIdx][pIdx]) return;
+            if (!el) return;
+            // A paragraph the pupil has typed into *is* a paragraph, even if the
+            // state row has not been made yet. This used to return here, so on a
+            // fresh essay the first paragraphs were never captured: the editor
+            // showed them, `answersText` stayed empty, the sync skipped them (it
+            // only writes when something is dirty) and the submitted paper had no
+            // answer at all. The row is created here rather than trusted to exist.
+            if (!this.paragraphs[qIdx] || !this.paragraphs[qIdx].length) {
+                this.paragraphs[qIdx] = [{id: 'p0', text: '', html: '<p><br></p>', order: 0,
+                                          initialHtml: '<p><br></p>'}];
+            }
+            if (!this.paragraphs[qIdx][pIdx]) return;
             const para = this.paragraphs[qIdx][pIdx];
             para.html = el.innerHTML;
-            para.text = el.innerText;
+            para.initialHtml = el.innerHTML;
+            para.text = window.SGEssayEditor ? window.SGEssayEditor.textOf(el) : el.innerText;
+            this._activePara[qIdx] = pIdx;
+            this._activeEditor = el;
+            this._activeEditorQ = qIdx;
+            this.refreshListState(qIdx, el);
             this.onParagraphUpdate(qIdx);
+        },
+        // ── The essay editor's wiring ────────────────────────────────────────
+        // `para.initialHtml` is written once per paragraph (by the template's
+        // `x-init`) and kept in step here; the surface is never re-bound to the
+        // value being typed, which is what dropped the caret on every keystroke.
+        seedParagraphs() {
+            this.questions.forEach((q, i) => {
+                if (sgKind(q.type) !== 'essay') return;
+                if (this.paragraphs[i] && this.paragraphs[i].length) return;
+                this.paragraphs[i] = [{id: 'p0', text: '', html: '<p><br></p>', order: 0,
+                                       initialHtml: '<p><br></p>'}];
+            });
+        },
+        focusPara(qIdx, pIdx, el) {
+            this._activePara[qIdx] = pIdx;
+            this._activeEditor = el || null;
+            this._activeEditorQ = qIdx;
+            this.rememberPara(el);
+            this.refreshListState(qIdx, el);
+        },
+        rememberPara(el) {
+            if (el && window.SGEssayEditor) window.SGEssayEditor.remember(el);
+        },
+        refreshListState(qIdx, el) {
+            this.listState[qIdx] = (el && window.SGEssayEditor)
+                ? window.SGEssayEditor.listKind(el) : null;
+        },
+        essayFont(i) {
+            const known = ['Nunito, Inter, system-ui, sans-serif',
+                           "'Times New Roman', Georgia, serif",
+                           'ui-monospace, SFMono-Regular, Menlo, monospace'];
+            const stack = this.textFontFamily[i];
+            if (stack && known.indexOf(stack) !== -1) return stack;
+            if (this._rememberedFont && known.indexOf(this._rememberedFont) !== -1) return this._rememberedFont;
+            return known[0];
+        },
+        setEssayFont(i, stack) {
+            // The same per-question field the canvas text boxes use, so the sit has
+            // one font preference rather than two that drift apart.
+            this.textFontFamily[i] = stack;
+            this._rememberedFont = stack;
+            this._remember('sg_essay_font', stack);
+        },
+        essaySize(i) {
+            const size = parseInt(this.textFontSize[i], 10);
+            if (size >= 12 && size <= 28) return size;
+            const remembered = parseInt(this._rememberedSize, 10);
+            return remembered >= 12 && remembered <= 28 ? remembered : 16;
+        },
+        setEssaySize(i, px) {
+            const size = parseInt(px, 10) || 16;
+            this.textFontSize[i] = size;
+            this._rememberedSize = size;
+            this._remember('sg_essay_size', String(size));
+        },
+        essayStyle(i) {
+            return 'font-family:' + this.essayFont(i) + ';font-size:' + this.essaySize(i) + 'px';
+        },
+        applyList(qIdx, kind) {
+            const paras = this.paragraphs[qIdx] || [];
+            const pIdx = this._activePara[qIdx] !== undefined ? this._activePara[qIdx] : 0;
+            const para = paras[pIdx] || paras[0];
+            const el = para ? this.$refs['para_' + para.id] : null;
+            this._activePara[qIdx] = pIdx;
+            this._activeEditor = el || null;
+            this._activeEditorQ = qIdx;
+            if (!el || !window.SGEssayEditor) return;
+            window.SGEssayEditor.remember(el);   // a no-op when the caret is elsewhere
+            window.SGEssayEditor.toggleList(el, kind);
+            this.onParagraphInput(qIdx, pIdx, el);
+            this.refreshListState(qIdx, el);
+        },
+        onParagraphEnter(qIdx, pIdx, ev) {
+            if (ev.shiftKey) return;             // a soft line break inside this block
+            // Inside a list item the browser's own Enter makes the next bullet (and
+            // an empty item leaves the list), which is the behaviour a pupil expects;
+            // only outside a list does the page add a paragraph.
+            if (window.SGEssayEditor && window.SGEssayEditor.inListItem(ev.target)) return;
+            ev.preventDefault();
+            this.addParagraph(qIdx, pIdx + 1);
+        },
+        onParagraphPaste(qIdx, pIdx, ev) {
+            // Plain text only: a pasted web page would otherwise bring its own fonts
+            // and links into the answer, none of which the pupil can see the source of.
+            if (window.SGEssayEditor) window.SGEssayEditor.pastePlain(ev);
         },
         onParagraphUpdate(qIdx) {
             if (!this.paragraphs[qIdx]) return;
@@ -5070,7 +5300,17 @@ function examApp(duration, totalQ) {
             this.dirty = true;
         },
         execCmd(cmd) {
+            // The toolbar button kept the caret in the paragraph (`mousedown.prevent`),
+            // and the last range is restored here as well for the browsers that clear
+            // it anyway: a command with no selection is a command that does nothing.
+            const el = this._activeEditor && document.contains(this._activeEditor)
+                ? this._activeEditor : null;
+            if (el && window.SGEssayEditor) window.SGEssayEditor.restore(el);
             document.execCommand(cmd);
+            if (el) {
+                const qIdx = this._activeEditorQ;
+                this.onParagraphInput(qIdx, this._activePara[qIdx], el);
+            }
         },
         clearCanvas(i) {
             if (!this.canvasDraw[i]) return;
@@ -5350,12 +5590,16 @@ function examApp(duration, totalQ) {
                         // Restore paragraphs
                         if (qData && qData.paragraphs && qData.paragraphs.length > 0) {
                             if (!this.paragraphs) this.paragraphs = {};
-                            this.paragraphs[i] = qData.paragraphs.map((p, idx) => ({
-                                id: p.id || ('p' + idx),
-                                text: p.text || '',
-                                html: p.html || '<p>' + (p.text || '') + '</p>',
-                                order: p.order !== undefined ? p.order : idx
-                            }));
+                            this.paragraphs[i] = qData.paragraphs.map((p, idx) => {
+                                const html = p.html || ('<p>' + (p.text || '') + '</p>');
+                                return {
+                                    id: p.id || ('p' + idx),
+                                    text: p.text || '',
+                                    html: html,
+                                    initialHtml: html,
+                                    order: p.order !== undefined ? p.order : idx
+                                };
+                            });
                         }
                     } else if (qData != null) {
                         // Choice, true/false, matching and drag-and-drop all restore the

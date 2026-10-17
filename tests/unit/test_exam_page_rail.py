@@ -753,7 +753,12 @@ def test_both_halves_of_the_stage_move_together():
     template = EXAM_PAGE.read_text(encoding="utf-8")
     assert ":class=\"answerWidthClass\"" in template, (
         "the answer column no longer asks for the width its control needs")
-    assert "answersSide === 'left' ? 'exam-stage--left' : ''" in template, (
+    # One whole class string, so the two halves cannot end up in different
+    # arrangements. An essay is the one exception the stage carries: two pages of
+    # writing in a 34rem side column is the width this rule exists to protect, so
+    # `isEssayCurrent` drops the side layout for it — and the string is still
+    # decided in one place, for both halves at once.
+    assert "answersSide === 'left' && !isEssayCurrent ? 'exam-stage--left' : ''" in template, (
         "the stage no longer takes the side layout as a whole class string")
 
 
