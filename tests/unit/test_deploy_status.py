@@ -97,7 +97,30 @@ def install_from(tmp_path: Path, name: str, source: Path) -> Path:
     return path
 
 
+def install_drifted(tmp_path: Path, name: str, text: str) -> Path:
+    """A copy of `text` that differs from the checkout's file on **any** platform.
+
+    `install` writes text, so on Windows its line endings are translated and the
+    file it writes is a drifted copy; on Linux the same fixture is byte-identical,
+    and the tests that assert "drifted" were building a state they never created —
+    the reading came back "the copy still matches", so the fixture failed rather
+    than the service. The difference those tests are about is a content difference,
+    so it is made here instead of inherited from the platform's newline
+    translation: one line the checkout's own file does not have, which is the shape
+    the box produced by hand (the marker the neighbouring fixtures already use).
+    """
+    return install(tmp_path, name, text + "\n# edited on the box by hand\n")
+
+
 def launcher_for(repo: Path) -> str:
+    """The launcher the deploy files *as shipped* (`ENTRYPOINT`, in `ROOT`) render.
+
+    For a fixture whose checkout still holds those files this is also what that
+    checkout renders. A test that *edits* the checkout's entrypoint (a fix that
+    landed after the install) is asking about the new render instead, and has to
+    pass that as `expect` — which is what `state_of` does, since it renders the
+    checkout's own entrypoint.
+    """
     return _render(ENTRYPOINT.read_text(encoding="utf-8"), repo)
 
 
@@ -147,8 +170,11 @@ def ahead_of_head(repo: Path) -> str:
     return sha
 
 
-def state_of(tmp_path: Path, repo: Path, name: str, text: str) -> dict:
-    return status.runner_state(install(tmp_path, name, text), repo,
+def state_of(tmp_path: Path, repo: Path, name: str, text: str, *,
+             drifted: bool = False) -> dict:
+    path = (install_drifted(tmp_path, name, text) if drifted
+            else install(tmp_path, name, text))
+    return status.runner_state(path, repo,
                                expect=_render((repo / "deploy/entrypoint.sh")
                                               .read_text(encoding="utf-8"), repo))
 
@@ -209,7 +235,7 @@ class TestWhatIsInstalled:
             "the runner no longer mentions the placeholder, so this fixture has stopped "
             "reproducing the shape that caught the defect — look for the token's new "
             "home before relaxing this test")
-        state = state_of(tmp_path, repo, "scangrade-deploy", runner)
+        state = state_of(tmp_path, repo, "scangrade-deploy", runner, drifted=True)
         assert state["kind"] == "copy", "a copy of the runner was read as a launcher"
         assert state["reason_key"] == "drifted"
         assert state["differs_from_checkout"] is True, (
@@ -317,9 +343,8 @@ class TestWhatIsInstalled:
         old_short = _git("rev-parse", "--short", "HEAD~1", cwd=repo).stdout.strip()
         old_render = _render(
             _git("show", "HEAD~1:deploy/entrypoint.sh", cwd=repo).stdout, repo)
-        launcher = install(tmp_path, "scangrade-deploy", old_render)
-
-        state = status.runner_state(launcher, repo, expect=launcher_for(repo))
+        # Stale only against the checkout's *new* render; see launcher_for.
+        state = state_of(tmp_path, repo, "scangrade-deploy", old_render)
 
         assert state["kind"] == "launcher"
         assert state["gate0"] == status.GATE0_PASSES, "Gate 0 never judges a launcher"
@@ -453,14 +478,15 @@ class TestWhereTheCheckoutIs:
 
 class TestWhatItAddsUpTo:
     def _report(self, tmp_path, *, installed=None, dirty=False, ahead=False,
-                paused=False, box_edits_dir=None):
+                paused=False, box_edits_dir=None, drifted=False):
         repo = checkout(tmp_path)
         if dirty:
             (repo / "scribble.txt").write_text("x\n", encoding="utf-8")
         if ahead:
             ahead_of_head(repo)
         text = launcher_for(repo) if installed is None else installed
-        runner = install(tmp_path, "scangrade-deploy", text)
+        runner = (install_drifted(tmp_path, "scangrade-deploy", text) if drifted
+                  else install(tmp_path, "scangrade-deploy", text))
         pause_file = tmp_path / "pause-flag"
         if paused:
             pause_file.write_text("", encoding="utf-8")
@@ -477,9 +503,14 @@ class TestWhatItAddsUpTo:
     @needs_git
     def test_a_drifted_copy_outranks_commits_behind(self, tmp_path):
         """Nothing deploys at all in this state, however much is waiting, so it is
-        the headline rather than a footnote."""
+        the headline rather than a footnote.
+
+        The installed copy is a *drifted* one: written by hand (install_drifted),
+        since a fixture that writes the checkout's own text is byte-identical and
+        this state never exists on Linux.
+        """
         report = self._report(
-            tmp_path, ahead=True,
+            tmp_path, ahead=True, drifted=True,
             installed=(ROOT / "deploy/scangrade-deploy.sh").read_text(encoding="utf-8"))
         verdict = report["verdict"]
         assert verdict["level"] == status.BROKEN
