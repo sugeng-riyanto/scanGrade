@@ -322,9 +322,18 @@ def render_panel(app, **context):
     return app.jinja_env.get_template("super_admin/_traffic_panel.html").render(**context)
 
 
+#: The record `platform_health()` actually hands this panel: `served_commit()`'s
+#: dict, not a sha. The fixture used to model `commit` as `"a" * 40`, and that string
+#: is why the panel's `(health.commit or '—')[:7]` shipped and answered 500 on the box
+#: (`TypeError: unhashable type: 'slice'`) while every test in this file passed: the
+#: fixture was the one shape the route never produces.
+SERVED = {"available": True, "reason_key": None, "commit": "abc1234",
+          "full_commit": "a" * 40, "loaded_at": None}
+
+
 def context_for(report):
     return {"analytics": report, "school_names": {"school-a": "SMP Tujuan"},
-            "health": {"commit": "a" * 40, "workers": "3", "redis": True,
+            "health": {"commit": SERVED, "workers": "3", "redis": True,
                        "page_cache": 0},
             "cache_sweep": {"at": "2026-10-11T20:05:00+00:00", "ran": True},
             "worst_page": {"roundtrips": 12, "roundtrips_endpoint": "/student/dashboard"}}
@@ -361,6 +370,34 @@ class TestThePanel:
         body = render_panel(app, **context_for(report))
         assert "SENTRY_DSN" in body
         assert "sentry.io" not in body
+
+    def test_the_commit_it_shows_is_the_one_the_route_hands_it(self, app):
+        """Rendered from the producer's own shape, the box's health card does not raise."""
+        report = traffic.build_report(FakeSupabase())
+        report["rising"], report["last_flush"], report["sentry_url"] = [], {}, None
+        body = render_panel(app, **context_for(report))
+        assert "abc1234" in body, "the short commit `served_commit()` names is on the page"
+        assert "a" * 40 not in body, "the full sha is not what this card shows"
+
+    def test_the_health_fixture_is_the_shape_the_route_produces(self):
+        """The two shapes are read against each other, so the fixture cannot drift again.
+
+        This is the guard the old fixture needed: the panel renders `health["commit"]`,
+        which `platform_health()` fills with `served_commit()`'s record. A fixture that
+        models it as a string passes every render and proves nothing about the page the
+        box serves, so the keys the route writes are compared with the keys here, and the
+        record's own keys with the ones `served_commit()` returns.
+        """
+        from app import served_commit
+        from app.routes.super_admin import platform_health
+
+        health = platform_health()
+        assert set(health) == set(context_for(None)["health"]), (
+            "the route writes a key this fixture does not model")
+        assert isinstance(health["commit"], dict), (
+            "`served_commit()` is a record, and the page reads its `commit` field")
+        assert set(health["commit"]) == set(served_commit()), (
+            "the card shows a record whose fields this fixture does not carry")
 
     def test_an_empty_window_does_not_break_the_page(self, app):
         report = traffic.build_report(FakeSupabase())

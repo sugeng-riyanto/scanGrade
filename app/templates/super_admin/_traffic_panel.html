@@ -293,9 +293,15 @@
         <div class="space-y-4">
             <div class="bg-white rounded-xl border border-slate-200 p-4">
                 <h3 class="text-sm font-bold text-slate-700 mb-2" x-text="t('Kesehatan kotak','Box health')"></h3>
+                {#- `health.commit` is not a sha: it is `served_commit()`'s record, so the
+                    page reads its `commit` field. Slicing the record itself is what made
+                    this page answer 500 on the box (`unhashable type: 'slice'`) while the
+                    test that renders it passed, because the fixture modelled the key as
+                    the string this line used to assume. -#}
+                {%- set _served = health.commit if health.commit is mapping else {} %}
                 <p class="text-xs text-slate-500">
                     <span x-text="t('Commit','Commit')"></span>:
-                    <span class="font-mono">{{ (health.commit or '—')[:7] }}</span>
+                    <span class="font-mono">{{ _served.commit or (_served.full_commit or '—')[:7] }}</span>
                 </p>
                 <p class="text-xs text-slate-500">
                     <span x-text="t('Worker','Workers')"></span>: <span class="font-mono">{{ health.workers }}</span>
