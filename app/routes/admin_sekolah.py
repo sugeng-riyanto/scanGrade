@@ -1969,7 +1969,12 @@ def admin_grade_weights():
                 .eq("school_id", sid).eq("is_active", True)
                 .order("name").execute().data or [])
     custom = grade_weighting.configs_for_school(supabase, sid, year_id)
-    defaults = grade_weighting.default_config(supabase, sid)
+    # The default **in force for the year being shown** (067), not the school-wide
+    # value of 058: a new year starts from the previous year's policy, and the page
+    # says which of the two it is showing so saving cannot look like a no-op.
+    default_meta = grade_weighting.default_snapshot(supabase, sid, year_id)
+    defaults = default_meta["weights"]
+    default_from_year = (default_meta.get("from_year") or {}).get("name") or ""
     comp_names = {str(c["id"]): c.get("name") or "?" for c in components
                   if c.get("is_active")}
     # Every subject is shown. One that has its own distribution uses it; one the
@@ -2003,42 +2008,61 @@ def admin_grade_weights():
         comp_names=comp_names, year=year, year_name=year.get("name") or "",
         year_status=year_status, required_total=grade_weighting.REQUIRED_TOTAL,
         subject_levels=subject_levels, grade_levels=grade_levels,
+        default_source=default_meta["source"], default_from_year=default_from_year,
+        # What this year would follow if its own default were removed — the map the
+        # page runs its impact check against when the admin clears the override.
+        default_inherited=grade_weighting.inherited_config(supabase, sid, year_id),
     )
 
 
 @admin_sekolah_bp.route("/grade-weights/defaults", methods=["POST"])
 @admin_sekolah_required
 def admin_grade_defaults_save():
-    """Set the school-wide default distribution every subject follows.
+    """Set the default distribution a school's subjects follow — for one year.
 
-    The body is ``{"weights": {"<component_id>": 30, ...}}``. A set that does not
-    reach 100% is refused; an empty set clears the default, so subjects without a
-    custom distribution fall back to the simple mean again. This is the school
-    admin's write alone.
+    The body is ``{"weights": {"<component_id>": 30, ...}, "school_year_id": ...}``.
+    The year is the year the policy belongs to (the one the page is showing), and it
+    is the whole point of this door: a new academic year sets its own default while
+    the years before it keep the weights their marks were graded under. When the
+    body names no year the active one is used; a school with no active year writes
+    the school floor of 058, which is what it has always written.
+
+    A set that does not reach 100% is refused; an empty set **removes this year's**
+    policy, so the year goes back to following the previous year's default (or the
+    school floor). This is the school admin's write alone.
 
     A closed year is refused before the write, as its own sibling
-    (`admin_grade_reset_level`) does. The default is not *scoped* to a year — but a
-    mark is derived from a weight map every time it is read (`grade_weighting.compute`
-    is pure over the weights), so the fallback a subject inherits is part of how a
-    closed year's marks read. Rewriting it would move marks in a year the wizard
-    promised nobody could move.
+    (`admin_grade_reset_level`) does — and it is now the *target* year that is
+    judged, not whichever year happens to be running. A mark is derived from a
+    weight map every time it is read (`grade_weighting.compute` is pure over the
+    weights), so a closed year's default is part of how that year's marks read.
+    Rewriting it would move marks in a year the wizard promised nobody could move.
     """
     sid = _school_id()
     supabase = get_supabase()
     payload = request.get_json(silent=True) or {}
     year = ta_service.active_school_year(supabase, sid) or {}
-    closed_reason = academic_year.write_refusal(supabase, year.get("id"))
+    target_year_id = payload.get("school_year_id") or year.get("id")
+    closed_reason = academic_year.write_refusal(supabase, target_year_id)
     if closed_reason:
         return jsonify({"error": closed_reason}), 403
     ok, out = grade_weighting.save_defaults(
-        supabase, sid, payload.get("weights") or {}, actor_id=g.user_id)
+        supabase, sid, payload.get("weights") or {}, year_id=target_year_id,
+        actor_id=g.user_id)
     if not ok:
         return jsonify(out), out.get("status", 400)
     invalidate_school(sid)
-    log_activity("update", "grade_component_type", sid,
-                 new_data={"defaults": out.get("weights"), "cleared": out.get("cleared")},
+    log_activity("update",
+                 "grade_default_weight" if target_year_id else "grade_component_type",
+                 target_year_id or sid,
+                 new_data={"defaults": out.get("weights"), "cleared": out.get("cleared"),
+                           "school_year_id": target_year_id},
                  user_id=g.user_id)
-    return jsonify({"success": True, **out})
+    # What the year follows **now** — which is not always what was written: an empty
+    # set hands the year back to the previous year's default. Read fresh, because the
+    # resolver is memoised for this request and the memo holds the pre-save answer.
+    fresh = grade_weighting.default_snapshot(supabase, sid, target_year_id, fresh=True)
+    return jsonify({"success": True, **out, "default": fresh})
 
 
 @admin_sekolah_bp.route("/grade-weights/components", methods=["POST"])

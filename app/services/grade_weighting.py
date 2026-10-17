@@ -47,6 +47,7 @@ from __future__ import annotations
 import logging
 
 from app.services import subject_kkm as kkm_service
+from app.utils import req_cache
 from app.utils.exam_access import result_released
 
 logger = logging.getLogger(__name__)
@@ -63,6 +64,11 @@ COMPONENT_COLUMNS = ("id, school_id, name, sort_order, is_active, default_weight
                      "created_at, updated_at")
 CONFIG_COLUMNS = ("id, school_id, subject_id, school_year_id, component_id, "
                   "weight_percent, is_active")
+DEFAULT_COLUMNS = "id, school_id, school_year_id, component_id, weight_percent, is_active"
+
+#: Where a year's default came from. Stated as data so the page renders the same
+#: words this module resolves with, and so a test can name each answer.
+DEFAULT_SOURCES = ("year", "inherited", "school", "none")
 
 
 def _rows(query) -> list[dict]:
@@ -92,16 +98,27 @@ def list_components(supabase, school_id: str, *, active_only: bool = True) -> li
     return rows
 
 
-def default_config(supabase, school_id: str) -> dict[str, int]:
-    """The school's **default** distribution, or ``{}``.
+def _policy(weights: dict) -> dict[str, int]:
+    """A weight map, or ``{}`` when it does not add up to a policy.
 
-    Read from the active components' own `default_weight` (058). It is a real
-    policy only when it adds up to :data:`REQUIRED_TOTAL`; a half-filled default
-    is not a policy and answers ``{}``, so a subject that follows it falls back to
-    the simple mean rather than to a total that never reached 100.
+    The one rule that makes a default a *policy* rather than a set of numbers, in
+    one place because it is asked of three different readers (the school floor,
+    one year's rows, and the resolver's answer).
     """
-    if not school_id:
+    if not weights or sum(weights.values()) != REQUIRED_TOTAL:
         return {}
+    return dict(weights)
+
+
+def _school_floor(supabase, school_id: str) -> dict[str, int]:
+    """The pre-versioning school default — `grade_component_type.default_weight`.
+
+    This is what a school declared before a default could be scoped to a year
+    (058), and it still governs every year older than the first year-scoped
+    default. It is **not** rewritten when a year sets its own policy: writing it
+    would move the marks of every older year at once, which is the defect a
+    year-scoped default exists to prevent.
+    """
     weights = {}
     for row in list_components(supabase, school_id):
         value = row.get("default_weight")
@@ -113,20 +130,179 @@ def default_config(supabase, school_id: str) -> dict[str, int]:
             continue
         if value > 0:
             weights[str(row["id"])] = value
-    if not weights or sum(weights.values()) != REQUIRED_TOTAL:
+    return _policy(weights)
+
+
+def _year_policies(supabase, school_id: str) -> dict[str, dict[str, int]]:
+    """``{school_year_id: {component_id: weight}}`` — years with a default of their own.
+
+    A year whose rows do not reach :data:`REQUIRED_TOTAL` is left out rather than
+    read as a policy: a half-filled default is not a distribution, and falling
+    through to the previous year's policy is the honest answer for it.
+    """
+    rows = _rows(supabase.table("grade_default_weight").select(DEFAULT_COLUMNS)
+                 .eq("school_id", school_id).eq("is_active", True))
+    grouped: dict[str, dict[str, int]] = {}
+    for row in rows:
+        year_id, cid = row.get("school_year_id"), row.get("component_id")
+        if not year_id or not cid:
+            continue
+        try:
+            value = int(row.get("weight_percent") or 0)
+        except (TypeError, ValueError):
+            continue
+        if value > 0:
+            grouped.setdefault(str(year_id), {})[str(cid)] = value
+    out = {}
+    for year_id, weights in grouped.items():
+        policy = _policy(weights)
+        if policy:
+            out[year_id] = policy
+    return out
+
+
+def _resolve_default(supabase, school_id: str, year_id: str | None,
+                     *, skip_own: bool = False):
+    """``(weights, source, from_year)`` — the default in force for one year.
+
+    The order **is** the promise, and every caller reads it here rather than
+    deciding for itself:
+
+    1. ``"year"`` — the year has a default of its own;
+    2. ``"inherited"`` — the nearest *earlier* year's default, i.e. the policy in
+       force while this year was being graded. A change made to a later year can
+       therefore never reach back into an older one;
+    3. ``"school"`` — the school-wide default from before defaults had a year
+       (058's column), which is what years older than every versioned default
+       were graded under;
+    4. ``"none"`` — nothing sums to 100, so the simple mean applies.
+
+    A year whose `start_date` is unknown cannot be placed in time. That is not a
+    licence to guess: it reads only its own rows, else the school floor, and
+    never an arbitrary neighbour's policy.
+
+    ``skip_own`` answers "what would this year follow if it had no default" — the
+    question the page asks before offering to remove this year's override.
+    """
+    school = str(school_id or "")
+    if not school:
+        return {}, "none", None
+    return req_cache.memo(("grade_default", school, str(year_id or ""), bool(skip_own)),
+                          lambda: _resolve_uncached(supabase, school, year_id, skip_own))
+
+
+def _resolve_uncached(supabase, school_id: str, year_id, skip_own: bool):
+    policies = _year_policies(supabase, school_id)
+    target = str(year_id or "")
+    if target and not skip_own and target in policies:
+        return policies[target], "year", None
+    if policies and target:
+        years = {str(y["id"]): y for y in _rows(
+            supabase.table("school_years").select("id, name, start_date")
+            .eq("school_id", school_id)) if y.get("id")}
+        starts_at = str((years.get(target) or {}).get("start_date") or "")
+        if starts_at:
+            earlier = []
+            for other_id in policies:
+                if other_id == target:
+                    # The year's own rows were already refused above (`skip_own`),
+                    # and its start date is `<=` itself — so it has to be dropped
+                    # here or "what would this year follow without its own default"
+                    # would answer with the default it is trying to remove.
+                    continue
+                row = years.get(other_id) or {}
+                start = str(row.get("start_date") or "")
+                # `<=` includes a same-day sibling, which is why the tie is broken
+                # by name below: the answer must not depend on dict order.
+                if start and start <= starts_at:
+                    earlier.append((start, str(row.get("name") or ""), other_id))
+            if earlier:
+                earlier.sort()
+                chosen = earlier[-1][2]
+                return policies[chosen], "inherited", years.get(chosen)
+    floor = _school_floor(supabase, school_id)
+    if floor:
+        return floor, "school", None
+    return {}, "none", None
+
+
+def default_config(supabase, school_id: str, year_id: str | None = None) -> dict[str, int]:
+    """The **default** distribution in force for one year, or ``{}``.
+
+    ``year_id`` is the year the mark belongs to — the exam's own year, not "the
+    year it is now". Passing it is what keeps a mark graded last year on last
+    year's policy: the resolver answers that year's own default, else the latest
+    default set by an earlier year, else the school-wide default from before
+    defaults were versioned (:func:`_resolve_default`).
+
+    Called **without** a year it answers the school floor (058) — the behaviour
+    every caller had before defaults could be scoped to a year, kept for the
+    readers that genuinely have no year to name (a component picker listing what
+    a school uses). A reader that has a year must pass it; the page's own
+    ``default_snapshot`` says which of the two answers it got.
+    """
+    if not school_id:
         return {}
-    return weights
+    return _resolve_default(supabase, school_id, year_id)[0]
+
+
+def default_snapshot(supabase, school_id: str, year_id: str | None = None, *,
+                     fresh: bool = False) -> dict:
+    """Where a year's default came from — for the page that shows it.
+
+    ``{"weights", "source", "from_year"}``, where ``source`` is one of
+    :data:`DEFAULT_SOURCES`. The page needs this to say *whose* policy the numbers
+    in its editor are: a school that has just opened a year sees the previous
+    year's weights and must be told that, or saving an untouched editor would
+    look like it changes nothing when it in fact pins this year to a copy.
+
+    ``fresh`` reads past this request's memo. The writer needs it: the resolution
+    is cached per request, so a snapshot taken after a save would otherwise answer
+    with the state the request started from.
+    """
+    if fresh:
+        weights, source, from_year = _resolve_uncached(
+            supabase, str(school_id or ""), year_id, False)
+    else:
+        weights, source, from_year = _resolve_default(supabase, school_id, year_id)
+    return {"weights": weights, "source": source,
+            "from_year": ({"id": str(from_year.get("id")),
+                           "name": from_year.get("name") or ""}
+                          if from_year else None)}
+
+
+def inherited_config(supabase, school_id: str, year_id: str | None) -> dict[str, int]:
+    """What this year would follow if it had no default of its own.
+
+    The page asks before it offers to remove this year's override, so the impact
+    check behind that act is run against the distribution the year returns *to*
+    rather than against an empty map — which would be read as the simple mean and
+    warn about a movement that is not going to happen.
+    """
+    if not school_id:
+        return {}
+    return _resolve_default(supabase, school_id, year_id, skip_own=True)[0]
 
 
 def save_defaults(supabase, school_id: str, weights: dict, *,
-                  actor_id=None) -> tuple[bool, dict]:
-    """Set the school's default distribution across its active components.
+                  year_id: str | None = None, actor_id=None) -> tuple[bool, dict]:
+    """Set the default distribution — for one year when one is named.
 
     ``weights`` is ``{component_id: percent}``. Every id must be an active
     component this school owns (else 403); a non-empty set must sum to exactly
-    :data:`REQUIRED_TOTAL` (else 400). An empty set clears every default, so a
-    school that removes its default goes back to per-subject configs and the
-    simple mean.
+    :data:`REQUIRED_TOTAL` (else 400).
+
+    With ``year_id`` the distribution is written as **that year's** policy, so
+    every other year — older and newer — keeps the weights it was graded under.
+    An empty set removes this year's policy: the year goes back to inheriting the
+    previous year's default (or the school floor), which is a state, not an error.
+
+    Without ``year_id`` it is the school floor (058's column) that is written — the
+    behaviour before defaults had a year. Only a caller with no year to name
+    should use it; the admin page always sends one.
+
+    A **closed** year is the caller's refusal to make, and the route makes it with
+    the same `academic_year` rule as its siblings.
     """
     if not school_id:
         return False, {"error": "Sekolah tidak diketahui", "status": 400}
@@ -148,34 +324,83 @@ def save_defaults(supabase, school_id: str, weights: dict, *,
     if cleaned and total != REQUIRED_TOTAL:
         return False, {"error": f"Total bobot default harus 100% (sekarang {total}%)",
                        "status": 400, "total": total}
-    try:
-        for comp in components:
-            cid = str(comp["id"])
-            # `updated_by` lives on the weight-config rows, not on this table
-            # (057 gave the component list `created_by` only), so only the value
-            # that actually exists is written here.
-            supabase.table("grade_component_type").update(
-                {"default_weight": cleaned.get(cid, 0)})\
-                .eq("id", comp["id"]).eq("school_id", school_id).execute()
-    except Exception as exc:                                        # noqa: BLE001
-        logger.warning("grade_weighting: save defaults failed: %s", exc)
-        return False, {"error": "Gagal menyimpan bobot default", "status": 400}
-    return True, {"weights": cleaned, "total": total, "cleared": not cleaned}
+
+    if year_id:
+        try:
+            years = _rows(supabase.table("school_years").select("id")
+                          .eq("id", year_id).eq("school_id", school_id))
+        except Exception as exc:                                    # noqa: BLE001
+            logger.warning("grade_weighting: year read failed: %s", exc)
+            years = []
+        if not years:
+            # The year names whose policy this is, so it must be this school's. A
+            # forged id is a refusal, not a row written under someone else's year.
+            return False, {"error": "Tahun ajaran tidak ditemukan", "status": 404}
+        try:
+            existing = _rows(supabase.table("grade_default_weight")
+                             .select("id, component_id")
+                             .eq("school_id", school_id)
+                             .eq("school_year_id", year_id))
+            known = {str(r["component_id"]): r["id"] for r in existing
+                     if r.get("component_id")}
+            # Rows not in the new set are deactivated, never deleted: they are what
+            # a mark of that year was computed under before the change.
+            stale = [rid for cid, rid in known.items() if cid not in cleaned]
+            if stale:
+                supabase.table("grade_default_weight").update({"is_active": False})\
+                    .in_("id", stale).execute()
+            to_insert = []
+            for cid, value in cleaned.items():
+                if cid in known:
+                    patch = {"weight_percent": value, "is_active": True}
+                    if actor_id:
+                        patch["updated_by"] = actor_id
+                    supabase.table("grade_default_weight").update(patch)\
+                        .eq("id", known[cid]).eq("school_id", school_id).execute()
+                else:
+                    row = {"school_id": school_id, "school_year_id": year_id,
+                           "component_id": cid, "weight_percent": value,
+                           "is_active": True}
+                    if actor_id:
+                        row["updated_by"] = actor_id
+                    to_insert.append(row)
+            if to_insert:
+                supabase.table("grade_default_weight").insert(to_insert).execute()
+        except Exception as exc:                                    # noqa: BLE001
+            logger.warning("grade_weighting: save year defaults failed: %s", exc)
+            return False, {"error": "Gagal menyimpan bobot default", "status": 400}
+    else:
+        try:
+            for comp in components:
+                cid = str(comp["id"])
+                # `updated_by` lives on the weight-config rows, not on this table
+                # (057 gave the component list `created_by` only), so only the value
+                # that actually exists is written here.
+                supabase.table("grade_component_type").update(
+                    {"default_weight": cleaned.get(cid, 0)})\
+                    .eq("id", comp["id"]).eq("school_id", school_id).execute()
+        except Exception as exc:                                    # noqa: BLE001
+            logger.warning("grade_weighting: save defaults failed: %s", exc)
+            return False, {"error": "Gagal menyimpan bobot default", "status": 400}
+    return True, {"weights": cleaned, "total": total, "cleared": not cleaned,
+                  "year_id": year_id or None}
 
 
 def effective_config(supabase, school_id: str, subject_id: str,
                      year_id: str | None) -> dict[str, int]:
     """The weights a subject's mark actually uses.
 
-    A custom distribution for the subject/year wins; otherwise the school's
-    **default** distribution applies; otherwise ``{}`` (the simple mean). This is
-    the one read every surface should use, so a subject the admin never touched
-    still carries the school's declared weights.
+    A custom distribution for the subject/year wins; otherwise the **default in
+    force for that year** applies (:func:`default_config`, which takes the year
+    for exactly this reason); otherwise ``{}`` (the simple mean). This is the one
+    read every surface should use, so a subject the admin never touched still
+    carries the policy the school had when the paper was sat — and a default
+    changed for a new year cannot move an old one.
     """
     custom = config_for(supabase, school_id, subject_id, year_id)
     if custom:
         return custom
-    return default_config(supabase, school_id)
+    return default_config(supabase, school_id, year_id)
 
 
 def component_ids(supabase, school_id: str) -> set[str]:
@@ -692,7 +917,7 @@ def finals_for_student(supabase, school_id: str, subject_ids, year_id: str | Non
 
     # 2. the weights, one read for the whole school plus its default
     configs = configs_for_school(supabase, school_id, year_id)
-    default = default_config(supabase, school_id)
+    default = default_config(supabase, school_id, year_id)
 
     def _entry(subj: str, rows: list) -> dict:
         mark = compute(rows, configs.get(subj) or default)
@@ -1010,7 +1235,7 @@ def class_impact(supabase, school_id: str, subjects: list[dict], year_id: str | 
                 if rows_by else [])
 
     custom = configs_for_school(supabase, school_id, year_id)
-    default = default_config(supabase, school_id)
+    default = default_config(supabase, school_id, year_id)
     name_of_subject = {str(s["subject_id"]): (s.get("name") or "?") for s in subjects}
     per_subject = {sid: {"subject_id": sid, "name": name_of_subject.get(sid, "?"),
                          "evaluated": 0, "moved": 0, "up": 0, "down": 0,

@@ -154,9 +154,16 @@ class TestTheWiring:
         assert "@admin_sekolah_required" in block
 
     def test_the_page_sends_the_default_and_the_custom_rows(self):
+        """The page shows the default **in force for the year it is showing**.
+
+        `default_config` without a year answers the pre-version school floor, which
+        is the wrong question for a page whose whole matrix is one year's.
+        """
         src = ADMIN.read_text(encoding="utf-8")
         body = src.split("def admin_grade_weights(")[1].split("\ndef ")[0]
-        assert "default_config(" in body and "custom_subjects" in body
+        assert "default_snapshot(supabase, sid, year_id)" in body, (
+            "the default editor must read the year's own policy, not the school floor")
+        assert "custom_subjects" in body
         assert "defaults=defaults" in body
 
     def test_the_service_uses_the_effective_config_where_a_mark_is_computed(self):
