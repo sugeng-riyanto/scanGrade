@@ -97,5 +97,18 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
           python -m pip check
+      - name: Install legacy Python for minimum-version rejection tests
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Restore Python 3.13 for compatibility tests
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Create disposable dotenv fixture
+        run: touch .env
       - name: Run interpreter and configuration regression tests
         run: python -m pytest tests/unit/test_python_requirement.py tests/unit/test_env_and_email.py -q -ra
+      - name: Remove disposable fixture
+        if: always()
+        run: rm -f .env
