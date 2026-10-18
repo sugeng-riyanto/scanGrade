@@ -40,14 +40,14 @@
         <!-- Hero -->
         <div class="text-center max-w-4xl mx-auto mb-20">
             <div class="inline-flex items-center gap-2 px-4 py-1.5 bg-blue-100 rounded-full text-blue-700 text-xs font-bold mb-6 shadow-sm">
-                <i class="fas fa-robot"></i> AI-Powered Essay Grading
+                <i class="fas fa-robot"></i> <span x-text="t('Saran Nilai Esai oleh AI — Guru Menentukan Nilai Akhir', 'AI-Assisted Essay Suggestions — Teachers Decide Final Grades')"></span>
             </div>
             <h1 class="text-4xl lg:text-5xl font-extrabold text-surface-900 leading-tight">
                 <span x-text="t('Platform Ujian Digital','Digital Exam Platform')"></span><br>
                 <span class="text-transparent bg-clip-text bg-gradient-to-r from-primary-600 to-primary-400">All-in-One</span>
             </h1>
             <p class="mt-4 text-lg text-surface-500 font-medium max-w-2xl mx-auto leading-relaxed"
-               x-text="t('Dari pembuatan soal, ujian terkunci Safe Exam Browser, anti-cheat otomatis, koreksi esai dengan AI, hingga analisis butir soal — semua dalam satu platform.','From authoring questions and Safe Exam Browser lockdown through automatic anti-cheat and AI essay grading to per-question analysis — all in one platform.')"></p>
+               x-text="t('Dari pembuatan soal, ujian terkunci Safe Exam Browser, anti-cheat otomatis, saran penilaian esai oleh AI dengan keputusan akhir oleh guru, hingga analisis butir soal — semua dalam satu platform.','From authoring questions and Safe Exam Browser lockdown through automatic anti-cheat and AI-assisted essay suggestions reviewed by teachers to per-question analysis — all in one platform.')"></p>
             <div class="mt-8 flex items-center justify-center gap-4 flex-wrap">
                 <a href="/auth/register" class="px-8 py-3.5 bg-gradient-to-r from-primary-500 to-primary-600 text-white rounded-xl font-extrabold shadow-lg shadow-primary-500/30 hover:from-primary-600 hover:to-primary-700 transition text-sm">
                     <i class="fas fa-school mr-2"></i><span x-text="t('Daftarkan Sekolah','Register Your School')"></span>
@@ -134,7 +134,7 @@
                     <i class="fas fa-robot text-white text-xl"></i>
                 </div>
                 <h3 class="mt-4 font-extrabold text-surface-800 text-sm" x-text="t('Koreksi AI','AI Grading')"></h3>
-                <p class="mt-1.5 text-xs text-surface-500 font-medium leading-relaxed" x-text="t('AI grading untuk esai teks. Guru tinggal review. Support Gemini, OpenAI, DeepSeek, Groq.','AI grading for text essays. The teacher just reviews. Supports Gemini, OpenAI, DeepSeek, Groq.')"></p>
+                <p class="mt-1.5 text-xs text-surface-500 font-medium leading-relaxed" x-text="t('AI menyarankan nilai esai teks; guru meninjau dan menentukan nilai akhir. Support Gemini, OpenAI, DeepSeek, Groq.','AI suggests text-essay scores; teachers review and decide final grades. Supports Gemini, OpenAI, DeepSeek, Groq.')"></p>
             </div>
             <div data-facility="anti-cheat" class="bg-white rounded-2xl p-6 shadow-lg shadow-surface-200/40 border border-surface-100 text-center hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
                 <div class="w-14 h-14 mx-auto rounded-2xl bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center shadow-lg shadow-amber-500/20">
