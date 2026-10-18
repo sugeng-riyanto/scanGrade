@@ -68,7 +68,7 @@ jobs:
         run: python -m pip install -r requirements.txt
       - name: Create disposable environment fixture
         run: |
-          printf '# Test-only fixture; no credentials\\n' > .env
+          touch .env
       - name: Run offline account, anti-cheat and isolation regressions
         run: python -m pytest tests/unit/test_account_creation_orphans.py tests/unit/test_anticheat_seed.py tests/test_rls_security.py tests/unit/test_env_and_email.py -q -ra
       - name: Remove disposable fixture
