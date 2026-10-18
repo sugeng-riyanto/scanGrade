@@ -233,7 +233,7 @@ quarantine_reason() {
 # decides whether to retry: a history write that fails is ignored, because it must
 # never stop a refusal from being recorded.
 refusal_history_name() {
-  printf 'refused-%s-%s\n' "$(date +%s)" "${AFTER:-unknown}"
+  printf 'refused-%s-%s\n' "$(date +%s%N)" "${AFTER:-unknown}"
 }
 
 # Keep the newest `$REFUSALS_KEEP` records and drop the rest. Names sort by time, so
