@@ -301,14 +301,14 @@ class TestTheRecordStaysBecauseOnlyThePaperTakesItWithHim:
     def test_only_the_delete_door_removes_them(self):
         """Both app doors that delete the log are the paper's own delete — so 'the
         record goes only when the paper itself is deleted' is a fact, not a comfort."""
-        assert ROUTES.count('table("violation_logs").delete()') == 1, (
+        assert ROUTES.count('table("violation_logs").delete(') == 1, (
             "the teacher's routes delete violation rows somewhere other than the "
             "exam-delete door")
         assert ADMIN_ROUTES_PATH.read_text(encoding="utf-8").count(
-            'table("violation_logs").delete()') == 1
+            'table("violation_logs").delete(') == 1
         for path in (ROUTES_PATH, ADMIN_ROUTES_PATH):
             body = _function_body(path.read_text(encoding="utf-8"), "delete_exam")
-            assert 'table("violation_logs").delete()' in body, (
+            assert 'table("violation_logs").delete(' in body, (
                 f"{path.name}: the log is not deleted by the paper's own delete door")
 
     def test_the_builder_s_save_never_touches_the_log(self):

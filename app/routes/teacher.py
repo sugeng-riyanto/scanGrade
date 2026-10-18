@@ -1559,7 +1559,7 @@ def exam_form():
             return _exam_save_refused(autosave, refusal)
     try:
         if draft_row:
-            res = supabase.table("exams").update(data).eq("id", draft_row["id"]).execute()
+            res = supabase.table("exams").update(data, returning="minimal").eq("id", draft_row["id"]).execute()
             exam_id = draft_row["id"]
         else:
             res = supabase.table("exams").insert(data).execute()
@@ -1574,7 +1574,7 @@ def exam_form():
         for key in ["question_weights", "question_texts", "question_stimuli", "anti_cheat_enabled", "penalty_per_violation", "max_violations", "auto_submit_on_max", "fullscreen_required", "randomize_questions", "randomize_options", "watermark_name", "block_copy_paste", "block_right_click", "block_screenshot", "allow_calculator", "lock_pending_resume", "resume_code_limit", "grade_component_type_id", "school_year_id", "subject_id", "class_ids", "start_at", "end_at", "assessment_period_id", "auto_submit_on_window_end", "is_template", "source_exam_id", "max_attempts", "publish_mode", "question_pages", "question_cognitive"]:
             data.pop(key, None)
         if draft_row:
-            res = supabase.table("exams").update(data).eq("id", draft_row["id"]).execute()
+            res = supabase.table("exams").update(data, returning="minimal").eq("id", draft_row["id"]).execute()
             exam_id = draft_row["id"]
         else:
             res = supabase.table("exams").insert(data).execute()
@@ -1991,11 +1991,11 @@ def exam_detail(exam_id):
         # was verified in — the only repair an edit is allowed to make.
         data["school_id"] = filing_school_id
     try:
-        supabase.table("exams").update(data).eq("id", exam_id).execute()
+        supabase.table("exams").update(data, returning="minimal").eq("id", exam_id).execute()
     except Exception:
         for key in ["question_weights", "question_texts", "question_stimuli", "anti_cheat_enabled", "penalty_per_violation", "max_violations", "auto_submit_on_max", "fullscreen_required", "randomize_questions", "randomize_options", "watermark_name", "block_copy_paste", "block_right_click", "block_screenshot", "allow_calculator", "lock_pending_resume", "resume_code_limit", "grade_component_type_id", "school_year_id", "subject_id", "class_ids", "start_at", "end_at", "assessment_period_id", "auto_submit_on_window_end", "is_template", "source_exam_id", "max_attempts", "publish_mode", "question_pages", "question_cognitive"]:
             data.pop(key, None)
-        supabase.table("exams").update(data).eq("id", exam_id).execute()
+        supabase.table("exams").update(data, returning="minimal").eq("id", exam_id).execute()
 
     # The builder's background save stops here. Everything below — the weight-gap
     # flash, the PDF re-upload, the publish side effects and the redirect — belongs
@@ -2225,9 +2225,15 @@ def my_exams():
     # A teacher sees their own exams; an admin sees the school's. Previously this
     # filtered by teacher_id for everyone, so an admin_sekolah — who is allowed on
     # this page — got a permanently empty list, with no clue why.
-    query = supabase.table("exams").select("*").eq("teacher_id", g.user_id)
+    # Cards and their warnings need metadata and the key, never the large
+    # question_canvas/question_texts/stimuli payload used by the editor.
+    columns = (
+        "id,title,subject,duration_minutes,total_questions,status,is_published,"
+        "is_template,start_at,anti_cheat_enabled,class_ids,question_types,answer_key"
+    )
+    query = supabase.table("exams").select(columns).eq("teacher_id", g.user_id)
     if g.get("user_role") == "admin_sekolah" and g.get("user_school_id"):
-        query = supabase.table("exams").select("*").eq("school_id", g.get("user_school_id"))
+        query = supabase.table("exams").select(columns).eq("school_id", g.get("user_school_id"))
     res = query.order("created_at", desc=True).execute()
     exams = res.data or []
     # Which cards get the "no class" badge. Computed here rather than in the
@@ -2438,11 +2444,11 @@ def delete_exam(exam_id):
     _, err = _guard_exam(supabase, exam_id, as_json=_wants_json())
     if err:
         return err
-    supabase.table("violation_logs").delete().eq("exam_id", exam_id).execute()
-    supabase.table("exam_access_codes").delete().eq("exam_id", exam_id).execute()
-    supabase.table("analytics_cache").delete().eq("exam_id", exam_id).execute()
-    supabase.table("submissions").delete().eq("exam_id", exam_id).execute()
-    supabase.table("exams").delete().eq("id", exam_id).execute()
+    supabase.table("violation_logs").delete(returning="minimal").eq("exam_id", exam_id).execute()
+    supabase.table("exam_access_codes").delete(returning="minimal").eq("exam_id", exam_id).execute()
+    supabase.table("analytics_cache").delete(returning="minimal").eq("exam_id", exam_id).execute()
+    supabase.table("submissions").delete(returning="minimal").eq("exam_id", exam_id).execute()
+    supabase.table("exams").delete(returning="minimal").eq("id", exam_id).execute()
     _invalidate_teacher_dashboard()
     log_activity("delete", "exam", exam_id, user_id=g.user_id)
     if request.headers.get("Accept", "") == "application/json" or request.is_json:

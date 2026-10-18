@@ -157,11 +157,11 @@ class _Query:
     def order(self, *a, **k):
         return self
 
-    def insert(self, payload):
+    def insert(self, payload, *, returning="representation"):
         self.mode, self.payload = "insert", payload
         return self
 
-    def update(self, payload):
+    def update(self, payload, *, returning="representation"):
         self.mode, self.payload = "update", payload
         return self
 

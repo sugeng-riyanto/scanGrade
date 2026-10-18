@@ -1277,6 +1277,9 @@ def student_sync_draft():
                             ex_pages = merged[k].get("pages", {})
                             in_pages = v.get("pages", {})
                             if isinstance(ex_pages, dict) and isinstance(in_pages, dict):
+                                # A light payload may omit pages entirely. Attach
+                                # the merged map so preserved canvases are saved.
+                                v["pages"] = in_pages
                                 for pk, pdata in ex_pages.items():
                                     if isinstance(pdata, dict) and "canvas" in pdata:
                                         if pk not in in_pages:
@@ -1312,9 +1315,11 @@ def student_sync_draft():
             stored_rev = _next_revision(sub, incoming_rev)
             if isinstance(answers, dict):
                 answers[DRAFT_REV_KEY] = stored_rev
+            # No returned row is consumed. In particular, do not download the
+            # merged PNG canvases again in the database's write response.
             supabase.table("submissions").update({
                 "answers": answers, "updated_at": server_iso,
-            }).eq("id", sub["id"]).execute()
+            }, returning="minimal").eq("id", sub["id"]).execute()
             # Timer reconciliation: validasi started_at antar device
             client_started = data.get("started_at")
             existing_started = sub.get("started_at")
@@ -1376,7 +1381,7 @@ def student_sync_draft():
                 "status": "draft",
                 "started_at": started_at_dt,
                 "updated_at": server_iso,
-            }).execute()
+            }, returning="minimal").execute()
             # A brand-new sitting gets the same answer as an existing one, so a
             # device that opens the page late in the window is told the truth about
             # the window rather than the full duration.
