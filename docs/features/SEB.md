@@ -959,8 +959,13 @@ Halaman publik `/panduan/seb` memuat versi lengkap untuk murid dan orang tua,
    perilakunya**. Kolom-kolom itu juga sudah terbaca lewat PostgREST (HTTP 200),
    jadi aplikasinya bisa langsung memakainya.
 
-   Satu ketidaksamaan yang ditemukan saat pemeriksaan: `AGENTS.md` mencatat ref
-   proyek sebagai `roshkbkbzgfedowozfo` (19 karakter), sedangkan `DIRECT_URL` dan
-   `SUPABASE_URL` **sama-sama** menunjuk `roshkbzgfzpfedowozfo` (20 karakter, satu-
-   satunya bentuk ref Supabase yang sah). Catatan di `AGENTS.md` itu salah ketik;
-   yang menentukan target adalah kedua URL tersebut, dan keduanya cocok.
+   Satu ketidaksamaan yang ditemukan saat pemeriksaan, dan **sudah diperbaiki**:
+   `AGENTS.md` dulu mencatat ref proyek sebagai `roshkbkbzgfedowozfo` — salah ketik,
+   19 karakter, dan ref Supabase selalu 20 — sedangkan `DIRECT_URL` dan
+   `SUPABASE_URL` **sama-sama** menunjuk `roshkbzgfzpfedowozfo`. Yang menentukan
+   target adalah kedua URL itu, dan keduanya cocok. Ketidaksepakatan seperti ini
+   kini bisa diperiksa tanpa membaca `.env`: balasan `/rest/v1/` proyek ini membawa
+   `sb-project-ref: roshkbzgfzpfedowozfo`, sementara nama 19 karakter itu tidak
+   menjawab sama sekali — nama yang tidak ada, bukan proyek kedua. Salah ketik itu
+   sengaja dikutip di baris ini sebagai catatan; `AGENTS.md` dan `start-dev.ps1`
+   sudah diseragamkan, dan `tests/unit/test_supabase_region.py` menjaga keduanya.

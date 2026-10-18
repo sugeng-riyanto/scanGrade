@@ -374,7 +374,7 @@ body.sg-exam .sidebar-overlay { display: none !important; }
    pair is measured rather than chosen. */
 .full-canvas-wrap { border: 2.5px solid #fdba74; border-radius: 14px; overflow: visible; touch-action: none; background: var(--paper); position: relative; box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
 .full-canvas-wrap canvas { display: block; width: 100%; }
-.text-box { position: absolute; min-width: 120px; max-width: 90%; z-index: var(--sg-layer-canvas-item); touch-action: none; }
+.text-box { position: absolute; width: 16rem; min-width: 120px; max-width: 90%; z-index: var(--sg-layer-canvas-item); touch-action: none; }
 /* The box the pupil types an answer into sits *on* the sheet, so its background
    is the same paper — and its type is pinned to the ink that belongs on paper.
    Without the pin it inherited the theme's `--text`, which in dark mode is light
@@ -388,6 +388,44 @@ body.sg-exam .sidebar-overlay { display: none !important; }
 .text-box .box-font-controls select, .text-box .box-font-controls input { font-size: 10px; border-radius: 4px; border: 1px solid #475569; background: #334155; color: #f1f5f9; padding: 1px 3px; height: 20px; }
 .text-box .box-font-controls select { max-width: 90px; }
 .text-box .box-font-controls input { width: 40px; text-align: center; }
+/* A canvas box is a rich-text field now, and these rules are the essay sheet's
+   for the same reasons. Tailwind's preflight removes list markers from every
+   `ul`/`ol` on the page, so a bulleted answer typed on the paper would render as
+   indented lines with no bullet; a table has to draw its own borders because
+   nothing on this page draws one; and the ink is pinned to the paper in both
+   themes, because the sheet stays light (the same reasoning as the textarea
+   above, which is kept for an already-rendered page). */
+.text-box .box-rich { width: 100%; min-width: 120px; max-height: 45vh; overflow: auto; font-size: 14px; padding: 6px 10px; border: 2.5px solid #f97316; border-radius: 10px; background: var(--paper); color: var(--paper-ink); box-shadow: 0 4px 16px rgba(249,115,22,0.2); font-family: 'Nunito', sans-serif; -webkit-user-select: text; user-select: text; outline: none; overflow-wrap: anywhere; tab-size: 4; }
+.text-box .box-rich:focus { border-color: #ea580c; box-shadow: 0 4px 20px rgba(249,115,22,0.3); }
+.text-box.is-active .box-rich { border-color: #ea580c; }
+.text-box .box-rich ul, .text-box .box-rich ol { margin: .25rem 0; padding-left: 1.4rem; }
+.text-box .box-rich ul { list-style: disc outside; }
+.text-box .box-rich ol { list-style: decimal outside; }
+.text-box .box-rich li { margin: .1rem 0; }
+.text-box .box-rich table { border-collapse: collapse; margin: .25rem 0; width: 100%; }
+.text-box .box-rich td, .text-box .box-rich th { border: 1px solid rgba(15,23,42,.35); padding: 2px 5px; min-width: 2rem; vertical-align: top; }
+.sg-box-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; width: 100%; padding: 3px 0 2px; }
+.sg-box-toolbar button { min-width: 30px; min-height: 30px; border-radius: 6px; font-size: 12px; font-weight: 700; color: var(--text); }
+.sg-box-toolbar button:hover { background: var(--bg-hover); }
+.sg-box-toolbar select { height: 30px; font-size: 10px; font-weight: 700; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-card); color: var(--text); padding: 0 2px; }
+.sg-box-toolbar .sg-pop { position: relative; }
+.sg-box-toolbar .sg-pop > div { position: absolute; left: 0; top: 100%; z-index: var(--sg-layer-canvas-item-ctl); background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.12); padding: 4px; }
+@media (max-width: 768px) {
+    /* One scrolling row rather than seven wrapped ones: the controls keep the
+       44px target a finger needs, and the paper keeps the vertical space those
+       seven rows were taking (measured at 390px: 141px of chrome became one
+       ~50px row). Horizontal scrolling is the same bargain the wide tables make. */
+    .sg-box-toolbar { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; }
+    .sg-box-toolbar > * { flex: 0 0 auto; }
+    .sg-box-toolbar button, .sg-box-toolbar select { min-height: 44px; min-width: 44px; }
+}
+/* The graph panel is sized here and the calculator inside follows it: Desmos
+   draws to whatever box it is handed and does not watch that box, so the
+   panel's own width is the responsive rule and `resize()` is the mechanism. */
+.sg-graph { width: min(92vw, 620px); height: min(70vh, 540px); }
+.sg-graph-host { width: 100%; height: 100%; }
+@media (max-width: 640px) { .sg-graph { width: calc(100vw - 16px); height: min(64vh, 420px); } }
+
 .tool-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: var(--sg-layer-canvas-tool); }
 .tool-overlay svg { position: absolute; touch-action: none; }
 .tool-overlay svg * { pointer-events: none; }
@@ -475,6 +513,13 @@ body.sg-exam .sidebar-overlay { display: none !important; }
    as their own white raster whatever this is, so a fixed near-white panel here
    was a bright rectangle in a dark room for no reason. */
 .dark .pdf-container { background: var(--bg-subtle) !important; }
+/* The toolbar's palettes are native <details>, which draw a disclosure triangle
+   where a toolbar wants an icon. The marker is removed here only: the element is
+   still a disclosure for a keyboard and a screen reader, which is the reason it
+   is a <details> and not a div with a click handler. */
+.sg-tool-pop > summary { list-style: none; cursor: pointer; }
+.sg-tool-pop > summary::-webkit-details-marker { display: none; }
+.sg-tool-pop[open] > summary { background: var(--bg-hover); }
 </style>
 {% endblock %}
 {% block content %}
@@ -848,57 +893,102 @@ body.sg-exam .sidebar-overlay { display: none !important; }
                 <div class="text-[9px] text-slate-500 font-mono truncate" x-text="calcExpression || ' '"></div>
                 <div class="text-lg font-bold text-white font-mono tracking-wider truncate" x-text="calcInput"></div>
             </div>
-            <!-- Scientific row 1: trig + log -->
-            <div class="grid grid-cols-5 gap-[2px] mb-[2px]">
-                <template x-for="(b, bi) in [
-                    {l:'sin',c:'sci',a:'sin'},{l:'cos',c:'sci',a:'cos'},{l:'tan',c:'sci',a:'tan'},
-                    {l:'log',c:'sci',a:'log'},{l:'ln',c:'sci',a:'ln'},
-                ]" :key="'s1-'+bi">
-                    <button type="button" @click="calcSciFunc(b.a)"
-                            class="py-1.5 text-[9px] font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-emerald-400 transition"><span x-text="b.l"></span></button>
-                </template>
+            <!-- Scientific keys. An external board's papers expect more
+                 than the four functions this keypad used to carry: trig with its
+                 inverses, logs and their bases, powers and roots, factorial,
+                 permutations/combinations, the constants and a memory. Every key
+                 inserts a character of the one expression, so a bracket changes
+                 what is evaluated and a wrong key is backspaced rather than the
+                 whole calculation being cleared. -->
+            <div class="grid grid-cols-6 gap-[2px] mb-[2px]">
+                <button type="button" @click="calcSciFunc('sin')" class="py-1.5 text-[9px] font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-emerald-400 transition">sin</button>
+                <button type="button" @click="calcSciFunc('cos')" class="py-1.5 text-[9px] font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-emerald-400 transition">cos</button>
+                <button type="button" @click="calcSciFunc('tan')" class="py-1.5 text-[9px] font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-emerald-400 transition">tan</button>
+                <button type="button" @click="calcSciFunc('asin')" class="py-1.5 text-[8px] font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-emerald-400 transition">sin⁻¹</button>
+                <button type="button" @click="calcSciFunc('acos')" class="py-1.5 text-[8px] font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-emerald-400 transition">cos⁻¹</button>
+                <button type="button" @click="calcSciFunc('atan')" class="py-1.5 text-[8px] font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-emerald-400 transition">tan⁻¹</button>
             </div>
-            <!-- Scientific row 2: power + constants -->
-            <div class="grid grid-cols-5 gap-[2px] mb-[2px]">
-                <template x-for="(b, bi) in [
-                    {l:'x²',c:'sci',a:'sq'},{l:'x³',c:'sci',a:'cube'},{l:'x^y',c:'sci',a:'pow'},
-                    {l:'π',c:'const',a:'pi'},{l:'e',c:'const',a:'e'},
-                ]" :key="'s2-'+bi">
-                    <button type="button"
-                            @click="b.a === 'sq' ? calcSciFunc('sq') : b.a === 'cube' ? calcSciFunc('cube') : b.a === 'pow' ? calcOp('pow') : calcConstant(b.a)"
-                            class="py-1.5 text-[9px] font-extrabold rounded bg-slate-800 hover:bg-slate-700 transition"
-                            :class="b.c === 'const' ? 'text-amber-400' : 'text-emerald-400'">'<span x-text="b.l"></span>'</button>
-                </template>
+            <div class="grid grid-cols-6 gap-[2px] mb-[2px]">
+                <button type="button" @click="calcSciFunc('log')" class="py-1.5 text-[9px] font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-emerald-400 transition">log</button>
+                <button type="button" @click="calcSciFunc('ln')" class="py-1.5 text-[9px] font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-emerald-400 transition">ln</button>
+                <button type="button" @click="calcInsert('10^')" class="py-1.5 text-[9px] font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-emerald-400 transition">10^x</button>
+                <button type="button" @click="calcInsert('e^')" class="py-1.5 text-[9px] font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-emerald-400 transition">e^x</button>
+                <button type="button" @click="calcSciFunc('sqrt')" class="py-1.5 text-[10px] font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-emerald-400 transition">√</button>
+                <button type="button" @click="calcSciFunc('cbrt')" class="py-1.5 text-[10px] font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-emerald-400 transition">∛</button>
             </div>
-            <!-- Memory row -->
-            <div class="grid grid-cols-5 gap-[2px] mb-[2px]">
+            <div class="grid grid-cols-6 gap-[2px] mb-[2px]">
+                <button type="button" @click="calcInsert('^2')" class="py-1.5 text-[9px] font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-emerald-400 transition">x²</button>
+                <button type="button" @click="calcInsert('^3')" class="py-1.5 text-[9px] font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-emerald-400 transition">x³</button>
+                <button type="button" @click="calcInsert('^')" class="py-1.5 text-[9px] font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-emerald-400 transition">x^y</button>
+                <button type="button" @click="calcInsert('!')" class="py-1.5 text-[9px] font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-emerald-400 transition">x!</button>
+                <button type="button" @click="calcInsert('1/(')" class="py-1.5 text-[9px] font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-emerald-400 transition">1/x</button>
+                <button type="button" @click="calcSciFunc('abs')" class="py-1.5 text-[9px] font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-emerald-400 transition">|x|</button>
+            </div>
+            <div class="grid grid-cols-6 gap-[2px] mb-[2px]">
+                <button type="button" @click="calcConstant('pi')" class="py-1.5 text-[10px] font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-amber-400 transition">π</button>
+                <button type="button" @click="calcConstant('e')" class="py-1.5 text-[10px] font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-amber-400 transition">e</button>
+                <button type="button" @click="calcSciFunc('nCr')" class="py-1.5 text-[9px] font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-emerald-400 transition">nCr</button>
+                <button type="button" @click="calcSciFunc('nPr')" class="py-1.5 text-[9px] font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-emerald-400 transition">nPr</button>
+                <button type="button" @click="calcConstant('ans')" class="py-1.5 text-[9px] font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-amber-400 transition">Ans</button>
+                <button type="button" @click="calcInsert('%')" class="py-1.5 text-[9px] font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-emerald-400 transition">%</button>
+            </div>
+            <div class="grid grid-cols-6 gap-[2px] mb-[2px]">
                 <button type="button" @click="calcMem('MC')" class="py-1 text-[8px] font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-slate-400 transition">MC</button>
                 <button type="button" @click="calcMem('MR')" class="py-1 text-[8px] font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-slate-400 transition">MR</button>
                 <button type="button" @click="calcMem('M+')" class="py-1 text-[8px] font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-slate-400 transition">M+</button>
-                <button type="button" @click="calcMem('M-')" class="py-1 text-[8px] font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-slate-400 transition">M-</button>
-                <button type="button" @click="calcParen('(')" class="py-1 text-[9px] font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition">(</button>
+                <button type="button" @click="calcMem('M-')" class="py-1 text-[8px] font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-slate-400 transition">M−</button>
+                <button type="button" @click="calcParen('(')" class="py-1 text-[10px] font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition">(</button>
+                <button type="button" @click="calcParen(')')" class="py-1 text-[10px] font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition">)</button>
             </div>
             <!-- Number pad + operators -->
             <div class="grid grid-cols-4 gap-[2px]">
                 <button type="button" @click="calcClear(true)" class="py-2 text-xs font-extrabold rounded bg-red-900/40 hover:bg-red-800/60 text-red-300 transition">C</button>
                 <button type="button" @click="calcClear(false)" class="py-2 text-xs font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition">CE</button>
-                <button type="button" @click="calcParen(')')" class="py-2 text-xs font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition">)</button>
+                <button type="button" @click="calcDel()" class="py-2 text-xs font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition" :aria-label="t('Hapus satu','Backspace')">DEL</button>
                 <button type="button" @click="calcOp('÷')" class="py-2 text-xs font-extrabold rounded bg-slate-700 hover:bg-slate-600 text-orange-400 transition">÷</button>
-                <template x-for="(b, bi) in [
-                    {l:'7',c:'num'},{l:'8',c:'num'},{l:'9',c:'num'},
-                    {l:'4',c:'num'},{l:'5',c:'num'},{l:'6',c:'num'},
-                    {l:'1',c:'num'},{l:'2',c:'num'},{l:'3',c:'num'},
-                ]" :key="'n-'+bi">
-                    <button type="button" @click="calcButton(b.l)"
-                            class="py-2 text-xs font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-white transition"><span x-text="b.l"></span></button>
-                </template>
+                <button type="button" @click="calcButton('7')" class="py-2 text-xs font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-white transition">7</button>
+                <button type="button" @click="calcButton('8')" class="py-2 text-xs font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-white transition">8</button>
+                <button type="button" @click="calcButton('9')" class="py-2 text-xs font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-white transition">9</button>
                 <button type="button" @click="calcOp('×')" class="py-2 text-xs font-extrabold rounded bg-slate-700 hover:bg-slate-600 text-orange-400 transition">×</button>
+                <button type="button" @click="calcButton('4')" class="py-2 text-xs font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-white transition">4</button>
+                <button type="button" @click="calcButton('5')" class="py-2 text-xs font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-white transition">5</button>
+                <button type="button" @click="calcButton('6')" class="py-2 text-xs font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-white transition">6</button>
+                <button type="button" @click="calcOp('-')" class="py-2 text-xs font-extrabold rounded bg-slate-700 hover:bg-slate-600 text-orange-400 transition">−</button>
+                <button type="button" @click="calcButton('1')" class="py-2 text-xs font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-white transition">1</button>
+                <button type="button" @click="calcButton('2')" class="py-2 text-xs font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-white transition">2</button>
+                <button type="button" @click="calcButton('3')" class="py-2 text-xs font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-white transition">3</button>
+                <button type="button" @click="calcOp('+')" class="py-2 text-xs font-extrabold rounded bg-slate-700 hover:bg-slate-600 text-orange-400 transition">+</button>
+                <button type="button" @click="calcOp('pm')" class="py-2 text-xs font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-white transition">+/−</button>
                 <button type="button" @click="calcButton('0')" class="py-2 text-xs font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-white transition">0</button>
                 <button type="button" @click="calcButton('.')" class="py-2 text-xs font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-white transition">.</button>
-                <button type="button" @click="calcOp('pm')" class="py-2 text-xs font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-white transition">+/−</button>
-                <button type="button" @click="calcOp('+')" class="py-2 text-xs font-extrabold rounded bg-slate-700 hover:bg-slate-600 text-orange-400 transition">+</button>
-                <button type="button" @click="calcOp('-')" class="py-2 text-xs font-extrabold rounded bg-slate-700 hover:bg-slate-600 text-orange-400 transition">−</button>
-                <button type="button" @click="calcEquals()" class="py-2 text-xs font-extrabold rounded bg-orange-500 hover:bg-orange-600 text-white transition row-span-2">=</button>
+                <button type="button" @click="calcEquals()" class="py-2 text-xs font-extrabold rounded bg-orange-500 hover:bg-orange-600 text-white transition">=</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Desmos graphing calculator. Behind the same `allow_calculator` switch as
+         the scientific calculator: the teacher decides once per paper whether a
+         calculator is allowed, and a graph tool is one. The script is fetched on
+         the first press, never on load, so a paper opened on a dead link still
+         opens; each failure says which it was. -->
+    <div x-show="showGraph && !submitted && !showExamAgreement" x-transition x-cloak
+         class="sg-graph sg-layer-float fixed bottom-20 right-4 bg-white rounded-2xl shadow-2xl border border-surface-200 overflow-hidden"
+         @click.outside="closeGraph()">
+        <div class="flex items-center justify-between px-3 py-1.5 bg-surface-50 border-b border-surface-200">
+            <span class="text-[11px] font-extrabold text-surface-700 flex items-center gap-1.5"><i class="fas fa-chart-line text-emerald-600"></i><span x-text="t('Grafik Desmos','Desmos graph')"></span></span>
+            <div class="flex items-center gap-2">
+                <button type="button" @click="openGraph(true)" class="text-[11px] font-bold text-surface-500 hover:text-surface-800" :title="t('Muat ulang grafik','Reload graph')" :aria-label="t('Muat ulang grafik','Reload graph')"><i class="fas fa-rotate-right"></i></button>
+                <button type="button" @click="closeGraph()" class="text-surface-400 hover:text-surface-800 text-sm" :aria-label="t('Tutup grafik','Close graph')">&times;</button>
+            </div>
+        </div>
+        <div class="relative" style="height: calc(100% - 34px)">
+            <div x-ref="graphHost" class="sg-graph-host"></div>
+            <div x-show="graphState !== 'ready'" class="absolute inset-0 flex flex-col items-center justify-center gap-2 p-4 text-center bg-white">
+                <i class="fas text-2xl" :class="graphState === 'loading' ? 'fa-spinner fa-spin text-emerald-600' : 'fa-triangle-exclamation text-amber-500'"></i>
+                <p class="text-xs font-extrabold text-surface-700" x-text="graphMessage"></p>
+                <p x-show="graphState === 'unconfigured'" class="text-[11px] text-surface-500" x-text="t('Kunci API Desmos belum diatur di server ini.','The Desmos API key is not configured on this server.')"></p>
+                <p x-show="graphState !== 'unconfigured' && graphState !== 'loading'" class="text-[11px] text-surface-500" x-text="t('Periksa koneksi lalu coba lagi. Jawaban Anda tetap tersimpan.','Check the connection and try again. Your answer is still saved.')"></p>
+                <button type="button" x-show="graphState !== 'unconfigured' && graphState !== 'loading'" @click="openGraph(true)" class="mt-1 px-3 py-2 rounded-lg bg-emerald-600 text-white text-[11px] font-bold" x-text="t('Coba lagi','Try again')"></button>
             </div>
         </div>
     </div>
@@ -1273,9 +1363,82 @@ body.sg-exam .sidebar-overlay { display: none !important; }
                             <button type="button" @click="undoCanvas(i)" :disabled="!(canvasHistory[i]?.length > 1)" class="px-2.5 py-1.5 text-[11px] font-bold text-stone-500 hover:bg-stone-100 disabled:opacity-25"><i class="fas fa-undo mr-1"></i></button>
                             <button type="button" @click="clearCanvas(i)" class="px-2.5 py-1.5 text-[11px] font-bold text-red-500 hover:bg-red-50"><i class="fas fa-trash-alt mr-1"></i></button>
                             <template x-if="antiCheat.allow_calculator">
+                                <button type="button" @click="toggleGraph()" :class="showGraph ? 'bg-emerald-100 ring-2 ring-emerald-400' : ''" class="px-2.5 py-1.5 text-[11px] font-bold" :title="t('Grafik Desmos','Desmos graph')"><i class="fas fa-chart-line mr-1"></i><span x-text="t('Grafik','Graph')"></span></button>
+                            </template>
+                            <template x-if="antiCheat.allow_calculator">
                                 <button type="button" @click="toggleCalculator" :class="showCalculator ? 'bg-orange-100 ring-2 ring-orange-400' : ''" class="px-2.5 py-1.5 text-[11px] font-bold" :title="t('Kalkulator Ilmiah','Scientific calculator')"><i class="fas fa-calculator mr-1"></i><span x-text="t('Kalk','Calc')"></span></button>
                             </template>
-                            <span class="text-[10px] font-bold text-stone-400 ml-auto" x-text="((hasDrawn[i]||{})[page-1] ? '✏️ ' : '') + ((textBoxes[i]||{})[page-1]?.length || 0) + ' ' + t('teks','text')"></span>
+<div class="sg-box-toolbar" x-show="essayCanvasMode[i] === 'text'" x-cloak>
+                                <span class="text-[9px] font-extrabold text-stone-400 uppercase tracking-wider mr-1" x-text="t('Teks:','Text:')"></span>
+                                <!-- `@mousedown.prevent` on every control: a button outside the
+                                     editable takes focus on mousedown, and a command with no
+                                     selection in the box does nothing. The palette, symbols,
+                                     equations and table are <details> disclosures, so their open
+                                     state is an attribute rather than a field per box. -->
+                                <button type="button" :disabled="activeBox[i] == null" @mousedown.prevent="boxCmd(i, 'bold')" class="w-8 h-8 text-sm font-bold" :title="t('Tebal','Bold')">B</button>
+                                <button type="button" :disabled="activeBox[i] == null" @mousedown.prevent="boxCmd(i, 'italic')" class="w-8 h-8 text-sm italic" :title="t('Miring','Italic')">I</button>
+                                <button type="button" :disabled="activeBox[i] == null" @mousedown.prevent="boxCmd(i, 'underline')" class="w-8 h-8 text-sm underline" :title="t('Garis bawah','Underline')">U</button>
+                                <span class="w-px h-5 bg-stone-300 mx-0.5"></span>
+                                <button type="button" :disabled="activeBox[i] == null" @mousedown.prevent="boxCmd(i, 'ul')" class="w-8 h-8" :title="t('Daftar butir','Bullet list')"><i class="fas fa-list-ul"></i></button>
+                                <button type="button" :disabled="activeBox[i] == null" @mousedown.prevent="boxCmd(i, 'ol')" class="w-8 h-8" :title="t('Daftar bernomor','Numbered list')"><i class="fas fa-list-ol"></i></button>
+                                <select :disabled="activeBox[i] == null" :value="activeBoxData(i)?.align || 'left'" @change="boxAlign(i, $event.target.value)" class="ml-1" :aria-label="t('Perataan','Alignment')" :title="t('Perataan paragraf','Paragraph alignment')">
+                                    <option value="left" x-text="t('Kiri','Left')"></option>
+                                    <option value="center" x-text="t('Tengah','Center')"></option>
+                                    <option value="right" x-text="t('Kanan','Right')"></option>
+                                    <option value="justify" x-text="t('Rata','Justify')"></option>
+                                </select>
+                                <button type="button" :disabled="activeBox[i] == null" @mousedown.prevent="boxTab(i, null, false)" class="w-8 h-8" :title="t('Tab / indentasi','Tab / indent')"><i class="fas fa-indent"></i></button>
+                                <details class="sg-pop">
+                                    <summary class="w-8 h-8 rounded-lg hover:bg-stone-100 flex items-center justify-center text-stone-600" :title="t('Warna huruf','Text colour')"><i class="fas fa-palette"></i></summary>
+                                    <div class="flex gap-1">
+                                        <button type="button" @mousedown.prevent="boxColor(i, '#111827')" @click="$el.closest('details').open=false" class="h-8 w-8 rounded-full border border-stone-300" style="background:#111827" :title="t('Hitam','Black')"></button>
+                                        <button type="button" @mousedown.prevent="boxColor(i, '#b91c1c')" @click="$el.closest('details').open=false" class="h-8 w-8 rounded-full border border-stone-300" style="background:#b91c1c" :title="t('Merah','Red')"></button>
+                                        <button type="button" @mousedown.prevent="boxColor(i, '#1d4ed8')" @click="$el.closest('details').open=false" class="h-8 w-8 rounded-full border border-stone-300" style="background:#1d4ed8" :title="t('Biru','Blue')"></button>
+                                        <button type="button" @mousedown.prevent="boxColor(i, '#15803d')" @click="$el.closest('details').open=false" class="h-8 w-8 rounded-full border border-stone-300" style="background:#15803d" :title="t('Hijau','Green')"></button>
+                                        <button type="button" @mousedown.prevent="boxColor(i, '#c2410c')" @click="$el.closest('details').open=false" class="h-8 w-8 rounded-full border border-stone-300" style="background:#c2410c" :title="t('Jingga','Orange')"></button>
+                                        <button type="button" @mousedown.prevent="boxColor(i, '#7e22ce')" @click="$el.closest('details').open=false" class="h-8 w-8 rounded-full border border-stone-300" style="background:#7e22ce" :title="t('Ungu','Purple')"></button>
+                                    </div>
+                                </details>
+                                <details class="sg-pop">
+                                    <summary class="w-8 h-8 rounded-lg hover:bg-stone-100 flex items-center justify-center text-stone-600" :title="t('Simbol','Symbols')"><i class="fas fa-square-root-variable"></i></summary>
+                                    <div class="grid grid-cols-6 gap-1">
+                                        <template x-for="sym in ['×','÷','±','≠','≤','≥','≈','√','∛','π','∑','∫','∞','°','∠','Δ']" :key="'bsym-'+sym">
+                                            <button type="button" @mousedown.prevent="boxSymbol(i, sym)" @click="$el.closest('details').open=false" class="h-8 w-8 rounded-md hover:bg-stone-100 text-sm text-stone-700" x-text="sym"></button>
+                                        </template>
+                                    </div>
+                                </details>
+                                <details class="sg-pop">
+                                    <summary class="w-8 h-8 rounded-lg hover:bg-stone-100 flex items-center justify-center text-stone-600" :title="t('Sisipkan rumus','Insert equation')"><i class="fas fa-function"></i></summary>
+                                    <div class="w-60">
+                                        <template x-for="eq in ['a² + b² = c²','x = (−b ± √(b² − 4ac)) / 2a','v = s / t','F = m × a','E = m c²','pH = −log[H⁺]']" :key="'beq-'+eq">
+                                            <button type="button" @mousedown.prevent="boxSymbol(i, eq)" @click="$el.closest('details').open=false" class="block w-full text-left px-2 py-1.5 rounded-md hover:bg-stone-100 text-xs text-stone-700" x-text="eq"></button>
+                                        </template>
+                                    </div>
+                                </details>
+                                <details class="sg-pop">
+                                    <summary class="w-8 h-8 rounded-lg hover:bg-stone-100 flex items-center justify-center text-stone-600" :title="t('Sisipkan tabel','Insert table')"><i class="fas fa-table"></i></summary>
+                                    <div class="grid grid-cols-2 gap-1">
+                                        <button type="button" @mousedown.prevent="boxTable(i, 2, 2)" @click="$el.closest('details').open=false" class="h-8 px-2 rounded-md hover:bg-stone-100 text-xs font-semibold">2 × 2</button>
+                                        <button type="button" @mousedown.prevent="boxTable(i, 3, 3)" @click="$el.closest('details').open=false" class="h-8 px-2 rounded-md hover:bg-stone-100 text-xs font-semibold">3 × 3</button>
+                                        <button type="button" @mousedown.prevent="boxTable(i, 2, 4)" @click="$el.closest('details').open=false" class="h-8 px-2 rounded-md hover:bg-stone-100 text-xs font-semibold">2 × 4</button>
+                                        <button type="button" @mousedown.prevent="boxTable(i, 4, 3)" @click="$el.closest('details').open=false" class="h-8 px-2 rounded-md hover:bg-stone-100 text-xs font-semibold">4 × 3</button>
+                                    </div>
+                                </details>
+                                <select :disabled="activeBox[i] == null" :value="activeBoxData(i)?.fontSize || 16" @change="boxFontSize(i, +$event.target.value)" class="ml-1" :aria-label="t('Ukuran huruf','Text size')" :title="t('Ukuran huruf','Text size')">
+                                    <template x-for="sz in [12,14,16,18,20,24,28,32]" :key="'bsz-'+sz"><option :value="sz" x-text="sz+'pt'"></option></template>
+                                </select>
+                                <select :disabled="activeBox[i] == null" :value="activeBoxData(i)?.fontFamily || 'Times New Roman, serif'" @change="boxFontFamily(i, $event.target.value)" :aria-label="t('Huruf','Font')" :title="t('Huruf','Font')">
+                                    <option value="Nunito, sans-serif">Nunito</option>
+                                    <option value="Arial, sans-serif">Arial</option>
+                                    <option value="Georgia, serif">Georgia</option>
+                                    <option value="Courier New, monospace">Courier</option>
+                                    <option value="Times New Roman, serif">Times NR</option>
+                                </select>
+                                <button type="button" :disabled="activeBox[i] == null" @mousedown.prevent="boxOrient(i)" class="w-8 h-8" :class="activeBoxData(i)?.orient === 'vertical' ? 'bg-primary-100 text-primary-700' : ''" :title="t('Orientasi teks','Text orientation')"><i class="fas fa-arrows-up-down"></i></button>
+                                <button type="button" :disabled="activeBox[i] == null" @click="deleteActiveBox(i)" class="w-8 h-8 text-red-500" :title="t('Hapus kotak teks','Delete text box')"><i class="fas fa-trash-alt"></i></button>
+                                <span class="text-[10px] font-bold text-stone-400 ml-auto" x-text="activeBox[i] == null ? t('Klik halaman untuk menambah teks','Click the page to add text') : t('Kotak teks aktif','Text box active')"></span>
+                            </div>
+                                                        <span class="text-[10px] font-bold text-stone-400 ml-auto" x-text="((hasDrawn[i]||{})[page-1] ? '✏️ ' : '') + ((textBoxes[i]||{})[page-1]?.length || 0) + ' ' + t('teks','text')"></span>
                         </div>
                         <div class="flex items-center justify-end gap-2 px-4 py-2 bg-gradient-to-r from-stone-50 to-orange-50/30 border-b border-stone-100" x-show="pages.length > 0">
                             <button type="button" @click="prevPage" :disabled="page <= 1"
@@ -1419,37 +1582,30 @@ body.sg-exam .sidebar-overlay { display: none !important; }
                                       </div>
                                   </div>
 
-                                <template x-for="(box, bi) in ((textBoxes[i] || {})[page - 1] || [])" :key="'tb-'+bi">
-                                    <div class="text-box"
+                                <template x-for="(box, bi) in ((textBoxes[i] || {})[page - 1] || [])" :key="'tb-' + page + '-' + bi">
+                                    <div class="text-box" :class="activeBox[i] === bi ? 'is-active' : ''"
                                          :style="'left:' + (box.x_pct * 100) + '%;top:' + (box.y_pct * 100) + '%;'"
-                                         @mousedown="startTextBoxDrag(i, bi, $event)"
-                                         @touchstart="startTextBoxDrag(i, bi, $event)">
-                                        <div class="box-font-controls" x-show="essayCanvasMode[i] === 'text'" @mousedown.stop @touchstart.stop>
-                                            <select x-model="box.fontSize" @change="applyBoxFont(box); textBoxes={...(textBoxes||{})}" class="text-[9px]">
-                                                <template x-for="sz in [12,14,16,18,20,24,28,32]"><option :value="sz" x-text="sz+'pt'"></option></template>
-                                            </select>
-                                             <select x-model="box.fontFamily" @change="applyBoxFont(box); textBoxes={...(textBoxes||{})}" class="text-[9px]">
-                                                 <option value="Nunito, sans-serif">Nunito</option>
-                                                 <option value="Arial, sans-serif">Arial</option>
-                                                 <option value="Georgia, serif">Georgia</option>
-                                                 <option value="Courier New, monospace">Courier</option>
-                                                 <option value="Times New Roman, serif">Times NR</option>
-                                             </select>
-                                             <button type="button" @click="box.orient = box.orient === 'vertical' ? 'horizontal' : 'vertical'; textBoxes={...(textBoxes||{})}"
-                                                     class="text-white text-[10px] px-1.5 py-0.5 rounded font-bold"
-                                                     :class="box.orient === 'vertical' ? 'bg-orange-500' : 'bg-slate-600'"
-                                                     title="Orientasi teks">
-                                                 <i class="fas" :class="box.orient === 'vertical' ? 'fa-arrow-down' : 'fa-arrow-right'"></i>
-                                             </button>
-                                        </div>
-                                        <div class="box-handle"><i class="fas fa-grip-lines text-white text-[8px]"></i></div>
-                                        <button type="button" class="box-del" @click="removeTextBox(i, bi)" @mousedown.stop @touchstart.stop>&times;</button>
-                                         <textarea x-model="box.text"
-                                                  :style="'font-size:' + (box.fontSize || 16) + 'px; font-family:' + (box.fontFamily || 'Times New Roman, serif') + '; writing-mode:' + (box.orient === 'vertical' ? 'vertical-rl' : 'horizontal-tb') + ';'"
-                                                  @input="onTextBoxInput(i); textBoxes = {...(textBoxes || {})}"
-                                                  @copy.prevent @paste.prevent @cut.prevent @contextmenu.prevent
-                                                  placeholder="Ketik..."
-                                                  @mousedown.stop @touchstart.stop></textarea>
+                                         @mousedown.stop>
+                                        <!-- Dragging is the handle's job, not the box's: a drag
+                                             begun anywhere on the box would swallow the selection
+                                             gesture, so placing the caret would move the answer. -->
+                                        <div class="box-handle" @mousedown.stop="startTextBoxDrag(i, bi, $event)" @touchstart.stop="startTextBoxDrag(i, bi, $event)"><i class="fas fa-grip-lines text-white text-[8px]"></i></div>
+                                        <button type="button" class="box-del" @click.stop="removeTextBox(i, bi)" @mousedown.stop @touchstart.stop>&times;</button>
+                                        <!-- Written once from the stored HTML and never re-bound to
+                                             the live value: an `x-html` on what is being typed
+                                             replaces the nodes on every keystroke and drops the
+                                             caret (the essay paragraph carries the same note). -->
+                                        <div class="box-rich" contenteditable="true" role="textbox"
+                                             :aria-label="t('Teks pada halaman','Text on the page')"
+                                             :ref="'box_' + i + '_' + bi"
+                                             x-init="$el.innerHTML = sanitizeBoxHtml(box.html || '')"
+                                             @focus="activeBox[i] = bi"
+                                             @input="onBoxRichInput(i, bi, $el)"
+                                             @keyup="rememberBox($el)" @mouseup="rememberBox($el)"
+                                             @keydown.tab.prevent="boxTab(i, $event)"
+                                             @paste="boxPaste(i, $event)"
+                                             @copy.prevent @cut.prevent @contextmenu.prevent
+                                             :style="'font-size:' + (box.fontSize || 16) + 'px; font-family:' + (box.fontFamily || 'Times New Roman, serif') + '; text-align:' + (box.align || 'left') + '; writing-mode:' + (box.orient === 'vertical' ? 'vertical-rl' : 'horizontal-tb') + ';'"></div>
                                     </div>
                                 </template>
                             </div>
@@ -2057,7 +2213,7 @@ body.sg-exam .sidebar-overlay { display: none !important; }
                                      is a command that does nothing — which is what the list
                                      buttons did. The list buttons do not call the deprecated
                                      execCommand at all; SGEssayEditor builds the <ul>/<ol>. -->
-                                <div class="flex flex-wrap items-center gap-1 px-3 py-2 bg-surface-50 border border-surface-200 rounded-t-xl">
+                                <div class="flex flex-wrap items-center gap-1 px-3 py-2 bg-surface-50 border border-surface-200 rounded-t-xl relative">
                                     <button type="button" @mousedown.prevent="execCmd('bold')" class="w-8 h-8 rounded-lg hover:bg-surface-200 text-sm font-bold text-surface-700" :title="t('Tebal','Bold')">B</button>
                                     <button type="button" @mousedown.prevent="execCmd('italic')" class="w-8 h-8 rounded-lg hover:bg-surface-200 text-sm italic text-surface-700" :title="t('Miring','Italic')">I</button>
                                     <button type="button" @mousedown.prevent="execCmd('underline')" class="w-8 h-8 rounded-lg hover:bg-surface-200 text-sm underline text-surface-700" :title="t('Garis bawah','Underline')">U</button>
@@ -2094,6 +2250,79 @@ body.sg-exam .sidebar-overlay { display: none !important; }
                                         <option value="18">18</option>
                                         <option value="20">20</option>
                                     </select>
+                                    <span class="w-px h-5 bg-surface-300 mx-0.5"></span>
+                                    <!-- Paragraph group: alignment is a property of the block a
+                                         pupil is typing in, so it is one select beside the font
+                                         ones. The value is read back from the element, which is
+                                         why a paragraph restored from a draft shows its own
+                                         alignment instead of the last one chosen. -->
+                                    <select :value="essayAlign(i)" @change="setEssayAlign(i, $event.target.value)"
+                                            :aria-label="t('Perataan paragraf','Paragraph alignment')"
+                                            :title="t('Perataan paragraf','Paragraph alignment')"
+                                            class="h-8 rounded-lg border border-surface-200 bg-white px-1 text-[11px] font-semibold text-surface-700">
+                                        <option value="left" x-text="t('Kiri','Left')"></option>
+                                        <option value="center" x-text="t('Tengah','Center')"></option>
+                                        <option value="right" x-text="t('Kanan','Right')"></option>
+                                        <option value="justify" x-text="t('Rata kiri-kanan','Justify')"></option>
+                                    </select>
+                                    <button type="button" @mousedown.prevent="applyTab(i)" class="w-8 h-8 rounded-lg hover:bg-surface-200 text-surface-600" :title="t('Tab / indentasi','Tab / indent')" :aria-label="t('Tab / indentasi','Tab / indent')"><i class="fas fa-indent"></i></button>
+                                    <!-- The three palettes are <details> on purpose: a popover
+                                         that needs JavaScript state would have to be repeated in
+                                         every essay block and in the preview, and a native
+                                         disclosure is one open/closed attribute. -->
+                                    <details class="sg-tool-pop">
+                                        <summary class="w-8 h-8 rounded-lg hover:bg-surface-200 text-surface-600 flex items-center justify-center" :title="t('Warna huruf','Text colour')" :aria-label="t('Warna huruf','Text colour')"><i class="fas fa-palette"></i></summary>
+                                        <div class="absolute left-0 top-full mt-1 sg-layer-over p-2 bg-white border border-surface-200 rounded-xl shadow-lg flex gap-1">
+                                            <button type="button" @mousedown.prevent="applyColor(i, '#111827')" @click="$el.closest('details').open=false" class="h-8 w-8 rounded-full border border-surface-300" style="background:#111827" :title="t('Hitam','Black')" :aria-label="t('Hitam','Black')"></button>
+                                            <button type="button" @mousedown.prevent="applyColor(i, '#b91c1c')" @click="$el.closest('details').open=false" class="h-8 w-8 rounded-full border border-surface-300" style="background:#b91c1c" :title="t('Merah','Red')" :aria-label="t('Merah','Red')"></button>
+                                            <button type="button" @mousedown.prevent="applyColor(i, '#1d4ed8')" @click="$el.closest('details').open=false" class="h-8 w-8 rounded-full border border-surface-300" style="background:#1d4ed8" :title="t('Biru','Blue')" :aria-label="t('Biru','Blue')"></button>
+                                            <button type="button" @mousedown.prevent="applyColor(i, '#15803d')" @click="$el.closest('details').open=false" class="h-8 w-8 rounded-full border border-surface-300" style="background:#15803d" :title="t('Hijau','Green')" :aria-label="t('Hijau','Green')"></button>
+                                            <button type="button" @mousedown.prevent="applyColor(i, '#c2410c')" @click="$el.closest('details').open=false" class="h-8 w-8 rounded-full border border-surface-300" style="background:#c2410c" :title="t('Jingga','Orange')" :aria-label="t('Jingga','Orange')"></button>
+                                            <button type="button" @mousedown.prevent="applyColor(i, '#7e22ce')" @click="$el.closest('details').open=false" class="h-8 w-8 rounded-full border border-surface-300" style="background:#7e22ce" :title="t('Ungu','Purple')" :aria-label="t('Ungu','Purple')"></button>
+                                        </div>
+                                    </details>
+                                    <details class="sg-tool-pop">
+                                        <summary class="w-8 h-8 rounded-lg hover:bg-surface-200 text-surface-600 flex items-center justify-center" :title="t('Simbol','Symbols')" :aria-label="t('Simbol','Symbols')"><i class="fas fa-square-root-variable"></i></summary>
+                                        <div class="absolute left-0 top-full mt-1 sg-layer-over p-2 bg-white border border-surface-200 rounded-xl shadow-lg grid grid-cols-6 gap-1">
+                                            <button type="button" @mousedown.prevent="insertSymbol(i, '×')" @click="$el.closest('details').open=false" class="h-8 w-8 rounded-md hover:bg-surface-100 text-sm text-surface-700">×</button>
+                                            <button type="button" @mousedown.prevent="insertSymbol(i, '÷')" @click="$el.closest('details').open=false" class="h-8 w-8 rounded-md hover:bg-surface-100 text-sm text-surface-700">÷</button>
+                                            <button type="button" @mousedown.prevent="insertSymbol(i, '±')" @click="$el.closest('details').open=false" class="h-8 w-8 rounded-md hover:bg-surface-100 text-sm text-surface-700">±</button>
+                                            <button type="button" @mousedown.prevent="insertSymbol(i, '≠')" @click="$el.closest('details').open=false" class="h-8 w-8 rounded-md hover:bg-surface-100 text-sm text-surface-700">≠</button>
+                                            <button type="button" @mousedown.prevent="insertSymbol(i, '≤')" @click="$el.closest('details').open=false" class="h-8 w-8 rounded-md hover:bg-surface-100 text-sm text-surface-700">≤</button>
+                                            <button type="button" @mousedown.prevent="insertSymbol(i, '≥')" @click="$el.closest('details').open=false" class="h-8 w-8 rounded-md hover:bg-surface-100 text-sm text-surface-700">≥</button>
+                                            <button type="button" @mousedown.prevent="insertSymbol(i, '≈')" @click="$el.closest('details').open=false" class="h-8 w-8 rounded-md hover:bg-surface-100 text-sm text-surface-700">≈</button>
+                                            <button type="button" @mousedown.prevent="insertSymbol(i, '√')" @click="$el.closest('details').open=false" class="h-8 w-8 rounded-md hover:bg-surface-100 text-sm text-surface-700">√</button>
+                                            <button type="button" @mousedown.prevent="insertSymbol(i, 'π')" @click="$el.closest('details').open=false" class="h-8 w-8 rounded-md hover:bg-surface-100 text-sm text-surface-700">π</button>
+                                            <button type="button" @mousedown.prevent="insertSymbol(i, '∑')" @click="$el.closest('details').open=false" class="h-8 w-8 rounded-md hover:bg-surface-100 text-sm text-surface-700">∑</button>
+                                            <button type="button" @mousedown.prevent="insertSymbol(i, '∫')" @click="$el.closest('details').open=false" class="h-8 w-8 rounded-md hover:bg-surface-100 text-sm text-surface-700">∫</button>
+                                            <button type="button" @mousedown.prevent="insertSymbol(i, '∞')" @click="$el.closest('details').open=false" class="h-8 w-8 rounded-md hover:bg-surface-100 text-sm text-surface-700">∞</button>
+                                        </div>
+                                    </details>
+                                    <!-- An equation is a text template, not a rendered formula: a
+                                         maths renderer is hundreds of kilobytes of font this
+                                         app's spotty-WiFi users would pay for on every paper,
+                                         and a CDN would break the offline rule. The pupil edits
+                                         the template, and the teacher reads the same characters. -->
+                                    <details class="sg-tool-pop">
+                                        <summary class="w-8 h-8 rounded-lg hover:bg-surface-200 text-surface-600 flex items-center justify-center" :title="t('Sisipkan rumus','Insert equation')" :aria-label="t('Sisipkan rumus','Insert equation')"><i class="fas fa-function"></i></summary>
+                                        <div class="absolute left-0 top-full mt-1 sg-layer-over w-60 p-2 bg-white border border-surface-200 rounded-xl shadow-lg">
+                                            <button type="button" @mousedown.prevent="insertSymbol(i, 'a² + b² = c²')" @click="$el.closest('details').open=false" class="block w-full text-left px-2 py-1.5 rounded-md hover:bg-surface-100 text-xs text-surface-700">a² + b² = c²</button>
+                                            <button type="button" @mousedown.prevent="insertSymbol(i, 'x = (−b ± √(b² − 4ac)) / 2a')" @click="$el.closest('details').open=false" class="block w-full text-left px-2 py-1.5 rounded-md hover:bg-surface-100 text-xs text-surface-700">x = (−b ± √(b² − 4ac)) / 2a</button>
+                                            <button type="button" @mousedown.prevent="insertSymbol(i, 'v = s / t')" @click="$el.closest('details').open=false" class="block w-full text-left px-2 py-1.5 rounded-md hover:bg-surface-100 text-xs text-surface-700">v = s / t</button>
+                                            <button type="button" @mousedown.prevent="insertSymbol(i, 'F = m × a')" @click="$el.closest('details').open=false" class="block w-full text-left px-2 py-1.5 rounded-md hover:bg-surface-100 text-xs text-surface-700">F = m × a</button>
+                                            <button type="button" @mousedown.prevent="insertSymbol(i, 'E = m c²')" @click="$el.closest('details').open=false" class="block w-full text-left px-2 py-1.5 rounded-md hover:bg-surface-100 text-xs text-surface-700">E = m c²</button>
+                                            <button type="button" @mousedown.prevent="insertSymbol(i, 'pH = −log[H⁺]')" @click="$el.closest('details').open=false" class="block w-full text-left px-2 py-1.5 rounded-md hover:bg-surface-100 text-xs text-surface-700">pH = −log[H⁺]</button>
+                                        </div>
+                                    </details>
+                                    <details class="sg-tool-pop">
+                                        <summary class="w-8 h-8 rounded-lg hover:bg-surface-200 text-surface-600 flex items-center justify-center" :title="t('Sisipkan tabel','Insert table')" :aria-label="t('Sisipkan tabel','Insert table')"><i class="fas fa-table"></i></summary>
+                                        <div class="absolute left-0 top-full mt-1 sg-layer-over p-2 bg-white border border-surface-200 rounded-xl shadow-lg grid grid-cols-4 gap-1">
+                                            <button type="button" @mousedown.prevent="insertTable(i, 2, 2)" @click="$el.closest('details').open=false" class="h-8 rounded-md hover:bg-surface-100 text-xs font-semibold text-surface-700">2 × 2</button>
+                                            <button type="button" @mousedown.prevent="insertTable(i, 3, 3)" @click="$el.closest('details').open=false" class="h-8 rounded-md hover:bg-surface-100 text-xs font-semibold text-surface-700">3 × 3</button>
+                                            <button type="button" @mousedown.prevent="insertTable(i, 2, 4)" @click="$el.closest('details').open=false" class="h-8 rounded-md hover:bg-surface-100 text-xs font-semibold text-surface-700">2 × 4</button>
+                                            <button type="button" @mousedown.prevent="insertTable(i, 4, 3)" @click="$el.closest('details').open=false" class="h-8 rounded-md hover:bg-surface-100 text-xs font-semibold text-surface-700">4 × 3</button>
+                                        </div>
+                                    </details>
                                     <button type="button" @mousedown.prevent="addParagraph(i)" class="ml-auto px-2.5 h-8 rounded-lg hover:bg-surface-200 text-xs font-semibold text-primary-600" :title="t('Tambah paragraf','Add paragraph')"><span x-text="t('+ Paragraf','+ Paragraph')"></span></button>
                                 </div>
                                 <!-- Paragraphs -->
@@ -2120,6 +2349,7 @@ body.sg-exam .sidebar-overlay { display: none !important; }
                                                  @keyup="rememberPara($refs['para_' + para.id])"
                                                  @mouseup="rememberPara($refs['para_' + para.id])"
                                                  @keydown.enter="onParagraphEnter(i, pIdx, $event)"
+                                                 @keydown.tab.prevent="onParagraphTab(i, pIdx, $event)"
                                                  @paste="onParagraphPaste(i, pIdx, $event)"
                                                  class="sg-essay-para min-h-[3.5rem] px-4 py-2.5 leading-relaxed focus:outline-none"
                                                  :style="essayStyle(i)"
@@ -2162,7 +2392,7 @@ body.sg-exam .sidebar-overlay { display: none !important; }
                                     </span>
                                     <span class="text-xs text-slate-400" x-text="'(' + ((answersText[i] || '').length) + t(' karakter, ',' characters, ') + ((paragraphs[i]||[]).length) + t(' paragraf)',' paragraphs)')"></span>
                                 </div>
-                                <div class="flex flex-wrap items-center gap-1 px-3 py-2 bg-surface-50 border border-surface-200 rounded-t-xl">
+                                <div class="flex flex-wrap items-center gap-1 px-3 py-2 bg-surface-50 border border-surface-200 rounded-t-xl relative">
                                     <button type="button" @mousedown.prevent="execCmd('bold')" class="w-8 h-8 rounded-lg hover:bg-surface-200 text-sm font-bold text-surface-700" :title="t('Tebal','Bold')">B</button>
                                     <button type="button" @mousedown.prevent="execCmd('italic')" class="w-8 h-8 rounded-lg hover:bg-surface-200 text-sm italic text-surface-700" :title="t('Miring','Italic')">I</button>
                                     <button type="button" @mousedown.prevent="execCmd('underline')" class="w-8 h-8 rounded-lg hover:bg-surface-200 text-sm underline text-surface-700" :title="t('Garis bawah','Underline')">U</button>
@@ -2199,6 +2429,79 @@ body.sg-exam .sidebar-overlay { display: none !important; }
                                         <option value="18">18</option>
                                         <option value="20">20</option>
                                     </select>
+                                    <span class="w-px h-5 bg-surface-300 mx-0.5"></span>
+                                    <!-- Paragraph group: alignment is a property of the block a
+                                         pupil is typing in, so it is one select beside the font
+                                         ones. The value is read back from the element, which is
+                                         why a paragraph restored from a draft shows its own
+                                         alignment instead of the last one chosen. -->
+                                    <select :value="essayAlign(i)" @change="setEssayAlign(i, $event.target.value)"
+                                            :aria-label="t('Perataan paragraf','Paragraph alignment')"
+                                            :title="t('Perataan paragraf','Paragraph alignment')"
+                                            class="h-8 rounded-lg border border-surface-200 bg-white px-1 text-[11px] font-semibold text-surface-700">
+                                        <option value="left" x-text="t('Kiri','Left')"></option>
+                                        <option value="center" x-text="t('Tengah','Center')"></option>
+                                        <option value="right" x-text="t('Kanan','Right')"></option>
+                                        <option value="justify" x-text="t('Rata kiri-kanan','Justify')"></option>
+                                    </select>
+                                    <button type="button" @mousedown.prevent="applyTab(i)" class="w-8 h-8 rounded-lg hover:bg-surface-200 text-surface-600" :title="t('Tab / indentasi','Tab / indent')" :aria-label="t('Tab / indentasi','Tab / indent')"><i class="fas fa-indent"></i></button>
+                                    <!-- The three palettes are <details> on purpose: a popover
+                                         that needs JavaScript state would have to be repeated in
+                                         every essay block and in the preview, and a native
+                                         disclosure is one open/closed attribute. -->
+                                    <details class="sg-tool-pop">
+                                        <summary class="w-8 h-8 rounded-lg hover:bg-surface-200 text-surface-600 flex items-center justify-center" :title="t('Warna huruf','Text colour')" :aria-label="t('Warna huruf','Text colour')"><i class="fas fa-palette"></i></summary>
+                                        <div class="absolute left-0 top-full mt-1 sg-layer-over p-2 bg-white border border-surface-200 rounded-xl shadow-lg flex gap-1">
+                                            <button type="button" @mousedown.prevent="applyColor(i, '#111827')" @click="$el.closest('details').open=false" class="h-8 w-8 rounded-full border border-surface-300" style="background:#111827" :title="t('Hitam','Black')" :aria-label="t('Hitam','Black')"></button>
+                                            <button type="button" @mousedown.prevent="applyColor(i, '#b91c1c')" @click="$el.closest('details').open=false" class="h-8 w-8 rounded-full border border-surface-300" style="background:#b91c1c" :title="t('Merah','Red')" :aria-label="t('Merah','Red')"></button>
+                                            <button type="button" @mousedown.prevent="applyColor(i, '#1d4ed8')" @click="$el.closest('details').open=false" class="h-8 w-8 rounded-full border border-surface-300" style="background:#1d4ed8" :title="t('Biru','Blue')" :aria-label="t('Biru','Blue')"></button>
+                                            <button type="button" @mousedown.prevent="applyColor(i, '#15803d')" @click="$el.closest('details').open=false" class="h-8 w-8 rounded-full border border-surface-300" style="background:#15803d" :title="t('Hijau','Green')" :aria-label="t('Hijau','Green')"></button>
+                                            <button type="button" @mousedown.prevent="applyColor(i, '#c2410c')" @click="$el.closest('details').open=false" class="h-8 w-8 rounded-full border border-surface-300" style="background:#c2410c" :title="t('Jingga','Orange')" :aria-label="t('Jingga','Orange')"></button>
+                                            <button type="button" @mousedown.prevent="applyColor(i, '#7e22ce')" @click="$el.closest('details').open=false" class="h-8 w-8 rounded-full border border-surface-300" style="background:#7e22ce" :title="t('Ungu','Purple')" :aria-label="t('Ungu','Purple')"></button>
+                                        </div>
+                                    </details>
+                                    <details class="sg-tool-pop">
+                                        <summary class="w-8 h-8 rounded-lg hover:bg-surface-200 text-surface-600 flex items-center justify-center" :title="t('Simbol','Symbols')" :aria-label="t('Simbol','Symbols')"><i class="fas fa-square-root-variable"></i></summary>
+                                        <div class="absolute left-0 top-full mt-1 sg-layer-over p-2 bg-white border border-surface-200 rounded-xl shadow-lg grid grid-cols-6 gap-1">
+                                            <button type="button" @mousedown.prevent="insertSymbol(i, '×')" @click="$el.closest('details').open=false" class="h-8 w-8 rounded-md hover:bg-surface-100 text-sm text-surface-700">×</button>
+                                            <button type="button" @mousedown.prevent="insertSymbol(i, '÷')" @click="$el.closest('details').open=false" class="h-8 w-8 rounded-md hover:bg-surface-100 text-sm text-surface-700">÷</button>
+                                            <button type="button" @mousedown.prevent="insertSymbol(i, '±')" @click="$el.closest('details').open=false" class="h-8 w-8 rounded-md hover:bg-surface-100 text-sm text-surface-700">±</button>
+                                            <button type="button" @mousedown.prevent="insertSymbol(i, '≠')" @click="$el.closest('details').open=false" class="h-8 w-8 rounded-md hover:bg-surface-100 text-sm text-surface-700">≠</button>
+                                            <button type="button" @mousedown.prevent="insertSymbol(i, '≤')" @click="$el.closest('details').open=false" class="h-8 w-8 rounded-md hover:bg-surface-100 text-sm text-surface-700">≤</button>
+                                            <button type="button" @mousedown.prevent="insertSymbol(i, '≥')" @click="$el.closest('details').open=false" class="h-8 w-8 rounded-md hover:bg-surface-100 text-sm text-surface-700">≥</button>
+                                            <button type="button" @mousedown.prevent="insertSymbol(i, '≈')" @click="$el.closest('details').open=false" class="h-8 w-8 rounded-md hover:bg-surface-100 text-sm text-surface-700">≈</button>
+                                            <button type="button" @mousedown.prevent="insertSymbol(i, '√')" @click="$el.closest('details').open=false" class="h-8 w-8 rounded-md hover:bg-surface-100 text-sm text-surface-700">√</button>
+                                            <button type="button" @mousedown.prevent="insertSymbol(i, 'π')" @click="$el.closest('details').open=false" class="h-8 w-8 rounded-md hover:bg-surface-100 text-sm text-surface-700">π</button>
+                                            <button type="button" @mousedown.prevent="insertSymbol(i, '∑')" @click="$el.closest('details').open=false" class="h-8 w-8 rounded-md hover:bg-surface-100 text-sm text-surface-700">∑</button>
+                                            <button type="button" @mousedown.prevent="insertSymbol(i, '∫')" @click="$el.closest('details').open=false" class="h-8 w-8 rounded-md hover:bg-surface-100 text-sm text-surface-700">∫</button>
+                                            <button type="button" @mousedown.prevent="insertSymbol(i, '∞')" @click="$el.closest('details').open=false" class="h-8 w-8 rounded-md hover:bg-surface-100 text-sm text-surface-700">∞</button>
+                                        </div>
+                                    </details>
+                                    <!-- An equation is a text template, not a rendered formula: a
+                                         maths renderer is hundreds of kilobytes of font this
+                                         app's spotty-WiFi users would pay for on every paper,
+                                         and a CDN would break the offline rule. The pupil edits
+                                         the template, and the teacher reads the same characters. -->
+                                    <details class="sg-tool-pop">
+                                        <summary class="w-8 h-8 rounded-lg hover:bg-surface-200 text-surface-600 flex items-center justify-center" :title="t('Sisipkan rumus','Insert equation')" :aria-label="t('Sisipkan rumus','Insert equation')"><i class="fas fa-function"></i></summary>
+                                        <div class="absolute left-0 top-full mt-1 sg-layer-over w-60 p-2 bg-white border border-surface-200 rounded-xl shadow-lg">
+                                            <button type="button" @mousedown.prevent="insertSymbol(i, 'a² + b² = c²')" @click="$el.closest('details').open=false" class="block w-full text-left px-2 py-1.5 rounded-md hover:bg-surface-100 text-xs text-surface-700">a² + b² = c²</button>
+                                            <button type="button" @mousedown.prevent="insertSymbol(i, 'x = (−b ± √(b² − 4ac)) / 2a')" @click="$el.closest('details').open=false" class="block w-full text-left px-2 py-1.5 rounded-md hover:bg-surface-100 text-xs text-surface-700">x = (−b ± √(b² − 4ac)) / 2a</button>
+                                            <button type="button" @mousedown.prevent="insertSymbol(i, 'v = s / t')" @click="$el.closest('details').open=false" class="block w-full text-left px-2 py-1.5 rounded-md hover:bg-surface-100 text-xs text-surface-700">v = s / t</button>
+                                            <button type="button" @mousedown.prevent="insertSymbol(i, 'F = m × a')" @click="$el.closest('details').open=false" class="block w-full text-left px-2 py-1.5 rounded-md hover:bg-surface-100 text-xs text-surface-700">F = m × a</button>
+                                            <button type="button" @mousedown.prevent="insertSymbol(i, 'E = m c²')" @click="$el.closest('details').open=false" class="block w-full text-left px-2 py-1.5 rounded-md hover:bg-surface-100 text-xs text-surface-700">E = m c²</button>
+                                            <button type="button" @mousedown.prevent="insertSymbol(i, 'pH = −log[H⁺]')" @click="$el.closest('details').open=false" class="block w-full text-left px-2 py-1.5 rounded-md hover:bg-surface-100 text-xs text-surface-700">pH = −log[H⁺]</button>
+                                        </div>
+                                    </details>
+                                    <details class="sg-tool-pop">
+                                        <summary class="w-8 h-8 rounded-lg hover:bg-surface-200 text-surface-600 flex items-center justify-center" :title="t('Sisipkan tabel','Insert table')" :aria-label="t('Sisipkan tabel','Insert table')"><i class="fas fa-table"></i></summary>
+                                        <div class="absolute left-0 top-full mt-1 sg-layer-over p-2 bg-white border border-surface-200 rounded-xl shadow-lg grid grid-cols-4 gap-1">
+                                            <button type="button" @mousedown.prevent="insertTable(i, 2, 2)" @click="$el.closest('details').open=false" class="h-8 rounded-md hover:bg-surface-100 text-xs font-semibold text-surface-700">2 × 2</button>
+                                            <button type="button" @mousedown.prevent="insertTable(i, 3, 3)" @click="$el.closest('details').open=false" class="h-8 rounded-md hover:bg-surface-100 text-xs font-semibold text-surface-700">3 × 3</button>
+                                            <button type="button" @mousedown.prevent="insertTable(i, 2, 4)" @click="$el.closest('details').open=false" class="h-8 rounded-md hover:bg-surface-100 text-xs font-semibold text-surface-700">2 × 4</button>
+                                            <button type="button" @mousedown.prevent="insertTable(i, 4, 3)" @click="$el.closest('details').open=false" class="h-8 rounded-md hover:bg-surface-100 text-xs font-semibold text-surface-700">4 × 3</button>
+                                        </div>
+                                    </details>
                                     <button type="button" @mousedown.prevent="addParagraph(i)" class="ml-auto px-2.5 h-8 rounded-lg hover:bg-surface-200 text-xs font-semibold text-primary-600" :title="t('Tambah paragraf','Add paragraph')"><span x-text="t('+ Paragraf','+ Paragraph')"></span></button>
                                 </div>
                                 <!-- Paragraphs (Canvas mode) -->
@@ -2225,6 +2528,7 @@ body.sg-exam .sidebar-overlay { display: none !important; }
                                                  @keyup="rememberPara($refs['para_' + para.id])"
                                                  @mouseup="rememberPara($refs['para_' + para.id])"
                                                  @keydown.enter="onParagraphEnter(i, pIdx, $event)"
+                                                 @keydown.tab.prevent="onParagraphTab(i, pIdx, $event)"
                                                  @paste="onParagraphPaste(i, pIdx, $event)"
                                                  class="sg-essay-para min-h-[3.5rem] px-4 py-2.5 leading-relaxed focus:outline-none"
                                                  :style="essayStyle(i)"
@@ -2287,6 +2591,7 @@ body.sg-exam .sidebar-overlay { display: none !important; }
 <script src="/static/js/exam-view.js"></script>
 <!-- The essay surface's list/font/paste behaviour. Classic, like the two above,
      because the component reads `window.SGEssayEditor` while it is built. -->
+<script src="/static/js/exam-graph.js"></script>
 <script src="/static/js/essay-editor.js"></script>
 <script>
 // The lightbox is page furniture rather than exam state, so it is wired here and
@@ -2979,14 +3284,32 @@ function examApp(duration, totalQ) {
         showCalculator: false,
         calcInput: '0',
         calcResult: 0,
-        calcOp: null,
-        calcPrev: 0,
-        calcNew: true,
         calcExpression: '',
         calcAngleMode: 'DEG',
         calcMemVal: 0,
         calcHasMem: false,
-        calcParenLevel: 0,
+        calcAns: 0,
+        calcJustEvaluated: false,
+        // The graph: key from the deployment, and a state named so the panel can
+        // say *which* thing failed rather than only that it did.
+        showGraph: false,
+        graphKey: {{ (config.get('DESMOS_API_KEY') or '')|tojson }},
+        graphState: 'idle',
+        graphApi: null,
+        // Two strings per key, in the same shape the sync label uses. sgT() picks
+        // the language at the moment it is called, so a message that stays on the
+        // panel is rebuilt by relabelLocale() rather than left in the language it
+        // was first built in.
+        graphMessage: '',
+        graphMessageKey: '',
+        _graphMessages: {
+            loading: ['Memuat grafik…', 'Loading the graph…'],
+            unconfigured: ['Grafik belum tersedia', 'The graph is not available'],
+            offline: ['Tidak bisa memuat grafik', 'Could not load the graph'],
+        },
+        // Which box in this question is being edited, per question. The toolbar
+        // acts on it, so a button never guesses from focus.
+        activeBox: {},
         // Device status bar
         deviceBattery: 100,
         deviceCharging: false,
@@ -4318,6 +4641,7 @@ function examApp(duration, totalQ) {
         },
         relabelLocale() {
             this.setSyncLabel(this.syncLabelKey, this.syncLabelExtra);
+            if (this.graphMessageKey) this.setGraphMessage(this.graphMessageKey);
             this._renderViolationMessage();
             if (this._refreshConnection) this._refreshConnection();
             if (this._refreshAudio) this._refreshAudio();
@@ -4635,12 +4959,13 @@ function examApp(duration, totalQ) {
                     const y_pct = p.y / canvas.height;
                     if (!this.textBoxes[i]) this.textBoxes[i] = {};
                     if (!this.textBoxes[i][p_idx]) this.textBoxes[i][p_idx] = [];
-                    this.textBoxes[i][p_idx].push({ x_pct, y_pct, text: '', fontSize: this.textFontSize[i] || 16, fontFamily: this.textFontFamily[i] || 'Times New Roman, serif', orient: 'horizontal' });
+                    this.textBoxes[i][p_idx].push({ x_pct, y_pct, text: '', html: '', align: 'left', fontSize: this.textFontSize[i] || 16, fontFamily: this.textFontFamily[i] || 'Times New Roman, serif', orient: 'horizontal' });
+                    this.activeBox[i] = this.textBoxes[i][p_idx].length - 1;
                     this.onTextBoxInput(i);
             this.$nextTick(() => {
                 const area = document.getElementById('ec-area-' + i);
                 if (area) {
-                    const t = area.querySelector('.text-box:last-child textarea');
+                    const t = area.querySelector('.text-box:last-child .box-rich');
                     if (t) t.focus();
                 }
             });
@@ -4852,13 +5177,14 @@ function examApp(duration, totalQ) {
             const p = this.page - 1;
             if (!this.textBoxes[i]) this.textBoxes[i] = {};
             if (!this.textBoxes[i][p]) this.textBoxes[i][p] = [];
-            this.textBoxes[i][p].push({ x_pct, y_pct, text: '', fontSize: this.textFontSize[i] || 16, fontFamily: this.textFontFamily[i] || 'Times New Roman, serif', orient: 'horizontal' });
+            this.textBoxes[i][p].push({ x_pct, y_pct, text: '', html: '', align: 'left', fontSize: this.textFontSize[i] || 16, fontFamily: this.textFontFamily[i] || 'Times New Roman, serif', orient: 'horizontal' });
+            this.activeBox[i] = this.textBoxes[i][p].length - 1;
             this.textBoxes[i] = { ...this.textBoxes[i] }; // trigger reactivity
             this.markAnswered(i, true);
             this.$nextTick(() => {
                 const area = document.getElementById('ec-area-' + i);
                 if (area) {
-                    const boxes = area.querySelectorAll('.text-box textarea');
+                    const boxes = area.querySelectorAll('.text-box .box-rich');
                     if (boxes.length > 0) boxes[boxes.length - 1].focus();
                 }
             });
@@ -4869,8 +5195,17 @@ function examApp(duration, totalQ) {
             if (boxes) {
                 boxes.splice(bi, 1);
                 if (this.textBoxes[i]) this.textBoxes[i] = { ...this.textBoxes[i] };
+                // The toolbar acts on an index, so deleting the active box (or one
+                // before it) has to move the selection with the list rather than
+                // leave a button pointing at the box that took its place.
+                if (this.activeBox[i] === bi) this.activeBox[i] = null;
+                else if (this.activeBox[i] > bi) this.activeBox[i] = this.activeBox[i] - 1;
                 const allEmpty = Object.values(this.textBoxes[i] || {}).every(arr => !arr || arr.length === 0);
-                if (allEmpty) {
+                // An essay may be answered in its paragraphs: deleting the last box
+                // on the paper is not deleting the essay.
+                const typed = (this.answersText[i] || '').trim();
+                const drawn = Object.values(this.hasDrawn[i] || {}).some(Boolean);
+                if (allEmpty && !typed && !drawn) {
                     this.answered[i] = false;
                     this.questions[i].answer = null;
                 }
@@ -4917,27 +5252,28 @@ function examApp(duration, totalQ) {
             this.showCanvas[i] = !this.showCanvas[i];
             if (this.showCanvas[i]) this.$nextTick(() => this.initCanvas(i));
         },
+        // The boxes are state, and the DOM only ever *adds* to it: rebuilding the
+        // array from `.text-box` elements (the old shape) threw away everything the
+        // element does not carry — `orient`, `align`, and now the stored HTML —
+        // every time the pupil changed page.
+        _captureBoxes(i) {
+            const p = this.page - 1;
+            const boxes = ((this.textBoxes[i] || {})[p]) || [];
+            boxes.forEach((box, bi) => {
+                const el = this.$refs['box_' + i + '_' + bi];
+                if (!el) return;
+                box.html = this.sanitizeBoxHtml(el.innerHTML);
+                box.text = window.SGEssayEditor ? window.SGEssayEditor.textOf(el) : (el.innerText || '');
+            });
+        },
         _saveCurrentPage(i) {
             if (!i && i !== 0) i = this.currentQ;
             const q = this.questions[i];
             if (!q) return;
             const p = this.page - 1;
             if (!this.textBoxes[i]) this.textBoxes[i] = {};
-            const allBoxes = [];
-            const area = document.getElementById('ec-area-' + i);
-            if (area) {
-                area.querySelectorAll('.text-box textarea').forEach(ta => {
-                    const box = ta.closest('.text-box');
-                    if (box) {
-                        const left = parseFloat(box.style.left) || 0;
-                        const top = parseFloat(box.style.top) || 0;
-                        const fs = ta.style.fontSize ? parseInt(ta.style.fontSize) : 14;
-                        const ff = ta.style.fontFamily || 'Nunito, sans-serif';
-                        allBoxes.push({ x_pct: left / 100, y_pct: top / 100, text: ta.value, fontSize: fs, fontFamily: ff });
-                    }
-                });
-            }
-            this.textBoxes[i][p] = allBoxes;
+            if (!this.textBoxes[i][p]) this.textBoxes[i][p] = [];
+            this._captureBoxes(i);
             const d = this.canvasDraw[i];
             if (d && d.el) {
                 if (!this.canvasData[i]) this.canvasData[i] = {};
@@ -4981,12 +5317,20 @@ function examApp(duration, totalQ) {
         },
         prevPage() {
             this._saveCurrentPage();
-            if (this.page > 1) { this.page--; this.$nextTick(() => this._restorePage()); }
+            if (this.page > 1) {
+                this.page--;
+                this.activeBox[this.currentQ] = null;
+                this.$nextTick(() => this._restorePage());
+            }
             this.closeAllTools();
         },
         nextPage() {
             this._saveCurrentPage();
-            if (this.page < this.totalPages) { this.page++; this.$nextTick(() => this._restorePage()); }
+            if (this.page < this.totalPages) {
+                this.page++;
+                this.activeBox[this.currentQ] = null;
+                this.$nextTick(() => this._restorePage());
+            }
             this.closeAllTools();
         },
         closeAllTools(i) {
@@ -4996,6 +5340,7 @@ function examApp(duration, totalQ) {
             this.showCompass[idx] = false;
             this.showTriangle[idx] = false;
             this.showCalculator = false;
+            this.showGraph = false;
             if (this.essayCanvasMode[idx] === 'compass') {
                 // Reset compass to pen when leaving question
                 this.essayCanvasMode[idx] = 'pen';
@@ -5580,18 +5925,72 @@ function examApp(duration, totalQ) {
             return 'font-family:' + this.essayFont(i) + ';font-size:' + this.essaySize(i) + 'px';
         },
         applyList(qIdx, kind) {
+            const target = this.currentPara(qIdx);
+            if (!target.el || !window.SGEssayEditor) return;
+            window.SGEssayEditor.remember(target.el);   // a no-op when the caret is elsewhere
+            window.SGEssayEditor.toggleList(target.el, kind);
+            this.onParagraphInput(qIdx, target.pIdx, target.el);
+            this.refreshListState(qIdx, target.el);
+        },
+        // ── The writing tools ─────────────────────────────────────────────────
+        // One resolver for "the paragraph this toolbar control acts on": the one
+        // the caret was last in, the first otherwise. `paraEl` does not touch
+        // state, because `essayAlign` reads it while Alpine is rendering.
+        paraEl(qIdx) {
             const paras = this.paragraphs[qIdx] || [];
             const pIdx = this._activePara[qIdx] !== undefined ? this._activePara[qIdx] : 0;
             const para = paras[pIdx] || paras[0];
-            const el = para ? this.$refs['para_' + para.id] : null;
+            return para ? (this.$refs['para_' + para.id] || null) : null;
+        },
+        currentPara(qIdx) {
+            const paras = this.paragraphs[qIdx] || [];
+            let pIdx = this._activePara[qIdx] !== undefined ? this._activePara[qIdx] : 0;
+            if (!paras[pIdx]) pIdx = 0;
+            const el = this.paraEl(qIdx);
             this._activePara[qIdx] = pIdx;
             this._activeEditor = el || null;
             this._activeEditorQ = qIdx;
-            if (!el || !window.SGEssayEditor) return;
-            window.SGEssayEditor.remember(el);   // a no-op when the caret is elsewhere
-            window.SGEssayEditor.toggleList(el, kind);
-            this.onParagraphInput(qIdx, pIdx, el);
-            this.refreshListState(qIdx, el);
+            return {el: el, pIdx: pIdx};
+        },
+        // Every writing tool goes through one runner: keep the caret, run the
+        // editor's own command, and let the page's single writer store the text
+        // and markup. A control that returns false changed nothing, so nothing is
+        // marked dirty for it.
+        runEssayCommand(qIdx, fn) {
+            const target = this.currentPara(qIdx);
+            if (!target.el || !window.SGEssayEditor) return;
+            window.SGEssayEditor.remember(target.el);
+            if (fn(target.el, window.SGEssayEditor) === false) return;
+            this.onParagraphInput(qIdx, target.pIdx, target.el);
+            this.refreshListState(qIdx, target.el);
+        },
+        essayAlign(i) {
+            const el = this.paraEl(i);
+            return window.SGEssayEditor ? window.SGEssayEditor.alignOf(el) : 'left';
+        },
+        setEssayAlign(i, value) {
+            this.runEssayCommand(i, (el, api) => api.align(el, value));
+        },
+        applyTab(i) {
+            this.runEssayCommand(i, (el, api) => api.insertTab(el, false));
+        },
+        insertSymbol(i, text) {
+            this.runEssayCommand(i, (el, api) => api.insertText(el, text));
+        },
+        insertTable(i, rows, cols) {
+            this.runEssayCommand(i, (el, api) => api.insertTable(el, rows, cols));
+        },
+        applyColor(i, hex) {
+            this.runEssayCommand(i, (el, api) => api.foreColor(el, hex));
+        },
+        onParagraphTab(qIdx, pIdx, ev) {
+            // Tab is the browser's focus mover; on a paper it is an indent (and,
+            // inside a table, the next cell). It only counts as a change when the
+            // editor says it made one.
+            if (!window.SGEssayEditor) return;
+            if (window.SGEssayEditor.insertTab(ev.target, ev.shiftKey)) {
+                this.onParagraphInput(qIdx, pIdx, ev.target);
+            }
         },
         onParagraphEnter(qIdx, pIdx, ev) {
             if (ev.shiftKey) return;             // a soft line break inside this block
@@ -6213,81 +6612,373 @@ function examApp(duration, totalQ) {
             // preview never asks for fullscreen and never arms a watcher.
             {% endif %}
         },
-        toggleCalculator() { this.showCalculator = !this.showCalculator; },
-        // Scientific calculator functions
-        _degToRad(d) { return d * Math.PI / 180; },
-        _radToDeg(r) { return r * 180 / Math.PI; },
-        _getVal() { return parseFloat(this.calcInput) || 0; },
-        _setVal(v) { this.calcInput = String(v); this.calcResult = v; },
+        toggleCalculator() { this.showGraph = false; this.showCalculator = !this.showCalculator; },
+
+        // ── The graph, behind the same switch ────────────────────────────────
+        // Desmos is fetched on the first press and never on load, so a paper
+        // opened on a dead link still opens. The panel's state names which of the
+        // three outcomes happened; `graphMessage` is the sentence shown for it.
+        setGraphMessage(key) {
+            this.graphMessageKey = key;
+            const pair = this._graphMessages[key] || this._graphMessages.offline;
+            this.graphMessage = sgT(pair[0], pair[1]);
+        },
+        toggleGraph() {
+            this.showCalculator = false;
+            this.showGraph = !this.showGraph;
+            if (this.showGraph) this.openGraph();
+        },
+        closeGraph() { this.showGraph = false; },
+        async openGraph(force) {
+            if (this.graphState === 'ready' && !force) {
+                if (this.graphApi) this.graphApi.resize();
+                return;
+            }
+            if (this.graphApi) { this.graphApi.destroy(); this.graphApi = null; }
+            if (!this.graphKey) {
+                this.graphState = 'unconfigured';
+                this.setGraphMessage('unconfigured');
+                return;
+            }
+            this.graphState = 'loading';
+            this.setGraphMessage('loading');
+            try {
+                await window.SGGraph.load(this.graphKey);
+                const host = this.$refs.graphHost;
+                if (!host) throw new Error('no host');
+                this.graphApi = window.SGGraph.mount(host);
+                this.graphState = 'ready';
+                this.graphMessage = '';
+            } catch (err) {
+                this.graphState = (err && err.code) || 'offline';
+                this.setGraphMessage('offline');
+            }
+        },
+
+        // ── Canvas text boxes: rich text on the paper ────────────────────────
+        // A box stores its plain `text` *and* the `html` it was typed as. The
+        // plain text is what the teacher, the AI and the print report read — one
+        // representation, exactly as the essay paragraphs work — while the HTML is
+        // only ever painted back into the box the pupil is editing. It is
+        // sanitised on the way in, so a paste or a crafted draft cannot carry a
+        // script into a page another pupil or a teacher will open.
+        boxEl(i) {
+            const bi = this.activeBox[i];
+            if (bi === undefined || bi === null) return null;
+            return this.$refs['box_' + i + '_' + bi] || null;
+        },
+        activeBoxData(i) {
+            const bi = this.activeBox[i];
+            if (bi === undefined || bi === null) return null;
+            return ((this.textBoxes[i] || {})[this.page - 1] || [])[bi] || null;
+        },
+        sanitizeBoxHtml(html) {
+            const tpl = document.createElement('template');
+            tpl.innerHTML = html || '';
+            tpl.content.querySelectorAll('script,style,iframe,object,embed,link,meta,img,video,audio,form,input,button').forEach(n => n.remove());
+            tpl.content.querySelectorAll('*').forEach(node => {
+                Array.prototype.slice.call(node.attributes || []).forEach(attr => {
+                    const name = (attr.name || '').toLowerCase();
+                    if (name.indexOf('on') === 0) node.removeAttribute(attr.name);
+                    else if ((name === 'href' || name === 'src') && /^\s*javascript:/i.test(attr.value || '')) node.removeAttribute(attr.name);
+                });
+            });
+            return tpl.innerHTML;
+        },
+        onBoxRichInput(i, bi, el) {
+            const box = ((this.textBoxes[i] || {})[this.page - 1] || [])[bi];
+            if (!box) return;
+            box.html = this.sanitizeBoxHtml(el.innerHTML);
+            box.text = window.SGEssayEditor ? window.SGEssayEditor.textOf(el) : (el.innerText || '');
+            if (box.text.trim()) this.markAnswered(i, true);
+            this.markDirty();
+        },
+        rememberBox(el) { if (el && window.SGEssayEditor) window.SGEssayEditor.remember(el); },
+        boxExec(i, fn) {
+            const el = this.boxEl(i);
+            const box = this.activeBoxData(i);
+            if (!el || !box || !window.SGEssayEditor) return;
+            window.SGEssayEditor.remember(el);
+            fn(el, window.SGEssayEditor);
+            this.$nextTick(() => {
+                box.html = this.sanitizeBoxHtml(el.innerHTML);
+                box.text = window.SGEssayEditor.textOf(el);
+                this.textBoxes[i] = { ...(this.textBoxes[i] || {}) };
+                this.markDirty();
+            });
+        },
+        boxCmd(i, cmd) {
+            if (!window.SGEssayEditor) return;
+            if (cmd === 'ul' || cmd === 'ol') {
+                this.boxExec(i, (el, api) => api.toggleList(el, cmd));
+                return;
+            }
+            this.boxExec(i, (el, api) => {
+                api.restore(el);
+                document.execCommand(cmd, false, null);
+                api.remember(el);
+            });
+        },
+        boxAlign(i, value) {
+            const box = this.activeBoxData(i);
+            if (box) box.align = value;
+            this.boxExec(i, (el, api) => api.align(el, value));
+        },
+        boxFontSize(i, size) {
+            const box = this.activeBoxData(i);
+            if (!box) return;
+            box.fontSize = size;
+            this.textBoxes[i] = { ...(this.textBoxes[i] || {}) };
+            this.markDirty();
+        },
+        boxFontFamily(i, family) {
+            const box = this.activeBoxData(i);
+            if (!box) return;
+            box.fontFamily = family;
+            this.textBoxes[i] = { ...(this.textBoxes[i] || {}) };
+            this.markDirty();
+        },
+        boxOrient(i) {
+            const box = this.activeBoxData(i);
+            if (!box) return;
+            box.orient = box.orient === 'vertical' ? 'horizontal' : 'vertical';
+            this.textBoxes[i] = { ...(this.textBoxes[i] || {}) };
+            this.markDirty();
+        },
+        boxColor(i, hex) { this.boxExec(i, (el, api) => api.foreColor(el, hex)); },
+        boxSymbol(i, value) { this.boxExec(i, (el, api) => api.insertText(el, value)); },
+        boxTable(i, rows, cols) { this.boxExec(i, (el, api) => api.insertTable(el, rows, cols)); },
+        boxTab(i, ev, back) {
+            const el = this.boxEl(i);
+            if (!el || !window.SGEssayEditor) return;
+            window.SGEssayEditor.insertTab(el, back || !!(ev && ev.shiftKey));
+        },
+        boxPaste(i, ev) { if (window.SGEssayEditor) window.SGEssayEditor.pastePlain(ev); },
+        deleteActiveBox(i) {
+            const bi = this.activeBox[i];
+            if (bi === undefined || bi === null) return;
+            this.removeTextBox(i, bi);
+            this.activeBox[i] = null;
+        },
+
+        // ── Scientific calculator ────────────────────────────────────────────
+        // An external board's papers expect a scientific calculator, and what
+        // was here was a four-function machine
+        // with a scientific-looking keypad: `(` and `)` only decorated a label,
+        // brackets never changed the arithmetic, and `x^y` applied to the last
+        // typed number rather than to the expression. One expression string is
+        // stored now and evaluated by a real parser, so 2×(3+4)^2 is 98 and
+        // sin(30) is 0.5 in DEG. Every key is a character in that expression,
+        // which is also why a wrong key can be backspaced rather than cleared.
+        _getVal() {
+            const value = this.calcEval(this.calcInput);
+            return (value === null || !isFinite(value)) ? 0 : value;
+        },
         calcButton(val) {
-            if (this.calcNew) { this.calcInput = ''; this.calcNew = false; this.calcExpression = ''; }
-            if (val === '.' && this.calcInput.includes('.')) return;
+            if (this.calcJustEvaluated && /^[0-9.]/.test(val)) this.calcInput = '';
+            this.calcJustEvaluated = false;
+            if (this.calcInput === '0' && /^[0-9.]$/.test(val)) this.calcInput = '';
+            if (val === '.' && /\.$/.test(this.calcInput)) return;
             this.calcInput += val;
-            this.calcResult = this._getVal();
+            this.calcRefresh();
         },
         calcOp(op) {
-            if (op === 'pm') { this._setVal(-this._getVal()); return; }
-            if (op === 'pow') { this.calcPrev = this._getVal(); this.calcOp = 'pow'; this.calcNew = true; this.calcExpression = this.calcPrev + ' ^ '; return; }
-            if (this.calcOp) this.calcEquals();
-            this.calcPrev = this._getVal();
-            this.calcOp = op;
-            this.calcNew = true;
-            const sym = { '+':' + ', '-':' − ', '×':' × ', '÷':' ÷ ' };
-            this.calcExpression = this.calcPrev + (sym[op] || ' ' + op + ' ');
+            if (op === 'pm') {
+                this.calcInput = this.calcInput.charAt(0) === '-' ? this.calcInput.slice(1) : '-' + this.calcInput;
+                this.calcJustEvaluated = false;
+                this.calcRefresh();
+                return;
+            }
+            this.calcInsert(op === 'pow' ? '^' : op);
+        },
+        calcInsert(value) {
+            if (this.calcJustEvaluated && /^[0-9.]/.test(value)) this.calcInput = '';
+            this.calcJustEvaluated = false;
+            if (this.calcInput === '0' && /^[0-9.]/.test(value)) this.calcInput = '';
+            this.calcInput += value;
+            this.calcRefresh();
+        },
+        // A function key inserts `name(`, so sin(30) is entered rather than
+        // applied to whatever happened to be on the display.
+        calcSciFunc(name) { this.calcInsert(name + '('); },
+        calcConstant(name) {
+            if (name === 'ans') this.calcInsert('Ans');
+            else if (name === 'pi') this.calcInsert('π');
+            else this.calcInsert('e');
+        },
+        calcParen(ch) { this.calcInsert(ch); },
+        calcDel() {
+            this.calcInput = this.calcInput.slice(0, -1) || '0';
+            this.calcJustEvaluated = false;
+            this.calcRefresh();
         },
         calcEquals() {
-            const cur = this._getVal();
-            let r = 0;
-            const prev = this.calcPrev;
-            this.calcExpression = (this.calcExpression || prev) + ' ' + cur + ' =';
-            if (this.calcOp === '+') r = prev + cur;
-            else if (this.calcOp === '-') r = prev - cur;
-            else if (this.calcOp === '×') r = prev * cur;
-            else if (this.calcOp === '÷') r = cur !== 0 ? prev / cur : 0;
-            else if (this.calcOp === 'pow') r = Math.pow(prev, cur);
-            else r = cur;
-            this._setVal(r);
-            this.calcOp = null;
-            this.calcNew = true;
-        },
-        calcSciFunc(name) {
-            const v = this._getVal();
-            let r = 0;
-            const deg = this.calcAngleMode === 'DEG';
-            if (name === 'sin') r = Math.sin(deg ? this._degToRad(v) : v);
-            else if (name === 'cos') r = Math.cos(deg ? this._degToRad(v) : v);
-            else if (name === 'tan') r = Math.tan(deg ? this._degToRad(v) : v);
-            else if (name === 'log') r = v > 0 ? Math.log10(v) : 0;
-            else if (name === 'ln') r = v > 0 ? Math.log(v) : 0;
-            else if (name === 'sq') r = v * v;
-            else if (name === 'cube') r = v * v * v;
-            else if (name === 'sqrt') r = v >= 0 ? Math.sqrt(v) : 0;
-            this.calcExpression = name + '(' + v + ') =';
-            this._setVal(r);
-            this.calcNew = true;
-        },
-        calcConstant(name) {
-            const val = name === 'pi' ? Math.PI : Math.E;
-            this._setVal(val);
-            this.calcExpression = name === 'pi' ? 'π' : 'e';
-            this.calcNew = true;
-        },
-        calcParen(char) {
-            if (char === '(') { this.calcParenLevel++; this.calcExpression += ' ('; }
-            else if (char === ')' && this.calcParenLevel > 0) { this.calcParenLevel--; this.calcExpression += ') '; }
-        },
-        calcMem(op) {
-            const cur = this._getVal();
-            if (op === 'MC') { this.calcMemVal = 0; this.calcHasMem = false; }
-            else if (op === 'MR') { if (this.calcHasMem) this._setVal(this.calcMemVal); }
-            else if (op === 'M+') { this.calcMemVal += cur; this.calcHasMem = true; }
-            else if (op === 'M-') { this.calcMemVal -= cur; this.calcHasMem = true; }
+            const value = this.calcEval(this.calcInput);
+            if (value === null || !isFinite(value)) {
+                this.calcExpression = this.calcInput + ' =';
+                return;
+            }
+            this.calcAns = value;
+            this.calcExpression = this.calcInput + ' =';
+            this.calcInput = this.calcFormat(value);
+            this.calcResult = value;
+            this.calcJustEvaluated = true;
         },
         calcClear(all) {
             this.calcInput = '0';
             this.calcResult = 0;
-            if (all) { this.calcOp = null; this.calcPrev = 0; this.calcExpression = ''; this.calcParenLevel = 0; }
+            if (all) { this.calcExpression = ''; this.calcAns = 0; }
+            this.calcJustEvaluated = false;
         },
+        calcMem(op) {
+            const cur = this._getVal();
+            if (op === 'MC') { this.calcMemVal = 0; this.calcHasMem = false; }
+            else if (op === 'MR') { if (this.calcHasMem) this.calcInsert(this.calcFormat(this.calcMemVal)); }
+            else if (op === 'M+') { this.calcMemVal += cur; this.calcHasMem = true; }
+            else if (op === 'M-') { this.calcMemVal -= cur; this.calcHasMem = true; }
+        },
+        calcRefresh() {
+            const value = this.calcEval(this.calcInput);
+            this.calcExpression = (value !== null && this.calcFormat(value) !== this.calcInput)
+                ? '= ' + this.calcFormat(value) : '';
+        },
+        calcFormat(value) {
+            if (value === null || value === undefined || !isFinite(value)) return '';
+            const size = Math.abs(value);
+            if (size !== 0 && (size >= 1e12 || size < 1e-9)) {
+                return value.toExponential(6).replace(/\.?0+e/, 'e');
+            }
+            return String(parseFloat(value.toPrecision(12)));
+        },
+        calcEval(src) {
+            const raw = String(src || '')
+                .replace(/×/g, '*').replace(/÷/g, '/').replace(/−/g, '-')
+                .replace(/π/g, 'PI').replace(/√/g, 'sqrt').replace(/∛/g, 'cbrt')
+                .replace(/²/g, '^2').replace(/³/g, '^3').replace(/\s+/g, '');
+            const toks = [];
+            let i = 0;
+            const FUNCS = ['asin', 'acos', 'atan', 'sin', 'cos', 'tan', 'log', 'ln',
+                           'sqrt', 'cbrt', 'abs', 'exp', 'nCr', 'nPr', 'Ans', 'PI'];
+            while (i < raw.length) {
+                const ch = raw.charAt(i);
+                if (/[0-9.]/.test(ch)) {
+                    let j = i;
+                    while (j < raw.length && /[0-9.]/.test(raw.charAt(j))) j++;
+                    toks.push({ t: 'num', v: parseFloat(raw.slice(i, j)) });
+                    i = j;
+                    continue;
+                }
+                let matched = null;
+                for (let k = 0; k < FUNCS.length; k++) {
+                    if (raw.slice(i, i + FUNCS[k].length) === FUNCS[k]) { matched = FUNCS[k]; break; }
+                }
+                if (matched) {
+                    if (matched === 'PI') toks.push({ t: 'const', v: Math.PI });
+                    else if (matched === 'Ans') toks.push({ t: 'id', v: 'Ans' });
+                    else toks.push({ t: 'id', v: matched });
+                    i += matched.length;
+                    continue;
+                }
+                if (ch === 'e') { toks.push({ t: 'const', v: Math.E }); i++; continue; }
+                if ('+-*/^!%(),'.indexOf(ch) >= 0) { toks.push({ t: ch }); i++; continue; }
+                return null;
+            }
+            if (!toks.length) return null;
+            let p = 0;
+            const deg = this.calcAngleMode === 'DEG';
+            const toRad = (v) => deg ? v * Math.PI / 180 : v;
+            const fromRad = (v) => deg ? v * 180 / Math.PI : v;
+            const factorial = (n) => {
+                if (n < 0 || Math.abs(n - Math.round(n)) > 1e-9) return NaN;
+                let r = 1;
+                for (let k = 2; k <= Math.round(n); k++) r *= k;
+                return r;
+            };
+            const peek = () => toks[p];
+            const eat = (type) => { if (toks[p] && (toks[p].t === type || toks[p].v === type)) { p++; return true; } return false; };
+            const startsValue = (tk) => tk && (tk.t === 'num' || tk.t === 'const' || tk.t === 'id' || tk.t === '(');
+            const expr = () => {
+                let value = term();
+                while (peek() && (peek().t === '+' || peek().t === '-')) {
+                    const op = toks[p++].t;
+                    const right = term();
+                    value = op === '+' ? value + right : value - right;
+                }
+                return value;
+            };
+            const term = () => {
+                let value = unary();
+                for (;;) {
+                    if (peek() && (peek().t === '*' || peek().t === '/')) {
+                        const op = toks[p++].t;
+                        const right = unary();
+                        value = op === '*' ? value * right : value / right;
+                    } else if (startsValue(peek())) {
+                        value = value * unary();
+                    } else break;
+                }
+                return value;
+            };
+            const unary = () => {
+                if (eat('-')) return -unary();
+                if (eat('+')) return unary();
+                return power();
+            };
+            const power = () => {
+                const base = postfix();
+                if (eat('^')) return Math.pow(base, unary());
+                return base;
+            };
+            const postfix = () => {
+                let value = primary();
+                for (;;) {
+                    if (eat('!')) value = factorial(value);
+                    else if (eat('%')) value = value / 100;
+                    else break;
+                }
+                return value;
+            };
+            const primary = () => {
+                const tk = toks[p];
+                if (!tk) return NaN;
+                if (tk.t === 'num' || tk.t === 'const') { p++; return tk.v; }
+                if (tk.t === '(') { p++; const v = expr(); if (!eat(')')) return NaN; return v; }
+                if (tk.t === 'id') {
+                    p++;
+                    if (tk.v === 'Ans') return this.calcAns;
+                    if (!eat('(')) return NaN;
+                    const a = expr();
+                    let b = null;
+                    if (eat(',')) b = expr();
+                    if (!eat(')')) return NaN;
+                    if (tk.v === 'sin') return Math.sin(toRad(a));
+                    if (tk.v === 'cos') return Math.cos(toRad(a));
+                    if (tk.v === 'tan') return Math.tan(toRad(a));
+                    if (tk.v === 'asin') return fromRad(Math.asin(a));
+                    if (tk.v === 'acos') return fromRad(Math.acos(a));
+                    if (tk.v === 'atan') return fromRad(Math.atan(a));
+                    if (tk.v === 'log') return Math.log(a) / Math.LN10;
+                    if (tk.v === 'ln') return Math.log(a);
+                    if (tk.v === 'sqrt') return Math.sqrt(a);
+                    if (tk.v === 'cbrt') return Math.cbrt(a);
+                    if (tk.v === 'abs') return Math.abs(a);
+                    if (tk.v === 'exp') return Math.exp(a);
+                    if (tk.v === 'nCr') return factorial(a) / (factorial(b) * factorial(a - b));
+                    if (tk.v === 'nPr') return factorial(a) / factorial(a - b);
+                    return NaN;
+                }
+                return NaN;
+            };
+            try {
+                const value = expr();
+                if (p !== toks.length) return null;
+                if (Number.isNaN(value)) return null;
+                return value;
+            } catch (err) {
+                return null;
+            }
+        },
+
         // The ruler is the one tool that was sized from a constant instead of from
         // the paper: a fixed 800px, with its rotate handle at the right-hand end.
         // On a phone the paper is ~300px wide, so that handle sat ~800px off the

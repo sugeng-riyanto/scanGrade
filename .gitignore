@@ -74,7 +74,11 @@ docs/ref/
 /static/
 !/static/.gitkeep
 node_modules/
-package-lock.json
+# Committed on purpose. `npm ci` in `.github/workflows/unit-tests.yml` installs from
+# this file, and two suites skip without the packages it pins — the essay editor's
+# jsdom cases and the stylesheet-freshness comparison — so a job with no lockfile
+# would be green about checks nobody ran. It is also what pins the tailwind build
+# the committed `app/static/css/tailwind.css` is compared against.
 app/static/css/input.css
 
 # Load test artifacts

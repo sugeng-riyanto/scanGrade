@@ -31,10 +31,39 @@
  * redisplay; a font is applied to the sheet, never written into the answer, so
  * choosing a font cannot change what a teacher or the AI reads.
  *
+ * ## The writing tools, and the one rule they all keep
+ *
+ * The toolbar now carries what a written answer actually needs: bullets and
+ * numbers (above), paragraph alignment, a tab, a table, a colour for a run, a
+ * palette of symbols, and a set of equation templates. Each is here rather than in
+ * the page so both the pupil's page and the teacher's preview of it — the same
+ * template, rendered read-only — run one implementation.
+ *
+ * **None of them may add a character the pupil did not type, or remove one they
+ * did.** That is what makes these safe to put in front of a graded answer:
+ *
+ *   * a symbol and an equation are plain text inserted at the caret, so the
+ *     stored answer contains `√` or `x²` rather than an image or an element;
+ *   * a tab is a `\t` in the text, so a line an indented answer survives the
+ *     round trip;
+ *   * alignment is written on the *block* the pupil is typing in, which is why
+ *     `textOf` cannot see it at all;
+ *   * a colour wraps the selected run (or a caret with a colour) and adds no
+ *     character — an empty span is a caret, not a zero-width space;
+ *   * a table's cells are read apart by a tab and its rows by a line, so a 2×2
+ *     table is not `abcd` on the teacher's page.
+ *
+ * There is no maths renderer and none is added: a vendored KaTeX is hundreds of
+ * kilobytes and a font set this app's spotty-WiFi users would pay for on every
+ * exam page, and a CDN would break the offline rule. An equation here is a text
+ * template the pupil edits — honest about what it is, and readable by the teacher
+ * and the AI exactly as written.
+ *
  * Loaded as a classic script before the page's Alpine component, like
  * `exam-view.js` beside it, and exercised in a real DOM by
- * `tests/unit/test_essay_editor_dom.py` (jsdom) — not by calling its functions in
- * isolation, which is what lets a broken wiring still pass.
+ * `tests/unit/test_essay_answer_integrity.py` and `tests/unit/test_essay_toolbar.py`
+ * (jsdom) — not by calling its functions in isolation, which is what lets a broken
+ * wiring still pass.
  */
 (function (root) {
     'use strict';
@@ -83,11 +112,23 @@
         sel.addRange(range);
     }
 
-    /* Put the caret back where it was, and say whether that worked. */
+    /* Put the caret back where it was, and say whether that worked.
+     *
+     * The live selection wins when it is already inside the paragraph, and that
+     * order is load-bearing: `focus()` moves the caret to the start of the element
+     * in a DOM without a real text input behind it (measured in jsdom, and the
+     * reason a symbol first landed at position 0), so focusing before deciding
+     * would replace a caret the pupil can see with one they cannot. Only a caret
+     * that has actually left the paragraph is restored from `saved`.
+     */
     function restore(editor) {
         if (!editor) return false;
-        if (typeof editor.focus === 'function') editor.focus({ preventScroll: true });
         var sel = selection();
+        if (sel && sel.rangeCount && inside(editor, sel.getRangeAt(0).commonAncestorContainer)) {
+            return true;
+        }
+        if (typeof editor.focus === 'function') editor.focus({ preventScroll: true });
+        sel = selection();
         if (!sel) return false;
         if (saved && saved.editor === editor) {
             sel.removeAllRanges();
@@ -268,6 +309,9 @@
          * `textContent` alone ran two list items together (`alphabeta`), which is
          * the *answer* as far as the server is concerned. */
         var out = [];
+        function trimTabs() {
+            while (out.length && out[out.length - 1] === '\t') out.pop();
+        }
         (function walk(node) {
             for (var i = 0; i < node.childNodes.length; i++) {
                 var child = node.childNodes[i];
@@ -275,13 +319,240 @@
                 if (child.nodeType !== 1) continue;
                 var tag = child.tagName;
                 if (tag === 'BR') { out.push('\n'); continue; }
-                var block = /^(DIV|P|LI|UL|OL|H1|H2|H3|BLOCKQUOTE)$/.test(tag);
-                if (block && out.length && out[out.length - 1] !== '\n') out.push('\n');
+                /* A cell is its own field of the answer: cells are separated by a
+                 * tab and rows by a line, which is how the same table reads on the
+                 * teacher's page. Without this a 2×2 table of "a b / c d" arrived as
+                 * "abcd", which is not the answer the pupil wrote. */
+                if (tag === 'TD' || tag === 'TH') {
+                    if (out.length && out[out.length - 1] !== '\n' && out[out.length - 1] !== '\t') out.push('\t');
+                    walk(child);
+                    if (out.length && out[out.length - 1] !== '\t') out.push('\t');
+                    continue;
+                }
+                var block = /^(DIV|P|LI|UL|OL|H1|H2|H3|BLOCKQUOTE|TABLE|TR|THEAD|TBODY|TFOOT)$/.test(tag);
+                if (block) {
+                    trimTabs();
+                    if (out.length && out[out.length - 1] !== '\n') out.push('\n');
+                }
                 walk(child);
-                if (block && out[out.length - 1] !== '\n') out.push('\n');
+                if (block) {
+                    trimTabs();
+                    if (out[out.length - 1] !== '\n') out.push('\n');
+                }
             }
         })(editor);
+        trimTabs();
         return out.join('');
+    }
+
+    /* Insert a run of plain text at the caret — a symbol, an equation template, a
+     * tab. The answer is *text*: what is stored, synced, read by the teacher and
+     * read by the AI is `textOf`, so a symbol is a character rather than an image
+     * or an element. One insertion, one `input` event, one save.
+     */
+    function insertText(editor, text) {
+        if (!editor || text === undefined || text === null) return false;
+        var doc = docOf(editor);
+        if (!restore(editor)) caretToEnd(editor);
+        var sel = selection();
+        if (!sel || !sel.rangeCount) return false;
+        var range = sel.getRangeAt(0);
+        range.deleteContents();
+        var node = doc.createTextNode(text);
+        range.insertNode(node);
+        range.setStartAfter(node);
+        range.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(range);
+        remember(editor);
+        announce(editor);
+        return true;
+    }
+
+    /* The cell the caret is in, or null. A table is the one block where Tab has a
+     * meaning of its own: moving to the next cell is what every sheet does, and a
+     * tab character inside a cell would be invisible. */
+    function cellOf(editor) {
+        var sel = selection();
+        if (!sel || !sel.rangeCount) return null;
+        var node = sel.getRangeAt(0).startContainer;
+        while (node) {
+            if (node.nodeType === 1 && (node.tagName === 'TD' || node.tagName === 'TH')) return node;
+            if (node === editor) return null;
+            node = node.parentNode;
+        }
+        return null;
+    }
+
+    function caretInto(node, atEnd) {
+        var doc = docOf(node);
+        if (!doc) return false;
+        var range = doc.createRange();
+        range.selectNodeContents(node);
+        range.collapse(!atEnd);
+        var sel = selection();
+        if (!sel) return false;
+        sel.removeAllRanges();
+        sel.addRange(range);
+        return true;
+    }
+
+    function nextCell(cell) {
+        var row = cell.parentNode;
+        var cells = row ? row.children : [];
+        for (var i = 0; i < cells.length - 1; i++) {
+            if (cells[i] === cell) return cells[i + 1];
+        }
+        var nextRow = row && row.nextElementSibling;
+        if (nextRow && nextRow.cells && nextRow.cells.length) return nextRow.cells[0];
+        return null;
+    }
+
+    /* Tab inserts a tab, Shift+Tab takes one back — except inside a table cell,
+     * where Tab moves to the next cell (and the last cell keeps the caret rather
+     * than leaving the answer). A tab is a character in the stored text, so an
+     * indented line survives the round trip to the teacher.
+     */
+    function insertTab(editor, back) {
+        if (!editor) return false;
+        var cell = cellOf(editor);
+        if (cell && !back) {
+            var target = nextCell(cell);
+            if (!target) return false;
+            cell = target;
+            caretInto(cell, false);
+            remember(editor);
+            return true;
+        }
+        if (!restore(editor)) return false;
+        if (!back) return insertText(editor, '\t');
+        var sel = selection();
+        if (!sel || !sel.rangeCount) return false;
+        var range = sel.getRangeAt(0);
+        var node = range.startContainer;
+        var offset = range.startOffset;
+        if (!node || node.nodeType !== 3 || offset <= 0) return false;
+        var value = node.nodeValue || '';
+        var cut = value.charAt(offset - 1) === '\t' ? 1 : 0;
+        if (!cut) {
+            var spaces = / {1,4}$/.exec(value.slice(0, offset));
+            cut = spaces ? spaces[0].length : 0;
+        }
+        if (!cut) return false;
+        node.nodeValue = value.slice(0, offset - cut) + value.slice(offset);
+        range.setStart(node, offset - cut);
+        range.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(range);
+        remember(editor);
+        announce(editor);
+        return true;
+    }
+
+    /* Paragraph alignment. It is a property of the *block*, not of a run, which is
+     * why it is written on the paragraph element the pupil is typing in rather
+     * than wrapped around the selection: half a line centred is not a thing a
+     * pupil asked for. `textOf` reads the same either way. */
+    var ALIGNMENTS = { left: 1, center: 1, right: 1, justify: 1 };
+
+    function align(editor, value) {
+        if (!editor || !editor.style || !ALIGNMENTS[value]) return false;
+        editor.style.textAlign = value;
+        remember(editor);
+        announce(editor);
+        return true;
+    }
+
+    function alignOf(editor) {
+        var value = (editor && editor.style && editor.style.textAlign) || 'left';
+        return ALIGNMENTS[value] ? value : 'left';
+    }
+
+    /* Colour for the selected run — or for what is typed next, when nothing is
+     * selected. The platform command is used where it exists (it is an inline
+     * toggle, like bold, and keeps the undo stack intact) and a `<span>` where it
+     * does not; either way the *text* is untouched, which is the rule this editor
+     * already holds for its font. An empty span at a collapsed caret is a caret
+     * with a colour, not an invisible character in the answer.
+     */
+    function foreColor(editor, hex) {
+        if (!editor || !/^#[0-9a-fA-F]{6}$/.test(hex || '')) return false;
+        if (!restore(editor)) caretToEnd(editor);
+        var doc = docOf(editor);
+        var done = false;
+        if (doc && typeof doc.execCommand === 'function') {
+            try {
+                done = doc.execCommand('foreColor', false, hex);
+            } catch (err) {
+                done = false;
+            }
+        }
+        if (!done) {
+            var sel = selection();
+            if (!sel || !sel.rangeCount) return false;
+            var range = sel.getRangeAt(0);
+            var span = doc.createElement('span');
+            span.style.color = hex;
+            if (range.collapsed) {
+                range.insertNode(span);
+                var caret = doc.createRange();
+                caret.setStart(span, 0);
+                caret.collapse(true);
+                sel.removeAllRanges();
+                sel.addRange(caret);
+            } else {
+                span.appendChild(range.extractContents());
+                range.insertNode(span);
+                var after = doc.createRange();
+                after.selectNodeContents(span);
+                sel.removeAllRanges();
+                sel.addRange(after);
+            }
+        }
+        remember(editor);
+        announce(editor);
+        return true;
+    }
+
+    /* A table, as a table. Cells are `contenteditable` by inheritance (the whole
+     * paragraph is), so a pupil types in them like anywhere else; `textOf` reads
+     * cells apart by a tab and rows by a line, so the stored answer is a readable
+     * table rather than every cell run together. Bounded at 6×6: a table is a
+     * small part of an essay, and an unbounded one is a way to fill a page with
+     * borders instead of an answer.
+     */
+    function insertTable(editor, rows, cols) {
+        if (!editor) return false;
+        rows = Math.min(Math.max(parseInt(rows, 10) || 2, 1), 6);
+        cols = Math.min(Math.max(parseInt(cols, 10) || 2, 1), 6);
+        var doc = docOf(editor);
+        var table = doc.createElement('table');
+        table.className = 'sg-essay-table';
+        var body = doc.createElement('tbody');
+        for (var r = 0; r < rows; r++) {
+            var tr = doc.createElement('tr');
+            for (var c = 0; c < cols; c++) {
+                var td = doc.createElement('td');
+                td.appendChild(doc.createElement('br'));
+                tr.appendChild(td);
+            }
+            body.appendChild(tr);
+        }
+        table.appendChild(body);
+        if (!restore(editor)) caretToEnd(editor);
+        var sel = selection();
+        if (!sel || !sel.rangeCount) {
+            editor.appendChild(table);
+        } else {
+            var range = sel.getRangeAt(0);
+            range.deleteContents();
+            range.insertNode(table);
+        }
+        var first = body.querySelector('td');
+        if (first) caretInto(first, false);
+        remember(editor);
+        announce(editor);
+        return true;
     }
 
     /* Paste as plain text. A copied web page would otherwise bring its own fonts,
@@ -318,6 +589,12 @@
         listKind: listKind,
         inListItem: inListItem,
         textOf: textOf,
-        pastePlain: pastePlain
+        pastePlain: pastePlain,
+        insertText: insertText,
+        insertTab: insertTab,
+        align: align,
+        alignOf: alignOf,
+        foreColor: foreColor,
+        insertTable: insertTable
     };
 })(typeof window !== 'undefined' ? window : this);

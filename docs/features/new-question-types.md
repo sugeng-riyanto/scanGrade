@@ -236,4 +236,10 @@ stimulus         : Σ skor sub-soal menurut tipe masing-masing
 * `app/templates/teacher/answer_keys.html` — tampilan/edit kunci.
 * `app/templates/teacher/grade_detail.html`, `grading_queue.html` — antrean Perlu Ditinjau.
 * `app/routes/{teacher,student,api}.py` — simpan, validasi, flag tinjauan.
-* `supabase/migrations/069_exam_stimuli.sql` — kolom stimulus.
+* `supabase/migrations/069_exam_stimuli.sql` — kolom stimulus (sudah dijalankan di
+  database; verifikasinya di
+  [docs/deploy/QUESTION_TYPES_MERGE_RUNBOOK.md](../deploy/QUESTION_TYPES_MERGE_RUNBOOK.md) §6).
+
+Cara branch ini disatukan dengan `main` — berkas mana yang diambil dari sisi mana, dan
+apa yang diperbaiki setelahnya — ada di
+[docs/deploy/QUESTION_TYPES_MERGE_RUNBOOK.md](../deploy/QUESTION_TYPES_MERGE_RUNBOOK.md).

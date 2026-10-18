@@ -370,7 +370,16 @@ def shared_analysis_file(token, ext):
 
 @public_bp.route("/privacy")
 def privacy():
-    """Kebijakan Privasi — UU PDP compliance."""
+    """Kebijakan Privasi — UU PDP compliance.
+
+    The cross-border section (§8) names where the database is, and that sentence is
+    `region_claim`, not a literal in the template: the same fact is published beside
+    the capacity figures, and two copies of it is how the disclosure spent weeks
+    pointing at Singapore while the app talked to Mumbai. One source, in
+    configuration — `app.config.database_region()`.
+    """
+    from app.config import database_region
+
     supabase = get_supabase()
     dpo_contact = None
     try:
@@ -379,7 +388,9 @@ def privacy():
             dpo_contact = dpo.get("value")
     except Exception:
         pass
-    return render_template("compliance/privacy.html", dpo_contact=dpo_contact)
+    return render_template(
+        "compliance/privacy.html", dpo_contact=dpo_contact,
+        region_claim=database_region())
 
 
 @public_bp.route("/terms")

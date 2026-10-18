@@ -1,0 +1,97 @@
+name: region guard
+
+# Which Supabase project this app talks to, and where its database is, on every
+# push — because both facts are written in prose and nothing executes prose.
+#
+# The ref was wrong in the tree for weeks: `AGENTS.md` carried a 19-character typo
+# one letter away from the real ref, and it was copied from there into a merge
+# runbook and the Windows dev script. The same bullet had the database in Singapore
+# on a **UU PDP disclosure**. Every page answered 200 throughout, because the app
+# takes its URL from `.env` and `.env` was right the whole time.
+#
+# `deploy/supabase_region.py` is the one tool that reads all of it: the recorded
+# ref, every ref-shaped string, every region next to Supabase, the disclosure, the
+# capacity row — and, where there is a `.env`, the live configuration. This workflow
+# runs the same tool the pre-commit hook and the VPS auto-deploy run, so CI is a
+# second pair of eyes on the release rather than a third implementation of it.
+#
+# **CI has no `.env`**, by construction: a committed one is a leaked service-role
+# key and `tests/unit/test_no_committed_secrets.py` refuses one. The half that
+# cannot be read here is therefore *stated*, not skipped: the tool prints
+# `the configuration was NOT measured — no .env in this checkout` and this workflow
+# requires that line to be present, which is the difference between a guard that
+# declined to compare and a guard that reported green about a comparison it never
+# made. The box, whose `.env` is what the app serves from, gets both halves judged
+# before a release is reloaded.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  region:
+    name: one project ref, one region
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      # The suite imports the app through `tests/conftest.py`, so CI builds what the
+      # box builds. The tool itself is stdlib-only on purpose: it is called from a
+      # git hook and from a deploy script, where nothing has installed anything.
+      - name: install the app's dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # Not decoration: the two branches below are different claims. If a `.env`
+      # ever appeared in the checkout, this job would be measuring the wrong half
+      # while still reading green — and a committed `.env` is the one file that must
+      # never be here at all.
+      - name: this runner has no .env, and that is the branch being exercised
+        run: |
+          if [ -e .env ]; then
+            echo "::error::a .env is present in the checkout — CI judges the committed record, and a committed .env is a leaked key"
+            exit 1
+          fi
+          echo "no .env here: the record is judged, and the configuration is reported as not measured"
+
+      - name: the recorded ref and region agree with each other
+        run: python deploy/supabase_region.py
+
+      # A guard that cannot say *what* it did not read is a guard that reads green
+      # whatever happened. This step keeps the declaration in the build log, and it
+      # fails the job if the phrase ever becomes a silent pass.
+      - name: the half it could not read is named, not skipped
+        run: |
+          python deploy/supabase_region.py > reading.txt
+          grep -q "the configuration was NOT measured" reading.txt
+          {
+            echo "### region guard"
+            echo '```'
+            cat reading.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # The same contract the box's gate runs: the tool's verdicts on scratch
+      # trees, the phrase the gate greps, the pre-commit trigger, and the gate block
+      # itself executed. A tool nobody wires in is a paragraph.
+      - name: the guard's own contract
+        run: python -m pytest tests/unit/test_supabase_region.py -q
+
+      - name: keep the reading
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: region-guard
+          path: reading.txt
+          if-no-files-found: ignore

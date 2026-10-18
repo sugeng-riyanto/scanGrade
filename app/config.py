@@ -111,6 +111,71 @@ def env_bool(name, default=False):
     return raw.strip().lower() in ("1", "true", "yes", "on")
 
 
+#: Where the database is, stated **once** — because two pages publish it. The UU PDP
+#: disclosure says it out loud to a reader deciding whether to trust the app with a
+#: child's data, and the capacity page's machine row says it beside the measured
+#: figures. Two copies of that sentence is how they drift: the disclosure said
+#: Singapore (a Cloudflare edge) while the pooler said Mumbai, and both pages
+#: answered 200 the whole time. So the claim is derived here, from the two things
+#: that actually know it, and a page renders `database_region()` instead of naming a
+#: region.
+#:
+#: `DIRECT_URL` wins, because that is the host the app really connects through — a
+#: `.env` moved to another project's region moves the published claim with it. With
+#: no pooler to read, the region the project was measured in is the answer; the deploy
+#: gate (`deploy/supabase_region.py`) holds this constant to its own record, so it
+#: cannot become a second opinion.
+SUPABASE_REGION_DEFAULT = "ap-south-1"
+
+#: Region code → the two words a disclosure has to name. A code this map does not
+#: know is still publishable **as a code** (`ap-south-1`), which is the honest
+#: degradation: a stale city under a new region is worse than no city, and it is the
+#: exact failure this source exists to prevent.
+REGION_PLACES = {
+    "ap-south-1": ("Mumbai", "India"),
+    "ap-southeast-1": ("Singapore", "Singapore"),
+    "ap-southeast-2": ("Sydney", "Australia"),
+    "ap-southeast-3": ("Jakarta", "Indonesia"),
+    "ap-northeast-1": ("Tokyo", "Japan"),
+    "ap-northeast-2": ("Seoul", "South Korea"),
+    "eu-central-1": ("Frankfurt", "Germany"),
+    "eu-west-1": ("Dublin", "Ireland"),
+    "eu-west-2": ("London", "United Kingdom"),
+    "us-east-1": ("N. Virginia", "United States"),
+    "us-west-2": ("Oregon", "United States"),
+    "sa-east-1": ("Sao Paulo", "Brazil"),
+}
+
+#: `postgres.<ref>:<pw>@aws-1-<region>.pooler.supabase.com`. The pooler host carries
+#: the database's own region however the connection string is dressed up, and it is
+#: the same host `deploy/supabase_region.py` compares its record against — one
+#: question, asked from two sides.
+_POOLER_REGION = re.compile(r"aws-\d+-([a-z0-9-]+)\.pooler\.supabase\.com")
+
+
+def database_region() -> dict:
+    """The database's region, as the app publishes it.
+
+    `label` is the sentence a page renders — ``Mumbai, India (ap-south-1)`` — and
+    `short` the machine-row form, ``ap-south-1 (Mumbai)``. Both fall back to the bare
+    code when the region is not in `REGION_PLACES`.
+
+    Read per call rather than frozen at import: nothing about it is per-request, but a
+    test that sets `DIRECT_URL` for one case must not have to reload the module, and a
+    dict handed back is a value a template can print without a helper.
+    """
+    found = _POOLER_REGION.search(env_str("DIRECT_URL", ""))
+    code = found.group(1) if found else SUPABASE_REGION_DEFAULT
+    city, country = REGION_PLACES.get(code, ("", ""))
+    return {
+        "code": code,
+        "city": city,
+        "country": country,
+        "label": f"{city}, {country} ({code})" if city else code,
+        "short": f"{code} ({city})" if city else code,
+    }
+
+
 #: Every name an SMTP app password may arrive under. `SMTP_PASSWORD` is what the
 #: installer writes and what this app has always read; the Gmail spelling is what
 #: the provider's own page produces and what people therefore put in `.env` — and a
@@ -158,6 +223,12 @@ class Config:
     # with either authenticates as 401, so normalise both away.
     MIDTRANS_SERVER_KEY = env_key("MIDTRANS_SERVER_KEY", "")
     MIDTRANS_CLIENT_KEY = env_key("MIDTRANS_CLIENT_KEY", "")
+    #: Desmos' graphing calculator. This is a **public** client key, not a secret:
+    #: it is interpolated into the exam page so Desmos' own script can identify the
+    #: caller. Empty is a supported state — the graph panel then says it is not
+    #: configured instead of loading a calculator that cannot start, which is what
+    #: a missing key looked like from the pupil's side until it was explained.
+    DESMOS_API_KEY = env_key("DESMOS_API_KEY", "")
     FONNTE_API_KEY = env_key("FONNTE_API_KEY", "")
     # Email is the active notification channel (WhatsApp/Fonnte is not used).
     SMTP_EMAIL = env_str("SMTP_EMAIL", "scangrade9@gmail.com")

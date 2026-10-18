@@ -52,6 +52,16 @@ DEFAULT_STATE = Path("/var/lib/scangrade-deploy")
 # The box these numbers were taken on. Prose on the landing page states the same
 # configuration, and `tests/unit/test_capacity_page.py` holds the two together —
 # a capacity figure without its configuration is the original claim again.
+#
+# `region` is the *box's*, and only the box's: it is not the database's region and
+# was never meant to be. That one row used to sit here as a literal too, and a
+# literal is a second copy — the disclosure on `/privacy` has to state the same
+# fact to a reader deciding whether to trust the app with a child's data, and two
+# copies of it drifted once already (Singapore, a Cloudflare edge, on a page whose
+# whole point is "where is personal data stored"). So `MACHINE` holds facts about
+# the machine, and `machine()` adds the database's row from `app.config`, which
+# derives it from the `DIRECT_URL` the app actually connects through. The box's own
+# region has not been measured from a workstation and is left as it was found.
 MACHINE = {
     "host": "scangrade.web.id",
     "vcpu": 1,
@@ -59,7 +69,6 @@ MACHINE = {
     "workers": 3,
     "worker_class": "gevent",
     "region": "ap-southeast-1 (Singapore)",
-    "database": "Supabase, same region",
     "measured_on": "2026-09-14",
     "ceiling_rps": 20,
     "bottleneck": "cpu",
@@ -72,6 +81,20 @@ MACHINE = {
 # the row exists, that it really is 0% errors, and that the landing page states
 # the same limit — the two pages are not allowed to disagree.
 COMFORTABLE_STUDENTS = 50
+
+
+def machine() -> dict:
+    """`MACHINE` plus the one row that has to come from configuration.
+
+    The database's region is published on two pages — this one and the UU PDP
+    disclosure — and the only way two pages stay in step is by there being one
+    value. It is `app.config.database_region()`, derived from the pooler host the
+    app connects through, and `deploy/supabase_region.py` refuses a release where
+    either page spells a region itself.
+    """
+    from app.config import database_region
+
+    return {**MACHINE, "database": f"Supabase, {database_region()['short']}"}
 
 # Only student pages are what "N concurrent students" means. A login burst is a
 # different claim and is compared separately (never folded in: it made a healthy
@@ -443,14 +466,13 @@ def build() -> dict:
             "requests_total": sum(m["requests_total"] for m in group),
             "p95_samples": len(p95),
         })
-
     newest = max((m["at"] for m in measurements if m["at"]), default="")
     # The row the recommendation is derived from, so the page can print the figure
     # next to it instead of restating it (a restated number is a number that can
     # drift away from the file).
     comfort = next((r for r in rungs if r["students"] == COMFORTABLE_STUDENTS), None)
     return {
-        "machine": MACHINE,
+        "machine": machine(),
         "comfortable": COMFORTABLE_STUDENTS,
         "comfortable_row": comfort,
         "rungs": rungs,
@@ -494,7 +516,7 @@ def report() -> dict:
             return build()
         except Exception as e:  # pragma: no cover - defensive
             logger.warning("capacity: report failed: %s", e)
-            return {"machine": MACHINE, "comfortable": COMFORTABLE_STUDENTS,
+            return {"machine": machine(), "comfortable": COMFORTABLE_STUDENTS,
                     "rungs": [], "measurements": [], "supporting": [],
                     "deploy": {"available": False, "claims": None, "perf": [],
                                "note": str(e)[:120]},
