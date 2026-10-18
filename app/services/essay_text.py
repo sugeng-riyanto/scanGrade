@@ -82,21 +82,29 @@ def essay_answer_text(answer: Any) -> str:
     if not isinstance(answer, Mapping):
         return ""
 
+    typed = ""
     text = answer.get("text")
     if isinstance(text, str) and text.strip():
-        return text.strip()
+        typed = text.strip()
+    else:
+        paragraphs = answer.get("paragraphs")
+        if isinstance(paragraphs, Sequence) and not isinstance(paragraphs, (str, bytes)):
+            typed = PARAGRAPH_JOIN.join(
+                part for part in (_paragraph_text(p) for p in paragraphs) if part
+            ).strip()
 
-    paragraphs = answer.get("paragraphs")
-    if isinstance(paragraphs, Sequence) and not isinstance(paragraphs, (str, bytes)):
-        joined = PARAGRAPH_JOIN.join(
-            part for part in (_paragraph_text(p) for p in paragraphs) if part
-        )
-        if joined.strip():
-            return joined.strip()
-
-    boxes = _text_boxes(answer.get("pages"))
-    if boxes.strip():
-        return boxes.strip()
+    # Boxes are added to the typed answer, never only used *instead* of it. A
+    # pupil who writes a paragraph and then labels a diagram on the paper has
+    # written both, and the fallback shape below dropped the labels the moment a
+    # paragraph existed — the marking page showed the paragraph and the AI was
+    # asked to mark an answer missing half of what the pupil wrote.
+    boxes = _text_boxes(answer.get("pages")).strip()
+    if typed and boxes:
+        return typed + PARAGRAPH_JOIN + boxes
+    if typed:
+        return typed
+    if boxes:
+        return boxes
 
     # A bare-string answer wrapped in the structured shape: an older client wrote
     # `{"answer": "..."}` and nothing else. `answer` is a *choice* key everywhere
