@@ -55,8 +55,8 @@ jobs:
     env:
       # Deliberately invalid, local-only test credentials; never production secrets.
       SUPABASE_URL: https://example.invalid
-      SUPABASE_SERVICE_KEY: ci-offline-test-only
-      SUPABASE_ANON_KEY: ci-offline-test-only
+      SUPABASE_SERVICE_KEY: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJjaS10ZXN0In0.test-only-signature
+      SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJjaS10ZXN0In0.test-only-signature
       FLASK_SECRET_KEY: ci-offline-test-only
     steps:
       - uses: actions/checkout@v4
