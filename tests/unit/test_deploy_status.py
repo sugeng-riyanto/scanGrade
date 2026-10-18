@@ -319,9 +319,17 @@ class TestWhatIsInstalled:
             _git("show", "HEAD~1:deploy/entrypoint.sh", cwd=repo).stdout, repo)
         launcher = install(tmp_path, "scangrade-deploy", old_render)
 
-        state = status.runner_state(launcher, repo, expect=launcher_for(repo))
+        # Read the expectation from the checkout under inspection, like report().
+        # launcher_for() renders ROOT's original template, which is also what the
+        # old install contains and would make this comparison always current.
+        expected, reason = status.expected_launcher(repo)
+        assert reason is None
+        assert old_render != expected, "the fixture must install an older launcher"
+
+        state = status.runner_state(launcher, repo, expect=expected)
 
         assert state["kind"] == "launcher"
+        assert state["matches_this_commit"] is False
         assert state["gate0"] == status.GATE0_PASSES, "Gate 0 never judges a launcher"
         assert state["origin_key"] == status.ORIGIN_NAMED
         assert state["origin_short"] == old_short
