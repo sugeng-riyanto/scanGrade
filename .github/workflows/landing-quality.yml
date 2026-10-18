@@ -29,8 +29,9 @@ jobs:
         run: npm install --no-audit --no-fund
       - name: Build CSS
         run: npm run css:build
-      - name: Ensure compiled CSS was committed
-        run: git diff --exit-code -- app/static/css/tailwind.css
+      - name: Check stylesheet freshness without dumping minified CSS
+        run: |
+          python deploy/css_freshness.py
       - name: Landing claim regression tests
         run: python -m pytest tests/unit/test_landing_ai_claim_honesty.py -q
       - name: Full test suite
