@@ -42,8 +42,20 @@ jobs:
           python deploy/css_freshness.py
       - name: Landing claim regression tests
         run: python -m pytest tests/unit/test_landing_ai_claim_honesty.py -q
+      - name: Require a browser for the full suite
+        run: |
+          for candidate in google-chrome google-chrome-stable chromium chromium-browser; do
+            found="$(command -v "$candidate" || true)"
+            if [ -n "$found" ]; then
+              echo "SG_CHROME=$found" >> "$GITHUB_ENV"
+              exit 0
+            fi
+          done
+          echo "::error::no Chrome/Chromium on this runner; browser regressions must run"
+          exit 1
       - name: Full test suite
-        run: python -m pytest tests -q -ra --ignore=tests/test_rls_security.py
+        run: |
+          python -m pytest tests -q -ra --ignore=tests/test_rls_security.py
           python -m pytest tests/test_rls_security.py -q -ra -k 'not TestSupabaseRLSPolicies'
       - name: Theme gate (includes static claims checks)
         run: bash deploy/theme_gate.sh
