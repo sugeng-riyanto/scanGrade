@@ -1,0 +1,43 @@
+name: ScanGrade staging RLS
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  staging-rls:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: staging
+    env:
+      SCANGRADE_RLS_URL: ${{ secrets.SCANGRADE_RLS_URL }}
+      SCANGRADE_RLS_ANON_KEY: ${{ secrets.SCANGRADE_RLS_ANON_KEY }}
+      SCANGRADE_RLS_TEACHER_A_JWT: ${{ secrets.SCANGRADE_RLS_TEACHER_A_JWT }}
+      SCANGRADE_RLS_SCHOOL_B_EXAM_ID: ${{ vars.SCANGRADE_RLS_SCHOOL_B_EXAM_ID }}
+      SCANGRADE_RLS_SCHOOL_B_SUBMISSION_ID: ${{ vars.SCANGRADE_RLS_SCHOOL_B_SUBMISSION_ID }}
+      SUPABASE_URL: https://example.invalid
+      SUPABASE_SERVICE_KEY: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJjaS10ZXN0In0.test-only-signature
+      FLASK_SECRET_KEY: ci-offline-test-only
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Validate staging credentials are configured
+        run: |
+          python - <<'PY'
+          import os
+          keys = ['SCANGRADE_RLS_URL','SCANGRADE_RLS_ANON_KEY','SCANGRADE_RLS_TEACHER_A_JWT','SCANGRADE_RLS_SCHOOL_B_EXAM_ID','SCANGRADE_RLS_SCHOOL_B_SUBMISSION_ID']
+          missing = [key for key in keys if not os.environ.get(key)]
+          if missing:
+              raise SystemExit('Missing staging environment secrets/variables: ' + ', '.join(missing))
+          PY
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip check
+      - name: Assert real cross-school RLS isolation
+        run: python -m pytest tests/test_rls_security.py -q -ra -k TestSupabaseRLSPolicies
