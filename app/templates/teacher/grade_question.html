@@ -133,8 +133,12 @@
                                 <div class="flex flex-wrap items-center gap-2">
                                     <span class="text-[11px] font-bold text-surface-500">Skor</span>
                                     <div class="flex gap-1">
+                                        {# One click is one mark and one step: the preset saves and the
+                                           queue moves to the next paper. Marking a class is the
+                                           same gesture repeated, so the gesture never ends with
+                                           the teacher hunting for the next card. #}
                                         <template x-for="preset in [0, 20, 40, 60, 80, 100]" :key="preset">
-                                            <button @click="s.scoreVal = preset; saveEssayScore(s)"
+                                            <button @click="pickScore(s, preset)"
                                                     class="w-9 h-9 rounded-lg text-xs font-bold border transition-all active:scale-95"
                                                     :class="s.scoreVal == preset
                                                         ? (preset >= 70 ? 'bg-emerald-500 text-white border-emerald-500 shadow-sm' : preset > 0 ? 'bg-amber-500 text-white border-amber-500 shadow-sm' : 'bg-surface-500 text-white border-surface-500 shadow-sm')
@@ -142,10 +146,14 @@
                                                     x-text="preset"></button>
                                         </template>
                                     </div>
-                                    <input type="number" x-model="s.scoreVal" @input="saveEssayScore(s)" min="0" max="100"
+                                    <input type="number" x-model="s.scoreVal" @input="onScoreTyped(s)"
+                                           @change="flushScore(s)" @keydown.enter.prevent="pickScore(s, s.scoreVal)"
+                                           min="0" max="100" step="0.5" inputmode="decimal"
                                            class="w-16 px-2 py-1.5 border-2 border-surface-200 rounded-lg text-sm font-bold text-center focus:border-primary-500"
                                            :class="s.scoreVal >= 70 ? 'text-emerald-600 border-emerald-300' : s.scoreVal > 0 ? 'text-amber-600 border-amber-300' : ''">
-                                    <span class="text-[10px] text-surface-400 font-medium">/ 100</span>
+                                    <span class="text-[10px] text-surface-400 font-medium">%</span>
+                                    <span class="text-[10px] font-bold text-primary-600 whitespace-nowrap"
+                                          x-show="pointsHint(s)" x-text="pointsHint(s)"></span>
                                     <button @click="toggleFlag(s)"
                                             class="ml-auto text-[10px] font-bold px-2.5 py-1.5 rounded-lg border transition flex items-center gap-1 shrink-0"
                                             :class="isFlagged(s) ? 'bg-rose-50 text-rose-600 border-rose-300' : 'bg-white text-surface-500 border-surface-200 hover:border-rose-300 hover:text-rose-500'"
@@ -217,7 +225,7 @@
                             </div>
                             <!-- Feedback + AI -->
                             <div class="flex items-center gap-2">
-                                <input type="text" x-model="s.feedbackVal" @change="saveEssayScore(s)"
+                                <input type="text" x-model="s.feedbackVal" @change="onCommentTyped(s)"
                                        placeholder="Feedback..." class="flex-1 px-3 py-1.5 border border-surface-200 rounded-lg text-xs focus:border-primary-400 focus:ring-1 focus:ring-primary-200">
                                 <button @click="aiGradeEssay(s)" class="px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition shrink-0 flex items-center gap-1"
                                         :class="s._aiLoading ? 'bg-violet-100 text-violet-500' : 'bg-violet-50 text-violet-700 hover:bg-violet-100'">
@@ -235,6 +243,21 @@
                                             <span x-show="s.aiConfidence !== undefined" class="text-[10px] font-bold"
                                                   :class="s.aiConfidence >= 0.7 ? 'text-emerald-600' : s.aiConfidence >= 0.4 ? 'text-amber-600' : 'text-red-500'"
                                                   x-text="'Keyakinan: ' + Math.round((s.aiConfidence || 0) * 100) + '%'"/>
+                                        </div>
+                                        {# A suggestion, not a mark. `applyAiSuggestion` fills the
+                                           score field beside it; the teacher's own save records it. #}
+                                        <p class="text-[10px] font-extrabold text-violet-700 mt-1"
+                                           x-show="s.aiSuggestedScore !== undefined && s.aiSuggestedScore !== null"
+                                           x-text="'Saran: ' + s.aiSuggestedScore + ' / ' + s.aiMaxScore + ' — belum menjadi nilai'"></p>
+                                        <div class="flex items-center gap-2 mt-1.5" x-show="s.aiSuggestionId">
+                                            <button @click="applyAiSuggestion(s)"
+                                                    class="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-violet-600 text-white hover:bg-violet-700 transition">
+                                                <i class="fas fa-check mr-1"></i><span x-text="'Terapkan skor ini'"></span>
+                                            </button>
+                                            <button @click="rejectAiSuggestion(s)"
+                                                    class="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-white text-surface-600 border border-surface-300 hover:bg-surface-50 transition">
+                                                <span x-text="'Abaikan'"></span>
+                                            </button>
                                         </div>
                                     </div>
                                     <div x-show="s.aiConfidence !== undefined" class="shrink-0 w-10 h-10 rounded-full flex items-center justify-center text-xs font-extrabold border-2"
@@ -322,12 +345,35 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="/static/js/ai-suggestion.js"></script>
 <script>
+// The comment a mark earns, in this page's language (it pins `id`), so two hundred
+// papers do not mean two hundred copies of the same sentence. It fills the box
+// only while the box is untouched — `syncCommentFromScore` owns that rule — and a
+// comment the teacher edits is never replaced by it.
+function autoCommentFor(pct, earned, max) {
+    const p = Math.round(Number(pct));
+    const head = (earned !== '' && earned !== null && earned !== undefined && max)
+        ? earned + ' dari ' + max + ' poin — '
+        : '';
+    if (p >= 90) return head + 'sangat baik: jawaban lengkap dan tepat.';
+    if (p >= 70) return head + 'baik: sebagian besar poin kunci tercakup.';
+    if (p >= 50) return head + 'cukup: beberapa poin penting belum tercakup.';
+    if (p >= 30) return head + 'kurang: banyak poin kunci belum muncul.';
+    if (p > 0) return head + 'sangat kurang: jawaban belum menjawab soal.';
+    return 'tidak ada jawaban yang bisa dinilai.';
+}
+
 function graderApp() {
     return {
         currentQ: 0, totalQuestions: {{ exam.total_questions }},
         questionTypes: {{ (exam.question_types or {}) | tojson | safe }},
         answerKey: {{ (exam.answer_key or {}) | tojson | safe }},
+        // What each question is worth, so a 0–100 box can say what it is worth in
+        // this question's own points instead of leaving the teacher to guess.
+        qPoints: {{ (exam.question_weights or {}) | tojson | safe }},
+        // One timer per student: typing is autosaved, but not once per keystroke.
+        _saveTimers: {},
         students: [], loading: true, loadingText: 'Memuat data siswa...',
         focusedIdx: 0,
         bank: [], bankDraft: '', bankDelta: '',
@@ -343,6 +389,22 @@ function graderApp() {
             }).length;
         },
         get totalCorrectable() { return this.isMCQ ? this.students.length : 0; },
+        // The question's own points, or 0 when the paper has no scheme for it.
+        get maxPoints() {
+            const w = parseFloat(this.qPoints[this.currentQ]);
+            return isFinite(w) && w > 0 ? w : 0;
+        },
+        pointsOf(pct) {
+            const s = parseFloat(pct);
+            if (!isFinite(s) || !this.maxPoints) return '';
+            const clamped = Math.min(Math.max(s, 0), 100);
+            return Math.round((clamped / 100) * this.maxPoints * 100) / 100;
+        },
+        pointsHint(s) {
+            const e = this.pointsOf(s && s.scoreVal);
+            if (e === '') return '';
+            return '= ' + e + ' / ' + this.maxPoints + ' poin';
+        },
         get doneCount() {
             return this.students.filter(s => s.scoreVal !== '' && s.scoreVal !== undefined && s.scoreVal !== null).length;
         },
@@ -570,7 +632,8 @@ function graderApp() {
             const st = this.paletteStudent();
             if (!st) return;
             st.scoreVal = preset;
-            this.saveEssayScore(st);
+            this.syncCommentFromScore(st);
+            this.flushScore(st);
             this.clearSelection();
         },
 
@@ -591,7 +654,11 @@ function graderApp() {
                 .then(r => r.json())
                 .then(d => {
                     this.students = (d.students || []).map(s => ({
-                        ...s, flagged: s.flagged || [], annotations: s.annotations || [], expanded: false, scoreVal: s.feedback?.score || '', feedbackVal: s.feedback?.feedback || '', aiReasoning: '', aiConfidence: undefined, _aiLoading: false
+                        ...s, flagged: s.flagged || [], annotations: s.annotations || [], expanded: false, scoreVal: s.feedback?.score || '', feedbackVal: s.feedback?.feedback || '',
+                        // A stored comment is the teacher's own, so the score is not allowed to
+                        // regenerate over it. Only an empty box may be filled from the mark.
+                        _commentAuto: !((s.feedback?.feedback || '').trim()),
+                        aiReasoning: '', aiConfidence: undefined, aiSuggestionId: null, aiSuggestedScore: undefined, aiMaxScore: undefined, _aiLoading: false, _aiElapsed: 0
                     }));
                     this.loading = false;
                     this.focusedIdx = 0;
@@ -628,11 +695,11 @@ function graderApp() {
             }
             if (!this.isMCQ && e.key >= '1' && e.key <= '9') {
                 const s = this.students[this.focusedIdx];
-                if (s) { s.scoreVal = parseInt(e.key) * 10; this.saveEssayScore(s); this._nextStudent(); }
+                if (s) this.pickScore(s, parseInt(e.key) * 10);
             }
             if (!this.isMCQ && e.key === '0') {
                 const s = this.students[this.focusedIdx];
-                if (s) { s.scoreVal = 100; this.saveEssayScore(s); this._nextStudent(); }
+                if (s) this.pickScore(s, 100);
             }
             if (e.key === 'f' || e.key === 'F') {
                 e.preventDefault();
@@ -680,6 +747,54 @@ function graderApp() {
             });
         },
 
+        // ── one mark, one save, one step ──────────────────────────────────
+        //
+        // Three things a marking run needs and this page did not do: typing a
+        // number saved it (once per keystroke — every digit was a request), a
+        // clicked preset saved but left the cursor where it was, and the comment
+        // was blank until the teacher composed it. Typing is now debounced, a
+        // preset or Enter saves and moves to the next paper, and an empty comment
+        // is filled from the mark while the mark is still the only thing typed.
+        pickScore(s, value) {
+            const v = (value === '' || value === null || value === undefined) ? '' : value;
+            s.scoreVal = v;
+            this.syncCommentFromScore(s);
+            this.flushScore(s);
+            this._nextStudent();
+        },
+
+        onScoreTyped(s) {
+            this.syncCommentFromScore(s);
+            if (this._saveTimers[s.submission_id]) clearTimeout(this._saveTimers[s.submission_id]);
+            this._saveTimers[s.submission_id] = setTimeout(() => {
+                this._saveTimers[s.submission_id] = null;
+                this.saveEssayScore(s);
+            }, 600);
+        },
+
+        // Save now, cancelling any pending debounce, so Enter/click cannot be
+        // overtaken by a timer that fires a stale value afterwards.
+        flushScore(s) {
+            const pending = this._saveTimers[s.submission_id];
+            if (pending) { clearTimeout(pending); this._saveTimers[s.submission_id] = null; }
+            this.saveEssayScore(s);
+        },
+
+        onCommentTyped(s) {
+            s._commentAuto = false;
+            this.flushScore(s);
+        },
+
+        syncCommentFromScore(s) {
+            // Only while the comment is the one this page generated (or still
+            // empty). A sentence a teacher wrote is theirs and is never replaced.
+            if (s._commentAuto === false && (s.feedbackVal || '').trim()) return;
+            const raw = parseFloat(s.scoreVal);
+            if (!isFinite(raw)) return;
+            s.feedbackVal = autoCommentFor(raw, this.pointsOf(raw), this.maxPoints);
+            s._commentAuto = true;
+        },
+
         saveEssayScore(s) {
             fetch('/teacher/api/grade-question/{{ exam_id }}/' + this.currentQ + '/save', {
                 method: 'POST',
@@ -693,28 +808,48 @@ function graderApp() {
         },
 
         aiGradeEssay(s) {
+            // Queues a suggestion and shows it. It used to write `scoreVal` and call
+            // `saveEssayScore` on the way back, which meant one click on "AI" put a
+            // model's number into a child's mark with no teacher decision in between.
             if (s._aiLoading) return;
             s._aiLoading = true;
-            fetch('/api/ai/grade-essay', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    submission_id: s.submission_id,
-                    question_index: this.currentQ,
-                    question_text: '',
-                    student_answer: s.essayText || '',
-                    max_score: 100,
-                })
-            })
-            .then(r => r.json())
-            .then(d => {
-                if (d.score !== undefined) { s.scoreVal = d.score; }
-                if (d.feedback) { s.feedbackVal = d.feedback; }
-                if (d.reasoning) { s.aiReasoning = d.reasoning; }
-                if (d.confidence !== undefined) { s.aiConfidence = d.confidence; }
-                this.saveEssayScore(s);
-            })
-            .catch(() => {}) .finally(() => { s._aiLoading = false; });
+            SGAi.suggest({
+                submission_id: s.submission_id,
+                questionIndex: this.currentQ,
+                onPending: (ms) => { s._aiElapsed = Math.round(ms / 1000); }
+            }).then(d => {
+                s.aiSuggestionId = d.suggestion_id;
+                s.aiSuggestedScore = d.score;
+                s.aiMaxScore = d.max_score;
+                s.aiReasoning = d.feedback || d.reasoning || '';
+                s.aiConfidence = d.confidence;
+            }).catch(err => {
+                s.aiReasoning = '';
+                alert(err.message);
+            }).finally(() => {
+                s._aiLoading = false;
+                s._aiElapsed = 0;
+            });
+        },
+
+        applyAiSuggestion(s) {
+            if (!s.aiSuggestionId) return;
+            SGAi.apply(s.aiSuggestionId).then(row => {
+                s.scoreVal = row.score;
+                if (row.feedback) { s.feedbackVal = row.feedback; }
+                s.aiSuggestionId = null;
+                // Still the teacher's save that records it, and they may edit first.
+            }).catch(err => alert(err.message));
+        },
+
+        rejectAiSuggestion(s) {
+            if (!s.aiSuggestionId) return;
+            SGAi.reject(s.aiSuggestionId).then(() => {
+                s.aiSuggestionId = null;
+                s.aiSuggestedScore = undefined;
+                s.aiReasoning = '';
+                s.aiConfidence = undefined;
+            }).catch(err => alert(err.message));
         },
 
         gradeAllMCQ() {

@@ -1,6 +1,7 @@
 import json
 import io
 import os
+import re
 import logging
 import dataclasses
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -24,7 +25,7 @@ from app.services.answer_sheet_generator import generate_answer_sheet
 from app.services.question_types import (
     CHOICE_MODE_SINGLE, CHOICE_OPTIONS, KEY_MODE_LOST, KEY_MODE_NARROW, KEY_STALE,
     KIND_CHOICE, KIND_DRAG,
-    KIND_ESSAY, KIND_MATCH, MCQ, MCQ_MULTI, public_options,
+    KIND_ESSAY, KIND_MATCH, KIND_MATRIX, KIND_NUMERIC, MCQ, MCQ_MULTI, public_options,
     KIND_TRUE_FALSE,
     ambiguous_choice_keys, answer_letters,
     canonical_type, choice_mode, default_weights, describe_answer,
@@ -336,12 +337,28 @@ def _relocate_question_media(supabase, from_exam_id, to_exam_id, question_audio)
     return relocated
 
 
-def _guard_submission(supabase, submission_id, as_json=True, redirect_to="/teacher/results"):
-    """Same, for a submission id — resolves the owning exam first."""
+#: What `_guard_submission` reads by default — the row identity and the owning exam.
+GUARDED_SUBMISSION_COLUMNS = "id,exam_id,student_id,exams(id,teacher_id,school_id)"
+
+
+def _guard_submission(supabase, submission_id, as_json=True,
+                      redirect_to="/teacher/results",
+                      columns=GUARDED_SUBMISSION_COLUMNS):
+    """Same, for a submission id — resolves the owning exam first.
+
+    ``columns`` is passed through the way `_guard_exam`'s is: a route that needs
+    more of the row asks for it here rather than paying a second read of the same
+    row. The columns the guard itself needs are the caller's responsibility to
+    keep — passing a set without `exams(...)` denies everyone, which is the safe
+    direction to get this wrong in but a silent one. The queue's answer endpoint
+    is the caller that does this: it needs `answers`, and reading the row twice to
+    learn what the guard had already fetched is one avoidable round-trip on a
+    request a teacher waits for.
+    """
     try:
         sub = row_or_none(
             supabase.table("submissions")
-            .select("id,exam_id,student_id,exams(id,teacher_id,school_id)")
+            .select(columns)
             .eq("id", submission_id).maybe_single().execute()
         )
     except Exception:
@@ -405,7 +422,7 @@ def _apply_mark_scheme(question_types, total_questions, question_weights):
 
 
 JSON_COLUMNS = ("answer_key", "question_types", "question_weights", "question_pages",
-               "question_cognitive", "question_audio", "question_canvas")
+               "question_cognitive", "question_audio", "question_canvas", "question_stimuli")
 
 
 def _json_fields(row):
@@ -491,6 +508,33 @@ def _as_list(value) -> list:
         except (ValueError, TypeError):
             return []
     return value if isinstance(value, list) else []
+
+
+def _drawn_pages(ans) -> int:
+    """How many pages of one answer carry a drawing or a written note.
+
+    The queue asks "did this pupil answer with the pen", and the two ways that
+    comes back are `canvas` (the ink) and `textBoxes` (a note typed onto the
+    sheet). A page that carries an empty string for one and nothing for the other
+    is a page the pupil opened, not a page they answered on — the exam page writes
+    a `pages` entry for a visited page too, so counting keys would mark every
+    question drawn.
+    """
+    if not isinstance(ans, dict):
+        return 0
+    pages = ans.get("pages") or {}
+    if not isinstance(pages, dict):
+        return 0
+    drawn = 0
+    for pd in pages.values():
+        if not isinstance(pd, dict):
+            continue
+        if pd.get("canvas"):
+            drawn += 1
+        elif any(isinstance(b, dict) and str(b.get("text") or "").strip()
+                 for b in (pd.get("textBoxes") or [])):
+            drawn += 1
+    return drawn
 
 
 def _normalise_exam_json(exam_data: dict) -> dict:
@@ -1320,6 +1364,16 @@ def exam_form():
     question_types = json.loads(request.form.get("question_types", "{}"))
     answer_key = json.loads(request.form.get("answer_key", "{}"))
     question_weights = json.loads(request.form.get("question_weights", "{}"))
+    # A stimulus is a container, not a question: it carries no type, no key and no
+    # marks, so it is stored beside the others rather than becoming a seventh kind
+    # of row. Each sub-question keeps its own type and its own points, which is why
+    # the mark scheme needs no new bucket for it.
+    try:
+        question_stimuli = json.loads(request.form.get("question_stimuli", "{}"))
+    except json.JSONDecodeError:
+        question_stimuli = {}
+    if not isinstance(question_stimuli, dict):
+        question_stimuli = {}
     # The marks a paper is scored by are decided by _apply_mark_scheme, never by
     # whatever the page posted (it posts a preview of the same numbers).
     question_weights = _apply_mark_scheme(question_types, total_questions, question_weights)
@@ -1411,6 +1465,7 @@ def exam_form():
         "question_weights": question_weights,
         "question_audio": question_audio,
         "question_canvas": question_canvas,
+        "question_stimuli": question_stimuli,
         "anti_cheat_enabled": anti_cheat_enabled,
         "penalty_per_violation": penalty_per_violation,
         "max_violations": max_violations,
@@ -1440,7 +1495,7 @@ def exam_form():
             res = supabase.table("exams").insert(data).execute()
             exam_id = res.data[0]["id"]
     except Exception:
-        for key in ["question_weights", "question_texts", "anti_cheat_enabled", "penalty_per_violation", "max_violations", "auto_submit_on_max", "fullscreen_required", "randomize_questions", "randomize_options", "watermark_name", "block_copy_paste", "block_right_click", "block_screenshot", "allow_calculator", "lock_pending_resume", "resume_code_limit", "grade_component_type_id", "school_year_id", "subject_id", "class_ids", "start_at", "end_at", "assessment_period_id", "auto_submit_on_window_end", "is_template", "source_exam_id", "max_attempts", "publish_mode", "question_pages", "question_cognitive"]:
+        for key in ["question_weights", "question_texts", "question_stimuli", "anti_cheat_enabled", "penalty_per_violation", "max_violations", "auto_submit_on_max", "fullscreen_required", "randomize_questions", "randomize_options", "watermark_name", "block_copy_paste", "block_right_click", "block_screenshot", "allow_calculator", "lock_pending_resume", "resume_code_limit", "grade_component_type_id", "school_year_id", "subject_id", "class_ids", "start_at", "end_at", "assessment_period_id", "auto_submit_on_window_end", "is_template", "source_exam_id", "max_attempts", "publish_mode", "question_pages", "question_cognitive"]:
             data.pop(key, None)
         if draft_row:
             res = supabase.table("exams").update(data).eq("id", draft_row["id"]).execute()
@@ -1728,6 +1783,16 @@ def exam_detail(exam_id):
     question_types = json.loads(request.form.get("question_types", "{}"))
     answer_key = json.loads(request.form.get("answer_key", "{}"))
     question_weights = json.loads(request.form.get("question_weights", "{}"))
+    # A stimulus is a container, not a question: it carries no type, no key and no
+    # marks, so it is stored beside the others rather than becoming a seventh kind
+    # of row. Each sub-question keeps its own type and its own points, which is why
+    # the mark scheme needs no new bucket for it.
+    try:
+        question_stimuli = json.loads(request.form.get("question_stimuli", "{}"))
+    except json.JSONDecodeError:
+        question_stimuli = {}
+    if not isinstance(question_stimuli, dict):
+        question_stimuli = {}
     # The marks a paper is scored by are decided by _apply_mark_scheme, never by
     # whatever the page posted (it posts a preview of the same numbers).
     question_weights = _apply_mark_scheme(question_types, total_questions, question_weights)
@@ -1827,6 +1892,7 @@ def exam_detail(exam_id):
         "question_weights": question_weights,
         "question_audio": question_audio,
         "question_canvas": question_canvas,
+        "question_stimuli": question_stimuli,
         "anti_cheat_enabled": anti_cheat_enabled,
         "penalty_per_violation": penalty_per_violation,
         "max_violations": max_violations,
@@ -1851,7 +1917,7 @@ def exam_detail(exam_id):
     try:
         supabase.table("exams").update(data).eq("id", exam_id).execute()
     except Exception:
-        for key in ["question_weights", "question_texts", "anti_cheat_enabled", "penalty_per_violation", "max_violations", "auto_submit_on_max", "fullscreen_required", "randomize_questions", "randomize_options", "watermark_name", "block_copy_paste", "block_right_click", "block_screenshot", "allow_calculator", "lock_pending_resume", "resume_code_limit", "grade_component_type_id", "school_year_id", "subject_id", "class_ids", "start_at", "end_at", "assessment_period_id", "auto_submit_on_window_end", "is_template", "source_exam_id", "max_attempts", "publish_mode", "question_pages", "question_cognitive"]:
+        for key in ["question_weights", "question_texts", "question_stimuli", "anti_cheat_enabled", "penalty_per_violation", "max_violations", "auto_submit_on_max", "fullscreen_required", "randomize_questions", "randomize_options", "watermark_name", "block_copy_paste", "block_right_click", "block_screenshot", "allow_calculator", "lock_pending_resume", "resume_code_limit", "grade_component_type_id", "school_year_id", "subject_id", "class_ids", "start_at", "end_at", "assessment_period_id", "auto_submit_on_window_end", "is_template", "source_exam_id", "max_attempts", "publish_mode", "question_pages", "question_cognitive"]:
             data.pop(key, None)
         supabase.table("exams").update(data).eq("id", exam_id).execute()
 
@@ -2179,7 +2245,7 @@ def exam_preview_paper(exam_id):
     # the same way — and a preview of a paper whose question types failed to parse
     # would be a preview of nothing at all.
     for field in ("question_types", "answer_key", "question_weights", "question_pages",
-                  "pdf_page_urls", "question_audio"):
+                  "pdf_page_urls", "question_audio", "question_stimuli"):
         value = exam.get(field)
         if isinstance(value, str):
             try:
@@ -2351,6 +2417,102 @@ def duplicate_exam(exam_id):
         return redirect("/teacher/exams")
 
 
+#: The ceiling on one question's marks. The column is a float and every scorer
+#: divides by the paper's total, so a typo of 1000 is not a rounding error — it is
+#: a question that decides the paper. Refused at the door, with the number named.
+MAX_QUESTION_POINTS = 100.0
+
+
+def _marks_from_form(stored, form) -> tuple[bool, dict, list[str]]:
+    """Merge the per-question marks this page posted (`points_<n>`) into the stored map.
+
+    Real form fields rather than one JSON blob on purpose: the blob needs a script
+    to assemble it, and a page that can only save with scripting on is a page half
+    its users cannot save. An empty box **clears** the question's own marks — that
+    is the delete half of the CRUD — while a value out of range is refused and
+    named, because silently clamping 1000 to 100 would write a number the teacher
+    did not type.
+    """
+    base = {}
+    if isinstance(stored, str):
+        try:
+            stored = json.loads(stored)
+        except (json.JSONDecodeError, TypeError):
+            stored = {}
+    if isinstance(stored, dict):
+        base = {str(k): v for k, v in stored.items()}
+
+    changed = False
+    refused: list[str] = []
+    for key, raw in form.items():
+        if not key.startswith("points_"):
+            continue
+        index = key[len("points_"):]
+        if not index.isdigit():
+            continue
+        text = (raw or "").strip().replace(",", ".")
+        if not text:
+            if index in base:
+                base.pop(index, None)
+                changed = True
+            continue
+        try:
+            points = float(text)
+        except ValueError:
+            refused.append(index)
+            continue
+        if points <= 0:
+            if index in base:
+                base.pop(index, None)
+                changed = True
+            continue
+        if points > MAX_QUESTION_POINTS:
+            refused.append(index)
+            continue
+        points = round(points, 2)
+        if base.get(index) != points:
+            base[index] = points
+            changed = True
+    return changed, base, refused
+
+
+def _references_from_form(stored, form) -> tuple[bool, dict]:
+    """Merge the essay reference answers this page posted (`refkey_<n>`).
+
+    The reference lives in `exams.question_rubrics`, which is the column the AI
+    grader already reads as `rubric` — so a key typed here is a key the model is
+    given as the thing to compare an answer against, in the same request, with no
+    second path to keep in step. It is *context*, not an instruction: `ai_prompt`
+    fences it separately from the pupil's answer and from the teacher's criteria.
+    """
+    base = {}
+    if isinstance(stored, str):
+        try:
+            stored = json.loads(stored)
+        except (json.JSONDecodeError, TypeError):
+            stored = {}
+    if isinstance(stored, dict):
+        base = {str(k): v for k, v in stored.items()}
+
+    changed = False
+    for key, raw in form.items():
+        if not key.startswith("refkey_"):
+            continue
+        index = key[len("refkey_"):]
+        if not index.isdigit():
+            continue
+        text = (raw or "").strip()[:4000]
+        if not text:
+            if index in base:
+                base.pop(index, None)
+                changed = True
+            continue
+        if base.get(index) != text:
+            base[index] = text
+            changed = True
+    return changed, base
+
+
 @teacher_bp.route("/exams/<exam_id>/answer-keys", methods=["GET", "POST"])
 @teacher_or_admin_required
 @open_year_required("exam_id")
@@ -2400,27 +2562,52 @@ def answer_keys(exam_id):
         refused = []
         for k, v in answer_key.items():
             qtype = qtypes.get(str(k))
-            if is_objective(qtype) and question_kind(qtype) != KIND_CHOICE:
+            # This page edits a choice key and a short answer's key. A short answer
+            # belongs here because its key is one value with a tolerance — the
+            # thing a teacher comes to this page to correct after a review flag
+            # fired — where a matching question's pairs and a grid's rows are a
+            # structure written in the builder. The split is by *shape*, not by
+            # type age.
+            if is_objective(qtype) and question_kind(qtype) not in (KIND_CHOICE, KIND_NUMERIC):
                 continue
             if choice_mode(qtype) == CHOICE_MODE_SINGLE and len(answer_letters(v)) > 1:
                 refused.append(int(k) + 1 if str(k).isdigit() else k)
                 continue
             merged[str(k)] = normalise_key(qtype, v)
         answer_key = merged
+        # ── Marks and the essay reference key ────────────────────────────────
+        # Both live beside the choice keys on this page, because both answer the
+        # same question a teacher asks here — "what is this question worth, and
+        # what counts as a right answer?" — and because a second page for them is
+        # a second place they can disagree.
+        marks_changed, marks, bad_marks = _marks_from_form(
+            exam.get("question_weights"), request.form)
+        refs_changed, references = _references_from_form(
+            exam.get("question_rubrics"), request.form)
+
         # A save that changes nothing writes nothing. The page posts only the
         # questions a teacher actually edited, so an untouched form arrives with
         # an empty payload, `merged` comes out equal to what is stored, and this
         # becomes a read. Without the guard, opening the page and clicking Save
         # would rewrite the key and re-grade every submission for no change —
         # the load that a 1 vCPU box feels most during a run of papers.
+        updates = {}
         if answer_key != stored:
-            supabase.table("exams").update({"answer_key": json.dumps(answer_key)}).eq("id", exam_id).execute()
-            # Recalculate scores
+            updates["answer_key"] = json.dumps(answer_key)
+        if marks_changed:
+            updates["question_weights"] = json.dumps(marks)
+        if refs_changed:
+            updates["question_rubrics"] = json.dumps(references)
+        if updates:
+            supabase.table("exams").update(updates).eq("id", exam_id).execute()
+            # Recalculate scores. A marks edit moves every mark on the paper, so
+            # the published numbers would otherwise be arithmetic on yesterday's
+            # denominators until somebody opened the exam form.
             try:
                 from app.routes.teacher import _recalculate_scores
                 _recalculate_scores(exam_id)
             except Exception:
-                pass
+                logger.exception("could not recalculate exam %s after a key edit", exam_id)
             # The dashboard's warning is about this key, and that page is cached.
             _invalidate_teacher_dashboard()
             flash("Kunci jawaban berhasil disimpan & nilai diperbarui!", "success")
@@ -2435,11 +2622,32 @@ def answer_keys(exam_id):
                 "beberapa jawaban.",
                 "error",
             )
+        if bad_marks:
+            flash(
+                "Poin maksimal soal " + ", ".join(sorted(bad_marks, key=int))
+                + f" tidak disimpan: isi angka 1-{int(MAX_QUESTION_POINTS)}\u00a0poin.",
+                "error",
+            )
         return redirect(f"/teacher/exams/{exam_id}/answer-keys")
 
     # GET: build question list from question_types
     qtypes = exam.get("question_types", {})
     akey = exam.get("answer_key", {})
+    # The page also edits what each question is worth and the reference answer an
+    # essay is compared against, so both are read here — one row per question, the
+    # same shape the rest of the page already uses.
+    weights = exam.get("question_weights") or {}
+    rubrics = exam.get("question_rubrics") or {}
+    if isinstance(weights, str):
+        try: weights = json.loads(weights)
+        except (json.JSONDecodeError, TypeError): weights = {}
+    if isinstance(rubrics, str):
+        try: rubrics = json.loads(rubrics)
+        except (json.JSONDecodeError, TypeError): rubrics = {}
+    if not isinstance(weights, dict):
+        weights = {}
+    if not isinstance(rubrics, dict):
+        rubrics = {}
     questions = []
     for i in sorted(qtypes.keys(), key=int):
         idx = str(i)
@@ -2448,6 +2656,14 @@ def answer_keys(exam_id):
         questions.append({
             "index": int(idx),
             "type": qtype,
+            # What this question is worth, or None when the app's default
+            # distribution is still in charge. A stored 0 is not a mark, so it
+            # reads as unset.
+            "points": weights.get(idx) if weights.get(idx) else None,
+            # The reference answer for a question the AI grades. Empty is the
+            # normal state for an objective question.
+            "reference": rubrics.get(idx, "") or "",
+            "graded_by_ai": bool(is_essay(qtype)),
             # The family and the readable key are computed here so the page never
             # has to compare a type name to decide what it is looking at.
             "kind": question_kind(qtype),
@@ -3706,8 +3922,6 @@ def grade_question(exam_id, question_index):
     return render_template("teacher/grade_question.html", exam=exam, exam_id=exam_id)
 
 
-@teacher_bp.route("/api/grade-question/<exam_id>/<int:question_index>")
-@teacher_or_admin_required
 def _review_flags_for(supabase, submission_ids):
     """Review flags for a set of papers, in one query."""
     return (supabase.table("grading_flag").select("attempt_id,question_index")
@@ -3725,6 +3939,14 @@ def _annotations_for(supabase, submission_ids, question_index):
             .eq("question_index", int(question_index)).execute().data or [])
 
 
+# The two decorators belong here. They used to sit on `_review_flags_for`, the
+# first helper defined after them: the URL `/teacher/api/grade-question/<id>/<q>`
+# was bound to a function taking `(supabase, submission_ids)`, so Flask called it
+# with `(exam_id, question_index)` — `'…'.table()` — and every marking queue
+# answered 500. The page that shows a pupil's essay was the page with no data on
+# it, which is exactly how "the answer never arrived" was reported.
+@teacher_bp.route("/api/grade-question/<exam_id>/<int:question_index>")
+@teacher_or_admin_required
 def grade_question_api(exam_id, question_index):
     """API: return all students' answers for a specific question."""
     supabase = get_supabase()
@@ -3787,6 +4009,15 @@ def grade_question_api(exam_id, question_index):
         elif isinstance(ans_data, str):
             answer_val = ans_data
 
+        # A paper written before `answers` grew its `{type, text, paragraphs}`
+        # shape holds a bare string, and that string *is* the essay. The old line
+        # below read `essay_text or answer_val if essay_text else ""`, which parses
+        # as `(essay_text or answer_val) if essay_text else ""` — so exactly the
+        # papers with no `text` key showed an empty answer beside a name that had
+        # submitted one.
+        if not essay_text and isinstance(answer_val, str):
+            essay_text = answer_val
+
         anns = sorted(annotations_by_submission.get(str(s["id"]), []),
                       key=lambda r: (int(r.get("start_offset") or 0),
                                      int(r.get("end_offset") or 0)))
@@ -3796,7 +4027,7 @@ def grade_question_api(exam_id, question_index):
             "annotations": anns,
             "name": student_name,
             "answer": answer_val,
-            "essayText": essay_text or answer_val if essay_text else "",
+            "essayText": essay_text,
             "hasCanvas": has_canvas,
             "status": s.get("status", ""),
             "score": s.get("score"),
@@ -4064,6 +4295,58 @@ def grading_annotation_delete():
     return jsonify({"success": True})
 
 
+#: Why a short answer needs a human, in words a teacher acts on. One table, because
+#: the marking page and the queue badge must not describe the same flag two ways.
+REVIEW_REASON_LABELS = {
+    "format": "Tidak terbaca sebagai angka",
+    "value": "Angka di luar toleransi",
+    "spelling": "Ejaan tidak ada di daftar",
+}
+
+
+def _review_items(exam: dict, submission: dict) -> list[dict]:
+    """The short answers on this paper that a teacher has to decide.
+
+    Read from the paper's own `_needs_review` — the slot `manual_review_map`
+    writes on submit and the scan screen has always written — so the marking page
+    and the record cannot disagree about which answers were flagged. An answer the
+    app accepted automatically is never here; the flag exists precisely for the
+    ones it could not decide.
+    """
+    answers = submission.get("answers") or {}
+    if not isinstance(answers, dict):
+        return []
+    flags = answers.get("_needs_review")
+    if not flags:
+        return []
+    if isinstance(flags, dict):
+        pairs = list(flags.items())
+    elif isinstance(flags, (list, tuple, set)):
+        # The scan screen stores the bare question numbers; an answer and a reason
+        # are then absent, and the row says so rather than inventing them.
+        pairs = [(str(i), {}) for i in flags]
+    else:
+        return []
+    qtypes = _as_dict(exam.get("question_types"))
+    keys = _as_dict(exam.get("answer_key"))
+    items: list[dict] = []
+    for index, meta in pairs:
+        info = meta if isinstance(meta, dict) else {}
+        qtype = qtypes.get(str(index))
+        reason = info.get("reason") or ""
+        items.append({
+            "index": str(index),
+            "number": (int(index) + 1) if str(index).isdigit() else str(index),
+            "reason": reason,
+            "reason_label": REVIEW_REASON_LABELS.get(
+                reason, "Jawaban tidak cocok otomatis"),
+            "answer": str(info.get("answer") or ""),
+            "expected": describe_answer(qtype, keys.get(str(index))),
+        })
+    items.sort(key=lambda item: int(item["index"]) if item["index"].isdigit() else 0)
+    return items
+
+
 @teacher_bp.route("/grade/<submission_id>")
 @teacher_or_admin_required
 @require_school_access("submissions", "submission_id", ("exam_id", "exams"))
@@ -4108,11 +4391,78 @@ def grade_detail(submission_id):
         violation_events = events_for_student(supabase, sub["exam_id"], sub["student_id"])
         return render_template("teacher/grade_detail.html", submission=sub, exam=exam,
                                exam_id=sub["exam_id"], student=student,
-                               violation_events=violation_events)
+                               violation_events=violation_events,
+                               review_items=_review_items(exam, sub))
     except Exception as e:
         current_app.logger.error("grade_detail error: %s", str(e), exc_info=True)
         flash(f"Terjadi kesalahan: {failure.sentence(e)}", "error")
         return redirect("/teacher/grading")
+
+
+#: A submission's own marking inputs, on top of what the guard needs. A route that
+#: computes a mark asks for these through `_guard_submission` rather than reading the
+#: same row a second time — the docstring there is the contract.
+MARKING_SUBMISSION_COLUMNS = (
+    "id,exam_id,student_id,answers,penalty,teacher_feedback,score,final_score,"
+    "exams(id,teacher_id,school_id)")
+
+
+def _mark_of(supabase, sub, feedback=None):
+    """(final mark, objective score) for one paper — `exam_scoring`, nothing else.
+
+    `feedback` replaces the marks the row carries without writing anything, which is
+    what lets the marking page ask what a paper *would* score while a teacher types.
+    ``None`` when the exam cannot be read: the caller decides whether to refuse or to
+    keep what it was sent.
+
+    The arithmetic is deliberately not repeated here, and deliberately not in the
+    browser either. Both marking screens used to build a final in JavaScript out of
+    the essay marks alone, so the paper's objective questions and its penalty were
+    left out of the number beside the pupil's name: a paper at 60% on its essays
+    showed 60 where the results page showed 84, and a class marked through the queue
+    was told every question was worth nothing.
+    """
+    exam_id = sub.get("exam_id") or (sub.get("_exam") or {}).get("id")
+    if not exam_id:
+        return None
+    loaded = exam_scoring.load_parts(supabase, exam_id)
+    if not loaded:
+        return None
+    _exam, parts = loaded
+    probe = dict(sub)
+    if feedback is not None:
+        probe["teacher_feedback"] = feedback
+    return exam_scoring.rescore(probe, parts=parts)
+
+
+@teacher_bp.route("/grade/<submission_id>/preview", methods=["POST"])
+@teacher_or_admin_required
+@require_school_access("submissions", "submission_id", ("exam_id", "exams"))
+def preview_score(submission_id):
+    """What this paper would score with the marks on screen — read-only.
+
+    The marking page shows a running total while a teacher types, and it computed it
+    in JavaScript: a second implementation of the rule, covering MCQ keys and weights
+    only, so a matching question, a partial-credit item, the AKM scoring mode and the
+    paper's penalty all paid nothing there. It answered a different question from the
+    one the save writes, so the number beside the pupil's name could disagree with the
+    results page with nothing on screen to say which was the mark.
+
+    A preview is not a save: nothing is written and no audit row is added, because the
+    marks arrive in the request rather than being read back.
+    """
+    supabase = get_supabase()
+    sub, err = _guard_submission(supabase, submission_id,
+                                 columns=MARKING_SUBMISSION_COLUMNS)
+    if err:
+        return err
+    data = request.get_json(silent=True) or {}
+    feedback = data.get("teacher_feedback")
+    mark = _mark_of(supabase, sub, feedback if isinstance(feedback, dict) else None)
+    if not mark:
+        return jsonify({"error": "Nilai kertas ini tidak dapat dihitung"}), 400
+    final_score, objective = mark
+    return jsonify({"final_score": final_score, "score": objective})
 
 
 @teacher_bp.route("/grade/<submission_id>/override", methods=["POST"])
@@ -4123,32 +4473,33 @@ def grade_detail(submission_id):
 def override_score(submission_id):
     # The guard runs before anything is read: `require_school_access` says the row
     # is this school's, and this says it is the caller's to grade.
-    _gb, _gerr = _guard_submission(get_supabase(), submission_id, as_json=_wants_json())
+    supabase = get_supabase()
+    sub, _gerr = _guard_submission(supabase, submission_id, as_json=_wants_json(),
+                                   columns=MARKING_SUBMISSION_COLUMNS)
     if _gerr:
         return _gerr
     if request.is_json:
         data = request.get_json()
-        new_score = data.get("final_score")
+        posted = data.get("final_score")
         feedback = data.get("teacher_feedback", {})
         penalty_override = data.get("penalty")  # optional penalty override
     else:
-        new_score = request.form.get("final_score")
+        posted = request.form.get("final_score")
         feedback_raw = request.form.get("teacher_feedback", "{}")
         penalty_override = request.form.get("penalty")
         try:
             feedback = json.loads(feedback_raw)
         except json.JSONDecodeError:
             feedback = {}
-    supabase = get_supabase()
-    final_score_val = float(new_score) if new_score is not None and new_score != '' else None
+    # Accepted, not trusted. Both screens that post here derive the final from the
+    # per-question marks alone (see `_mark_of`); it is written only when the exam
+    # cannot be read, which is the one case where nothing better is available.
+    posted_final = float(posted) if posted is not None and posted != '' else None
     # Each per-question mark this edit moves is recorded, with both ends. The
-    # previous feedback is read before the update overwrites it, because after
-    # the write the old marks exist only here.
+    # previous feedback is the guarded row's — read before the update overwrites it,
+    # because after the write the old marks exist only here.
     try:
-        prior = row_or_none(
-            supabase.table("submissions").select("teacher_feedback")
-            .eq("id", submission_id).maybe_single().execute())
-        prior_fb = (prior or {}).get("teacher_feedback") or {}
+        prior_fb = sub.get("teacher_feedback") or {}
         if isinstance(prior_fb, str):
             prior_fb = json.loads(prior_fb)
         prior_scores = (prior_fb or {}).get("scores") or {}
@@ -4158,7 +4509,6 @@ def override_score(submission_id):
     except Exception:
         logger.exception("could not audit the score change for %s", submission_id)
     update_data = {
-        "final_score": final_score_val,
         "status": "graded",
         "teacher_feedback": feedback,
     }
@@ -4173,6 +4523,32 @@ def override_score(submission_id):
             _recalculate_scores(sub_updated["exam_id"])
     except Exception:
         pass
+    # The mark left behind is `exam_scoring`'s, and the one returned is that same
+    # number read back out of the row. Echoing the caller's figure was how the queue
+    # displayed a total no results page would agree with.
+    final_score_val = posted_final
+    try:
+        stored = row_or_none(
+            supabase.table("submissions").select("final_score,score")
+            .eq("id", submission_id).maybe_single().execute())
+    except Exception:
+        stored = None
+    if stored and stored.get("final_score") is not None:
+        final_score_val = stored["final_score"]
+    else:
+        # The recalculation did not run, or this paper was never rewritten: compute
+        # the mark here and write it, so a save cannot leave a graded row carrying
+        # the browser's arithmetic.
+        probe = dict(sub)
+        probe["teacher_feedback"] = feedback
+        if "penalty" in update_data:
+            probe["penalty"] = update_data["penalty"]
+        mark = _mark_of(supabase, probe)
+        if mark:
+            final_score_val, objective = mark
+            supabase.table("submissions").update(
+                {"final_score": final_score_val, "score": objective}
+            ).eq("id", submission_id).execute()
     if request.is_json:
         return jsonify({"success": True, "final_score": final_score_val})
     return redirect(request.referrer or "/teacher/results")
@@ -4505,15 +4881,15 @@ def api_grading_queue(exam_id):
 
     subs = supabase.table("submissions").select("id,student_id,answers,teacher_feedback,score,final_score,status,violations,penalty,submitted_at,profiles!inner(full_name)").eq("exam_id", exam_id).in_("status", ["submitted", "graded", "published"]).order("submitted_at", desc=False).execute().data or []
 
-    # Build essay question info
-    essay_qs = []
-    qw = exam.get("question_weights", {}) or {}
-    if not qw and essay_indices:
-        equal_weight = round(100 / len(essay_indices), 2)
-        qw = {ei: equal_weight for ei in essay_indices}
-    for idx_str in essay_indices:
-        idx = int(idx_str)
-        essay_qs.append({"index": idx, "label": f"Soal {idx + 1}", "weight": qw.get(idx_str, 0)})
+    # The points each question pays, from `exam_scoring` — the same parts the mark is
+    # computed from and the results page is read from. This route used to build them
+    # itself and, for a paper with no stored weights, divided the whole paper's 100
+    # among the essays alone (`100 / len(essays)`), leaving every objective question
+    # out of the total; and it put no `weight` on the per-question rows at all, so each
+    # card in the queue said "Bobot: 0" beside the paper's own page saying "maks 15.2
+    # poin". A weight that is not the one the mark is computed with is worse than no
+    # weight: it is a number a teacher would act on.
+    parts = exam_scoring.exam_parts(exam)
 
     result = []
     for s in subs:
@@ -4539,11 +4915,26 @@ def api_grading_queue(exam_id):
                 text = ans.strip()
             if not preview and text:
                 preview = text[:150]
+            # No per-question `preview` any more. The card used to read a hundred
+            # characters of the answer here — a five-paragraph essay shown as its
+            # first sentence, with nothing on screen saying it had been cut. Its
+            # text now comes complete from the on-demand endpoint below, so the
+            # truncated copy is gone rather than kept as a fallback: a fallback is
+            # exactly when a teacher would be reading it and not know.
             per_question.append({
                 "index": ei,
                 "score": fb_scores.get(ei),
                 "comment": fb_comments.get(ei, ""),
-                "preview": text[:100] if text else "",
+                # What this question is worth on the paper, so the card can say
+                # "Bobot: 15.2 poin" and convert the mark in the box to points — the
+                # two readings the paper's own marking page already shows.
+                "weight": parts.weights.get(ei, 0),
+                # How many pages of *this* question were answered in handwriting —
+                # a per-question count, not just the paper's `has_drawing` flag. It
+                # is what the card says before the canvas arrives, and it is a
+                # number rather than the image: the drawings come from the
+                # on-demand endpoint below, one paper at a time.
+                "canvas_pages": _drawn_pages(ans),
             })
         profile = s.get("profiles") or {}
         result.append({
@@ -4559,9 +4950,19 @@ def api_grading_queue(exam_id):
             "submitted_at": s.get("submitted_at"),
             "essay_count": len(essay_indices),
             "graded_essays": graded_essays,
-            "score": s.get("final_score") or s.get("score"),
+            # A stored 0 is a mark, not a missing one: `or` let a paper that
+            # scored nothing fall through to its objective score.
+            "score": (s.get("final_score") if s.get("final_score") is not None
+                      else s.get("score")),
             "score_penalty": s.get("penalty") or 0,
             "has_drawing": any(isinstance(answers.get(ei), dict) and answers[ei].get("pages") for ei in essay_indices),
+            # How many short answers on this paper the app could not decide, so the
+            # card can say so before a teacher opens it — the same flag the marking
+            # page lists one by one. Counted from the stored map, never from a
+            # recomputation: a teacher who has since fixed a key must not see the
+            # old count reappear here.
+            "review_count": len(answers.get("_needs_review") or {})
+                            if isinstance(answers.get("_needs_review"), (dict, list, tuple, set)) else 0,
             "preview": preview,
             "questions": per_question,
             "teacher_feedback": fb,
@@ -4573,6 +4974,107 @@ def api_grading_queue(exam_id):
         "pending": sum(1 for r in result if r["status"] == "submitted"),
         "graded": sum(1 for r in result if r["status"] in ("graded", "published")),
         "essay_indices": essay_indices,
+    })
+
+
+@teacher_bp.route("/api/grading-queue/<exam_id>/answer/<submission_id>")
+@teacher_or_admin_required
+def api_grading_queue_answer(exam_id, submission_id):
+    """One paper's essay answers — the typed text *and* the canvas — for the queue.
+
+    The list endpoint above deliberately carries no images: it answers for a whole
+    class at once, and a stored canvas is 50–100 KB, so sending every pupil's
+    drawings with the list would put hundreds of megabytes behind one page load.
+    This is the on-demand half, asked for the paper a teacher actually opened.
+
+    It exists because the queue showed only one half of an essay answer. A paper
+    whose essays are answered on the canvas (`essay_canvas`) — which is what a
+    handwriting exam produces — read "Tidak ada jawaban teks" on every question
+    while the drawing sat unread in `submissions.answers`, and the only way to see
+    it was to leave the queue for each pupil's own detail page.
+
+    The paper page behind each drawing travels with it: the student's canvas holds
+    ink on transparency, so a drawing read without the sheet it was written on is a
+    few strokes in empty space. `paper` is that page's URL, resolved from the exam's
+    own `pdf_page_urls` by the same index the exam page wrote the canvas under.
+    """
+    supabase = get_supabase()
+    # `answers` is asked for here rather than in a second read: the guard already
+    # has the row open, and the drawings this endpoint exists to hand over live in
+    # that column. It was missing from the select for one version of this route,
+    # and the symptom was the whole feature: every question came back with no pages
+    # — the panel would have shown a pupil who answered nothing, on every paper.
+    sub, err = _guard_submission(
+        supabase, submission_id, as_json=True,
+        columns="id,exam_id,answers,exams(id,teacher_id,school_id)")
+    if err:
+        return err
+    if str(sub.get("exam_id") or "") != str(exam_id):
+        # The submission is the caller's to grade, but it is not this paper's.
+        # Reading it through the wrong exam's pages would compose a pupil's answer
+        # onto another paper's sheet.
+        return jsonify({"error": "Submission bukan milik ujian ini"}), 404
+
+    exam = supabase.table("exams").select(
+        "id,total_questions,question_types,question_pages,pdf_page_urls"
+    ).eq("id", exam_id).single().execute().data or {}
+
+    qtypes = _as_dict(exam.get("question_types"))
+    qpages = _as_dict(exam.get("question_pages"))
+    paper = [str(u) for u in _as_list(exam.get("pdf_page_urls")) if u]
+    answers = _as_dict(sub.get("answers"))
+
+    questions = {}
+    for i in range(int(exam.get("total_questions") or 0)):
+        key = str(i)
+        if not is_essay(qtypes.get(key)):
+            continue
+        ans = answers.get(key)
+        text = ""
+        pages_raw = {}
+        if isinstance(ans, dict):
+            text = str(ans.get("text") or ans.get("answer") or "").strip()
+            pages_raw = ans.get("pages") or {}
+        elif isinstance(ans, str):
+            text = ans.strip()
+
+        pages = []
+        for pk, pd in (pages_raw or {}).items():
+            if not isinstance(pd, dict):
+                continue
+            try:
+                pidx = int(pk)
+            except (TypeError, ValueError):
+                continue
+            canvas = pd.get("canvas") or ""
+            boxes = [b for b in (pd.get("textBoxes") or [])
+                     if isinstance(b, dict) and str(b.get("text") or "").strip()]
+            # A page carrying neither ink nor a note is a page the pupil visited,
+            # not a page they answered on.
+            if not canvas and not boxes:
+                continue
+            pages.append({
+                "page": pidx,
+                "canvas": canvas,
+                "textBoxes": boxes,
+                "paper": paper[pidx] if 0 <= pidx < len(paper) else "",
+            })
+        pages.sort(key=lambda p: p["page"])
+
+        questions[key] = {
+            "index": i,
+            "text": text,
+            "pages": pages,
+            # Which sheet this question was printed on, so the panel opens on the
+            # page the pupil answered on rather than on page one of the paper.
+            "question_page": str(qpages.get(key) or ""),
+        }
+
+    return jsonify({
+        "submission_id": submission_id,
+        "exam_id": exam_id,
+        "paper_pages": len(paper),
+        "questions": questions,
     })
 
 
@@ -4942,9 +5444,18 @@ def ai_settings():
                 settings["prompts"] = []
         elif pr is None:
             settings["prompts"] = []
-        # Auto-upgrade if less than 3 prompts (old version)
+        # Upgrade a row that holds no prompts at all — an old save that wrote an
+        # empty list, or a row created before the catalogue existed.
+        #
+        # The condition used to be `len(prompts) < 3`, which was a heuristic for
+        # "written by an older version" back when the only way a row could hold
+        # fewer than three was that older version. Now that a teacher can delete a
+        # prompt, two prompts is a state they *chose*, and this branch reinstated
+        # the ten built-ins on the next page load — the delete button would appear
+        # to work and then quietly undo itself. Emptiness is the property that
+        # actually means "nothing was ever chosen here".
         try:
-            if len(settings.get("prompts", [])) < 3:
+            if not settings.get("prompts"):
                 default_prompts = [
                     {"id": "default", "label": "Default (Semua Mapel)", "template": "Kamu adalah asisten koreksi ujian. Koreksi jawaban esai berikut berdasarkan soal dan bobot maksimal.\n\nSoal: {question}\nPedoman Penskoran: {rubric}\nBobot Maksimal: {max_score} poin\nJawaban Siswa: \"{answer}\"\n\nBerikan skor (0-{max_score}) dan feedback singkat dalam bahasa Indonesia.\nFormat JSON: {\"score\": <number>, \"feedback\": \"<string>\"}"},
                     {"id": "ipa", "label": "IPA / Sains", "template": "Kamu adalah asisten koreksi mata pelajaran IPA (Fisika, Kimia, Biologi, Earth Science).\n\nSoal: {question}\nPedoman Penskoran: {rubric}\nBobot Maksimal: {max_score} poin\nJawaban Siswa: \"{answer}\"\n\nBerikan skor (0-{max_score}). Nilai berdasarkan: keakuratan konsep sains, penggunaan istilah ilmiah yang tepat, logika ilmiah, dan kelengkapan jawaban. Feedback dalam bahasa Indonesia.\nFormat JSON: {\"score\": <number>, \"feedback\": \"<string>\"}"},
@@ -4965,6 +5476,12 @@ def ai_settings():
                 settings["active_prompt_id"] = "default"
         except Exception as e:
             current_app.logger.error(f"Auto-upgrade prompts error: {e}")
+    # Normalised once, here, so the page renders the same shape whatever the
+    # column holds (JSONB, a JSON string, a row missing `subject`) and an active id
+    # that names a prompt which is gone is repaired before it is shown as "active".
+    settings["prompts"] = _prompt_rows(settings)
+    if not any(p["id"] == settings.get("active_prompt_id") for p in settings["prompts"]):
+        settings["active_prompt_id"] = settings["prompts"][0]["id"] if settings["prompts"] else ""
     return render_template("teacher/ai_settings.html", keys=keys, settings=settings)
 
 
@@ -5021,6 +5538,8 @@ def ai_delete_key(key_id):
 
 
 @teacher_bp.route("/ai-settings/save-prompt", methods=["POST"])
+@subscription_write_required
+@require_subscription("ai_grading")
 @teacher_or_admin_required
 def ai_save_prompt():
     supabase = get_supabase()
@@ -5039,6 +5558,8 @@ def ai_save_prompt():
 
 
 @teacher_bp.route("/ai-settings/reset-prompt", methods=["POST"])
+@subscription_write_required
+@require_subscription("ai_grading")
 @teacher_or_admin_required
 def ai_reset_prompt():
     default_prompts = [
@@ -5060,6 +5581,217 @@ def ai_reset_prompt():
     }).execute()
     flash("Prompt dikembalikan ke default", "success")
     return redirect("/teacher/ai-settings")
+
+
+# ── Grading prompts: the teacher's own criteria, edited one prompt at a time ──
+#
+# The prompts live in one JSONB column and the page had **no control for any of
+# them**: "Edit Prompts →" was an anchor to a `#prompts` section that did not
+# exist, so a teacher could pick between the ten templates the wizard shipped and
+# could not add an eleventh, rename one, or delete one they had written. The save
+# route existed (`/ai-settings/save-prompt`) but posted the whole array as one
+# blob, which needs a client that owns the array — and the page had no client.
+#
+# Two rules hold across every route below. A prompt is **the caller's own**: every
+# read and write is scoped to `g.user_id`, because a prompt is a teacher's words
+# about how they mark, not school data. And every write is gated on the plan that
+# pays for AI grading: the only reader of these rows is a call to a provider, so
+# writing one on a plan without `ai_grading` would be collecting a setting that
+# can never be used.
+
+#: A route id has to survive a URL, so it is a slug rather than a label. The
+#: built-ins use plain words (`default`, `ipa`), and a new one must look the same.
+PROMPT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,47}$")
+
+#: Ten built-ins plus room for the teacher's own. A number rather than none:
+#: the page draws every prompt as a card, and an accidental 400 of them is a page
+#: that takes seconds to render on a 1 vCPU box.
+MAX_PROMPTS = 20
+
+
+def _prompt_rows(settings) -> list[dict]:
+    """The stored prompts as a list of dicts, whatever shape the column holds.
+
+    `prompts` is JSONB but was written as a JSON *string* by an older save path,
+    so both arrive here. A row that is not a dict is dropped rather than rendered
+    as an empty card — a prompt with no template is not a prompt.
+    """
+    raw = (settings or {}).get("prompts")
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            raw = []
+    if not isinstance(raw, list):
+        return []
+    rows = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        pid = str(item.get("id") or "").strip()
+        if not PROMPT_ID_RE.match(pid):
+            continue
+        rows.append({
+            "id": pid,
+            "label": str(item.get("label") or pid)[:80],
+            # Which subject this prompt is for. Empty means "any", which is what
+            # every built-in is: a teacher who writes one prompt has one prompt.
+            "subject": str(item.get("subject") or "")[:60],
+            "template": str(item.get("template") or ""),
+        })
+    return rows
+
+
+def _prompt_slug(label: str) -> str:
+    """A URL-safe id from a label, with a suffix if that name is taken."""
+    base = re.sub(r"[^a-z0-9]+", "-", (label or "").lower()).strip("-")[:40]
+    return base or "prompt"
+
+
+def _store_prompts(supabase, teacher_id, prompts, active_id):
+    """Write the whole list back, upserting the teacher's single settings row."""
+    supabase.table("teacher_ai_settings").upsert({
+        "teacher_id": teacher_id,
+        "prompts": prompts,
+        "active_prompt_id": active_id,
+    }).execute()
+
+
+def _prompts_and_active(supabase, teacher_id) -> tuple[list[dict], str]:
+    """Read the list and the active id, repaired against each other.
+
+    An active id that names a prompt which is gone is not an error to show a
+    teacher — it is a stale pointer, and the honest repair is the first prompt
+    that does exist. Read this way, a delete can never leave the grader with no
+    criteria at all.
+    """
+    try:
+        res = (supabase.table("teacher_ai_settings").select("prompts,active_prompt_id")
+               .eq("teacher_id", teacher_id).limit(1).execute())
+        settings = (res.data or [{}])[0] if res.data else {}
+    except Exception:
+        logger.exception("could not read the AI prompts for %s", teacher_id)
+        settings = {}
+    prompts = _prompt_rows(settings)
+    active = str(settings.get("active_prompt_id") or "")
+    if not any(p["id"] == active for p in prompts):
+        active = prompts[0]["id"] if prompts else ""
+    return prompts, active
+
+
+@teacher_bp.route("/ai-settings/prompt/add", methods=["POST"])
+@subscription_write_required
+@require_subscription("ai_grading")
+@teacher_or_admin_required
+def ai_prompt_add():
+    """Add one prompt of the teacher's own."""
+    from app.services.ai_prompt import MAX_TEACHER_PROMPT
+
+    supabase = get_supabase()
+    label = (request.form.get("label") or "").strip()[:80]
+    subject = (request.form.get("subject") or "").strip()[:60]
+    template = (request.form.get("template") or "").strip()
+    if not label or not template:
+        flash("prompt_needs_label_and_text", "error")
+        return redirect(url_for("teacher.ai_settings") + "#prompts")
+    if len(template) > MAX_TEACHER_PROMPT:
+        flash("prompt_too_long", "error")
+        return redirect(url_for("teacher.ai_settings") + "#prompts")
+    prompts, active = _prompts_and_active(supabase, g.user_id)
+    if len(prompts) >= MAX_PROMPTS:
+        flash("prompt_limit_reached", "error")
+        return redirect(url_for("teacher.ai_settings") + "#prompts")
+
+    # A unique id, because the id is the address a later edit/delete uses. The
+    # suffix is a counter rather than a random string so a duplicate label reads
+    # as `esai-2` on the page instead of an opaque token.
+    slug, n = _prompt_slug(label), 1
+    taken = {p["id"] for p in prompts}
+    pid = slug
+    while pid in taken:
+        n += 1
+        pid = f"{slug}-{n}"
+    prompts.append({"id": pid, "label": label, "subject": subject, "template": template})
+    _store_prompts(supabase, g.user_id, prompts, active or pid)
+    log_activity("create", "ai_prompt", g.user_id, new_data={"prompt_id": pid}, user_id=g.user_id)
+    flash("prompt_saved", "success")
+    return redirect(url_for("teacher.ai_settings") + "#prompts")
+
+
+@teacher_bp.route("/ai-settings/prompt/<prompt_id>/save", methods=["POST"])
+@subscription_write_required
+@require_subscription("ai_grading")
+@teacher_or_admin_required
+def ai_prompt_save(prompt_id):
+    """Edit one prompt's label, subject and text."""
+    from app.services.ai_prompt import MAX_TEACHER_PROMPT
+
+    if not PROMPT_ID_RE.match(str(prompt_id or "")):
+        flash("prompt_not_found", "error")
+        return redirect(url_for("teacher.ai_settings") + "#prompts")
+    supabase = get_supabase()
+    prompts, active = _prompts_and_active(supabase, g.user_id)
+    target = next((p for p in prompts if p["id"] == prompt_id), None)
+    if not target:
+        flash("prompt_not_found", "error")
+        return redirect(url_for("teacher.ai_settings") + "#prompts")
+    template = (request.form.get("template") or "").strip()
+    if not template:
+        flash("prompt_needs_label_and_text", "error")
+        return redirect(url_for("teacher.ai_settings") + "#prompts")
+    if len(template) > MAX_TEACHER_PROMPT:
+        flash("prompt_too_long", "error")
+        return redirect(url_for("teacher.ai_settings") + "#prompts")
+    target["template"] = template
+    label = (request.form.get("label") or "").strip()[:80]
+    if label:
+        target["label"] = label
+    target["subject"] = (request.form.get("subject") or "").strip()[:60]
+    _store_prompts(supabase, g.user_id, prompts, active)
+    log_activity("update", "ai_prompt", g.user_id, new_data={"prompt_id": prompt_id}, user_id=g.user_id)
+    flash("prompt_saved", "success")
+    return redirect(url_for("teacher.ai_settings") + "#prompts")
+
+
+@teacher_bp.route("/ai-settings/prompt/<prompt_id>/activate", methods=["POST"])
+@subscription_write_required
+@require_subscription("ai_grading")
+@teacher_or_admin_required
+def ai_prompt_activate(prompt_id):
+    """Make one prompt the one grading uses when the exam's subject matches nothing."""
+    supabase = get_supabase()
+    prompts, _ = _prompts_and_active(supabase, g.user_id)
+    if not any(p["id"] == prompt_id for p in prompts):
+        flash("prompt_not_found", "error")
+        return redirect(url_for("teacher.ai_settings") + "#prompts")
+    _store_prompts(supabase, g.user_id, prompts, prompt_id)
+    flash("prompt_activated", "success")
+    return redirect(url_for("teacher.ai_settings") + "#prompts")
+
+
+@teacher_bp.route("/ai-settings/prompt/<prompt_id>/delete", methods=["POST"])
+@subscription_write_required
+@require_subscription("ai_grading")
+@teacher_or_admin_required
+def ai_prompt_delete(prompt_id):
+    """Delete one prompt. The active one falls back to a sibling, never to nothing."""
+    supabase = get_supabase()
+    prompts, active = _prompts_and_active(supabase, g.user_id)
+    kept = [p for p in prompts if p["id"] != prompt_id]
+    if len(kept) == len(prompts):
+        flash("prompt_not_found", "error")
+        return redirect(url_for("teacher.ai_settings") + "#prompts")
+    if not kept:
+        # One prompt is the floor. An empty list means grading falls back to the
+        # builder's default criteria with nothing on the page saying so, which is
+        # the shape of a setting that silently stopped being applied.
+        flash("prompt_keep_one", "error")
+        return redirect(url_for("teacher.ai_settings") + "#prompts")
+    _store_prompts(supabase, g.user_id, kept,
+                   active if active != prompt_id else kept[0]["id"])
+    log_activity("delete", "ai_prompt", g.user_id, new_data={"prompt_id": prompt_id}, user_id=g.user_id)
+    flash("prompt_deleted", "success")
+    return redirect(url_for("teacher.ai_settings") + "#prompts")
 
 
 def _resolve_grade_component(supabase, school_id, raw):

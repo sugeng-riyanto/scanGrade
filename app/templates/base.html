@@ -867,17 +867,48 @@ window.sgSavePrefs = function (patch) {
 
 {% block modals %}{% endblock %}
 <script>
-// Auto-inject CSRF token into all forms + AJAX requests
+// The CSRF token reaches a form at SUBMIT time, not at load time.
+//
+// It used to be stamped into `form[method="POST"]` once on DOMContentLoaded, and
+// that is the wrong moment for every form this app renders from a list: an Alpine
+// `<template x-for>` clone does not exist yet when the page loads, so the key list
+// on /teacher/ai-settings had forms with no token and its Delete button answered
+// `{"error":"CSRF token invalid"}` — a page whose own control was never wired to
+// the server it posts to. One capture-phase listener covers forms that exist now and
+// forms that will exist, which is the property the load-time sweep could not have.
+(function () {
+    function token() {
+        const meta = document.querySelector('meta[name="csrf-token"]');
+        return meta ? meta.getAttribute('content') : '';
+    }
+    function stamp(form) {
+        if (!form || !form.getAttribute) return;
+        if ((form.getAttribute('method') || '').toUpperCase() !== 'POST') return;
+        const value = token();
+        if (!value) return;
+        const field = form.querySelector('input[name="_csrf_token"]');
+        if (field) {
+            if (!field.value) field.value = value;
+            return;
+        }
+        const input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = '_csrf_token';
+        input.value = value;
+        form.appendChild(input);
+    }
+    // Capture, so this runs before a `submit` handler that calls preventDefault.
+    document.addEventListener('submit', function (e) { stamp(e.target); }, true);
+    // A form submitted by its own `requestSubmit()`/`submit()` from a script still
+    // raises no event on the document, so the pages that do that call `SG.csrf`.
+    window.SG = window.SG || {};
+    window.SG.csrf = token;
+})();
+
 document.addEventListener('DOMContentLoaded', function() {
     const meta = document.querySelector('meta[name="csrf-token"]');
     const token = meta ? meta.getAttribute('content') : '';
     if (!token) return;
-    // Add hidden field to all forms
-    document.querySelectorAll('form[method="POST"]').forEach(f => {
-        const input = document.createElement('input');
-        input.type = 'hidden'; input.name = '_csrf_token'; input.value = token;
-        f.appendChild(input);
-    });
     // Add CSRF header to all fetch/XHR POST/PUT/DELETE
     const origFetch = window.fetch;
     window.fetch = function(url, opts) {

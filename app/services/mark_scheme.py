@@ -57,8 +57,10 @@ from app.services.question_types import (
     ESSAY_CANVAS,
     ESSAY_TEXT,
     MATCH,
+    MATRIX,
     MCQ,
     MCQ_MULTI,
+    NUMERIC,
     ORDER,
     SCHEME_KEY,
     TRUE_FALSE,
@@ -89,6 +91,13 @@ DEFAULT_MARKS: dict[str, float] = {
     MATCH: 3.0,
     DRAG_DROP: 3.0,
     ORDER: 3.0,
+    # One number, one mark: a short answer is a single judgement, like a true/false,
+    # and pricing it with the multi-part types would make a one-word answer worth
+    # three times a choice question.
+    NUMERIC: 1.0,
+    # Several rows of judgement in one question, so it is priced beside the other
+    # multi-part types rather than at a single mark.
+    MATRIX: 3.0,
     ESSAY_CANVAS: 10.0,
     ESSAY_TEXT: 10.0,
     ESSAY: 10.0,
@@ -106,7 +115,8 @@ DEFAULT_MARKS: dict[str, float] = {
 #: between "drag these into the box" and "rank these" is choosing the question's
 #: presentation, which is theirs to choose.
 SCHEME_ORDER: tuple[str, ...] = (
-    MCQ, TRUE_FALSE, COMPLEX_MULTIPLE_CHOICE, MATCH, DRAG_DROP, ORDER, ESSAY_CANVAS,
+    MCQ, TRUE_FALSE, COMPLEX_MULTIPLE_CHOICE, MATCH, DRAG_DROP, ORDER,
+    NUMERIC, MATRIX, ESSAY_CANVAS,
 )
 
 #: The *row* a stored type is priced in, where that is not the type itself.

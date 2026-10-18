@@ -1,310 +1,469 @@
-"""AI grading pipeline with cache for essay answers."""
+"""AI essay grading — a suggestion a teacher turns into a mark.
+
+This module used to do three things at once, and the third one was the problem: it
+built the prompt by pasting the pupil's answer after a rubric, it accepted whatever
+number the model returned, and on the bulk path it wrote that number straight into
+`submissions.answers`. A model could therefore decide a child's mark with no teacher
+in the loop, and nothing in the schema said otherwise.
+
+What it does now, and nothing else:
+
+* **build** the prompt in one place (`ai_prompt.build_grading_prompt`), with the
+  answer fenced as data and a fixed system turn that a rubric cannot rewrite;
+* **run** it in a Celery worker, so a teacher's request returns immediately on a
+  1-vCPU box instead of holding a gunicorn worker open for an external API's
+  latency;
+* **validate** the reply against the question's own points before storing it, and
+  record what had to be corrected as an anomaly rather than quietly fixing it;
+* **store** it as `ai_grading_suggestion`, a row whose status a *person* moves.
+
+The one thing it no longer does is write a mark. `apply_suggestion` records that a
+teacher accepted a suggestion and hands the number back for the form; the mark
+itself is written by the grading flow the teacher already presses save in. That is
+the whole difference between "AI helps grade" and "AI grades", and it is a
+separation of tables rather than a comment.
+"""
 import json
 import logging
-from datetime import datetime, timezone
 
+from app.celery_app import celery_app
+from app.services import ai_prompt
 from app.services.question_types import is_essay
 
 logger = logging.getLogger("app")
 
+TABLE = "ai_grading_suggestion"
 
-def _get_cache(submission_id: str, question_index: int, supabase) -> dict:
-    """Check if this essay has been graded before (cache hit)."""
-    res = supabase.table("ai_grading_cache") \
-        .select("*") \
-        .eq("submission_id", submission_id) \
-        .eq("question_index", question_index) \
-        .limit(1) \
-        .execute()
-    if res.data:
-        entry = res.data[0]
-        if not entry.get("teacher_overridden"):
-            return {
-                "cached": True,
-                "score": entry.get("ai_score"),
-                "feedback": entry.get("ai_feedback"),
-                "provider": entry.get("ai_provider"),
-                "created_at": entry.get("created_at"),
-            }
-    return {"cached": False}
+#: A suggestion in one of these states is still the answer to the question the
+#: teacher asked; asking again is a duplicate, not a second opinion. `applied` and
+#: `rejected` are decisions, and a decision does not block a new run — a teacher who
+#: rejected a suggestion may reasonably ask again after editing the rubric.
+OPEN_STATES = ("queued", "running", "ready")
+
+#: How the prompt is built. Stored on every row so a mark can be explained by the
+#: prompt that produced it even after this file changes.
+PROMPT_VERSION = "v2-fenced"
+
+#: A bulk request is a person clicking once on a class. Beyond this it is a script,
+#: and a script asking for 400 API calls from a button is a bill nobody approved.
+MAX_BULK = 100
+
+#: Points for a question the exam carries no weight for. The same default the
+#: marking page already uses (`question_weights[qIdx] || 100`), so the number the
+#: teacher sees beside the field is the number the model was asked for.
+DEFAULT_POINTS = 100.0
 
 
-def _save_cache(submission_id: str, question_index: int, score: float, feedback: str,
-                provider: str, prompt: str, raw_response: str, tokens: int, supabase):
-    """Save AI grading result to cache."""
+def _rows(result):
+    return getattr(result, "data", None) or []
+
+
+# ── reading the paper ────────────────────────────────────────────────────────
+
+def question_points(exam: dict, question_index) -> float:
+    """The marks question `question_index` is worth, from `question_weights`.
+
+    `_scheme` is skipped explicitly rather than by accident: it rides in the same
+    map (see `question_types.SCHEME_KEY`) and reading it as a question's points
+    would give one question the whole mark scheme as its maximum.
+    """
+    weights = (exam or {}).get("question_weights") or {}
+    if isinstance(weights, str):
+        try:
+            weights = json.loads(weights)
+        except ValueError:
+            weights = {}
+    if not isinstance(weights, dict):
+        weights = {}
+    raw = weights.get(str(question_index))
     try:
-        supabase.table("ai_grading_cache").upsert({
-            "submission_id": submission_id,
-            "question_index": question_index,
-            "ai_score": score,
-            "ai_feedback": feedback[:1000] if feedback else "",
-            "ai_provider": provider,
-            "tokens_used": tokens,
-            "prompt_sent": prompt[:2000] if prompt else "",
-            "raw_response": raw_response[:2000] if raw_response else "",
-        }, on_conflict=["submission_id", "question_index"]).execute()
-    except Exception as e:
-        logger.error("Failed to save AI grading cache: %s", e)
+        points = float(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_POINTS
+    return points if points > 0 else DEFAULT_POINTS
 
 
-_LANG_FEEDBACK = {
-    "en": (
-        "Evaluate this answer at IELTS 7.5+ standard.\n\n"
-        "Scoring Guidelines:\n"
-        "- 85-100: Exceptional — demonstrates mastery beyond expectations\n"
-        "- 70-84: Proficient — solid understanding with minor gaps\n"
-        "- 55-69: Developing — adequate but needs improvement\n"
-        "- 40-54: Emerging — significant gaps in understanding\n"
-        "- Below 40: Insufficient — major revision needed\n\n"
-        "Requirements:\n"
-        "1. Be encouraging — start with what the student did well\n"
-        "2. Provide specific, actionable feedback for improvement\n"
-        "3. Use professional academic language (IELTS 7.5+ vocabulary)\n"
-        "4. Score must be a number (0-{max_score})\n"
-        "5. Feedback must be in English\n"
-        "6. Include a brief 'reasoning' explaining why the score was given\n"
-        "7. Include a 'confidence' score from 0.0 to 1.0 indicating how sure you are\n\n"
-        "Output ONLY JSON:\n"
-        '{{"score": <number>, "feedback": "<constructive feedback>", "reasoning": "<1-2 sentence reasoning>", "confidence": <0.0-1.0>}}'
-    ),
-    "id": (
-        "Evaluasi jawaban ini dengan standar UKBI/EYD.\n\n"
-        "Pedoman Penskoran:\n"
-        "- 85-100: Istimewa — menguasai materi melebihi ekspektasi\n"
-        "- 70-84: Baik — pemahaman solid dengan sedikit kekurangan\n"
-        "- 55-69: Cukup — memadai namun perlu peningkatan\n"
-        "- 40-54: Kurang — kesenjangan pemahaman yang signifikan\n"
-        "- Di bawah 40: Sangat Kurang — perlu perbaikan mendasar\n\n"
-        "Ketentuan:\n"
-        "1. Mulai dengan apresiasi — sebutkan kelebihan jawaban\n"
-        "2. Berikan saran perbaikan yang spesifik dan membangun\n"
-        "3. Gunakan Bahasa Indonesia baku sesuai EYD\n"
-        "4. Skor berupa angka (0-{max_score})\n"
-        "5. Feedback dalam Bahasa Indonesia yang memotivasi\n"
-        "6. Sertakan 'reasoning' singkat menjelaskan alasan skor\n"
-        "7. Sertakan 'confidence' 0.0-1.0 seberapa yakin Anda\n\n"
-        "Output HANYA JSON:\n"
-        '{{"score": <number>, "feedback": "<feedback membangun>", "reasoning": "<alasan 1-2 kalimat>", "confidence": <0.0-1.0>}}'
-    ),
-    "zh-Hant": (
-        "根據HSK 5級標準評估此答案。\n\n"
-        "評分指南：\n"
-        "- 85-100：優秀 — 掌握程度超出預期\n"
-        "- 70-84：良好 — 理解扎實，略有不足\n"
-        "- 55-69：一般 — 尚可但需加強\n"
-        "- 40-54：不足 — 有明顯理解差距\n"
-        "- 低於40：急需加強 — 需要大幅改進\n\n"
-        "要求：\n"
-        "1. 先肯定學生的優點\n"
-        "2. 提供具體可行的改進建議\n"
-        "3. 用正向積極的語氣\n"
-        "4. 分數為數字（0-{max_score}）\n"
-        "5. 反饋使用繁體中文\n"
-        "6. 包含簡短'reasoning'解釋給分原因\n"
-        "7. 包含'confidence' 0.0-1.0 表示確定程度\n\n"
-        "僅輸出JSON：\n"
-        '{{"score": <number>, "feedback": "<建設性反饋>", "reasoning": "<1-2句理由>", "confidence": <0.0-1.0>}}'
-    ),
-    "ar": (
-        "قم بتقييم هذه الإجابة بمستوى مناسب للمرحلة المتوسطة والثانوية.\n\n"
-        "مبادئ التقييم:\n"
-        "- 85-100: ممتاز — يُظهر إتقانًا يتجاوز التوقعات\n"
-        "- 70-84: جيد جدًا — فهم قوي مع بعض النواقص البسيطة\n"
-        "- 55-69: مقبول — إجابة مناسبة لكنها تحتاج تحسينًا\n"
-        "- 40-54: ضعيف — فجوات واضحة في الفهم\n"
-        "- أقل من 40: غير كافٍ — يحتاج مراجعة جوهرية\n\n"
-        "المتطلبات:\n"
-        "1. ابدأ بالإيجابيات — اذكر ما أجاد الطالب\n"
-        "2. قدم اقتراحات محددة للتحسين\n"
-        "3. استخدم لغة عربية فصيحة ومشجعة\n"
-        "4. الدرجة تكون رقمًا (0-{max_score})\n"
-        "5. التعليق باللغة العربية\n"
-        "6. تضمين 'reasoning' موجز يشرح سبب الدرجة\n"
-        "7. تضمين 'confidence' 0.0-1.0 لمدى الثقة\n\n"
-        "أخرج JSON فقط:\n"
-        '{{"score": <number>, "feedback": "<تعليق بناء>", "reasoning": "<سبب 1-2 جملة>", "confidence": <0.0-1.0>}}'
-    ),
-}
+def answer_text(submission: dict, question_index) -> str:
+    """The pupil's words for one question, as stored.
+
+    The answer lives in `submissions.answers`, keyed by question index, and its
+    shape has drifted over time: a bare string, `{"answer": ...}`, `{"text": ...}`.
+    `ai_prompt.plain_text` folds all three and strips the editor's markup, so this
+    only has to find the right slot.
+    """
+    answers = (submission or {}).get("answers") or {}
+    if isinstance(answers, str):
+        try:
+            answers = json.loads(answers)
+        except ValueError:
+            return ""
+    if not isinstance(answers, dict):
+        return ""
+    value = answers.get(str(question_index))
+    if isinstance(value, dict):
+        for key in ("answer", "text", "value", "content"):
+            if value.get(key):
+                return str(value[key])
+        return ""
+    return str(value) if value else ""
 
 
-def _build_prompt(question_text: str, rubric: str, diagram_context: str,
-                  student_answer: str, max_score: int, lang: str = "en") -> str:
-    """Build a smart prompt for AI essay grading."""
-    feedback_template = _LANG_FEEDBACK.get(lang) or _LANG_FEEDBACK["en"]
-    parts = ["Koreksi jawaban esai berikut dengan teliti dan adil."]
-    if question_text:
-        parts.append(f"\nSoal: {question_text}")
-    if rubric:
-        parts.append(f"\nRubrik Penilaian:\n{rubric}")
-    if diagram_context:
-        parts.append(f"\nKonteks Diagram/Gambar:\n{diagram_context}")
-    parts.append(f"\nJawaban Siswa:\n{student_answer}")
-    parts.append(f"\nSkor Maksimal: {max_score}")
-    parts.append("\n" + feedback_template.format(max_score=max_score))
-    return "\n".join(parts)
+def _criteria_for(teacher_id, supabase, subject=None) -> str:
+    """The teacher's own grading prompt, read as *criteria* for this exam's subject.
+
+    Placeholders are dropped for the same reason `ai_service.suggest_grade` drops
+    them: `{answer}` inside the criteria would put the pupil's text back inside an
+    instruction, which is the hole this module exists to close.
+
+    `subject` is the exam's own, so a prompt a teacher wrote for Matematika is the
+    one used when marking Matematika — otherwise "a different prompt for each
+    subject" would be a page that describes behaviour the grader does not have.
+    """
+    from app.services.ai_service import _PLACEHOLDER, _get_active_prompt, _get_ai_settings
+
+    try:
+        settings = _get_ai_settings(teacher_id)
+    except Exception as exc:                      # a settings row is not worth a 500
+        logger.warning("AI settings unreadable for %s: %s", teacher_id, exc)
+        return ""
+    return _PLACEHOLDER.sub("", _get_active_prompt(settings, subject=subject) or "").strip()
 
 
-def grade_essay(teacher_id: str, submission_id: str, question_index: int,
-                question_text: str, student_answer: str, max_score: int,
-                rubric: str = "", diagram_context: str = "",
-                exam_id: str = "", lang: str = "en") -> dict:
-    """Grade a single essay answer with cache check.
-    
-    Returns dict with score, feedback, cached flag, provider.
+def _exam_row(supabase, exam_id) -> dict:
+    if not exam_id:
+        return {}
+    # Every window column this module reads is named: PostgREST reads a column left
+    # out of a select as *absent*, never as an error, so a forgotten `question_weights`
+    # would silently fall back to 100 points for the whole paper.
+    res = supabase.table("exams").select(
+        "id,subject,question_texts,question_weights,question_rubrics,diagram_contexts"
+    ).eq("id", exam_id).limit(1).execute()
+    return (_rows(res) or [{}])[0]
+
+
+# ── creating a suggestion ────────────────────────────────────────────────────
+
+def create_suggestion(supabase, *, teacher_id, submission_id, question_index,
+                      exam_id=None, school_id=None, answer_override=None):
+    """Queue one suggestion, or hand back the one already in flight.
+
+    The duplicate check is what stops a double-clicked button from costing two
+    provider calls; the partial unique index in migration 068 is the same rule at
+    the database, because a check in Python alone loses the race between two
+    workers.
+    """
+    existing = _rows(
+        supabase.table(TABLE).select("*")
+        .eq("submission_id", submission_id)
+        .eq("question_index", int(question_index))
+        .eq("teacher_id", teacher_id)
+        .in_("status", list(OPEN_STATES))
+        .limit(1).execute()
+    )
+    if existing:
+        return existing[0], True
+
+    payload = {
+        "submission_id": submission_id,
+        "question_index": int(question_index),
+        "teacher_id": teacher_id,
+        "exam_id": exam_id,
+        "school_id": school_id,
+        "status": "queued",
+        "prompt_version": PROMPT_VERSION,
+    }
+    if answer_override:
+        # Only the teacher's OCR reading of a canvas answer reaches this. It is
+        # stored rather than posted to the worker because a task that takes its
+        # text from a request body has no barrier at all — the fence in `ai_prompt`
+        # would then be protecting a prompt whose contents arrived from outside.
+        payload["answer_override"] = str(answer_override)[:ai_prompt.MAX_ANSWER_CHARS * 2]
+    try:
+        written = _rows(supabase.table(TABLE).insert(payload).execute())
+    except Exception as exc:
+        # The partial unique index refused it: a worker inserted the same row
+        # between the read above and this write. Read it back rather than fail.
+        logger.info("suggestion insert raced for %s Q%s: %s",
+                    submission_id, question_index, exc)
+        again = _rows(
+            supabase.table(TABLE).select("*")
+            .eq("submission_id", submission_id)
+            .eq("question_index", int(question_index))
+            .eq("teacher_id", teacher_id)
+            .in_("status", list(OPEN_STATES))
+            .limit(1).execute()
+        )
+        if again:
+            return again[0], True
+        raise
+    row = written[0] if written else dict(payload)
+    return row, False
+
+
+def queue_suggestion(teacher_id, *, submission_id, question_index, exam_id=None,
+                     school_id=None, ocr_text=""):
+    """Create the row and hand it to Celery. Returns `(row, duplicate)`."""
+    from app.utils.auth import get_supabase
+
+    supabase = get_supabase()
+    row, duplicate = create_suggestion(
+        supabase,
+        teacher_id=teacher_id,
+        submission_id=submission_id,
+        question_index=question_index,
+        exam_id=exam_id,
+        school_id=school_id,
+        answer_override=ocr_text or None,
+    )
+    if not duplicate:
+        grade_suggestion_task.delay(row["id"])
+    return row, duplicate
+
+
+def queue_bulk(teacher_id, exam_id, submission_ids=None, school_id=None):
+    """Queue one suggestion per unmarked essay, up to `MAX_BULK`.
+
+    Per-essay tasks rather than one long task: the worker's own concurrency is the
+    provider's rate limit, a failed essay does not take the batch down with it, and
+    progress is a count of rows rather than state held in a single worker that a
+    second click would have to find.
     """
     from app.utils.auth import get_supabase
+
     supabase = get_supabase()
-
-    # 1. Check cache
-    cached = _get_cache(submission_id, question_index, supabase)
-    if cached["cached"]:
-        logger.info("Cache hit: %s Q%d", submission_id, question_index)
-        return {
-            "score": cached["score"],
-            "feedback": cached["feedback"],
-            "provider": cached["provider"],
-            "cached": True,
-        }
-
-    # 2. Get active AI key
-    from app.services.ai_service import _get_active_key
-    key = _get_active_key(teacher_id)
-    if not key:
-        return {"error": "Belum ada API key aktif. Atur di Pengaturan AI."}
-
-    # 3. Build prompt
-    prompt = _build_prompt(question_text, rubric, diagram_context, student_answer, max_score, lang)
-
-    # 4. Call AI
-    try:
-        from app.services.ai_service import _call_ai, _parse_ai_response
-        raw = _call_ai(key, prompt)
-        score, feedback, reasoning, confidence = _parse_ai_response(raw)
-
-        # 5. Save to cache
-        _save_cache(submission_id, question_index, score, feedback,
-                    key.get("provider", "unknown"), prompt, raw, 0, supabase)
-
-        # 6. Log grading
-        try:
-            from app.services.ai_service import _save_log
-            _save_log(teacher_id, submission_id, question_index,
-                      key.get("provider", "ai"), score, feedback, prompt, raw, 0)
-        except Exception:
-            pass
-
-        return {
-            "score": round(score, 1),
-            "feedback": feedback,
-            "reasoning": reasoning,
-            "confidence": round(confidence, 2),
-            "provider": key.get("provider", "ai"),
-            "cached": False,
-        }
-    except Exception as e:
-        logger.error("AI grading failed: %s", e)
-        return {"error": f"Gagal mengoreksi: {str(e)[:150]}"}
-
-
-def grade_bulk_essays(teacher_id: str, exam_id: str, submission_ids: list = None) -> dict:
-    """Grade all pending essay questions for submissions."""
-    from app.utils.auth import get_supabase
-    supabase = get_supabase()
-
-    exam = supabase.table("exams").select("question_types,question_texts,total_questions,question_rubrics,id").eq("id", exam_id).single().execute().data
-    if not exam:
-        return {"error": "Exam not found"}
-
+    exam = _exam_row(supabase, exam_id)
     qtypes = exam.get("question_types") or {}
     if isinstance(qtypes, str):
         qtypes = json.loads(qtypes)
+
+    query = supabase.table("submissions").select("id,answers").eq("exam_id", exam_id)
+    if submission_ids:
+        query = query.in_("id", list(submission_ids)[:MAX_BULK])
+    submissions = _rows(query.execute())[:MAX_BULK]
+
+    indexes = [i for i in range(len(qtypes) or 0) if is_essay(qtypes.get(str(i)))]
+
+    queued, duplicates, skipped = 0, 0, 0
+    for sub in submissions:
+        for index in indexes:
+            if not answer_text(sub, index):
+                skipped += 1
+                continue
+            row, duplicate = create_suggestion(
+                supabase,
+                teacher_id=teacher_id,
+                submission_id=sub["id"],
+                question_index=index,
+                exam_id=exam_id,
+                school_id=school_id,
+            )
+            if duplicate:
+                duplicates += 1
+                continue
+            grade_suggestion_task.delay(row["id"])
+            queued += 1
+
+    return {
+        "queued": queued,
+        "already_running": duplicates,
+        "skipped_empty": skipped,
+        "submissions": len(submissions),
+        "questions": len(indexes),
+    }
+
+
+# ── running one suggestion ───────────────────────────────────────────────────
+
+def _fail(supabase, suggestion_id, message):
+    logger.warning("AI suggestion %s failed: %s", suggestion_id, message)
+    try:
+        supabase.table(TABLE).update({
+            "status": "failed",
+            "error": str(message)[:400],
+        }).eq("id", suggestion_id).execute()
+    except Exception as exc:                      # a failed update must not retry the job
+        logger.error("could not record AI failure for %s: %s", suggestion_id, exc)
+    return {"status": "failed", "error": str(message)[:400]}
+
+
+def run_suggestion(suggestion_id) -> dict:
+    """Do the work for one queued row. Safe to call twice.
+
+    Re-reads the paper rather than trusting inputs frozen at enqueue time: the
+    answer and the question's points are both editable, and a suggestion computed
+    against yesterday's answer is a suggestion about a different essay.
+    """
+    from app.utils.auth import get_supabase
+    from app.services.ai_service import _call_ai, _get_active_key
+
+    supabase = get_supabase()
+    rows = _rows(supabase.table(TABLE).select("*").eq("id", suggestion_id).limit(1).execute())
+    if not rows:
+        return {"status": "missing"}
+    row = rows[0]
+
+    if row.get("status") not in ("queued", "running"):
+        # Applied, rejected, or already ready. Re-running would either overwrite a
+        # decision or spend a second call on a question already answered.
+        return {"status": row.get("status"), "skipped": True}
+
+    supabase.table(TABLE).update({"status": "running"}).eq("id", suggestion_id).execute()
+
+    key = _get_active_key(row["teacher_id"])
+    if not key:
+        return _fail(supabase, suggestion_id,
+                     "Belum ada API key AI aktif. Atur di Pengaturan AI.")
+
+    try:
+        submission = (_rows(
+            supabase.table("submissions").select("id,answers")
+            .eq("id", row["submission_id"]).limit(1).execute()
+        ) or [{}])[0]
+        exam = _exam_row(supabase, row.get("exam_id"))
+    except Exception as exc:
+        return _fail(supabase, suggestion_id, f"Gagal membaca pekerjaan: {exc}")
+
+    index = int(row["question_index"])
+    points = question_points(exam, index)
     qtexts = exam.get("question_texts") or {}
+    rubrics = exam.get("question_rubrics") or {}
     if isinstance(qtexts, str):
         qtexts = json.loads(qtexts)
-    total_q = exam.get("total_questions", 0)
+    if isinstance(rubrics, str):
+        rubrics = json.loads(rubrics)
 
-    # Get submissions
-    query = supabase.table("submissions").select("id,student_id,answers").eq("exam_id", exam_id)
-    if submission_ids:
-        query = query.in_("id", submission_ids)
-    submissions = query.execute().data or []
+    answer = row.get("answer_override") or answer_text(submission, index)
+    if not answer:
+        return _fail(supabase, suggestion_id, "Tidak ada jawaban murid untuk dinilai.")
 
-    results = {"processed": 0, "cached": 0, "errors": 0, "total": len(submissions), "details": []}
+    built = ai_prompt.build_grading_prompt(
+        teacher_prompt=_criteria_for(row["teacher_id"], supabase, exam.get("subject")),
+        question_text=qtexts.get(str(index), ""),
+        rubric=rubrics.get(str(index), ""),
+        max_score=points,
+        student_answer=answer,
+    )
 
-    for sub in submissions:
-        answers = sub.get("answers") or {}
-        if isinstance(answers, str):
-            try:
-                answers = json.loads(answers)
-            except Exception:
-                answers = {}
-
-        for i in range(total_q):
-            qi = str(i)
-            # Only teacher-marked questions are sent for AI marking. Asking
-            # "not MCQ" pulled the objective types in too, and a true/false question
-            # would have been handed to a language model as a free-text essay.
-            if is_essay(qtypes.get(qi)):
-                ans_data = answers.get(qi, {})
-                if isinstance(ans_data, dict):
-                    student_ans = ans_data.get("answer", "")
-                else:
-                    student_ans = str(ans_data) if ans_data else ""
-
-                if not student_ans:
-                    continue
-
-                max_score = 100  # default, could be from question_weights
-                question_text = qtexts.get(qi, "")
-                rubric = exam.get("question_rubrics", {}).get(qi, "") if isinstance(exam.get("question_rubrics"), dict) else ""
-
-                result = grade_essay(
-                    teacher_id=teacher_id,
-                    submission_id=sub["id"],
-                    question_index=i,
-                    question_text=question_text,
-                    student_answer=student_ans,
-                    max_score=max_score,
-                    rubric=rubric,
-                    exam_id=exam_id,
-                )
-
-                if result.get("cached"):
-                    results["cached"] += 1
-                elif result.get("score") is not None:
-                    results["processed"] += 1
-                    # Update submission score
-                    _update_submission_score(sub["id"], i, result["score"], supabase)
-                else:
-                    results["errors"] += 1
-
-                results["details"].append({
-                    "submission_id": sub["id"],
-                    "question": i + 1,
-                    "score": result.get("score"),
-                    "cached": result.get("cached", False),
-                    "error": result.get("error"),
-                })
-
-    return results
-
-
-def _update_submission_score(submission_id: str, question_index: int, score: float, supabase):
-    """Update the score for a specific essay question in the submission."""
     try:
-        sub = supabase.table("submissions").select("answers").eq("id", submission_id).single().execute().data
-        if not sub:
-            return
-        answers = sub.get("answers") or {}
-        if isinstance(answers, str):
-            answers = json.loads(answers)
+        raw = _call_ai(key, built["user"], built["system"])
+    except Exception as exc:
+        # Provider failures are the most likely failure here — a bad key, a rate
+        # limit, a timeout — and each one has a sentence a teacher can act on.
+        return _fail(supabase, suggestion_id, _provider_message(exc))
 
-        qi = str(question_index)
-        if qi in answers and isinstance(answers[qi], dict):
-            answers[qi]["ai_score"] = score
-        else:
-            answers[qi] = {"answer": str(answers.get(qi, "")), "ai_score": score}
+    try:
+        suggestion = ai_prompt.parse_suggestion(raw, built["max_score"])
+    except ai_prompt.PromptError as exc:
+        return _fail(supabase, suggestion_id, str(exc))
 
-        supabase.table("submissions").update({"answers": answers}).eq("id", submission_id).execute()
-    except Exception as e:
-        logger.error("Failed to update submission score: %s", e)
+    supabase.table(TABLE).update({
+        "status": "ready",
+        "score_suggested": suggestion.score,
+        "max_score": suggestion.max_score,
+        "feedback": suggestion.feedback,
+        "reasoning": suggestion.reasoning,
+        "confidence": suggestion.confidence,
+        "anomalies": list(suggestion.anomalies) + list(built["notes"]),
+        "provider": key.get("provider"),
+        "model_used": key.get("model_name"),
+        "answer_chars": len(ai_prompt.plain_text(answer)),
+        "error": None,
+    }).eq("id", suggestion_id).execute()
+
+    return {"status": "ready", **suggestion.as_dict()}
+
+
+def _provider_message(exc) -> str:
+    """A provider error a teacher can act on, not a stack trace."""
+    text = str(exc)
+    lowered = text.lower()
+    if "quota" in lowered or "rate limit" in lowered or "429" in lowered:
+        return "Kuota API AI sedang habis atau dibatasi. Coba lagi beberapa saat lagi."
+    if "api key" in lowered or "invalid" in lowered or "401" in lowered or "403" in lowered:
+        return "API key AI ditolak provider. Periksa key di Pengaturan AI."
+    if "timeout" in lowered or "timed out" in lowered:
+        return "Provider AI tidak merespons tepat waktu. Coba lagi."
+    return f"Gagal menghubungi provider AI: {text[:200]}"
+
+
+@celery_app.task(bind=True, max_retries=0, name="ai.grade_suggestion")
+def grade_suggestion_task(self, suggestion_id):
+    """Celery entry point. Never retries on its own.
+
+    A retry here spends the school's money twice on the same question, and the row
+    already carries the failure for the teacher to retry deliberately.
+    """
+    try:
+        return run_suggestion(suggestion_id)
+    except Exception as exc:
+        logger.error("AI suggestion task crashed: %s", exc, exc_info=True)
+        try:
+            from app.utils.auth import get_supabase
+            _fail(get_supabase(), suggestion_id, str(exc))
+        except Exception:
+            pass
+        return {"status": "failed", "error": str(exc)[:200]}
+
+
+# ── a person decides ─────────────────────────────────────────────────────────
+
+def _decide(supabase, suggestion_id, teacher_id, status):
+    rows = _rows(
+        supabase.table(TABLE).select("*")
+        .eq("id", suggestion_id).eq("teacher_id", teacher_id).limit(1).execute()
+    )
+    if not rows:
+        raise LookupError("saran tidak ditemukan")
+    row = rows[0]
+    if row.get("status") != "ready":
+        raise ValueError(f"saran belum siap (status: {row.get('status')})")
+    from datetime import datetime, timezone
+    supabase.table(TABLE).update({
+        "status": status,
+        "resolved_at": datetime.now(timezone.utc).isoformat(),
+        "resolved_by": teacher_id,
+    }).eq("id", suggestion_id).eq("teacher_id", teacher_id).execute()
+    return {**row, "status": status}
+
+
+def apply_suggestion(supabase, suggestion_id, teacher_id) -> dict:
+    """Record that a teacher accepted a suggestion, and hand the number back.
+
+    Deliberately writes nothing to `submissions`. The teacher's form holds the
+    value and the existing save route writes it, so a suggestion a teacher accepted
+    and then changed is the teacher's mark — not a value the AI's row overrides on
+    the next page load.
+    """
+    return _decide(supabase, suggestion_id, teacher_id, "applied")
+
+
+def reject_suggestion(supabase, suggestion_id, teacher_id) -> dict:
+    return _decide(supabase, suggestion_id, teacher_id, "rejected")
+
+
+def suggestions_for(supabase, submission_id, teacher_id=None) -> dict:
+    """Every suggestion for one paper, newest per question, keyed by question."""
+    query = supabase.table(TABLE).select("*").eq("submission_id", submission_id)
+    if teacher_id:
+        query = query.eq("teacher_id", teacher_id)
+    rows = _rows(query.execute())
+    latest = {}
+    for row in rows:
+        index = int(row.get("question_index") or 0)
+        if index not in latest or str(row.get("created_at") or "") > str(latest[index].get("created_at") or ""):
+            latest[index] = row
+    return latest
+
+
+def status_counts(supabase, exam_id) -> dict:
+    """How many suggestions of each status this exam has, for the overview page."""
+    rows = _rows(
+        supabase.table(TABLE).select("status")
+        .eq("exam_id", exam_id).in_("status", ["queued", "running", "ready"]).execute()
+    )
+    counts = {"queued": 0, "running": 0, "ready": 0}
+    for row in rows:
+        state = row.get("status")
+        if state in counts:
+            counts[state] += 1
+    return counts

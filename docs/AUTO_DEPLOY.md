@@ -205,7 +205,7 @@ one of those the launcher is whatever the last *successful* release installed.
 | see the step the last run stopped at, whatever stopped it | `cat /var/lib/scangrade-deploy/last-stop` |
 | retry a quarantined commit once | `touch /etc/scangrade-deploy.release` |
 | stop deploying automatically | `systemctl disable --now scangrade-deploy.timer` |
-| see the last release that stuck | `cat /var/lib/scangrade-deploy/last-deploy` |
+| see the last release that stuck | `cat /var/lib/scangrade-deploy/last-deploy` — `/super-admin/deploy-status` reads this record and compares it with the code being served, so the shell is only needed when the site is the thing that is down |
 | **unstick a box that fetches and never merges** | `curl -fsSL https://raw.githubusercontent.com/sugeng-riyanto/scanGrade/main/deploy/unstick-deploy.sh \| sudo bash` |
 
 The freeze file is the one to reach for during exams: the timer keeps ticking,
@@ -2093,6 +2093,39 @@ The reading sits above `dirty` and `behind` in the verdict order, and below ever
 stop. Those two describe the *arrangement* — what the next tick would do — and this one
 describes what a student is being served right now; a `refused` record or a heal the
 runner performed is a stop, and a stop stays the headline.
+
+### Held and released are two different questions
+
+That placement answers "served equals held": it compares the code answering the page
+with the checkout. The other half of the question is "served equals released", and the
+two answers are the same only while every change arrives through the runner. They come
+apart in exactly the states worth knowing about:
+
+* the checkout moved outside the runner — a `git pull` and a restart by hand — so the
+  code being served *is* `HEAD`, no gate ever judged it, and every reading that compares
+  against `HEAD` is happy about it;
+* a rollback whose reload did not take: the checkout went back, the runner recorded the
+  commit it went back to, and the process is still running the refused one.
+
+The runner has written a record of the release it landed all along —
+`/var/lib/scangrade-deploy/last-deploy`, three lines: the commit, when, and the recovery
+point taken before it — and the only reader was an operator with a shell. The page reads
+it now (`app/services/deploy_status_service.py`, `last_release_state`) and compares it
+with the served commit:
+
+| comparison | what it means |
+|---|---|
+| `live` | the release the box recorded is the code being served |
+| `not_served` | the box recorded one commit and is serving another. The only one that changes the headline verdict |
+| `unknown` | the process could not read its own commit, so the claim cannot be checked against it — never reported as `live` |
+| `absent` | no release is on record. `deploy/unstick-deploy.sh` clears the record deliberately, so this is a state an operator can reach on purpose |
+| `malformed` / `unreadable` | the record is there and does not read as a commit (a write that never finished), or could not be read at all — both are different findings from "no record", and neither is folded into it |
+
+The comparison is decided on the **full** sha and the abbreviation is display only: two
+commits can share the seven characters the page prints, and that is the one collision
+where the answer matters. The claim reading sits *below* the checkout placement, because
+when both fire the checkout one names the mechanism ("a release landed and this process
+never loaded it"), and above `dirty` and `behind` for the same reason the placement is.
 
 ### And the deploy asks it too, before it trusts any gate
 

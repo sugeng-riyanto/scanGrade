@@ -38,12 +38,32 @@ def _get_ai_settings(teacher_id):
     return {"teacher_id": teacher_id, "prompt_template": "", "prompts": [], "active_prompt_id": None}
 
 
-def _get_active_prompt(settings):
+def _get_active_prompt(settings, subject=None):
+    """The criteria to grade with: a subject's own prompt first, then the active one.
+
+    The page says "you can write a different one for each subject", so a prompt may
+    name a subject. It is asked first and the active prompt second: a teacher who
+    wrote one prompt for Matematika meant it for Matematika, and grading that exam
+    with a different prompt because they last clicked "Use" on another row would be
+    the setting not sticking. A prompt with no subject is the fallback — which is
+    every built-in, and the case of a teacher who wrote one prompt and has one.
+    """
     prompts = settings.get("prompts")
     if isinstance(prompts, str):
-        prompts = json.loads(prompts)
+        try:
+            prompts = json.loads(prompts)
+        except (json.JSONDecodeError, TypeError):
+            prompts = []
+    if not isinstance(prompts, list):
+        prompts = []
+    prompts = [p for p in prompts if isinstance(p, dict)]
     if not prompts:
         return "Koreksi jawaban esai berikut.\nSoal: {question}\nBobot: {max_score}\nJawaban: {answer}\nBerikan skor (0-{max_score}) dan feedback.\nFormat JSON: {\"score\": <number>, \"feedback\": \"<string>\"}"
+    wanted = str(subject or "").strip().casefold()
+    if wanted:
+        for p in prompts:
+            if str(p.get("subject") or "").strip().casefold() == wanted:
+                return p.get("template", "")
     active_id = settings.get("active_prompt_id")
     for p in prompts:
         if p.get("id") == active_id:
@@ -81,31 +101,36 @@ def _parse_ai_response(raw_text):
         return score, feedback, reasoning, confidence
 
 
-def _call_gemini(api_key, prompt):
+def _call_gemini(api_key, prompt, system=None):
     """Call Gemini API — supports AIzaSy (standard) and AQ. (auth) keys."""
     # Auth keys (AQ.) require the new genai.Client() API
     # Standard keys (AIzaSy) work with both old and new API
     if api_key.startswith("AQ"):
-        return _call_gemini_client(api_key, prompt)
+        return _call_gemini_client(api_key, prompt, system)
     # Standard keys: try old API first, fallback to new API
     try:
         import google.generativeai as genai
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-2.0-flash-lite")
+        model = genai.GenerativeModel(
+            "gemini-2.0-flash-lite",
+            system_instruction=system or None,
+        )
         resp = model.generate_content(prompt)
         return resp.text
     except Exception:
-        return _call_gemini_client(api_key, prompt)
+        return _call_gemini_client(api_key, prompt, system)
 
 
-def _call_gemini_client(api_key, prompt):
+def _call_gemini_client(api_key, prompt, system=None):
     """Call Gemini API using the new genai.Client() — works with auth keys (AQ.)."""
     try:
         from google import genai
         client = genai.Client(api_key=api_key)
+        config = {"system_instruction": system} if system else None
         resp = client.models.generate_content(
             model="gemini-2.0-flash-lite",
             contents=prompt,
+            config=config,
         )
         return resp.text
     except Exception as e:
@@ -145,15 +170,23 @@ def _test_gemini_rest(api_key):
         return None  # Fallback to library error
 
 
-def _call_openai_like(api_key, prompt, base_url=None, model=None):
+def _call_openai_like(api_key, prompt, base_url=None, model=None, system=None):
     from openai import OpenAI
     kwargs = {"api_key": api_key}
     if base_url:
         kwargs["base_url"] = base_url
     client = OpenAI(**kwargs)
+    # The system turn is the grading contract (`ai_prompt.SYSTEM_INSTRUCTION`). It
+    # is sent as a real `system` message rather than glued to the front of the user
+    # text, so a provider that honours role separation can honour it — gluing it on
+    # makes the contract look like something the pupil's answer could continue.
+    messages = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": prompt})
     resp = client.chat.completions.create(
         model=model or "gpt-4o-mini",
-        messages=[{"role": "user", "content": prompt}],
+        messages=messages,
         temperature=0.3,
         max_tokens=4096,
     )
@@ -162,40 +195,76 @@ def _call_openai_like(api_key, prompt, base_url=None, model=None):
 
 _PROVIDER_MAP = {
     "gemini": {"caller": _call_gemini},
-    "openai": {"caller": lambda k, p: _call_openai_like(k, p, None, "gpt-4o-mini")},
-    "deepseek": {"caller": lambda k, p: _call_openai_like(k, p, "https://api.deepseek.com", "deepseek-chat")},
-    "groq": {"caller": lambda k, p: _call_openai_like(k, p, "https://api.groq.com/openai/v1", "llama-3.3-70b-versatile")},
+    "openai": {"caller": lambda k, p, s=None: _call_openai_like(k, p, None, "gpt-4o-mini", s)},
+    "deepseek": {"caller": lambda k, p, s=None: _call_openai_like(k, p, "https://api.deepseek.com", "deepseek-chat", s)},
+    "groq": {"caller": lambda k, p, s=None: _call_openai_like(k, p, "https://api.groq.com/openai/v1", "llama-3.3-70b-versatile", s)},
 }
 
 
-def _call_ai(key, prompt):
+def _call_ai(key, prompt, system=None):
     provider = key.get("provider", "")
     caller_entry = _PROVIDER_MAP.get(provider)
     if caller_entry:
-        return caller_entry["caller"](key["api_key"], prompt)
+        return caller_entry["caller"](key["api_key"], prompt, system)
     # Custom provider — use OpenAI client with custom base_url and model
     base_url = key.get("base_url") or None
     model = key.get("model_name") or "gpt-4o-mini"
-    return _call_openai_like(key["api_key"], prompt, base_url, model)
+    return _call_openai_like(key["api_key"], prompt, base_url, model, system)
+
+
+#: Placeholders a stored prompt may carry. They used to be the *whole* prompt —
+#: `_fill_prompt` pasted the pupil's answer into the teacher's text, which is the
+#: injection hole `ai_prompt` was written to close. The template is now read as
+#: criteria and the placeholders are dropped: leaving `{answer}` in the criteria
+#: would print a literal `{answer}` at the model, and substituting it would put the
+#: pupil's words back inside the teacher's instruction.
+_PLACEHOLDER = re.compile(r"\{(?:question|answer|max_score|rubric)\}")
 
 
 def suggest_grade(teacher_id, question_text, student_answer, max_score, rubric=""):
-    key = _get_active_key(teacher_id)
+    """One suggestion, built by the guarded prompt and validated before return.
+
+    Returns a validated proposal or `{"error": ...}`. It never writes a mark: the
+    caller stores the suggestion and a teacher is what turns it into one.
+    """
+    from app.services.ai_prompt import PromptError, build_grading_prompt, parse_suggestion
+
+    try:
+        key = _get_active_key(teacher_id)
+        settings = _get_ai_settings(teacher_id)
+    except Exception as e:
+        # A settings table that cannot be read is a sentence, not a 500: the teacher
+        # asked for a suggestion and "we could not reach it" is actionable.
+        current_app.logger.warning("AI settings unreachable: %s", e)
+        return {"error": "Pengaturan AI tidak dapat dibaca saat ini. Coba lagi."}
     if not key:
         return {"error": "Belum ada API key aktif. Atur di Pengaturan AI."}
 
-    settings = _get_ai_settings(teacher_id)
-    prompt_template = _get_active_prompt(settings)
-    prompt = _fill_prompt(prompt_template, question_text, student_answer, max_score, rubric)
+    criteria = _PLACEHOLDER.sub("", _get_active_prompt(settings)).strip()
+    built = build_grading_prompt(
+        teacher_prompt=criteria,
+        question_text=question_text,
+        rubric=rubric,
+        max_score=max_score,
+        student_answer=student_answer,
+    )
 
     try:
-        raw = _call_ai(key, prompt)
-        score, feedback, reasoning, confidence = _parse_ai_response(raw)
-        _save_log(teacher_id, None, 0, key["provider"], score, feedback, prompt, raw, 0)
-        return {"score": round(score, 1), "feedback": feedback, "reasoning": reasoning, "confidence": round(confidence, 2), "provider": key["provider"], "prompt": prompt}
+        raw = _call_ai(key, built["user"], built["system"])
     except Exception as e:
         current_app.logger.error(f"AI suggest_grade error: {e}")
         return {"error": f"Gagal: {str(e)[:120]}"}
+
+    try:
+        suggestion = parse_suggestion(raw, built["max_score"])
+    except PromptError as e:
+        current_app.logger.warning("AI reply unusable: %s", e)
+        return {"error": f"Balasan AI tidak dapat dibaca: {e}"}
+
+    _save_log(teacher_id, None, 0, key["provider"], suggestion.score,
+              suggestion.feedback, built["user"], raw, 0)
+    return {**suggestion.as_dict(), "provider": key["provider"],
+            "notes": list(built["notes"])}
 
 
 def test_api_key(teacher_id, key_id):

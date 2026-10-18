@@ -299,8 +299,14 @@ class TestEveryTypeStandsOnItsOwn:
     def test_every_kind_has_its_own_scheme_row(self):
         from app.services import mark_scheme as ms
         kinds = {qt.question_kind(t) for t in ms.SCHEME_ORDER}
+        # `numeric` and `matrix` are the two rows this list gained when the types did:
+        # an answer that is a number is not a letter, and a grid is neither one letter
+        # nor an essay, so pricing either of them as something else was the pool model
+        # for a type nobody had priced. A kind that leaves this set leaves a teacher no
+        # way to say what it is worth.
         assert kinds == {qt.KIND_CHOICE, qt.KIND_TRUE_FALSE, qt.KIND_PGK,
-                         qt.KIND_MATCH, qt.KIND_DRAG, qt.KIND_ORDER, qt.KIND_ESSAY}
+                         qt.KIND_MATCH, qt.KIND_DRAG, qt.KIND_ORDER,
+                         qt.KIND_NUMERIC, qt.KIND_MATRIX, qt.KIND_ESSAY}
 
     def test_every_type_has_its_own_marks(self):
         from app.services import mark_scheme as ms
@@ -771,9 +777,13 @@ class TestTheBuildersTypeList:
         picker = [c["v"] for c in qt.vocabulary()["picker"]]
         # `complex_multiple_choice` sits between true/false and matching because it
         # joined the picker with its editor — the type and the form that draws it are
-        # added in the same change, which is what this list stands for.
+        # added in the same change, which is what this list stands for. `numeric` and
+        # `matrix` sit before the canvas essay for the same reason, each added with the
+        # editor that draws it; an entry here with nothing under it would be a type a
+        # teacher can name and cannot write.
         assert picker == [qt.MCQ, qt.TRUE_FALSE, qt.COMPLEX_MULTIPLE_CHOICE, qt.MATCH,
-                          qt.DRAG_DROP, qt.ORDER, qt.ESSAY_CANVAS]
+                          qt.DRAG_DROP, qt.ORDER, qt.NUMERIC, qt.MATRIX,
+                          qt.ESSAY_CANVAS]
 
     def test_every_pickable_type_is_one_the_grader_knows(self):
         for entry in qt.vocabulary()["picker"]:

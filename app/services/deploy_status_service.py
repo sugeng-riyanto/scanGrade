@@ -148,6 +148,15 @@ DEFAULT_LAST_STOP_FILE = DEFAULT_STATE_DIR + "/last-stop"
 #: action that ends it. Beside `last-stop` because it is read for the same question
 #: and follows the same life cycle — present means the last tick stopped.
 DEFAULT_SITUATION_FILE = DEFAULT_STATE_DIR + "/situation"
+#: The release the runner **landed**, as the runner recorded it: the commit, when, and
+#: the recovery point taken before it. Written on the path that ends a successful run
+#: and again on the rollback path — where the commit named is the one it went *back to*
+#: — and deliberately not deleted while the box runs: this is the box's own claim about
+#: what it released, which is a different question from what the checkout holds.
+#: `docs/AUTO_DEPLOY.md` tells an operator to read it with `cat`, which is how it was
+#: read until now: the one question the page could not answer was "is the release this
+#: box says it made the code it is serving?" — see `last_release_state`.
+DEFAULT_LAST_RELEASE_FILE = DEFAULT_STATE_DIR + "/last-deploy"
 #: What the *performance* gate measured, in its own words. `deploy/perf_gate.py`
 #: appends one JSON line per judgement to the history file — the commit under
 #: judgement, the verdict, every number, and on a regression the `reasons` it
@@ -240,6 +249,28 @@ RUNNING_CURRENT, RUNNING_BEHIND, RUNNING_AHEAD, RUNNING_UNKNOWN, RUNNING_UNREADA
     "current", "behind", "ahead", "unknown", "unreadable")
 RUNNING_KEYS = frozenset({RUNNING_CURRENT, RUNNING_BEHIND, RUNNING_AHEAD,
                           RUNNING_UNKNOWN, RUNNING_UNREADABLE})
+
+#: How the release the box *recorded* compares with the code *answering this page*.
+#: The checkout reading above answers "is what is served what the box holds", which is
+#: the same answer as "is what is served what the box released" only while the two
+#: move together — and they do not when the checkout is moved outside the runner (a
+#: hand pull with a restart) or when a rollback's reload does not take. This is the
+#: comparison against the box's own claim instead:
+#:
+#:   `live`         — the commit on record is the commit being served;
+#:   `not_served`   — the box recorded one release and is serving something else;
+#:   `unknown`      — the process could not read its own commit, so the claim cannot
+#:                    be checked against it (never reported as `live`);
+#:   `absent`       — no release is on record at all (`unstick-deploy.sh` clears it);
+#:   `malformed` /  — the record is there and does not read as a commit, which is a
+#:   `unreadable`     different answer from "no record" and is never folded into it.
+#:
+#: `not_served` is the one that gets a verdict: a box serving code no release on record
+#: put there is a state every other reading on this page is happy about.
+CLAIM_LIVE, CLAIM_NOT_SERVED, CLAIM_UNKNOWN = "live", "not_served", "unknown"
+CLAIM_ABSENT, CLAIM_MALFORMED, CLAIM_UNREADABLE = "absent", "malformed", "unreadable"
+CLAIM_KEYS = frozenset({CLAIM_LIVE, CLAIM_NOT_SERVED, CLAIM_UNKNOWN, CLAIM_ABSENT,
+                        CLAIM_MALFORMED, CLAIM_UNREADABLE})
 
 
 # ── the commit a gate refused ────────────────────────────────────────────────
@@ -1301,6 +1332,86 @@ def last_stop_state(path: pathlib.Path, *, now: _dt.datetime) -> dict:
         state["commit"] = commit.lower()
         state["short"] = commit[:7]
     return state
+
+
+def last_release_state(path: pathlib.Path, repo: pathlib.Path, *, now: _dt.datetime,
+                       running: dict | None = None) -> dict:
+    """The release the box *recorded*, against the code *answering this page*.
+
+    Three positional lines, as the runner writes them: the commit, when it recorded
+    it, and the recovery point taken before it (empty when the release shipped no
+    migrations). The record is the box's own claim about what it released, and the
+    claim is what this reading compares with the running process — the checkout's
+    `HEAD` is what the box *holds*, and the two answers differ exactly in the states
+    worth knowing about: code a hand pull put there (served equals the checkout and
+    no release ever recorded it), and a rollback whose reload did not take (the
+    checkout went back, the claim went back with it, and the process did not).
+
+    A record that cannot be read is reported rather than treated as absent, which is
+    the rule every record on this page follows: `unstick-deploy.sh` deletes this file
+    deliberately, so "no release is on record" is a real answer that must not be told
+    apart from "this page could not look".
+
+    `repo` is only ever used to resolve the commit's **subject** — the answer itself
+    is sha equality, which needs no history: a record naming a commit this checkout
+    does not have is still a definite answer to "is that what is being served?", and
+    every file on the box is allowed to be older than the checkout it sits in.
+    """
+    state: dict = {
+        "path": str(path), "present": False, "key": CLAIM_ABSENT,
+        "sha": None, "short": None, "subject": None, "released_at": None,
+        "age_seconds": None, "snapshot": None, "reason": None,
+        "served": None, "served_commit": None, "detail": None,
+    }
+    text, why = _read(path)
+    if text is None:
+        if why != "absent":
+            state["key"] = CLAIM_UNREADABLE
+            state["reason"] = why
+        return state
+
+    lines = text.splitlines()
+    sha = lines[0].strip() if lines else ""
+    if not re.fullmatch(r"[0-9a-fA-F]{40}", sha):
+        # A first line that is not a commit is not this record's kind of record —
+        # a half-written file, or something else that happens to live at this path.
+        state["key"] = CLAIM_MALFORMED
+        state["reason"] = sha or None
+        return state
+
+    state["present"] = True
+    state["sha"], state["short"] = sha.lower(), sha[:7]
+    when = lines[1].strip() if len(lines) > 1 else ""
+    state["released_at"] = when or None
+    state["age_seconds"] = _age_seconds(when or None, now)
+    state["snapshot"] = (lines[2].strip() if len(lines) > 2 else "") or None
+    state["subject"] = _commit_subject(repo, state["sha"])
+    _match_last_release(state, running)
+    return state
+
+
+def _match_last_release(state: dict, running: dict | None) -> None:
+    """Is the release on record the code being served? One comparison, one answer.
+
+    The full sha decides it, and the short one is only ever displayed: comparing the
+    abbreviations the page prints would call two different commits the same on a
+    collision, which is the one way this reading could be confidently wrong. A
+    process that could not read its own commit is `unknown` and never `live` — "I
+    could not check" is not "it matches".
+    """
+    running = running or {}
+    state["served_commit"] = running.get("commit")
+    full = running.get("full_commit")
+    if not running.get("available") or not full:
+        state["key"] = CLAIM_UNKNOWN
+        state["detail"] = running.get("reason_key") or "no reading"
+        return
+    if str(full).lower() == state["sha"]:
+        state["served"] = True
+        state["key"] = CLAIM_LIVE
+    else:
+        state["served"] = False
+        state["key"] = CLAIM_NOT_SERVED
 
 
 def situation_state(path: pathlib.Path, *, now: _dt.datetime,
@@ -2631,7 +2742,8 @@ def checkout_state(repo: pathlib.Path, *, now: _dt.datetime,
 
 def verdict(runner: dict, checkout: dict, *, paused: bool,
             unarmed: dict | None = None, preflight: dict | None = None,
-            box_edits: dict | None = None) -> dict:
+            box_edits: dict | None = None,
+            last_release: dict | None = None) -> dict:
     """One level and one reason key, in the order the failures actually bite.
 
     A runner that cannot pass Gate 0 is the headline even when the checkout is
@@ -2708,6 +2820,20 @@ def verdict(runner: dict, checkout: dict, *, paused: bool,
     if running.get("key") == RUNNING_BEHIND:
         return {**out, "level": WARN, "key": "running_behind",
                 "detail": str(running.get("behind")), "behind": checkout.get("behind")}
+    # The same class of reading one step further out: what is being *served* against
+    # what the box *recorded releasing*, rather than against what its checkout holds.
+    # It sits below `running_behind` because when the two disagree with each other
+    # the checkout reading is the one that names the mechanism (a release the process
+    # never loaded); it sits above `dirty` and `behind` for the reason that one does,
+    # since those describe what the next tick would do and this describes what a
+    # pupil is being served now. The state it exists for is one nothing else here can
+    # see: a checkout moved outside the runner, so the served code equals `HEAD` and
+    # every other figure on this page is happy about a release no gate ever judged.
+    last_release = last_release or {}
+    if last_release.get("key") == CLAIM_NOT_SERVED:
+        return {**out, "level": WARN, "key": "release_not_served",
+                "detail": last_release.get("short"),
+                "behind": checkout.get("behind")}
     if checkout.get("dirty"):
         return {**out, "level": WARN, "key": "dirty", "detail": str(checkout["dirty"])}
     # A heal is a real intervention on the box — something that was there is now in
@@ -2753,12 +2879,14 @@ REASON_KEYS = frozenset({
     "box_edits",
     # the code answering the page is older than the checkout that holds it
     "running_behind",
+    # the code answering the page is not the release the box recorded landing
+    "release_not_served",
 })
 
 
 def report(*, repo=None, runner=None, snapshot_runner=None, pause_file=None,
            quarantine_file=None, unarmed_file=None, preflight_file=None,
-           preflight_diff_file=None,
+           preflight_diff_file=None, last_release_file=None,
            last_stop_file=None, situation_file=None, request_dir=None,
            release_request=None,
            perf_history_file=None, perf_baseline_file=None, refusals_dir=None,
@@ -2801,6 +2929,9 @@ def report(*, repo=None, runner=None, snapshot_runner=None, pause_file=None,
         last_stop_file or os.environ.get("SCANGRADE_LAST_STOP_FILE")
         or DEFAULT_LAST_STOP_FILE)
     last_stop = last_stop_state(last_stop_file, now=now)
+    last_release_file = pathlib.Path(
+        last_release_file or os.environ.get("SCANGRADE_LAST_RELEASE_FILE")
+        or DEFAULT_LAST_RELEASE_FILE)
     perf_history_file = pathlib.Path(
         perf_history_file or os.environ.get("SCANGRADE_PERF_HISTORY_FILE")
         or DEFAULT_PERF_HISTORY_FILE)
@@ -2854,6 +2985,11 @@ def report(*, repo=None, runner=None, snapshot_runner=None, pause_file=None,
     snapshot = runner_state(snapshot_runner, repo, expect=expect,
                             copy_of="scangrade-db-snapshot.sh")
     checkout = checkout_state(repo, now=now, running=running)
+    # Read the box's own claim *after* the checkout, because the comparison it makes
+    # needs the served commit as that reader placed it — which is the one reading of
+    # it that survives a checkout this page cannot read at all.
+    last_release = last_release_state(last_release_file, repo, now=now,
+                                      running=checkout["running"])
     try:
         paused = pause_file.exists()
     except OSError:
@@ -2869,7 +3005,8 @@ def report(*, repo=None, runner=None, snapshot_runner=None, pause_file=None,
         "pause_file": str(pause_file),
         "launcher": expect_reason,
         "verdict": verdict(main, checkout, paused=paused, unarmed=unarmed,
-                           preflight=preflight, box_edits=box_edits),
+                           preflight=preflight, box_edits=box_edits,
+                           last_release=last_release),
         "quarantine": quarantine,
         "quarantine_file": str(quarantine_file),
         # The same refusals, kept past the lift: what the quarantine card must
@@ -2892,6 +3029,11 @@ def report(*, repo=None, runner=None, snapshot_runner=None, pause_file=None,
         "run_steps": RUN_STEPS,
         "last_stop": last_stop,
         "last_stop_file": str(last_stop_file),
+        # The release the box recorded landing, against the code answering this page.
+        # The claim and the served code are two different readings, and this page had
+        # only ever shown the second one's comparison with the checkout.
+        "last_release": last_release,
+        "last_release_file": str(last_release_file),
         # Whether what is blocking the deploy clears itself, as the runner judged it,
         # and the one action that ends it — the reading this page was missing.
         "situation": situation,

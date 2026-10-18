@@ -23,6 +23,7 @@ Three things are pinned here:
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -131,9 +132,22 @@ def test_an_untouched_save_writes_nothing():
 
 def test_the_route_still_merges_rather_than_overwrites():
     """The guard that stopped this page writing `essay` over a matching question's
-    pairs must survive the write-nothing change."""
+    pairs must survive the write-nothing change.
+
+    The accepted set is `(KIND_CHOICE, KIND_NUMERIC)`: one letter, and one value with
+    a tolerance. Those are the two keys this page is for — a stale letter to
+    re-pick, a number a review flag disputed. A matching question's pairs, a grid's
+    rows, an ordering's sequence and a drawing are structures written in the
+    builder, and a save here must not overwrite one of them with this page's own
+    shape. Asserted as the *set* rather than as a sentence, because a wider guard
+    that kept the sentence and dropped the filter would pass a `str in src` check.
+    """
     src = _route_source()
-    assert "if is_objective(qtype) and question_kind(qtype) != KIND_CHOICE:" in src
+    guard = re.search(
+        r"if is_objective\(qtype\) and question_kind\(qtype\) not in \(([^)]*)\):", src)
+    assert guard, "the answer-key save no longer filters by question kind"
+    accepted = {name.strip() for name in guard.group(1).split(",") if name.strip()}
+    assert accepted == {"KIND_CHOICE", "KIND_NUMERIC"}
 
 
 # ── the answer-key page ──────────────────────────────────────────────────────

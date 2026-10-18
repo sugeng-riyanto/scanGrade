@@ -21,7 +21,7 @@ from app.decorators.subscription import require_subscription
 from app.services.anti_cheat_service import validate_violation_log
 from app.services.question_types import (
     complete_weights, earned_points, grade_answer, is_objective,
-    normalize_answer_map, objective_result,
+    manual_review_map, normalize_answer_map, objective_result, validate_answer_map,
 )
 from app.services.student_import import create_student_account
 from app.utils.logger import get_logger
@@ -1191,6 +1191,24 @@ def student_sync_draft():
         # a page loaded before the teacher flipped the toggle is *read* into the
         # right shape rather than refused (see `question_types.normalize_answer`).
         answers = normalize_answer_map((exam_data or {}).get("question_types"), answers)
+        # ── The structure belongs to the server ─────────────────────────────
+        # A matrix answer naming a row the question has no, or a checkbox index
+        # past the end of a grid, is dropped here rather than stored: the mark is
+        # unaffected either way, but a reload would draw a tick that does not
+        # exist, and the report would claim a pupil answered a row nobody wrote.
+        # Sanitised rather than refused — a stray key must not cost a sitting.
+        _akey = (exam_data or {}).get("answer_key") or {}
+        if isinstance(_akey, str):
+            try:
+                _akey = json.loads(_akey)
+            except (json.JSONDecodeError, TypeError):
+                _akey = {}
+        answers, _dropped = validate_answer_map(
+            (exam_data or {}).get("question_types"), _akey, answers)
+        if _dropped:
+            current_app.logger.info(
+                "sync-draft dropped %d out-of-shape answer(s) for exam %s user %s: %s",
+                len(_dropped), exam_id, g.user_id, _dropped[:5])
         existing = supabase.table("submissions").select("id,status,answers,started_at,updated_at").eq("exam_id", exam_id).eq("student_id", g.user_id).limit(1).execute().data
         if existing:
             sub = existing[0]
@@ -2296,46 +2314,165 @@ def _generate_report_excel(exam, students, stats):
 
 
 # ── AI Essay Grading API ──
+#
+# Every route here either QUEUES a suggestion, REPORTS one, or records that a
+# person accepted or rejected one. None of them writes a mark — `submissions` does
+# not appear anywhere in this section, and that absence is the design. The reply to
+# "saran diterima" carries the number back to the marking form; the form's own save
+# is what turns it into a mark, so a teacher who accepted a suggestion and then
+# changed it gets their number, not the model's.
+#
+# The provider call is never made in the request. A teacher pressing "Koreksi AI"
+# returns in milliseconds with a suggestion id; the model answers in a Celery worker
+# (`ai_grading.grade_suggestion_task`), because holding a gunicorn worker open for an
+# external API on a 1-vCPU box is how one slow provider takes the whole school down.
 
+_AI_ROLES = ("guru", "admin_sekolah", "super_admin")
+
+
+def _suggestion_body(row):
+    """The shape the marking page polls. No pupil identity, no prompt, no answer."""
+    return {
+        "suggestion_id": row.get("id"),
+        "status": row.get("status"),
+        "score": row.get("score_suggested"),
+        "max_score": row.get("max_score"),
+        "feedback": row.get("feedback"),
+        "reasoning": row.get("reasoning"),
+        "confidence": row.get("confidence"),
+        "anomalies": row.get("anomalies") or [],
+        "error": row.get("error"),
+        "question_index": row.get("question_index"),
+    }
+
+
+def _own_suggestion(supabase, suggestion_id):
+    """The row, if it is this teacher's. Someone else's id reads as missing."""
+    from app.services.ai_grading import TABLE
+
+    rows = supabase.table(TABLE).select("*") \
+        .eq("id", suggestion_id).eq("teacher_id", g.user_id) \
+        .limit(1).execute().data or []
+    return rows[0] if rows else None
+
+
+@api_bp.route("/ai/suggest-essay", methods=["POST"])
 @api_bp.route("/ai/grade-essay", methods=["POST"])
 @login_required
 @require_subscription("ai_grading")
 @open_year_required("submission_id")
-def ai_grade_essay():
-    """Grade a single essay answer."""
-    if g.get("user_role") not in ("guru", "admin_sekolah", "super_admin"):
+def ai_suggest_essay():
+    """Queue a suggestion for one essay. Answers 202, never a score.
+
+    `/ai/grade-essay` stays as an alias because it is what the pages already post;
+    what changed is the answer. A synchronous `{score}` here was a value a template
+    could drop into a mark field, and did.
+    """
+    if g.get("user_role") not in _AI_ROLES:
         return jsonify({"error": "Hanya guru/admin yang boleh mengoreksi esai"}), 403
-    data = request.get_json()
+    data = request.get_json(silent=True)
     if not data:
         return jsonify({"error": "No data"}), 400
 
     submission_id = data.get("submission_id")
-    question_index = data.get("question_index", 0)
-    question_text = data.get("question_text", "")
-    student_answer = data.get("student_answer", "")
-    max_score = int(data.get("max_score", 100))
-    rubric = data.get("rubric", "")
-    diagram_context = data.get("diagram_context", "")
-    lang = data.get("lang", "en")
+    if not submission_id:
+        return jsonify({"error": "submission_id required"}), 400
+    try:
+        question_index = int(data.get("question_index", 0))
+    except (TypeError, ValueError):
+        return jsonify({"error": "question_index tidak valid"}), 400
 
-    if not student_answer:
-        return jsonify({"error": "Tidak ada jawaban siswa"}), 400
+    supabase = get_supabase()
+    subs = supabase.table("submissions").select("id,exam_id,answers") \
+        .eq("id", submission_id).limit(1).execute().data or []
+    if not subs:
+        return jsonify({"error": denials.NO_SUBMISSION_ACCESS}), 404
+    exam_id = subs[0].get("exam_id")
 
-    from app.services.ai_grading import grade_essay as ai_grade
-    result = ai_grade(
-        teacher_id=g.user_id,
+    exam, refusal = _guard_managed_exam(exam_id, columns="id,teacher_id,school_id")
+    if refusal:
+        return refusal
+
+    from app.services.ai_grading import answer_text, queue_suggestion
+
+    # The teacher's OCR reading of a hand-drawn answer replaces the stored text for
+    # this one suggestion; everything else reads the submission itself, so the text
+    # the model sees is the text the app stored rather than text the browser chose.
+    ocr_text = (data.get("ocr_text") or "").strip()[:12000]
+
+    if not ocr_text and not answer_text(subs[0], question_index):
+        return jsonify({"error": "Tidak ada jawaban siswa untuk dinilai"}), 400
+
+    row, duplicate = queue_suggestion(
+        g.user_id,
         submission_id=submission_id,
         question_index=question_index,
-        question_text=question_text,
-        student_answer=student_answer,
-        max_score=max_score,
-        rubric=rubric,
-        diagram_context=diagram_context,
-        lang=lang,
+        exam_id=exam_id,
+        school_id=(exam or {}).get("school_id") or g.get("user_school_id"),
+        ocr_text=ocr_text,
     )
-    if "error" in result:
-        return jsonify(result), 422
-    return jsonify(result)
+    return jsonify({"status": "queued", "reused": duplicate,
+                    **_suggestion_body(row)}), 202
+
+
+@api_bp.route("/ai/suggestion/<suggestion_id>", methods=["GET"])
+@login_required
+def ai_suggestion_status(suggestion_id):
+    """Poll one suggestion. The marking page asks every couple of seconds.
+
+    Deliberately not behind `require_subscription`: the decorator skips GET, and a
+    school whose plan lapsed mid-marking should be able to read a suggestion it has
+    already paid for rather than see it vanish from a page mid-sentence.
+    """
+    row = _own_suggestion(get_supabase(), suggestion_id)
+    if not row:
+        return jsonify({"error": "Saran AI tidak ditemukan"}), 404
+    return jsonify(_suggestion_body(row))
+
+
+@api_bp.route("/ai/suggestion/<suggestion_id>/apply", methods=["POST"])
+@login_required
+@require_subscription("ai_grading")
+def ai_suggestion_apply(suggestion_id):
+    """Record that the teacher accepted the suggestion, and return it.
+
+    Writing nothing to `submissions` is the point: this answers with the number, the
+    form fills its own field, and the teacher's save — with whatever they changed —
+    is what the mark becomes.
+    """
+    if g.get("user_role") not in _AI_ROLES:
+        return jsonify({"error": "Hanya guru/admin yang boleh mengoreksi esai"}), 403
+    from app.services.ai_grading import apply_suggestion
+
+    try:
+        row = apply_suggestion(get_supabase(), suggestion_id, g.user_id)
+    except LookupError:
+        return jsonify({"error": "Saran AI tidak ditemukan"}), 404
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 409
+    return jsonify(_suggestion_body(row))
+
+
+@api_bp.route("/ai/suggestion/<suggestion_id>/reject", methods=["POST"])
+@login_required
+@require_subscription("ai_grading")
+def ai_suggestion_reject(suggestion_id):
+    """Record that the teacher looked at it and did not use it.
+
+    Kept as a status rather than a delete: a rejected suggestion is evidence about
+    the prompt, and the teacher may want to ask again after editing it.
+    """
+    if g.get("user_role") not in _AI_ROLES:
+        return jsonify({"error": "Hanya guru/admin yang boleh mengoreksi esai"}), 403
+    from app.services.ai_grading import reject_suggestion
+
+    try:
+        row = reject_suggestion(get_supabase(), suggestion_id, g.user_id)
+    except LookupError:
+        return jsonify({"error": "Saran AI tidak ditemukan"}), 404
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 409
+    return jsonify(_suggestion_body(row))
 
 
 @api_bp.route("/ai/grade-bulk", methods=["POST"])
@@ -2343,26 +2480,36 @@ def ai_grade_essay():
 @require_subscription("ai_grading")
 @open_year_required("exam_id")
 def ai_grade_bulk():
-    """Grade all pending essay questions for an exam or submission list."""
-    if g.get("user_role") not in ("guru", "admin_sekolah", "super_admin"):
+    """Queue one suggestion per unmarked essay on this exam.
+
+    Returns counts, not marks — and not a list of suggestions either, because the
+    caller is an overview page showing "12 dari 30"; the page reads progress from
+    `status_counts` rather than from a response that would have to be re-fetched as
+    each worker finished.
+    """
+    if g.get("user_role") not in _AI_ROLES:
         return jsonify({"error": "Hanya guru/admin yang boleh mengoreksi esai"}), 403
-    data = request.get_json()
+    data = request.get_json(silent=True)
     if not data:
         return jsonify({"error": "No data"}), 400
 
     exam_id = data.get("exam_id")
-    submission_ids = data.get("submission_ids")
-
     if not exam_id:
         return jsonify({"error": "exam_id required"}), 400
 
-    from app.services.ai_grading import grade_bulk_essays
-    result = grade_bulk_essays(
-        teacher_id=g.user_id,
-        exam_id=exam_id,
-        submission_ids=submission_ids,
+    exam, refusal = _guard_managed_exam(exam_id, columns="id,teacher_id,school_id")
+    if refusal:
+        return refusal
+
+    from app.services.ai_grading import queue_bulk
+
+    result = queue_bulk(
+        g.user_id,
+        exam_id,
+        submission_ids=data.get("submission_ids"),
+        school_id=(exam or {}).get("school_id") or g.get("user_school_id"),
     )
-    return jsonify(result)
+    return jsonify(result), 202
 
 
 # ═══════════════════════════════════════════════════════════

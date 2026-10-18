@@ -83,6 +83,15 @@ MACHINE = frozenset({
     # `/teacher/api/exam-roster` answers the class roster as JSON for the exam
     # builder's Target Classes panel: a readback, never a page of its own.
     "exam-roster",
+    # `/teacher/api/grading-queue/<exam>/answer/<submission>` hands back one
+    # paper's essay answers — the typed text and the canvases of handwriting — for
+    # the marking queue's own panel. A readback the queue makes for the pupil it is
+    # showing; the crumb is the queue itself, which is where the reader is.
+    "answer",
+    # `/api/ai/suggestion/<id>` answers one AI grading proposal as JSON, and its
+    # siblings accept or reject it — the marking screens' own readbacks and writes,
+    # reached from a button rather than from a link.
+    "suggestion",
     # `/teacher/api/grading-assist/bank` hands back the marking comment bank as
     # JSON for the per-question marking page, and its two siblings apply a
     # comment and set a review flag — readbacks and writes the marking page makes

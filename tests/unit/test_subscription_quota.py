@@ -126,7 +126,12 @@ class TestTheRoutesCarryTheCheck:
             "the bulk student import is not gated on the student quota")
 
     def test_ai_grading_is_gated(self):
-        for name in ("def ai_grade_essay(", "def ai_grade_bulk("):
+        # Every route that spends a provider call or records a decision. The polling
+        # route (`ai_suggestion_status`) is deliberately absent: it is a GET, the
+        # decorator skips GET, and a school whose plan lapsed mid-marking should
+        # still be able to read a suggestion it has already paid for.
+        for name in ("def ai_suggest_essay(", "def ai_grade_bulk(",
+                     "def ai_suggestion_apply(", "def ai_suggestion_reject("):
             deco = _decorators_above("app/routes/api.py", name)
             assert 'require_subscription("ai_grading")' in deco, (
                 f"{name[:-1]} is not gated on the AI-grading entitlement")

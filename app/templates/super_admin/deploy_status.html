@@ -120,6 +120,14 @@
                     #}
                     {% elif v.key == 'running_behind' %}
                     <span x-text="t('Proses yang menjawab halaman ini masih menjalankan kode yang lebih lama daripada checkout-nya: sebuah rilis sudah masuk ke checkout, tetapi proses ini belum memuatnya. Situs tetap melayani versi sebelumnya.','The process answering this page is still running code older than its own checkout: a release has landed in the checkout and this process never loaded it. The site keeps serving the previous version.')"></span>
+                    {#
+                        The claim, not the checkout: the box recorded a release and is
+                        serving something else. The two can disagree with the checkout
+                        perfectly happy — a pull and a restart outside the runner
+                        serves code no gate ever judged, and nothing else here sees it.
+                    #}
+                    {% elif v.key == 'release_not_served' %}
+                    <span x-text="t('Kode yang menjawab halaman ini bukan rilis yang terakhir dicatat kotak ini: kotak mencatat satu commit dan yang dilayani commit lain, jadi rilis yang tercatat itu tidak pernah dimuat — atau checkout dipindahkan di luar runner dan restart. Kedua commit itu ada di kartu checkout.','The code answering this page is not the release this box last recorded: the box recorded one commit and is serving another, so the release on record never loaded — or the checkout was moved outside the runner and restarted. Both commits are named on the checkout card.')"></span>
                     {% elif v.key == 'behind' %}
                     <span x-text="t('Runner sudah benar, tetapi checkout tertinggal dari origin/main.','The runner is right, but the checkout is behind origin/main.')"></span>
                     {% elif v.key == 'dirty' %}
@@ -1558,6 +1566,55 @@
                     {% else %}<span x-text="t('tidak diketahui','unknown')"></span>{% endif %}
                 </span>
             </div>
+            {#
+                The box's own claim, and the question the rows above cannot answer:
+                they compare what is served with what the checkout *holds*, and the two
+                only move together while every change arrives through the runner. The
+                record is what the runner wrote when it landed a release (or went back
+                to one), so a box serving code that no release put there reads as
+                `not_served` here and as perfectly fresh everywhere else.
+            #}
+            <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1">
+                <span class="text-surface-500 shrink-0" x-text="t('Rilis yang dicatat kotak ini','The release this box recorded')"></span>
+                <span class="text-right min-w-0">
+                    {% if status.last_release.present %}
+                    <code class="font-mono text-xs text-surface-700">{{ status.last_release.short }}</code>
+                    {% if status.last_release.subject %}<span class="block text-xs text-surface-500 break-words">{{ status.last_release.subject }}</span>{% endif %}
+                    {% if status.last_release.age_seconds is not none %}<span class="block text-xs text-surface-500"><strong>{{ status.last_release.age_seconds }}</strong> <span x-text="t('detik lalu','seconds ago')"></span></span>{% endif %}
+                    {% else %}
+                    <span class="text-xs text-surface-500" x-text="t('tidak ada','none')"></span>
+                    {% endif %}
+                </span>
+            </div>
+            <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1">
+                <span class="text-surface-500 shrink-0" x-text="t('Dibandingkan dengan kode yang menjawab halaman ini','Against the code answering this page')"></span>
+                <span class="text-right min-w-0">
+                    {% if status.last_release.key == 'live' %}
+                    <span class="text-xs font-bold text-emerald-700" x-text="t('sama — yang dilayani adalah rilis yang dicatat kotak ini','the same — the release the box recorded is the code being served')"></span>
+                    {% elif status.last_release.key == 'not_served' %}
+                    <span class="text-xs font-bold text-rose-700">
+                        <span x-text="t('berbeda — yang dilayani bukan rilis yang dicatat kotak ini','different — what is being served is not the release the box recorded')"></span>
+                        {% if status.last_release.served_commit %}<code class="ml-1 font-mono text-xs">{{ status.last_release.served_commit }}</code>{% endif %}
+                    </span>
+                    {% elif status.last_release.key == 'unknown' %}
+                    <span class="text-xs text-surface-500" x-text="t('tidak bisa dibandingkan — proses ini tidak melaporkan commit yang dilayaninya','cannot be compared — this process reported no commit of its own')"></span>
+                    {% elif status.last_release.key == 'malformed' %}
+                    <span class="text-xs text-amber-700" x-text="t('catatannya tidak terbaca sebagai commit, jadi tidak ada yang bisa dibandingkan','the record does not read as a commit, so there is nothing to compare')"></span>
+                    {% elif status.last_release.key == 'unreadable' %}
+                    <span class="text-xs text-amber-700" x-text="t('catatannya tidak bisa dibaca, jadi tidak ada yang bisa dibandingkan','the record cannot be read, so there is nothing to compare')"></span>
+                    {% elif status.last_release.key == 'absent' %}
+                    <span class="text-xs text-surface-500" x-text="t('belum ada rilis yang tercatat, jadi belum ada yang bisa dibandingkan','no release is on record, so there is nothing to compare yet')"></span>
+                    {% else %}
+                    <span class="text-surface-500">—</span>
+                    {% endif %}
+                </span>
+            </div>
+            {% if status.last_release.snapshot %}
+            <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1">
+                <span class="text-surface-500 shrink-0" x-text="t('Titik pemulihan sebelum rilis itu','The recovery point before that release')"></span>
+                <code class="font-mono text-xs text-surface-700 break-all text-right min-w-0">{{ status.last_release.snapshot }}</code>
+            </div>
+            {% endif %}
         </div>
     </div>
 

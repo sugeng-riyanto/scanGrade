@@ -114,7 +114,37 @@
        room. */
     .exam-stage--left .answer-bubbles { width: 9.5rem; }
     .exam-stage--left .answer-medium { width: 20rem; max-width: 40%; }
-    .exam-stage--left .answer-wide { width: 34rem; max-width: 45%; }
+    /* An essay is the one control a pupil types into for an hour. 34rem/45% made
+       it the narrowest thing on the page while the paper beside it kept the
+       room; it gets 44rem now, and the ceiling stays at half the row because
+       that is the rail's own rule — the column a pupil answers in must never
+       take more of the row than the question it is answering. */
+    .exam-stage--left .answer-wide { width: 44rem; max-width: 50%; }
+    /* ── the essay editor ─────────────────────────────────────────────────
+       A surface a pupil reads and types on for an hour, painted from the theme's
+       own tokens so it follows the theme. `--paper` is the deliberate exception
+       the answer canvas already makes (dark ink on a light sheet) and does NOT
+       apply here: this is typing, not ink. */
+    .essay-para {
+        min-height: 7.5rem;
+        max-width: 76ch;
+        background: var(--bg-card);
+        color: var(--text);
+        caret-color: var(--sb-thumb-active);
+    }
+    .essay-para:focus { outline: none; box-shadow: inset 0 0 0 2px var(--border-strong); }
+    /* List markers were invisible because the editor had no list styling at all:
+       the browser's default `list-style` inside a `div` with `padding: 0` put the
+       marker outside the padding box, where `overflow: hidden` cut it off. */
+    .essay-para ul { list-style: disc outside; padding-left: 1.5rem; margin: 0.25rem 0; }
+    .essay-para ol { list-style: decimal outside; padding-left: 1.75rem; margin: 0.25rem 0; }
+    .essay-para li { margin: 0.2rem 0; }
+    .essay-para li > br:only-child { display: block; }
+    /* The third typeface is not a new font download: it is Inter with the spacing
+       a struggling reader actually needs. A bundled OpenDyslexic would be a
+       licensing and subsetting decision of its own, and shipping one silently
+       would be the wrong place to make it. */
+    .word-spacing-wide { word-spacing: 0.14em; letter-spacing: 0.012em; font-size: 1.02rem; }
     /* The control is offered exactly where the layout exists, so it can never be
        a switch that does nothing. */
     .exam-side-ctl { display: flex; }
@@ -1448,6 +1478,28 @@ body.sg-exam .sidebar-overlay { display: none !important; }
                  :class="answerWidthClass">
             <template x-for="(q, i) in questions" :key="i">
                 <div x-show="currentQ === i" class="">
+                    <!-- ── The stimulus ──────────────────────────────────────────
+                         One context shared by several sub-questions, a reading in
+                         AKM/PISA style. It is shown once, above the first of its
+                         questions on this pupil's screen, and it stays put: the
+                         sub-questions under it are shuffled per pupil, the passage
+                         never is — a context that moved would not be a context.
+                         The text keeps its own line breaks (`whitespace-pre-line`),
+                         because a data table or a stanza typed with newlines is
+                         exactly what a passage is made of. -->
+                    <template x-if="stimulusStartsHere(i)">
+                        <div class="mb-3 rounded-2xl border-2 border-cyan-200 bg-cyan-50/60 p-3" data-stimulus-panel>
+                            <div class="flex items-center gap-2 mb-1.5">
+                                <i class="fas fa-book-open text-cyan-600"></i>
+                                <span class="text-[11px] font-extrabold text-cyan-700 uppercase tracking-wide"
+                                      x-text="t('Bacaan / Konteks','Passage / Context')"></span>
+                            </div>
+                            <p x-show="stimulusTitle(i)" class="text-sm font-extrabold text-stone-800 mb-1 break-words"
+                               data-stimulus-title x-text="stimulusTitle(i)"></p>
+                            <p class="text-xs font-semibold text-stone-700 whitespace-pre-line break-words"
+                               data-stimulus-content x-text="stimulusContent(i)"></p>
+                        </div>
+                    </template>
                     <!-- Media players -->
                     <!-- Media players.
                          Both are gated on what the link *resolved to*, not on the link
@@ -1817,25 +1869,107 @@ body.sg-exam .sidebar-overlay { display: none !important; }
                                     <i class="fas fa-check text-emerald-500"></i><span x-text="t('Terjawab','Answered')"></span>
                                 </span>
                             </div>
-                            <p class="text-[11px] font-semibold text-stone-400" x-text="t('Tentukan satu jawaban untuk tiap pernyataan.','Choose one judgement for each statement.')"></p>
+                            <p class="text-[11px] font-semibold text-stone-400"
+                               x-text="pgkIsMulti(i)
+                                   ? t('Centang setiap pernyataan yang menurut Anda benar.','Tick every statement you think is true.')
+                                   : t('Tentukan satu jawaban untuk tiap pernyataan.','Choose one judgement for each statement.')"></p>
                             <template x-for="(s, si) in pgkStatements(i)" :key="'pgk-' + i + '-' + si">
                                 <div class="rounded-2xl border-2 p-3 transition"
-                                     :class="pgkAnswer(i)[si] != null ? 'border-emerald-300 bg-emerald-50/40' : 'border-stone-200 bg-white'">
+                                     :class="(pgkIsMulti(i) ? pgkTicked(i, si) : pgkAnswer(i)[si] != null) ? 'border-emerald-300 bg-emerald-50/40' : 'border-stone-200 bg-white'">
                                     <p class="text-xs font-bold text-stone-700 mb-2 break-words">
                                         <span class="text-stone-400" x-text="(si + 1) + '. '"></span><span x-text="s"></span>
                                     </p>
                                     <div class="flex flex-wrap gap-1.5">
+                                        <button type="button" x-show="pgkIsMulti(i)" @click="pgkToggleTicked(i, si)"
+                                                role="checkbox" :aria-checked="pgkTicked(i, si) ? 'true' : 'false'"
+                                                class="tap-44 pgk-opt text-xs font-bold px-3 py-2 rounded-xl border-2 transition inline-flex items-center gap-1.5"
+                                                :class="pgkTicked(i, si) ? 'bg-emerald-100 border-emerald-300 text-emerald-700' : 'bg-white border-stone-200 text-stone-600 hover:border-teal-300'">
+                                            <i class="fas" :class="pgkTicked(i, si) ? 'fa-square-check' : 'fa-square'"></i>
+                                            <span x-text="t('Benar','True')"></span>
+                                        </button>
                                         <template x-for="(cat, ci) in pgkCategories(i)" :key="'pc-' + i + '-' + si + '-' + ci">
-                                            <button type="button" @click="pgkPick(i, si, ci)"
+                                            <button type="button" x-show="!pgkIsMulti(i)" @click="pgkPick(i, si, ci)"
                                                     class="tap-44 pgk-opt text-xs font-bold px-3 py-2 rounded-xl border-2 transition"
                                                     :class="pgkAnswer(i)[si] === ci ? 'bg-emerald-100 border-emerald-300 text-emerald-700' : 'bg-white border-stone-200 text-stone-600 hover:border-teal-300'">
                                                 <span x-text="cat"></span>
                                             </button>
                                         </template>
-                                        <button type="button" @click="pgkClear(i, si)" x-show="pgkAnswer(i)[si] != null"
+                                        <button type="button" @click="pgkClear(i, si)" x-show="!pgkIsMulti(i) && pgkAnswer(i)[si] != null"
                                                 class="text-xs font-bold px-3 py-2 rounded-xl border-2 border-dashed border-stone-200 text-stone-400 hover:text-rose-500 hover:border-rose-200 transition">
                                             <i class="fas fa-eraser mr-1"></i><span x-text="t('Hapus','Clear')"></span>
                                         </button>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                    </template>
+
+                    <!-- Numeric / short answer: one box. `inputmode` is what makes a
+                         phone open its number pad for a number and its ordinary keyboard
+                         for a word — the only thing the student's side needs to know about
+                         the mode, since the key stays on the server. -->
+                    <template x-if="qKind(i) === 'numeric'">
+                        <div class="space-y-2">
+                            <div class="flex items-center gap-2 flex-wrap">
+                                <span class="text-sm font-extrabold text-stone-700" x-text="t('Soal ','Question ') + (i + 1) + ':'"></span>
+                                <span class="inline-flex items-center gap-1 text-[10px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-200"
+                                      x-text="numericMode(i) === 'text' ? t('Isian Singkat','Short answer') : t('Angka','Numeric')"></span>
+                                <span x-show="answered[i]" class="inline-flex items-center gap-1 text-xs font-bold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
+                                    <i class="fas fa-check text-emerald-500"></i><span x-text="t('Terjawab','Answered')"></span>
+                                </span>
+                            </div>
+                            <p class="text-[11px] font-semibold text-stone-400"
+                               x-text="numericMode(i) === 'text'
+                                   ? t('Tulis jawaban singkat, satu kata atau frasa.','Write a short answer, one word or a phrase.')
+                                   : t('Tulis angkanya saja, tanpa satuan. Koma atau titik sama-sama diterima.','Write the number only, without units. A comma or a full stop both work.')"></p>
+                            <div class="rounded-2xl border-2 px-3 py-2.5 transition"
+                                 :class="answered[i] ? 'border-emerald-300 bg-emerald-50/40' : 'border-stone-200 bg-white'">
+                                <input type="text"
+                                       :inputmode="numericMode(i) === 'text' ? 'text' : 'decimal'"
+                                       :autocomplete="'off'"
+                                       :value="numericAnswer(i)"
+                                       @input="setNumericAnswer(i, $event.target.value)"
+                                       :placeholder="numericMode(i) === 'text' ? t('jawaban Anda','your answer') : t('mis. 9,8','e.g. 9.8')"
+                                       class="w-full bg-transparent text-base font-bold text-stone-800 outline-none placeholder:font-semibold placeholder:text-stone-300">
+                            </div>
+                            <p class="text-[10px] font-semibold text-stone-400"
+                               x-text="t('Jawaban yang tidak terbaca otomatis akan diperiksa guru, jadi tulis jawaban sejelas mungkin.',
+                                       'An answer the app cannot read automatically is checked by your teacher, so write it as clearly as you can.')"></p>
+                        </div>
+                    </template>
+
+                    <!-- Matrix / grid: one card per row, never a wide table. Each row
+                         carries the shared options underneath it, so a phone answers the
+                         same grid as a laptop without scrolling sideways. -->
+                    <template x-if="qKind(i) === 'matrix'">
+                        <div class="space-y-2">
+                            <div class="flex items-center gap-2 flex-wrap">
+                                <span class="text-sm font-extrabold text-stone-700" x-text="t('Soal ','Question ') + (i + 1) + ':'"></span>
+                                <span class="inline-flex items-center gap-1 text-[10px] font-bold text-fuchsia-700 bg-fuchsia-50 px-2 py-0.5 rounded-full border border-fuchsia-200" x-text="t('Matriks','Matrix')"></span>
+                                <span x-show="answered[i]" class="inline-flex items-center gap-1 text-xs font-bold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
+                                    <i class="fas fa-check text-emerald-500"></i><span x-text="t('Terjawab','Answered')"></span>
+                                </span>
+                            </div>
+                            <p class="text-[11px] font-semibold text-stone-400"
+                               x-text="matrixIsMulti(i)
+                                   ? t('Pilih semua opsi yang benar untuk tiap baris.','Choose every option that is true for each row.')
+                                   : t('Pilih satu opsi untuk tiap baris.','Choose one option for each row.')"></p>
+                            <template x-for="(row, ri) in matrixRows(i)" :key="'mxr-' + i + '-' + ri">
+                                <div class="rounded-2xl border-2 p-3 transition"
+                                     :class="(matrixAnswer(i)[String(ri)] || []).length ? 'border-emerald-300 bg-emerald-50/40' : 'border-stone-200 bg-white'">
+                                    <p class="text-xs font-bold text-stone-700 mb-2 break-words">
+                                        <span class="text-stone-400" x-text="(ri + 1) + '. '"></span><span x-text="row.text"></span>
+                                    </p>
+                                    <div class="flex flex-wrap gap-1.5">
+                                        <template x-for="(col, ci) in matrixColumns(i)" :key="'mxc-' + i + '-' + ri + '-' + ci">
+                                            <button type="button" @click="matrixPick(i, ri, ci)"
+                                                    :role="matrixIsMulti(i) ? 'checkbox' : 'radio'"
+                                                    :aria-checked="matrixPicked(i, ri, ci) ? 'true' : 'false'"
+                                                    class="tap-44 matrix-opt text-xs font-bold px-3 py-2 rounded-xl border-2 transition"
+                                                    :class="matrixPicked(i, ri, ci) ? 'bg-emerald-100 border-emerald-300 text-emerald-700' : 'bg-white border-stone-200 text-stone-600 hover:border-fuchsia-300'">
+                                                <span x-text="col"></span>
+                                            </button>
+                                        </template>
                                     </div>
                                 </div>
                             </template>
@@ -1877,15 +2011,27 @@ body.sg-exam .sidebar-overlay { display: none !important; }
                                     <span class="text-xs text-slate-400" x-text="'(' + ((answersText[i] || '').length) + t(' karakter, ',' characters, ') + ((paragraphs[i]||[]).length) + t(' paragraf)',' paragraphs)')"></span>
                                 </div>
                                 <!-- Rich text toolbar -->
-                                <div class="flex items-center gap-1 px-3 py-1.5 bg-surface-50 border border-surface-200 rounded-t-xl">
-                                    <button type="button" @click="execCmd('bold')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs font-bold text-surface-600" :title="t('Tebal','Bold')">B</button>
-                                    <button type="button" @click="execCmd('italic')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs italic text-surface-600" :title="t('Miring','Italic')">I</button>
-                                    <button type="button" @click="execCmd('underline')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs underline text-surface-600" :title="t('Garis bawah','Underline')">U</button>
+                                <div class="flex flex-wrap items-center gap-1 px-3 py-1.5 bg-surface-50 border border-surface-200 rounded-t-xl">
+                                    <button type="button" @mousedown.prevent @click="execCmd('bold', i)" class="w-7 h-7 rounded hover:bg-surface-200 text-xs font-bold text-surface-600" :title="t('Tebal','Bold')">B</button>
+                                    <button type="button" @mousedown.prevent @click="execCmd('italic', i)" class="w-7 h-7 rounded hover:bg-surface-200 text-xs italic text-surface-600" :title="t('Miring','Italic')">I</button>
+                                    <button type="button" @mousedown.prevent @click="execCmd('underline', i)" class="w-7 h-7 rounded hover:bg-surface-200 text-xs underline text-surface-600" :title="t('Garis bawah','Underline')">U</button>
                                     <span class="w-px h-4 bg-surface-300 mx-0.5"></span>
-                                    <button type="button" @click="execCmd('insertUnorderedList')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs text-surface-600" :title="t('Daftar','Bullet list')"><i class="fas fa-list-ul"></i></button>
-                                    <button type="button" @click="execCmd('insertOrderedList')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs text-surface-600" :title="t('Daftar nomor','Numbered list')"><i class="fas fa-list-ol"></i></button>
+                                    <button type="button" @mousedown.prevent @click="toggleList(i, false)"
+                                            :class="paraHasList(i, 'ul') ? 'bg-primary-100 text-primary-700' : 'hover:bg-surface-200 text-surface-600'"
+                                            class="w-7 h-7 rounded text-xs" :title="t('Daftar','Bullet list')"><i class="fas fa-list-ul"></i></button>
+                                    <button type="button" @mousedown.prevent @click="toggleList(i, true)"
+                                            :class="paraHasList(i, 'ol') ? 'bg-primary-100 text-primary-700' : 'hover:bg-surface-200 text-surface-600'"
+                                            class="w-7 h-7 rounded text-xs" :title="t('Daftar nomor','Numbered list')"><i class="fas fa-list-ol"></i></button>
                                     <span class="w-px h-4 bg-surface-300 mx-0.5"></span>
-                                    <button type="button" @click="addParagraph(i)" class="px-2 h-7 rounded hover:bg-surface-200 text-xs font-semibold text-primary-600" :title="t('Tambah paragraf','Add paragraph')"><span x-text="t('+ Paragraf','+ Paragraph')"></span></button>
+                                    <select x-model="essayFont[i]" @mousedown.stop
+                                            class="text-[10px] font-bold border border-surface-200 rounded px-1 py-0.5 bg-white text-surface-600"
+                                            :title="t('Jenis huruf','Typeface')">
+                                        <option value="inter" x-text="t('Normal','Standard')"></option>
+                                        <option value="serif" x-text="t('Serif','Serif')"></option>
+                                        <option value="wide" x-text="t('Lebar','Wide')"></option>
+                                    </select>
+                                    <span class="w-px h-4 bg-surface-300 mx-0.5"></span>
+                                    <button type="button" @mousedown.prevent @click="addParagraph(i)" class="px-2 h-7 rounded hover:bg-surface-200 text-xs font-semibold text-primary-600" :title="t('Tambah paragraf','Add paragraph')"><span x-text="t('+ Paragraf','+ Paragraph')"></span></button>
                                 </div>
                                 <!-- Paragraphs -->
                                 <div class="border border-t-0 border-surface-200 rounded-b-xl divide-y divide-surface-100 bg-white">
@@ -1895,12 +2041,21 @@ body.sg-exam .sidebar-overlay { display: none !important; }
                                                 <span class="text-[10px] font-semibold text-surface-400" x-text="t('Paragraf ','Paragraph ') + (pIdx + 1)"></span>
                                                 <button type="button" @click="deleteParagraph(i, pIdx)" x-show="(paragraphs[i]||[]).length > 1" class="text-surface-300 hover:text-red-500 text-xs opacity-0 group-hover:opacity-100 transition"><i class="fas fa-times"></i></button>
                                             </div>
+                                            {# `x-init`, not `x-html`: binding the
+                                               editor's HTML to the state every keystroke
+                                               updates made Alpine rewrite the node
+                                               mid-typing and drop the caret back to the
+                                               start of the paragraph. The HTML is set once,
+                                               when the paragraph is created or restored;
+                                               after that the DOM is the source. #}
                                             <div :ref="'para_' + para.id"
+                                                 x-init="$el.innerHTML = para.html || '<p><br></p>'"
                                                  contenteditable="true"
+                                                 class="essay-para p-4 text-[15px] leading-relaxed"
+                                                 :class="essayFontClass(i)"
+                                                 @focus="activePara[i] = pIdx"
                                                  @input="onParagraphInput(i, pIdx, $refs['para_' + para.id])"
-                                                 @keydown.enter.prevent="addParagraph(i, pIdx + 1)"
-                                                 class="min-h-[60px] p-3 text-sm leading-relaxed text-surface-800 focus:outline-none focus:bg-blue-50/30"
-                                                 x-html="para.html || '<p><br></p>'"></div>
+                                                 @keydown.enter="onEnter(i, pIdx, $event)"></div>
                                         </div>
                                     </template>
                                 </div>
@@ -1931,15 +2086,27 @@ body.sg-exam .sidebar-overlay { display: none !important; }
                                     </span>
                                     <span class="text-xs text-slate-400" x-text="'(' + ((answersText[i] || '').length) + t(' karakter, ',' characters, ') + ((paragraphs[i]||[]).length) + t(' paragraf)',' paragraphs)')"></span>
                                 </div>
-                                <div class="flex items-center gap-1 px-3 py-1.5 bg-surface-50 border border-surface-200 rounded-t-xl">
-                                    <button type="button" @click="execCmd('bold')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs font-bold text-surface-600" :title="t('Tebal','Bold')">B</button>
-                                    <button type="button" @click="execCmd('italic')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs italic text-surface-600" :title="t('Miring','Italic')">I</button>
-                                    <button type="button" @click="execCmd('underline')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs underline text-surface-600" :title="t('Garis bawah','Underline')">U</button>
+                                <div class="flex flex-wrap items-center gap-1 px-3 py-1.5 bg-surface-50 border border-surface-200 rounded-t-xl">
+                                    <button type="button" @mousedown.prevent @click="execCmd('bold', i)" class="w-7 h-7 rounded hover:bg-surface-200 text-xs font-bold text-surface-600" :title="t('Tebal','Bold')">B</button>
+                                    <button type="button" @mousedown.prevent @click="execCmd('italic', i)" class="w-7 h-7 rounded hover:bg-surface-200 text-xs italic text-surface-600" :title="t('Miring','Italic')">I</button>
+                                    <button type="button" @mousedown.prevent @click="execCmd('underline', i)" class="w-7 h-7 rounded hover:bg-surface-200 text-xs underline text-surface-600" :title="t('Garis bawah','Underline')">U</button>
                                     <span class="w-px h-4 bg-surface-300 mx-0.5"></span>
-                                    <button type="button" @click="execCmd('insertUnorderedList')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs text-surface-600" :title="t('Daftar','Bullet list')"><i class="fas fa-list-ul"></i></button>
-                                    <button type="button" @click="execCmd('insertOrderedList')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs text-surface-600" :title="t('Daftar nomor','Numbered list')"><i class="fas fa-list-ol"></i></button>
+                                    <button type="button" @mousedown.prevent @click="toggleList(i, false)"
+                                            :class="paraHasList(i, 'ul') ? 'bg-primary-100 text-primary-700' : 'hover:bg-surface-200 text-surface-600'"
+                                            class="w-7 h-7 rounded text-xs" :title="t('Daftar','Bullet list')"><i class="fas fa-list-ul"></i></button>
+                                    <button type="button" @mousedown.prevent @click="toggleList(i, true)"
+                                            :class="paraHasList(i, 'ol') ? 'bg-primary-100 text-primary-700' : 'hover:bg-surface-200 text-surface-600'"
+                                            class="w-7 h-7 rounded text-xs" :title="t('Daftar nomor','Numbered list')"><i class="fas fa-list-ol"></i></button>
                                     <span class="w-px h-4 bg-surface-300 mx-0.5"></span>
-                                    <button type="button" @click="addParagraph(i)" class="px-2 h-7 rounded hover:bg-surface-200 text-xs font-semibold text-primary-600" :title="t('Tambah paragraf','Add paragraph')"><span x-text="t('+ Paragraf','+ Paragraph')"></span></button>
+                                    <select x-model="essayFont[i]" @mousedown.stop
+                                            class="text-[10px] font-bold border border-surface-200 rounded px-1 py-0.5 bg-white text-surface-600"
+                                            :title="t('Jenis huruf','Typeface')">
+                                        <option value="inter" x-text="t('Normal','Standard')"></option>
+                                        <option value="serif" x-text="t('Serif','Serif')"></option>
+                                        <option value="wide" x-text="t('Lebar','Wide')"></option>
+                                    </select>
+                                    <span class="w-px h-4 bg-surface-300 mx-0.5"></span>
+                                    <button type="button" @mousedown.prevent @click="addParagraph(i)" class="px-2 h-7 rounded hover:bg-surface-200 text-xs font-semibold text-primary-600" :title="t('Tambah paragraf','Add paragraph')"><span x-text="t('+ Paragraf','+ Paragraph')"></span></button>
                                 </div>
                                 <!-- Paragraphs (Canvas mode) -->
                                 <div class="border border-t-0 border-surface-200 rounded-b-xl divide-y divide-surface-100 bg-white">
@@ -1949,12 +2116,21 @@ body.sg-exam .sidebar-overlay { display: none !important; }
                                                 <span class="text-[10px] font-semibold text-surface-400" x-text="t('Paragraf ','Paragraph ') + (pIdx + 1)"></span>
                                                 <button type="button" @click="deleteParagraph(i, pIdx)" x-show="(paragraphs[i]||[]).length > 1" class="text-surface-300 hover:text-red-500 text-xs opacity-0 group-hover:opacity-100 transition"><i class="fas fa-times"></i></button>
                                             </div>
+                                            {# `x-init`, not `x-html`: binding the
+                                               editor's HTML to the state every keystroke
+                                               updates made Alpine rewrite the node
+                                               mid-typing and drop the caret back to the
+                                               start of the paragraph. The HTML is set once,
+                                               when the paragraph is created or restored;
+                                               after that the DOM is the source. #}
                                             <div :ref="'para_' + para.id"
+                                                 x-init="$el.innerHTML = para.html || '<p><br></p>'"
                                                  contenteditable="true"
+                                                 class="essay-para p-4 text-[15px] leading-relaxed"
+                                                 :class="essayFontClass(i)"
+                                                 @focus="activePara[i] = pIdx"
                                                  @input="onParagraphInput(i, pIdx, $refs['para_' + para.id])"
-                                                 @keydown.enter.prevent="addParagraph(i, pIdx + 1)"
-                                                 class="min-h-[60px] p-3 text-sm leading-relaxed text-surface-800 focus:outline-none focus:bg-blue-50/30"
-                                                 x-html="para.html || '<p><br></p>'"></div>
+                                                 @keydown.enter="onEnter(i, pIdx, $event)"></div>
                                         </div>
                                     </template>
                                 </div>
@@ -2031,6 +2207,21 @@ const QUESTION_PAGES = {{ (exam.question_pages or {}) | tojson | safe }};
 // question_types.public_options(), and `answer_key` is stripped from `exam`
 // before this page is rendered at all.
 const QUESTION_OPTIONS = {{ (question_options or {}) | tojson | safe }};
+// A stimulus: one context (a passage, a picture, a data table) shared by the
+// questions filed under it, `{id: {title, content, questions:[index]}}`. It is a
+// container and carries no answer, so nothing here needs hiding — but note that
+// `questions` is a list of *original* indexes, while `this.questions` may be
+// shuffled, which is why the page maps them through `origIdx` rather than using a
+// display position.
+const STIMULI = {{ (exam.question_stimuli or {}) | tojson | safe }};
+function sgStimulusOf(origIdx) {
+    let found = null;
+    Object.keys(STIMULI || {}).forEach(function (sid) {
+        const list = (STIMULI[sid] || {}).questions || [];
+        if (list.indexOf(origIdx) > -1) found = sid;
+    });
+    return found;
+}
 // The type vocabulary, from the server, so this page and the grader cannot
 // disagree about what a true/false question is. See app/services/question_types.py.
 const SG_QT = {{ q_vocabulary() | tojson | safe }};
@@ -2296,6 +2487,11 @@ function examApp(duration, totalQ) {
         answersText: {},
         paragraphs: {},       // { i: [{id, text, html, order}] } per question
         essayMode: {},        // { i: 'text' | 'canvas' }
+        // Which paragraph the toolbar is acting on for each question, and the
+        // typeface the pupil chose for it. Neither is content: the font is a
+        // reading preference and is never sent to the server.
+        activePara: {},
+        essayFont: {},
         matchOpen: null,      // which matching row's candidate list is open, 'i:pi'
         chipDrag: null,       // { i, w } while a chip is being dragged
         dragOverChips: {},    // { i: true } while a chip hovers the answer box
@@ -2773,7 +2969,26 @@ function examApp(duration, totalQ) {
             {% endif %}
             // Shuffle questions if enabled
             if (this.antiCheat.randomize_questions) {
-                this._shuffle(this.questions);
+                // ── A stimulus is a unit of shuffling, not a question ────────────
+                // A paper whose questions are shuffled per pupil must keep the
+                // questions of one stimulus together: scattering five sub-questions
+                // through the paper leaves the passage screens away from the
+                // question that reads it, which is not a harder paper, it is a
+                // broken one. So the *groups* are shuffled and the order inside a
+                // group is kept — the sub-questions still differ in order between
+                // two pupils, because their group's position differs.
+                const units = [];
+                const byStimulus = {};
+                const self = this;
+                this.questions.forEach(function (q, i) {
+                    const oi = q.origIdx !== undefined ? q.origIdx : i;
+                    const sid = sgStimulusOf(oi);
+                    if (!sid) { units.push([q]); return; }
+                    if (!byStimulus[sid]) { byStimulus[sid] = []; units.push(byStimulus[sid]); }
+                    byStimulus[sid].push(q);
+                });
+                self._shuffle(units);
+                this.questions = units.reduce(function (acc, unit) { return acc.concat(unit); }, []);
                 // Store shuffled order for answer key mapping
                 this._qOrder = this.questions.map((_, i) => i);
             } else {
@@ -4041,6 +4256,10 @@ function examApp(duration, totalQ) {
             // A PGK question asks several judgements, so it wants the medium column
             // rather than the narrow one a single choice question fits in.
             if (kind === 'pgk') return 'answer-medium';
+            // A matrix is a stack of judgement rows — the same width the grid needs,
+            // and the cards are what keep it inside the column on a phone. A short
+            // answer is one box, so it fits where a bubble strip fits.
+            if (kind === 'matrix') return 'answer-medium';
             return 'answer-bubbles';
         },
         toggleChrome() {
@@ -4174,6 +4393,8 @@ function examApp(duration, totalQ) {
             if (kind === 'dragdrop') return {cls: 'text-rose-500', icon: 'fas fa-hand-pointer'};
             if (kind === 'ordering') return {cls: 'text-sky-500', icon: 'fas fa-arrow-down-1-9'};
             if (kind === 'pgk') return {cls: 'text-teal-500', icon: 'fas fa-list-check'};
+            if (kind === 'numeric') return {cls: 'text-indigo-500', icon: 'fas fa-hashtag'};
+            if (kind === 'matrix') return {cls: 'text-fuchsia-500', icon: 'fas fa-table-cells'};
             if (type === 'essay_text') return {cls: 'text-amber-500', icon: 'fas fa-font'};
             return {cls: 'text-orange-400', icon: 'fas fa-paint-brush'};
         },
@@ -4711,6 +4932,42 @@ function examApp(duration, totalQ) {
         // `questions[i].answer`, which is the same field a choice answer uses. So
         // saving, syncing and submitting need no special case; only the control does.
         qKind(i) { return sgKind((this.questions[i] || {}).type); },
+        // ── stimulus ────────────────────────────────────────────────────────
+        // The container a question sits under, looked up by the question's *own*
+        // index: `this.questions` may have been shuffled, and a stimulus must not
+        // move to another question because of it.
+        stimulusFor(i) {
+            const q = this.questions[i];
+            if (!q) return null;
+            const oi = q.origIdx !== undefined ? q.origIdx : i;
+            const sid = sgStimulusOf(oi);
+            return sid ? (STIMULI[sid] || null) : null;
+        },
+        // Shown once per group, above the first of its questions *on screen*. The
+        // panel is sticky-ish reading material, not a repeat on every question: a
+        // five-question stimulus would otherwise print the same passage five times.
+        stimulusStartsHere(i) {
+            const q = this.questions[i];
+            if (!q) return false;
+            const oi = q.origIdx !== undefined ? q.origIdx : i;
+            const sid = sgStimulusOf(oi);
+            if (!sid) return false;
+            return !this.questions.slice(0, i).some(function (other, j) {
+                // `j` and not 0 for the fallback: a question built by this page (the
+                // preview's own list) carries no `origIdx`, and reading it as index 0
+                // would make it look like the first question of every stimulus.
+                const oi2 = other.origIdx !== undefined ? other.origIdx : j;
+                return sgStimulusOf(oi2) === sid;
+            });
+        },
+        stimulusTitle(i) {
+            const s = this.stimulusFor(i);
+            return (s && s.title) || '';
+        },
+        stimulusContent(i) {
+            const s = this.stimulusFor(i);
+            return (s && s.content) || '';
+        },
         _opts(i) { return QUESTION_OPTIONS[(this.questions[i] || {}).origIdx !== undefined ? this.questions[i].origIdx : i] || null; },
         _setStructured(i, value, filled) {
             this.questions[i].answer = value;
@@ -4821,6 +5078,77 @@ function examApp(duration, totalQ) {
             arr[si] = null;
             const filled = arr.some(v => v != null);
             this._setStructured(i, filled ? arr : null, filled);
+        },
+        // The checkbox shape of the same question: `public_options` reports
+        // `select: multi`, the answer is the set of statements the pupil ticked, and
+        // there is no category list to read.
+        pgkIsMulti(i) { const o = this._opts(i); return !!o && o.select === 'multi'; },
+        pgkTicked(i, si) { return this.pgkAnswer(i).indexOf(si) > -1; },
+        pgkToggleTicked(i, si) {
+            const arr = this.pgkAnswer(i).filter(v => typeof v === 'number');
+            const at = arr.indexOf(si);
+            if (at > -1) arr.splice(at, 1); else arr.push(si);
+            arr.sort((a, b) => a - b);
+            // Every statement unticked is *no answer*, not an empty key: the server
+            // reads an empty set as a real key ("none of these"), so the page must
+            // send nothing at all rather than a list it did not mean.
+            this._setStructured(i, arr.length ? arr : null, arr.length > 0);
+        },
+
+        // ── numeric / short answer ──────────────────────────────────────────
+        // One box, typed. The mode comes from `public_options` and only decides the
+        // keyboard and the placeholder — never the key, which stays on the server.
+        numericMode(i) { const o = this._opts(i); return (o && o.mode) === 'text' ? 'text' : 'number'; },
+        numericAnswer(i) {
+            const raw = (this.questions[i] || {}).answer;
+            return typeof raw === 'string' ? raw : (raw == null ? '' : String(raw));
+        },
+        setNumericAnswer(i, text) {
+            const value = String(text == null ? '' : text);
+            this._setStructured(i, value.trim() ? value : null, !!value.trim());
+        },
+
+        // ── matrix / grid ───────────────────────────────────────────────────
+        // Rows are the statements, columns the shared options, and the answer is
+        // `{row: [column]} ` — the shape `question_types.matrix_answer` reads. The
+        // page draws them as stacked cards on every width, so a phone never has to
+        // scroll a wide table sideways to answer one row.
+        matrixRows(i) { const o = this._opts(i); return (o && o.rows) || []; },
+        matrixColumns(i) { const o = this._opts(i); return (o && o.columns) || []; },
+        matrixIsMulti(i) { const o = this._opts(i); return !!o && o.mode === 'multi'; },
+        matrixAnswer(i) {
+            const raw = (this.questions[i] || {}).answer;
+            const out = {};
+            if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+                Object.keys(raw).forEach(k => {
+                    const v = raw[k];
+                    if (Array.isArray(v)) out[k] = v.slice();
+                    else if (typeof v === 'number') out[k] = [v];
+                });
+            }
+            return out;
+        },
+        matrixPicked(i, ri, ci) {
+            const row = this.matrixAnswer(i)[String(ri)] || [];
+            return row.indexOf(ci) > -1;
+        },
+        matrixPick(i, ri, ci) {
+            const map = this.matrixAnswer(i);
+            const key = String(ri);
+            const row = (map[key] || []).slice();
+            if (this.matrixIsMulti(i)) {
+                const at = row.indexOf(ci);
+                if (at > -1) row.splice(at, 1); else row.push(ci);
+                row.sort((a, b) => a - b);
+            } else {
+                // Tapping the chosen option again clears the row — a mis-tap on a
+                // phone has to be undoable, and a grid has no third state to offer.
+                if (row.length === 1 && row[0] === ci) row.length = 0;
+                else row.splice(0, row.length, ci);
+            }
+            if (row.length) map[key] = row; else delete map[key];
+            const filled = Object.keys(map).length > 0;
+            this._setStructured(i, filled ? map : null, filled);
         },
         chipStart(e, i, chip) {
             this.chipDrag = { i: i, w: chip };
@@ -4983,12 +5311,128 @@ function examApp(duration, totalQ) {
             this.paragraphs[qIdx].forEach((p, i) => p.order = i);
             this.onParagraphUpdate(qIdx);
         },
+        // The paragraph the caret is in, for a toolbar button that never took focus.
+        currentParaEl(qIdx) {
+            const active = document.activeElement;
+            if (active && active.isContentEditable) return active;
+            const list = this.paragraphs[qIdx] || [];
+            const idx = this.activePara[qIdx] || 0;
+            const para = list[idx] || list[0];
+            return para ? this.$refs['para_' + para.id] : null;
+        },
+        // What the pupil sees, as text: list items carry their marker, because
+        // `innerText` of a <ul> drops it and the teacher would read a bulleted
+        // list as a run-on paragraph. This is the string that is stored, synced,
+        // shown to the teacher and sent to the AI — one representation, so the
+        // four cannot disagree.
+        paragraphText(el) {
+            if (!el) return '';
+            const clone = el.cloneNode(true);
+            clone.querySelectorAll('li').forEach(li => {
+                const parent = li.parentElement;
+                const ordered = parent && parent.tagName === 'OL';
+                const marker = ordered
+                    ? (Array.prototype.indexOf.call(parent.children, li) + 1) + '. '
+                    : '- ';
+                li.insertBefore(document.createTextNode(marker), li.firstChild);
+            });
+            return (clone.innerText || '').replace(/\u00a0/g, ' ').trim();
+        },
         onParagraphInput(qIdx, pIdx, el) {
             if (!el || !this.paragraphs[qIdx] || !this.paragraphs[qIdx][pIdx]) return;
             const para = this.paragraphs[qIdx][pIdx];
             para.html = el.innerHTML;
-            para.text = el.innerText;
+            para.text = this.paragraphText(el);
+            this.activePara[qIdx] = pIdx;
             this.onParagraphUpdate(qIdx);
+        },
+        // Re-read the node a command just changed. Without this the DOM moved and
+        // the state did not, so a formatted answer serialised as its old text and
+        // the teacher saw the answer without the formatting the pupil applied.
+        captureParagraphDom(qIdx, el) {
+            const list = this.paragraphs[qIdx] || [];
+            const idx = list.findIndex(p => this.$refs['para_' + p.id] === el);
+            if (idx >= 0) this.onParagraphInput(qIdx, idx, el);
+        },
+        paraHasList(qIdx, tag) {
+            return (this.paragraphs[qIdx] || []).some(
+                p => (p.html || '').includes('<' + tag));
+        },
+        essayFontClass(qIdx) {
+            const choice = this.essayFont[qIdx] || 'inter';
+            if (choice === 'serif') return 'font-serif';
+            if (choice === 'wide') return 'tracking-wide word-spacing-wide';
+            return '';
+        },
+        // Enter inside a list item belongs to the browser: it makes the next item.
+        // `@keydown.enter.prevent` used to fire unconditionally, so every Enter
+        // opened a brand-new paragraph div and a list could never grow past one
+        // line — the second half of "bullet does not work".
+        onEnter(qIdx, pIdx, ev) {
+            const sel = window.getSelection();
+            const node = sel && sel.anchorNode;
+            const host = node && (node.nodeType === 1 ? node : node.parentElement);
+            if (host && host.closest && host.closest('li')) return;
+            ev.preventDefault();
+            this.addParagraph(qIdx, pIdx + 1);
+        },
+        execCmd(cmd, qIdx) {
+            const el = this.currentParaEl(qIdx);
+            if (!el) return;
+            const sel = window.getSelection();
+            const saved = sel && sel.rangeCount ? sel.getRangeAt(0).cloneRange() : null;
+            el.focus();
+            if (saved) { sel.removeAllRanges(); sel.addRange(saved); }
+            document.execCommand(cmd, false, null);
+            this.captureParagraphDom(qIdx, el);
+        },
+        // Lists are built with DOM nodes rather than `execCommand`: the list
+        // commands are the part of that API browsers disagree about, and this is
+        // the part a pupil presses during a timed paper.
+        toggleList(qIdx, ordered) {
+            const el = this.currentParaEl(qIdx);
+            if (!el) return;
+            el.focus();
+            const sel = window.getSelection();
+            const node = sel && sel.anchorNode;
+            const host = node && (node.nodeType === 1 ? node : node.parentElement);
+            const inList = host && host.closest ? host.closest('ul,ol') : null;
+            const want = ordered ? 'OL' : 'UL';
+
+            if (inList && el.contains(inList)) {
+                if (inList.tagName === want) {
+                    // Toggle off: each item becomes a plain line again.
+                    const frag = document.createDocumentFragment();
+                    Array.from(inList.children).forEach(li => {
+                        const line = document.createElement('div');
+                        line.innerHTML = li.innerHTML;
+                        frag.appendChild(line);
+                    });
+                    inList.replaceWith(frag);
+                } else {
+                    // Switching bullet <-> numbered keeps the items.
+                    const replacement = document.createElement(ordered ? 'ol' : 'ul');
+                    Array.from(inList.children).forEach(li =>
+                        replacement.appendChild(li.cloneNode(true)));
+                    inList.replaceWith(replacement);
+                }
+                this.captureParagraphDom(qIdx, el);
+                return;
+            }
+
+            // No list yet: every line the pupil wrote becomes an item, and an
+            // empty line keeps its place so a blank row inside a list survives.
+            const lines = (el.innerText || '').split('\n');
+            const list = document.createElement(ordered ? 'ol' : 'ul');
+            lines.forEach(line => {
+                const li = document.createElement('li');
+                if (line.trim()) { li.textContent = line.replace(/\u00a0/g, ' '); }
+                else { li.appendChild(document.createElement('br')); }
+                list.appendChild(li);
+            });
+            el.innerHTML = '';
+            el.appendChild(list);
+            this.captureParagraphDom(qIdx, el);
         },
         onParagraphUpdate(qIdx) {
             if (!this.paragraphs[qIdx]) return;
@@ -4996,9 +5440,6 @@ function examApp(duration, totalQ) {
             this.answersText[qIdx] = fullText;
             this.answered[qIdx] = fullText.length > 0;
             this.dirty = true;
-        },
-        execCmd(cmd) {
-            document.execCommand(cmd);
         },
         clearCanvas(i) {
             if (!this.canvasDraw[i]) return;

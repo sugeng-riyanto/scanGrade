@@ -14,8 +14,8 @@ from app.utils.exam_recovery import issue_code, redeem_code
 from app.services.audit_service import log_activity
 from app.services.pdf_service import ensure_page_thumbs
 from app.services.question_types import (
-    default_weights, earned_points, is_objective, normalize_answer_map,
-    objective_result, public_options,
+    default_weights, earned_points, is_objective, manual_review_map,
+    normalize_answer_map, objective_result, public_options, validate_answer_map,
 )
 from app.services.submission_service import finish_sitting, open_sitting
 from app.services import exam_media
@@ -615,7 +615,7 @@ def take_exam(exam_id):
         if k not in exam or exam[k] is None:
             exam[k] = v
     # Parse JSON fields that may come as strings from Supabase
-    for _field in ("question_types", "answer_key", "question_weights", "question_pages", "pdf_page_urls"):
+    for _field in ("question_types", "answer_key", "question_weights", "question_pages", "pdf_page_urls", "question_stimuli"):
         _val = exam.get(_field)
         if isinstance(_val, str):
             try:
@@ -1116,6 +1116,26 @@ def submit_exam(exam_id):
     # a sitting over a control they cannot reach from their side.
     answers = normalize_answer_map(question_types, answers)
     total_q = exam["total_questions"]
+    # ── The answer's shape is the question's, and the server decides ────────
+    # A matrix answer that names a row or column this question does not have is
+    # dropped; a checkbox index past the end of a grid is dropped. Sanitised, not
+    # refused, so a stray key from a client cannot cost a pupil their sitting.
+    answers, _dropped = validate_answer_map(
+        question_types, exam.get("answer_key") or {}, answers)
+    if _dropped:
+        current_app.logger.info(
+            "submit dropped %d out-of-shape answer(s) for exam %s user %s: %s",
+            len(_dropped), exam_id, g.user_id, _dropped[:5])
+    # ── A short answer the app cannot read is not a wrong answer ────────────
+    # It is one a human has to look at: a tolerance typed as zero, a synonym the
+    # teacher did not list, `/`, a unit left on the end. The automatic mark is
+    # zero for now, and the flag is what the marking queue shows until a teacher's
+    # own mark clears it. Recorded on the paper, in the same `_needs_review` slot
+    # the scan screen has always used, so one reader serves both.
+    _review = manual_review_map(question_types, exam.get("answer_key") or {},
+                                answers, total_q)
+    if _review:
+        answers["_needs_review"] = _review
     question_weights = exam.get("question_weights") or {}
     if not question_weights and total_q > 0:
         question_weights = default_weights(question_types, total_q)
