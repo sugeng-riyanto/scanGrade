@@ -165,6 +165,15 @@ def report_of(runner: dict | None = None, checkout: dict | None = None,
                                                Path("/nonexistent"), now=NOW),
                       "path": "/var/lib/scangrade-deploy/set-aside"},
         "box_edits_dir": "/var/lib/scangrade-deploy/set-aside",
+        # The release the box recorded, against the code being served — built by the
+        # service for the reason `preflight`, `perf`, `refusals` and `box_edits` are:
+        # the comparison card reads it attribute by attribute, so a hand-written copy
+        # would fall behind the reader and 500 the page. The path is overwritten back
+        # to the box's own, because the card prints it.
+        "last_release": {**status.last_release_state(
+            Path("/nonexistent/last-deploy"), Path("/nonexistent"), now=NOW),
+            "path": "/var/lib/scangrade-deploy/last-deploy"},
+        "last_release_file": "/var/lib/scangrade-deploy/last-deploy",
     }
     report.update(extra)
     return report
@@ -204,6 +213,11 @@ class TestWhatCountsAsStale:
         # The armament card joined them: it runs the checker read-only and prints
         # every reading by name, so its shape has to match the reader too.
         assert set(report_of()["armament"]) == set(real["armament"])
+        # The release-claim card joined them from the other line of work, and it is
+        # the same shape question: the fixture has to carry every key the reader
+        # produces, or the page 500s on the one an operator reads to find out why
+        # nothing is deploying.
+        assert set(report_of()["last_release"]) == set(real["last_release"])
         assert set(report_of()["exit_codes"]) == set(real["exit_codes"])
         # And the reading the policy keys on is really in there.
         assert "gate0" in real["runner"] and "origin_behind" in real["runner"]

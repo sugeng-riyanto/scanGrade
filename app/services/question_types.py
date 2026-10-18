@@ -64,12 +64,24 @@ COMPLEX_MULTIPLE_CHOICE = "complex_multiple_choice"
 MATCH = "match"
 DRAG_DROP = "drag_drop"
 ORDER = "order"
+#: A number, or a short piece of text, typed into one box. Objective in the sense
+#: that the app can decide it — with a tolerance for a number and a list of accepted
+#: spellings for a word — but *not* in the sense that a miss is a zero: see
+#: `manual_review_map`, which is what keeps a format the teacher did not anticipate
+#: (`9,8` against `9.8`, `fotosintesis` against `Fotosíntesis`) in front of a human
+#: instead of silently costing a mark.
+NUMERIC = "numeric_short_answer"
+#: Rows × shared columns. The general form of a statement grid: the same judgement
+#: options apply to every row, and the teacher chooses whether a row takes one of
+#: them or several.
+MATRIX = "matrix"
 
 ESSAY = "essay"
 ESSAY_TEXT = "essay_text"
 ESSAY_CANVAS = "essay_canvas"
 
-OBJECTIVE_TYPES = (MCQ, MCQ_MULTI, TRUE_FALSE, COMPLEX_MULTIPLE_CHOICE, MATCH, DRAG_DROP, ORDER)
+OBJECTIVE_TYPES = (MCQ, MCQ_MULTI, TRUE_FALSE, COMPLEX_MULTIPLE_CHOICE, MATCH, DRAG_DROP, ORDER,
+                   NUMERIC, MATRIX)
 ESSAY_TYPES = (ESSAY, ESSAY_TEXT, ESSAY_CANVAS)
 
 #: The strings the answer key uses to mean "a teacher marks this one". The scanner
@@ -104,6 +116,43 @@ DEFAULT_TYPE = MCQ
 PGK_STATEMENTS = "statements"
 PGK_CATEGORIES = "categories"
 PGK_KEY = "key"
+
+#: A statement grid's *second* shape: one checkbox per statement ("tick every
+#: statement that is true") instead of one judgement per statement. It is a field on
+#: the same key, not a type of its own, because the question is the same question —
+#: N statements, the teacher decides which hold — and two types that differ by one
+#: control is how a teacher ends up on the wrong one.
+#:
+#: In this shape `key` is the list of **checked statement indexes**, not category
+#: indexes: there are no categories to point at. `pgk_statements()` and
+#: `public_options()` read the same field either way, which is why the pupil's page
+#: needs one branch for the control and none for the material.
+PGK_SELECT = "select"
+PGK_SELECT_SINGLE = "single"
+PGK_SELECT_MULTI = "multi"
+
+#: Numeric / short answer: `{"mode": "number", "value": 9.8, "tolerance": 0.2}`
+#: or `{"mode": "text", "accepted": ["fotosintesis", "fotosintesa"]}`.
+NUMERIC_MODE = "mode"
+NUMERIC_VALUE = "value"
+NUMERIC_TOLERANCE = "tolerance"
+NUMERIC_ACCEPTED = "accepted"
+NUMERIC_MODE_NUMBER = "number"
+NUMERIC_MODE_TEXT = "text"
+NUMERIC_MODES = (NUMERIC_MODE_NUMBER, NUMERIC_MODE_TEXT)
+
+#: Matrix: `{"columns": ["Benar", …], "rows": [{"text": "…", "key": [0]}, …],
+#: "mode": "single"|"multi"}`. The columns are shared by every row — that is what
+#: makes it a matrix rather than a stack of independent questions — and the mode is
+#: per question, chosen by the teacher.
+MATRIX_COLUMNS = "columns"
+MATRIX_ROWS = "rows"
+MATRIX_ROW_TEXT = "text"
+MATRIX_ROW_KEY = "key"
+MATRIX_MODE = "mode"
+MATRIX_MODE_SINGLE = "single"
+MATRIX_MODE_MULTI = "multi"
+MATRIX_MODES = (MATRIX_MODE_SINGLE, MATRIX_MODE_MULTI)
 
 #: Matching: `{"pairs": [{"left": …, "right": …}, …], "extra": [right, …]}`
 MATCH_PAIRS = "pairs"
@@ -429,6 +478,333 @@ def pgk_key(key: Any) -> tuple[int, ...]:
     return tuple(out)
 
 
+def pgk_select(key: Any) -> str:
+    """Which of the statement grid's two shapes this key is: one judgement per row,
+    or a checkbox per statement.
+
+    Read from the key rather than from the type, so a grid written before this field
+    existed is a single-choice grid — which is what it was — and a page cannot render
+    the wrong control for a question saved by an older builder.
+    """
+    if isinstance(key, Mapping) and key.get(PGK_SELECT) == PGK_SELECT_MULTI:
+        return PGK_SELECT_MULTI
+    return PGK_SELECT_SINGLE
+
+
+def pgk_multi_key(key: Any) -> frozenset[int]:
+    """The statements a ``select: multi`` grid says are true.
+
+    In this shape `key` holds the **checked statement indexes** — there are no
+    categories to point at — and an empty set is a real key ("none of these"), which
+    is why it is not folded to "no key".
+    """
+    if pgk_select(key) != PGK_SELECT_MULTI:
+        return frozenset()
+    raw = key.get(PGK_KEY) if isinstance(key, Mapping) else None
+    if isinstance(raw, str) or not isinstance(raw, (list, tuple)):
+        return frozenset()
+    out: set[int] = set()
+    for item in raw:
+        if isinstance(item, bool):
+            continue                    # a boolean is not a statement index
+        if isinstance(item, (int, float)):
+            out.add(int(item))
+        elif isinstance(item, str) and item.strip().isdigit():
+            out.add(int(item.strip()))
+        else:
+            return frozenset()
+    return frozenset(out)
+
+
+def pgk_multi_answer(answer: Any) -> frozenset[int]:
+    """The statements a pupil ticked, in the ``select: multi`` shape."""
+    value = unwrap(answer)
+    if isinstance(value, str) or not isinstance(value, (list, tuple, set, frozenset)):
+        return frozenset()
+    out: set[int] = set()
+    for item in value:
+        if isinstance(item, bool):
+            continue
+        if isinstance(item, (int, float)):
+            out.add(int(item))
+        elif isinstance(item, str) and item.strip().isdigit():
+            out.add(int(item.strip()))
+    return frozenset(out)
+
+
+def pgk_multi_score(key: Any, answer: Any, width: int | None = None) -> float:
+    """Share of the statements whose tick agrees with the key.
+
+    One statement, one share — the same rule the matrix uses per row, and the rule
+    the user-facing documentation states. A blank statement counts as "not ticked",
+    which is a judgement a pupil can make by leaving it alone; a blank *whole*
+    question is not an answer and scores zero through `has_answer`.
+    """
+    statements = width if width is not None else len(pgk_statements(key))
+    if statements <= 0:
+        return 0.0
+    want = pgk_multi_key(key)
+    got = pgk_multi_answer(answer)
+    right = sum(1 for i in range(statements) if (i in want) == (i in got))
+    return right / statements
+
+
+# ── numeric / short answer ─────────────────────────────────────────────────
+
+#: The characters a pupil's number may arrive wrapped in: a non-breaking space
+#: pasted from a document, an ordinary space as a thousands separator, a unicode
+#: minus from a phone keyboard, a trailing full stop from an Indonesian number pad.
+_NUMBER_NOISE = str.maketrans({"\u00a0": "", " ": "", "\u2212": "-", "\u2013": "-",
+                               "\u2014": "-", "\u00b7": ""})
+
+
+def numeric_mode(key: Any) -> str:
+    """``number`` or ``text`` — which of the two questions this one is."""
+    mode = key.get(NUMERIC_MODE) if isinstance(key, Mapping) else None
+    return mode if mode in NUMERIC_MODES else NUMERIC_MODE_NUMBER
+
+
+def parse_number(value: Any) -> float | None:
+    """A pupil's number as a float, or None when it is not a number.
+
+    The Indonesian decimal comma is the reason this exists. `9,8` and `9.8` are the
+    same answer on this app's own paper, and a comparison that only knew the full
+    stop would mark an Indonesian pupil's correct answer wrong — then (with this
+    type's review rule) hand the teacher a row to look at for every such answer,
+    which is a queue full of correct work.
+
+    The rules, stated because they are a decision and not a detail:
+
+    * both separators present — the **last** one is the decimal separator and the
+      other is grouping, so `1.234,5` and `1,234.5` both read 1234.5;
+    * a comma alone is a **decimal** comma, so `9,8` is 9.8. A pupil writing `1,234`
+      for one thousand two hundred and thirty-four is read as 1.234 — the app's
+      locale makes that the right guess, and the review queue is where the rare
+      other reading is still visible to a teacher;
+    * a trailing full stop is dropped (`12.` is 12), because a number pad appends
+      one;
+    * anything else — an empty string, `abc`, a fraction typed as text — is None,
+      and None is what sends the answer to a human rather than to zero.
+    """
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if not isinstance(value, str):
+        return None
+    text = value.translate(_NUMBER_NOISE).strip()
+    if not text or text.count("/") == 1:      # `1/2` is a fraction, not a decimal
+        return None
+    text = text.rstrip(".")
+    if "," in text and "." in text:
+        if text.rfind(",") > text.rfind("."):
+            text = text.replace(".", "").replace(",", ".")
+        else:
+            text = text.replace(",", "")
+    else:
+        text = text.replace(",", ".")
+    try:
+        return float(text)
+    except (TypeError, ValueError):
+        return None
+
+
+def normalise_short_text(value: Any) -> str:
+    """A short text answer as it is compared: trimmed, case-folded, one space.
+
+    `casefold` rather than `lower` because the app serves Indonesian and English,
+    and a teacher who lists `Fotosintesis` means the same word as `fotosintesis`.
+    Internal whitespace is collapsed so a phone's autocorrect cannot fail a right
+    answer on a double space.
+    """
+    if not isinstance(value, str):
+        return ""
+    return " ".join(value.split()).casefold()
+
+
+def numeric_value(key: Any) -> float | None:
+    """The correct number, or None when the key is unreadable."""
+    return parse_number(key.get(NUMERIC_VALUE)) if isinstance(key, Mapping) else None
+
+
+def numeric_tolerance(key: Any) -> float:
+    """How far from the correct number still counts, never negative.
+
+    Read through `parse_number`, the same reader a pupil's answer goes through, so a
+    tolerance typed `0,2` on an Indonesian keyboard means a fifth and not — as a
+    bare `float()` made it mean — nothing at all. A tolerance that silently becomes
+    zero is the worst version of this defect: every correct answer just outside the
+    exact value is marked wrong and then queued for review, which is a marking bug
+    that looks exactly like a class that got the question wrong.
+    """
+    raw = key.get(NUMERIC_TOLERANCE) if isinstance(key, Mapping) else None
+    if raw in (None, ""):
+        return 0.0
+    value = parse_number(raw)
+    return abs(value) if value is not None else 0.0
+
+
+def accepted_answers(key: Any) -> tuple[str, ...]:
+    """The spellings a text-mode short answer accepts, normalised for comparison."""
+    raw = key.get(NUMERIC_ACCEPTED) if isinstance(key, Mapping) else None
+    if isinstance(raw, str):
+        raw = [raw]
+    if not isinstance(raw, (list, tuple)):
+        return ()
+    out: list[str] = []
+    for item in raw:
+        text = normalise_short_text(item)
+        if text and text not in out:
+            out.append(text)
+    return tuple(out)
+
+
+def numeric_matches(key: Any, answer: Any) -> bool:
+    """Is this answer right — before any human is asked to look at it?"""
+    value = unwrap(answer)
+    if numeric_mode(key) == NUMERIC_MODE_TEXT:
+        text = normalise_short_text(value if isinstance(value, str) else "")
+        return bool(text) and text in accepted_answers(key)
+    want = numeric_value(key)
+    got = parse_number(value)
+    if want is None or got is None:
+        return False
+    return abs(got - want) <= numeric_tolerance(key) + 1e-9
+
+
+def numeric_review_reason(key: Any, answer: Any) -> str:
+    """Why an unmatched short answer needs a human, or `""` when it does not.
+
+    Three reasons, because they are three different things a teacher does next:
+
+    * ``format`` — the answer is not a number at all (`1/2`, `9.8 cm`, a unit left
+      on the end). The pupil may well be right and the teacher may well accept it;
+    * ``value`` — a number, outside the tolerance. It is probably a wrong answer,
+      and the type still says so rather than deciding it alone, because a tolerance
+      typed as 0 on a question that needed one is a marking bug that looks exactly
+      like a class that got it wrong;
+    * ``spelling`` — text that is not in the accepted list (a synonym, a typo, an
+      inflection the teacher did not think of).
+
+    A blank answer is not a review: nobody wrote anything, and there is nothing to
+    look at.
+    """
+    value = unwrap(answer)
+    blank = value is None or (isinstance(value, str) and not value.strip())
+    if blank or numeric_matches(key, answer):
+        return ""
+    if numeric_mode(key) == NUMERIC_MODE_TEXT:
+        return "spelling"
+    return "format" if parse_number(value) is None else "value"
+
+
+# ── matrices ────────────────────────────────────────────────────────────────
+
+def matrix_columns(key: Any) -> tuple[str, ...]:
+    """The shared answer options down every row, in the teacher's order."""
+    raw = key.get(MATRIX_COLUMNS) if isinstance(key, Mapping) else None
+    if isinstance(raw, (list, tuple)):
+        return tuple(text for text in (str(c).strip() for c in raw) if text)
+    return ()
+
+
+def matrix_mode(key: Any) -> str:
+    """One column per row, or as many as are true for it."""
+    mode = key.get(MATRIX_MODE) if isinstance(key, Mapping) else None
+    return mode if mode in MATRIX_MODES else MATRIX_MODE_SINGLE
+
+
+def matrix_rows(key: Any) -> tuple[dict[str, Any], ...]:
+    """Each row's text and the columns marked correct for it.
+
+    A row is `{"text": "…", "key": [0]}`; a key written by hand as a bare index
+    (`{"text": …, "key": 0}`) reads as the one-element set, because a stored key in
+    two shapes is a key graded two ways.
+    """
+    raw = key.get(MATRIX_ROWS) if isinstance(key, Mapping) else None
+    if not isinstance(raw, (list, tuple)):
+        return ()
+    out: list[dict[str, Any]] = []
+    for item in raw:
+        if isinstance(item, Mapping):
+            text = str(item.get(MATRIX_ROW_TEXT) or "").strip()
+            chosen = item.get(MATRIX_ROW_KEY, item.get("key", []))
+        else:
+            text, chosen = str(item or "").strip(), []
+        if not text:
+            continue
+        if isinstance(chosen, (int, float)) and not isinstance(chosen, bool):
+            chosen = [int(chosen)]
+        if not isinstance(chosen, (list, tuple, set, frozenset)):
+            chosen = []
+        columns = sorted({int(c) for c in chosen
+                          if isinstance(c, (int, float)) and not isinstance(c, bool)})
+        out.append({MATRIX_ROW_TEXT: text, MATRIX_ROW_KEY: columns})
+    return tuple(out)
+
+
+def matrix_answer(answer: Any) -> dict[str, list[int]]:
+    """A pupil's matrix answer as `{row index: [column indexes]}`.
+
+    Read from the page's own object and from the list shape an offline replay might
+    carry, and never invented: a row the question does not have is dropped by the
+    caller that knows the structure (`validate_answer_map`), not guessed here.
+    """
+    value = unwrap(answer)
+    out: dict[str, list[int]] = {}
+    if isinstance(value, Mapping):
+        for row, cols in value.items():
+            if not str(row).strip().isdigit():
+                continue
+            if isinstance(cols, (int, float)) and not isinstance(cols, bool):
+                cols = [int(cols)]
+            if not isinstance(cols, (list, tuple, set, frozenset)):
+                continue
+            picked = sorted({int(c) for c in cols
+                             if isinstance(c, (int, float)) and not isinstance(c, bool)})
+            if picked:
+                out[str(int(row))] = picked
+        return out
+    if isinstance(value, (list, tuple)):
+        for i, cols in enumerate(value):
+            if isinstance(cols, (int, float)) and not isinstance(cols, bool):
+                cols = [int(cols)]
+            if not isinstance(cols, (list, tuple, set, frozenset)):
+                continue
+            picked = sorted({int(c) for c in cols
+                             if isinstance(c, (int, float)) and not isinstance(c, bool)})
+            if picked:
+                out[str(i)] = picked
+    return out
+
+
+def matrix_row_correct(row: Mapping[str, Any], chosen: Any, mode: str) -> bool:
+    """One row exactly right — all-or-nothing *within* the row, in both modes.
+
+    The simple rule is deliberate and documented: a row is the unit of credit, so a
+    multi-select row with two of three ticks right earns nothing for that row. Part
+    credit inside a row as well would make the mark impossible to explain to a pupil
+    ("why did this grid give me 0.63?") and would reward a guesser on a row with
+    more than two options.
+    """
+    want = [int(c) for c in (row.get(MATRIX_ROW_KEY) or [])]
+    if mode == MATRIX_MODE_SINGLE:
+        return len(want) == 1 and list(chosen or []) == want
+    return sorted(int(c) for c in (chosen or [])) == sorted(want)
+
+
+def matrix_score(key: Any, answer: Any) -> float:
+    """Share of the rows answered exactly right."""
+    rows = matrix_rows(key)
+    if not rows:
+        return 0.0
+    mode = matrix_mode(key)
+    given = matrix_answer(answer)
+    right = sum(1 for i, row in enumerate(rows)
+                if matrix_row_correct(row, given.get(str(i)), mode))
+    return right / len(rows)
+
+
 def _as_pgk_answer(answer: Any, width: int) -> tuple[int | None, ...] | None:
     """A pupil's judgements as category indexes, `None` where a row was left blank.
 
@@ -489,6 +865,15 @@ def pgk_score(mode: Any, key: Any, answer: Any) -> float:
     worth ten — the conversion the brief asks for, applied once, here.
     """
     statements = pgk_statements(key)
+    if pgk_select(key) == PGK_SELECT_MULTI:
+        # The checkbox shape has one rule and no ladder: each statement is a
+        # judgement, and the share is how many of them agree with the key. The AKM
+        # modes are about a *category per statement*, which this shape does not
+        # have; applying a ladder here would pay a pupil who ticked nothing on a
+        # grid where nothing is true, which is the guess a blank page makes.
+        if not statements:
+            return 0.0
+        return pgk_multi_score(key, answer, len(statements))
     wanted = pgk_key(key)
     if not statements or len(wanted) != len(statements):
         return 0.0
@@ -771,10 +1156,34 @@ def public_options(qtype: Any, key: Any) -> dict[str, list[str]] | None:
         # answers travel together is exactly why this function exists rather than a
         # branch in a route.
         statements = list(pgk_statements(key))
-        categories = list(pgk_categories(key))
-        if not statements or not categories:
+        if not statements:
             return None
-        return {"statements": statements, "categories": categories}
+        if pgk_select(key) == PGK_SELECT_MULTI:
+            # Checkboxes need no categories: the answer is *which statements are
+            # true*, and the field the key keeps them in is not sent.
+            return {"statements": statements, "select": PGK_SELECT_MULTI}
+        categories = list(pgk_categories(key))
+        if not categories:
+            return None
+        return {"statements": statements, "categories": categories,
+                "select": PGK_SELECT_SINGLE}
+    if kind == KIND_NUMERIC:
+        # The mode is what the pupil's control has to know — a number pad or a
+        # keyboard. The correct value and the accepted spellings stay on the server:
+        # they are the answer.
+        return {"mode": numeric_mode(key)}
+    if kind == KIND_MATRIX:
+        rows = matrix_rows(key)
+        columns = matrix_columns(key)
+        if not rows or not columns:
+            return None
+        return {
+            "columns": columns,
+            # Text only. `key` is in the same objects, one field away, which is
+            # exactly the separation this function exists to guarantee.
+            "rows": [{"text": row[MATRIX_ROW_TEXT]} for row in rows],
+            "mode": matrix_mode(key),
+        }
     return None
 
 
@@ -786,6 +1195,8 @@ KIND_PGK = "pgk"
 KIND_MATCH = "match"
 KIND_DRAG = "dragdrop"
 KIND_ORDER = "ordering"
+KIND_NUMERIC = "numeric"
+KIND_MATRIX = "matrix"
 KIND_ESSAY = "essay"
 
 _KIND_BY_TYPE: dict[str, str] = {
@@ -799,6 +1210,8 @@ _KIND_BY_TYPE: dict[str, str] = {
     MATCH: KIND_MATCH,
     DRAG_DROP: KIND_DRAG,
     ORDER: KIND_ORDER,
+    NUMERIC: KIND_NUMERIC,
+    MATRIX: KIND_MATRIX,
     ESSAY: KIND_ESSAY,
     ESSAY_TEXT: KIND_ESSAY,
     ESSAY_CANVAS: KIND_ESSAY,
@@ -810,7 +1223,8 @@ _KIND_BY_TYPE: dict[str, str] = {
 #: typed essay is a legacy form the app still reads and grades, and offering it
 #: beside the canvas one invites a question the pupil cannot draw on.
 PICKER_TYPES: tuple[str, ...] = (
-    MCQ, TRUE_FALSE, COMPLEX_MULTIPLE_CHOICE, MATCH, DRAG_DROP, ORDER, ESSAY_CANVAS,
+    MCQ, TRUE_FALSE, COMPLEX_MULTIPLE_CHOICE, MATCH, DRAG_DROP, ORDER,
+    NUMERIC, MATRIX, ESSAY_CANVAS,
 )
 
 #: `complex_multiple_choice` joined this tuple **with its editor**, which is the
@@ -842,6 +1256,8 @@ _TYPE_LABELS: dict[str, tuple[str, str]] = {
     MATCH: ("Menjodohkan", "Matching"),
     DRAG_DROP: ("Tarik & Letakkan", "Drag & drop"),
     ORDER: ("Mengurutkan", "Ordering"),
+    NUMERIC: ("Angka / Isian Singkat", "Numeric / Short answer"),
+    MATRIX: ("Matriks / Tabel Pilihan", "Matrix / Grid"),
     ESSAY_CANVAS: ("Esai", "Essay"),
     ESSAY_TEXT: ("Esai (ketik)", "Essay (typed)"),
     ESSAY: ("Esai", "Essay"),
@@ -902,6 +1318,8 @@ def vocabulary() -> dict[str, Any]:
             KIND_MATCH: ["Menjodohkan", "Matching"],
             KIND_DRAG: ["Tarik & Letakkan", "Drag & drop"],
             KIND_ORDER: ["Mengurutkan", "Ordering"],
+            KIND_NUMERIC: ["Angka / Isian Singkat", "Numeric / Short answer"],
+            KIND_MATRIX: ["Matriks / Tabel Pilihan", "Matrix / Grid"],
             KIND_ESSAY: ["Esai", "Essay"],
         },
         "picker": [
@@ -933,6 +1351,8 @@ _KIND_LABELS: dict[str, str] = {
     KIND_MATCH: "Matching",
     KIND_DRAG: "Drag & drop",
     KIND_ORDER: "Ordering",
+    KIND_NUMERIC: "Numeric / short answer",
+    KIND_MATRIX: "Matrix / grid",
     KIND_ESSAY: "Essay",
 }
 
@@ -990,11 +1410,31 @@ def describe_answer(qtype: Any, key: Any) -> str:
     if kind in (KIND_DRAG, KIND_ORDER):
         return " \u2192 ".join(drag_order(key))
     if kind == KIND_PGK:
+        if pgk_select(key) == PGK_SELECT_MULTI:
+            ticked = sorted(pgk_multi_key(key))
+            if not ticked:
+                return ""                 # "none of these" is a key, and it has no text
+            return ", ".join(str(i + 1) for i in ticked)
         categories = pgk_categories(key)
         out = []
         for i, choice in enumerate(pgk_key(key)):
             label = categories[choice] if 0 <= choice < len(categories) else str(choice)
             out.append(f"{i + 1}={label}")
+        return "; ".join(out)
+    if kind == KIND_NUMERIC:
+        if numeric_mode(key) == NUMERIC_MODE_TEXT:
+            return " / ".join(accepted_answers(key))
+        want = numeric_value(key)
+        if want is None:
+            return ""
+        tol = numeric_tolerance(key)
+        return f"{want:g} \u00b1 {tol:g}" if tol else f"{want:g}"
+    if kind == KIND_MATRIX:
+        columns = matrix_columns(key)
+        out = []
+        for i, row in enumerate(matrix_rows(key)):
+            names = [columns[c] for c in row[MATRIX_ROW_KEY] if 0 <= c < len(columns)]
+            out.append(f"{i + 1}=" + (" + ".join(names) if names else "\u2014"))
         return "; ".join(out)
     if kind == KIND_ESSAY:
         return ""
@@ -1103,12 +1543,28 @@ def describe_attempt(qtype: Any, answer: Any, key: Any = None) -> str:
 
     value = unwrap(answer)
     if question_kind(qtype) == KIND_PGK:
+        if pgk_select(key) == PGK_SELECT_MULTI:
+            ticked = sorted(pgk_multi_answer(value))
+            return ", ".join(str(i + 1) for i in ticked)
         # The categories live in the *key*, one object away from the answer, so this
         # is the one type whose attempt cannot be described from its answer alone.
         # `key` is optional rather than required because the reports that render a
         # learner's own paper have the key to hand and the ones that do not are
         # still better off with positions than with a Python repr of the list.
         return _pgk_choices_text(pgk_categories(key), value)
+    if question_kind(qtype) == KIND_NUMERIC:
+        return value.strip() if isinstance(value, str) else ""
+    if question_kind(qtype) == KIND_MATRIX:
+        # "row=column; …", the same reading `describe_answer` gives a key, so a
+        # report's two columns can be compared line by line.
+        columns = matrix_columns(key)
+        given = matrix_answer(value)
+        out = []
+        for i in range(len(matrix_rows(key))):
+            picked = [columns[c] for c in given.get(str(i), []) if 0 <= c < len(columns)]
+            if picked:
+                out.append(f"{i + 1}=" + " + ".join(picked))
+        return "; ".join(out)
     text = describe_answer(qtype, answer)
     if isinstance(value, Mapping) and text.startswith(("{", "[")):
         # A structured answer whose shape this version does not know — an older
@@ -1146,11 +1602,40 @@ def normalise_key(qtype: Any, key: Any) -> Any:
             out[EXTRA] = extra
         return out
     if kind == KIND_PGK:
+        statements = list(pgk_statements(key))
+        if pgk_select(key) == PGK_SELECT_MULTI:
+            # Checked statement indexes, sorted, and no categories: a stored key of
+            # this shape that still carried a category list would be read by a page
+            # as the single-per-row shape it is not.
+            return {
+                PGK_SELECT: PGK_SELECT_MULTI,
+                PGK_STATEMENTS: statements,
+                PGK_KEY: sorted(pgk_multi_key(key)),
+            }
         return {
             PGK_CATEGORIES: list(pgk_categories(key)),
-            PGK_STATEMENTS: list(pgk_statements(key)),
+            PGK_STATEMENTS: statements,
             PGK_KEY: list(pgk_key(key)),
         }
+    if kind == KIND_NUMERIC:
+        out: dict[str, Any] = {NUMERIC_MODE: numeric_mode(key)}
+        if out[NUMERIC_MODE] == NUMERIC_MODE_TEXT:
+            out[NUMERIC_ACCEPTED] = list(accepted_answers(key))
+            return out
+        want = numeric_value(key)
+        out[NUMERIC_VALUE] = want if want is not None else ""
+        out[NUMERIC_TOLERANCE] = numeric_tolerance(key)
+        return out
+    if kind == KIND_MATRIX:
+        columns = list(matrix_columns(key))
+        mode = matrix_mode(key)
+        rows = []
+        for row in matrix_rows(key):
+            chosen = [c for c in row[MATRIX_ROW_KEY] if 0 <= c < len(columns)]
+            if mode == MATRIX_MODE_SINGLE:
+                chosen = chosen[:1]
+            rows.append({MATRIX_ROW_TEXT: row[MATRIX_ROW_TEXT], MATRIX_ROW_KEY: chosen})
+        return {MATRIX_COLUMNS: columns, MATRIX_ROWS: rows, MATRIX_MODE: mode}
     if kind == KIND_ESSAY:
         return essay_marker(qtype)
     return key
@@ -1178,8 +1663,18 @@ def key_has_answer(qtype: Any, value: Any) -> bool:
         # All three parts, and the statements must match the judgements one for one:
         # a key shorter than its statements is not a key, it is half a question.
         statements = pgk_statements(value)
+        if pgk_select(value) == PGK_SELECT_MULTI:
+            # No categories in this shape. An empty checked set is a *key* here
+            # ("none of these"), which is why the test is on the statements alone.
+            return bool(statements)
         return bool(statements) and len(statements) == len(pgk_key(value)) \
             and bool(pgk_categories(value))
+    if kind == KIND_NUMERIC:
+        if numeric_mode(value) == NUMERIC_MODE_TEXT:
+            return bool(accepted_answers(value))
+        return numeric_value(value) is not None
+    if kind == KIND_MATRIX:
+        return bool(matrix_rows(value)) and bool(matrix_columns(value))
     if kind == KIND_ESSAY:
         return False                     # a teacher marks it; there is no key
     if isinstance(value, (list, tuple, set)):
@@ -1387,6 +1882,21 @@ def normalize_answer(qtype: Any, answer: Any) -> Any:
     * the *order* is made deterministic (the paper's own option order) so the same
       ticks store the same bytes however the client listed them.
     """
+    if canonical_type(qtype) == NUMERIC:
+        # One shape either way: the string the pupil typed. A number sent by an
+        # offline replay becomes the text a person would have entered, so the stored
+        # answer and the one the review queue prints are the same value.
+        value = unwrap(answer)
+        if isinstance(value, bool):
+            return answer
+        if isinstance(value, (int, float)):
+            return repr(float(value)).rstrip("0").rstrip(".") if value == int(value) else str(value)
+        if isinstance(value, str):
+            return value.strip()
+        return answer
+    if canonical_type(qtype) == MATRIX:
+        picked = matrix_answer(answer)
+        return picked if picked else answer
     if canonical_type(qtype) not in (MCQ, MCQ_MULTI):
         return answer
     if isinstance(answer, (bool, int, float)) or answer is None:
@@ -1441,6 +1951,113 @@ def normalize_answer_map(question_types: Any, answers: Any) -> Any:
     return out
 
 
+def validate_answer_map(
+    question_types: Any, answer_key: Any, answers: Any
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """The answers this paper can hold, and what had to be dropped to say so.
+
+    The server is the source of truth for a question's *structure*, and until this
+    existed it was not: a matrix answer naming a row the question does not have was
+    stored as sent, and a row index outside the grid simply never matched a key —
+    which is harmless for the mark and a lie in the report (a pupil "answered" a
+    row the question never asked). A manipulated request could also put a statement
+    index past the end of a checkbox grid, and a page reload would then render a
+    tick that does not exist.
+
+    The answer is *sanitised*, not refused: a pupil must not lose a sitting because
+    a client sent one stray key, and the caller can log what `dropped` names. Every
+    entry it drops is outside the structure the key describes, so nothing a pupil
+    actually saw on their page is ever removed.
+    """
+    if not isinstance(answers, dict):
+        return answers, []
+    types = _mapping_or_empty(question_types)
+    keys = _mapping_or_empty(answer_key)
+    out = dict(answers)
+    dropped: list[dict[str, Any]] = []
+    for index, value in answers.items():
+        qtype = types.get(str(index))
+        if qtype is None:
+            continue
+        kind = question_kind(qtype)
+        if kind == KIND_MATRIX:
+            key = keys.get(str(index))
+            rows = matrix_rows(key)
+            columns = matrix_columns(key)
+            given = matrix_answer(value)
+            clean: dict[str, list[int]] = {}
+            for row, chosen in given.items():
+                position = int(row)
+                if not 0 <= position < len(rows):
+                    dropped.append({"question": index, "row": row, "reason": "no-such-row"})
+                    continue
+                kept = [c for c in chosen if 0 <= c < len(columns)]
+                if len(kept) != len(chosen):
+                    dropped.append({"question": index, "row": row, "reason": "no-such-column"})
+                if not kept:
+                    continue
+                mode = matrix_mode(key)
+                clean[str(position)] = kept[:1] if mode == MATRIX_MODE_SINGLE else kept
+            out[index] = clean if clean else value
+            continue
+        if kind == KIND_PGK and pgk_select(keys.get(str(index))) == PGK_SELECT_MULTI:
+            width = len(pgk_statements(keys.get(str(index))))
+            ticked = pgk_multi_answer(value)
+            kept = sorted(i for i in ticked if 0 <= i < width)
+            if len(kept) != len(ticked):
+                dropped.append({"question": index, "reason": "no-such-statement"})
+            out[index] = kept
+            continue
+        if kind == KIND_NUMERIC:
+            fixed = normalize_answer(qtype, value)
+            # A short answer is a string and nothing else. Anything longer would be
+            # stored verbatim and printed back at a teacher as a wall of JSON.
+            if isinstance(fixed, str) and len(fixed) <= 200:
+                out[index] = fixed
+            elif fixed not in (None, ""):
+                dropped.append({"question": index, "reason": "not-a-short-answer"})
+                out[index] = ""
+            continue
+    return out, dropped
+
+
+def manual_review_map(
+    question_types: Any, answer_key: Any, answers: Any, total_questions: int
+) -> dict[str, dict[str, str]]:
+    """Which short answers a teacher has to look at, and why.
+
+    A numeric / short answer question that does not match is **not** treated as a
+    wrong answer: it is treated as one the app cannot decide. A tolerance typed as
+    zero on a question that needed one, a pupil writing `9,8` where the key holds
+    `9.8`, a synonym the teacher did not list — all three look exactly like a class
+    that got the question wrong, and only a human can tell them apart. So the paper
+    is marked with the automatic result (unmatched earns nothing yet) and the row is
+    flagged here; the flag is what the marking queue shows, and a teacher's own mark
+    clears it (`teacher._clear_review_flags`).
+
+    Returns `{question index: {"reason": format|value|spelling, "answer": text}}`,
+    empty for a paper with none — the shape `submissions.needs_review` stores.
+    """
+    if not isinstance(answers, dict):
+        return {}
+    types = _mapping_or_empty(question_types)
+    keys = _mapping_or_empty(answer_key)
+    out: dict[str, dict[str, str]] = {}
+    for i in range(total_questions or 0):
+        index = str(i)
+        if canonical_type(types.get(index)) != NUMERIC:
+            continue
+        key = keys.get(index)
+        value = answers.get(index)
+        reason = numeric_review_reason(key, value)
+        if not reason:
+            continue
+        text = unwrap(value)
+        out[index] = {"reason": reason,
+                      "answer": (text.strip() if isinstance(text, str) else "")[:120]}
+    return out
+
+
 def has_answer(qtype: Any, answer: Any) -> bool:
     """Did the student actually answer this one?
 
@@ -1463,6 +2080,11 @@ def has_answer(qtype: Any, answer: Any) -> bool:
         if isinstance(value, str) or not isinstance(value, (list, tuple)):
             return False
         return any(item is not None and item != "" for item in value)
+    if kind == KIND_NUMERIC:
+        return isinstance(value, str) and bool(value.strip())
+    if kind == KIND_MATRIX:
+        # Any row with a tick on it is work; an empty object is an untouched grid.
+        return bool(matrix_answer(value))
     if kind == KIND_CHOICE and canonical_type(qtype) == MCQ_MULTI:
         # A ticked box is an answer; an empty list is not.
         return bool(answer_letters(value))
@@ -1520,6 +2142,15 @@ def grade_answer(qtype: Any, key: Any, answer: Any) -> bool:
         # asks "is this right" cannot disagree with the marks.
         return pgk_score(SCORING_ALL_OR_NOTHING, key, answer) >= 1.0
 
+    if kind == NUMERIC:
+        return numeric_matches(key, answer)
+
+    if kind == MATRIX:
+        # Every row, under the question's own mode — the same "all of it or none of
+        # it" reading the statement grid takes, so a page asking whether a question
+        # is right cannot disagree with the marks it earned.
+        return matrix_score(key, answer) >= 1.0
+
     if kind == MCQ_MULTI:
         # The exception: the pupil's ticked letters must be the key's letters, no
         # more and no fewer. All-or-nothing on purpose — "select all that apply" is
@@ -1568,7 +2199,7 @@ SCHEME_KEY = "_scheme"
 #: not "how many of the parts were right" but the *teacher's chosen rule* over how
 #: many were — a mode, not a proportion. That is why it is read through
 #: `pgk_score` rather than through the pair-and-position arithmetic below.
-PARTIAL_TYPES = (COMPLEX_MULTIPLE_CHOICE, MATCH, DRAG_DROP, ORDER)
+PARTIAL_TYPES = (COMPLEX_MULTIPLE_CHOICE, MATRIX, MATCH, DRAG_DROP, ORDER)
 
 
 def scheme_in(weights: Mapping[str, Any] | None) -> Mapping[str, Any] | None:
@@ -1604,7 +2235,8 @@ def partial_applies(raw_type: Any, weights: Mapping[str, Any] | None = None) -> 
     must not decide it by naming the type itself — that is the seven-copies defect
     this module was written to end.
     """
-    return partial_credit(weights) or canonical_type(raw_type) == COMPLEX_MULTIPLE_CHOICE
+    kind = canonical_type(raw_type)
+    return partial_credit(weights) or kind in (COMPLEX_MULTIPLE_CHOICE, MATRIX)
 
 
 def part_factor(qtype: Any, key: Any, answer: Any, mode: Any = None) -> float:
@@ -1628,6 +2260,10 @@ def part_factor(qtype: Any, key: Any, answer: Any, mode: Any = None) -> float:
         # count pairs and positions, neither of which a PGK has, and falling into
         # them would read the question as a sequence and award it zero.
         return pgk_score(mode, key, answer)
+    if kind == MATRIX:
+        # Also before the branches below, and for the same reason: a matrix is rows
+        # and columns, and the pair/position arithmetic would read it as neither.
+        return matrix_score(key, answer)
     if kind not in PARTIAL_TYPES:
         return 1.0 if grade_answer(kind, key, answer) else 0.0
 

@@ -310,11 +310,19 @@ def test_omr_process_scan_none_image():
 
 # ─── Test: Grading Service ───
 
-def test_grade_essay_no_api_key():
-    """grade_essay should return fallback score when no API key."""
+def test_grade_essay_without_a_teacher_invents_no_mark():
+    """No API key is an error, not a word-count score.
+
+    The old fallback returned `len(answer.split()) // 10` as a real mark, which a
+    teacher scrolling a class could not tell apart from a graded one. A suggestion
+    that cannot be made is a sentence; a guess is a mark nobody can audit.
+    """
     from app.services.grading_service import grade_essay
-    result = grade_essay("some answer", teacher_id="test")
-    assert result is not None
+
+    result = grade_essay("some answer")
+    assert "error" in result
+    assert "score" not in result
+    assert result["suggestion"] is True
 
 
 def test_extract_mcq_answer_string():

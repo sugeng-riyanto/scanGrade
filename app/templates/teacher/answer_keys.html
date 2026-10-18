@@ -21,7 +21,7 @@
         <div class="card p-8 text-center">
             <div class="text-4xl mb-3">&#x1F4DD;</div>
             <p class="font-semibold">Tidak ada soal pilihan ganda</p>
-            <p class="text-sm text-gray-500 mt-1">Kunci tipe soal lain diatur di editor ujian</p>
+            <p class="text-sm text-gray-500 mt-1">Poin dan kunci tipe soal lain ada di bawah.</p>
         </div>
         {% else %}
         <div class="space-y-3">
@@ -90,47 +90,168 @@
                 <div class="mt-2 text-xs text-gray-400">
                     Kunci saat ini: <span x-text="displayKey({{ q.index }})" class="font-mono font-bold text-gray-600"></span>
                 </div>
+                {# What this question is worth, on the same card as its key: the two
+                   are one decision about one question, and on separate pages one of
+                   them is always the stale one. #}
+                <div class="mt-3 flex items-center gap-2 flex-wrap border-t border-gray-200 pt-3">
+                    <label for="points-{{ q.index }}" class="text-xs font-bold text-gray-600">Poin maksimal</label>
+                    <input id="points-{{ q.index }}" type="number" name="points_{{ q.index }}"
+                           min="0" max="100" step="0.5" inputmode="decimal"
+                           value="{{ q.points if q.points is not none else '' }}"
+                           data-key-points="{{ q.index }}"
+                           class="w-24 px-3 py-1.5 border-2 border-gray-200 rounded-xl text-sm font-bold text-center focus:border-primary-500"
+                           placeholder="otomatis">
+                    <span class="text-[11px] text-gray-400">poin (kosongkan = pakai pembagian otomatis)</span>
+                </div>
             </div>
             {% endif %}
             {% endfor %}
         </div>
 
-        <div class="mt-6 flex justify-end">
-            <button form="answer-form" type="submit" class="btn btn-primary">
-                <i class="fas fa-save"></i> Simpan & Hitung Ulang
-            </button>
-        </div>
         {% endif %}
 
-        {# The other objective types are keyed in the exam builder, where their
-           content lives. Listing them here keeps this page honest about what it
-           does not edit — and it no longer writes `essay` over them. #}
+        {# The other types: their key *content* (the pairs, the sequence) belongs to
+           the exam builder, where it was written — but what the question is worth,
+           and the reference answer an essay is compared against, belong here with
+           every other marking decision. The key itself stays read-only, and this
+           section no longer writes `essay` over it. #}
         {% set others = questions|rejectattr("kind", "equalto", "choice")|list %}
         {% if others %}
-        <div class="card p-4 mt-4">
-            <h2 class="font-bold text-sm mb-1">Kunci tipe soal lain</h2>
-            <p class="text-xs text-gray-500 mb-3">Hanya-baca di sini. Ubah di editor ujian agar kontennya ikut tersimpan.</p>
-            <div class="space-y-2">
+        <div class="card p-4 mt-4" data-other-keys>
+            <h2 class="font-bold text-sm mb-1">Poin &amp; kunci tipe soal lain</h2>
+            <p class="text-xs text-gray-500 mb-3">
+                Isi poin maksimal dan, untuk esai, kunci/jawaban acuan. Kunci esai dibaca AI sebagai pembanding saat menilai,
+                jadi tulis jawaban yang benar dan hal yang harus muncul di jawaban murid.
+                Isi kunci objektif (pasangan, urutan) tetap diubah di editor ujian.
+            </p>
+            <div class="space-y-3">
                 {% for q in others %}
-                <div class="flex items-start gap-3 p-3 rounded-xl bg-gray-50 border border-gray-200">
-                    <span class="text-xs font-bold text-gray-500 shrink-0">Soal {{ q.index + 1 }}</span>
-                    <span class="text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0
-                        {% if q.kind == 'truefalse' %}bg-primary-50 text-primary-700
-                        {% elif q.kind == 'match' %}bg-violet-50 text-violet-700
-                        {% elif q.kind == 'dragdrop' %}bg-rose-50 text-rose-700
-                        {% elif q.kind == 'ordering' %}bg-sky-50 text-sky-700
-                        {% else %}bg-amber-50 text-amber-700{% endif %}">
-                        {% if q.kind == 'truefalse' %}Benar / Salah{% elif q.kind == 'match' %}Menjodohkan{% elif q.kind == 'dragdrop' %}Tarik &amp; Letakkan{% elif q.kind == 'ordering' %}Mengurutkan{% else %}Esai{% endif %}
-                    </span>
-                    <span class="text-xs font-mono font-bold text-gray-700 flex-1 break-words">{{ q.answer_text or 'Belum diatur' }}</span>
+                <div class="p-3 rounded-xl bg-gray-50 border border-gray-200" data-other-key="{{ q.index }}">
+                    <div class="flex items-center gap-2 flex-wrap mb-2">
+                        <span class="text-xs font-bold text-gray-600 shrink-0">Soal {{ q.index + 1 }}</span>
+                        <span class="text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0
+                            {% if q.kind == 'truefalse' %}bg-primary-50 text-primary-700
+                            {% elif q.kind == 'match' %}bg-violet-50 text-violet-700
+                            {% elif q.kind == 'dragdrop' %}bg-rose-50 text-rose-700
+                            {% elif q.kind == 'ordering' %}bg-sky-50 text-sky-700
+                            {% elif q.kind == 'numeric' %}bg-indigo-50 text-indigo-700
+                            {% elif q.kind == 'matrix' %}bg-fuchsia-50 text-fuchsia-700
+                            {% else %}bg-amber-50 text-amber-700{% endif %}">
+                            {% if q.kind == 'truefalse' %}Benar / Salah{% elif q.kind == 'match' %}Menjodohkan{% elif q.kind == 'dragdrop' %}Tarik &amp; Letakkan{% elif q.kind == 'ordering' %}Mengurutkan{% elif q.kind == 'numeric' %}Angka / Isian Singkat{% elif q.kind == 'matrix' %}Matriks / Tabel Pilihan{% else %}Esai{% endif %}
+                        </span>
+                        <label for="points-other-{{ q.index }}" class="text-xs font-bold text-gray-600 ml-auto">Poin maksimal</label>
+                        <input id="points-other-{{ q.index }}" type="number" name="points_{{ q.index }}"
+                               min="0" max="100" step="0.5" inputmode="decimal"
+                               value="{{ q.points if q.points is not none else '' }}"
+                               data-key-points="{{ q.index }}"
+                               class="w-24 px-3 py-1.5 border-2 border-gray-200 rounded-xl text-sm font-bold text-center focus:border-primary-500"
+                               placeholder="otomatis">
+                    </div>
+                    {% if q.kind == 'numeric' %}
+                    {# A short answer's key is one value with a tolerance, or a list
+                       of accepted spellings — small enough to correct here, and this
+                       is where a teacher arrives after a "Perlu Ditinjau" flag. The
+                       mode comes from the stored key, never guessed from the value:
+                       "9,8" is a number and "senyawa" is not. #}
+                    {% set nkey = q.key if q.key is mapping else {} %}
+                    <div class="mt-2 space-y-2" data-numeric-key="{{ q.index }}">
+                        <div class="flex flex-wrap items-center gap-1.5">
+                            <span class="text-[11px] font-extrabold text-gray-500">Jenis jawaban:</span>
+                            <button type="button" @click="numMode({{ q.index }}, 'number')"
+                                    class="text-[11px] font-bold px-2.5 py-1.5 rounded-lg border-2 transition"
+                                    :class="num({{ q.index }}).mode === 'text' ? 'bg-white text-gray-600 border-gray-200' : 'bg-indigo-50 text-indigo-700 border-indigo-300'">
+                                <i class="fas fa-hashtag mr-1"></i>Angka
+                            </button>
+                            <button type="button" @click="numMode({{ q.index }}, 'text')"
+                                    class="text-[11px] font-bold px-2.5 py-1.5 rounded-lg border-2 transition"
+                                    :class="num({{ q.index }}).mode === 'text' ? 'bg-indigo-50 text-indigo-700 border-indigo-300' : 'bg-white text-gray-600 border-gray-200'">
+                                <i class="fas fa-font mr-1"></i>Teks singkat
+                            </button>
+                        </div>
+                        <div x-show="num({{ q.index }}).mode !== 'text'" class="grid grid-cols-2 gap-2">
+                            <label class="block">
+                                <span class="text-[10px] font-extrabold text-gray-500">Jawaban benar</span>
+                                <input type="text" inputmode="decimal" data-numeric-value="{{ q.index }}"
+                                       :value="num({{ q.index }}).value ?? ''"
+                                       @change="numField({{ q.index }}, 'value', $el.value)"
+                                       class="w-full px-3 py-1.5 border-2 border-gray-200 rounded-xl text-sm font-bold focus:border-primary-500">
+                            </label>
+                            <label class="block">
+                                <span class="text-[10px] font-extrabold text-gray-500">Toleransi (0 = tepat)</span>
+                                <input type="text" inputmode="decimal" data-numeric-tolerance="{{ q.index }}"
+                                       :value="num({{ q.index }}).tolerance ?? 0"
+                                       @change="numField({{ q.index }}, 'tolerance', $el.value)"
+                                       class="w-full px-3 py-1.5 border-2 border-gray-200 rounded-xl text-sm font-bold focus:border-primary-500">
+                            </label>
+                        </div>
+                        <label x-show="num({{ q.index }}).mode === 'text'" class="block">
+                            <span class="text-[10px] font-extrabold text-gray-500">Ejaan yang diterima (pisahkan dengan koma)</span>
+                            <input type="text" data-numeric-accepted="{{ q.index }}"
+                                   :value="(num({{ q.index }}).accepted || []).join(', ')"
+                                   @change="numAccepted({{ q.index }}, $el.value)"
+                                   class="w-full px-3 py-1.5 border-2 border-gray-200 rounded-xl text-sm font-bold focus:border-primary-500">
+                        </label>
+                        <p class="text-[11px] text-gray-500">
+                            Jawaban yang tidak cocok tidak otomatis salah: masuk antrean <span class="font-bold">Perlu Ditinjau</span>
+                            di halaman koreksi sampai Anda memutuskan.
+                        </p>
+                    </div>
+                    {% elif q.kind == 'matrix' %}
+                    {# Rows × shared options is a structure, so like a matching
+                       question's pairs it is written in the builder. What this page
+                       shows is the key each row holds, so a teacher can read the
+                       whole grid's answer without opening the editor. #}
+                    {% set mkey = q.key if q.key is mapping else {} %}
+                    <div class="mt-2 rounded-xl border border-gray-200 overflow-x-auto" data-matrix-key="{{ q.index }}">
+                        <table class="w-full text-xs min-w-[280px]">
+                            <thead>
+                                <tr class="bg-gray-100 text-gray-600">
+                                    <th class="text-left px-2 py-1.5 font-extrabold">Baris</th>
+                                    <th class="text-left px-2 py-1.5 font-extrabold">Kunci</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% set cols = mkey.get('columns', []) %}
+                                {% for row in mkey.get('rows', []) %}
+                                <tr class="border-t border-gray-100">
+                                    <td class="px-2 py-1.5 font-semibold text-gray-700">{{ row.get('text', '') }}</td>
+                                    <td class="px-2 py-1.5 font-bold text-fuchsia-700">
+                                        {% set picked = row.get('key', []) %}
+                                        {% if picked %}
+                                            {% for ci in picked %}{{ cols[ci] if ci < cols|length else ci }}{{ ' + ' if not loop.last else '' }}{% endfor %}
+                                        {% else %}&mdash;{% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    <a href="/teacher/exams/{{ exam.id }}" class="inline-block mt-1 text-[11px] font-bold text-primary-600 hover:underline">Ubah baris &amp; opsi di editor ujian</a>
+                    {% elif q.graded_by_ai %}
+                    <label for="refkey-{{ q.index }}" class="block text-xs font-bold text-gray-600 mb-1">Kunci / jawaban acuan (dibaca AI)</label>
+                    <textarea id="refkey-{{ q.index }}" name="refkey_{{ q.index }}" rows="3"
+                              data-key-reference="{{ q.index }}"
+                              class="w-full px-3 py-2 border-2 border-gray-200 rounded-xl text-xs font-medium focus:border-primary-500 resize-y"
+                              placeholder="Contoh: fotosintesis terjadi di kloroplas; faktor: cahaya, CO2, suhu; menyebut ketiganya membatasi laju reaksi.">{{ q.reference }}</textarea>
+                    {% else %}
+                    <p class="text-xs text-gray-500">Kunci: <span class="font-mono font-bold text-gray-700 break-words">{{ q.answer_text or 'Belum diatur' }}</span></p>
+                    <a href="/teacher/exams/{{ exam.id }}" class="inline-block mt-1 text-[11px] font-bold text-primary-600 hover:underline">Ubah kunci di editor ujian</a>
+                    {% endif %}
                 </div>
                 {% endfor %}
             </div>
-            <a href="/teacher/exams/{{ exam.id }}" class="inline-block mt-3 text-xs font-bold text-primary-600 hover:underline">
-                <i class="fas fa-pen-to-square mr-1"></i>Buka editor ujian
-            </a>
         </div>
         {% endif %}
+
+        {# One save button for the whole form, outside the choice/other split: an
+           all-essay paper has no multiple-choice branch at all, and the button used
+           to live inside it — so the page that most needs a reference key was the
+           one with no way to save it. #}
+        <div class="mt-6 flex justify-end">
+            <button form="answer-form" type="submit" class="btn btn-primary">
+                <i class="fas fa-save"></i> Simpan &amp; Hitung Ulang
+            </button>
+        </div>
     </form>
 </div>
 
@@ -146,7 +267,13 @@ function answerKeyEditor() {
         // One letter, or as many as are right — per question, from the *type*, so
         // the control and the server agree about what a question accepts.
         modes: {},
+        // What each question *is*, so `getJson` can post the right shape for a
+        // short answer and a letter set without a second list of type names here.
+        kinds: {},
         init() {
+            {% for q in questions %}
+            this.kinds[{{ q.index }}] = '{{ q.kind }}';
+            {% endfor %}
             {% for q in questions %}
             {% if q.kind == 'choice' %}
             this.modes[{{ q.index }}] = '{{ q.mode }}';
@@ -162,7 +289,45 @@ function answerKeyEditor() {
             this.keys[{{ q.index }}] = [];
             {% endif %}
             {% endif %}
+            {% if q.kind == 'numeric' %}
+            // The stored key is the editor's starting value, never a guess: a
+            // question whose value and tolerance are already right opens showing
+            // them, so an untouched Save posts nothing.
+            this.keys[{{ q.index }}] = {{ (q.key if q.key is mapping else {'mode': 'number', 'value': '', 'tolerance': 0}) | tojson | safe }};
+            {% endif %}
             {% endfor %}
+        },
+        // ── a short answer's key ────────────────────────────────────────────
+        // `{mode, value, tolerance}` or `{mode, accepted}` — the shape
+        // `question_types.normalise_key` writes back, so the page and the grader
+        // read one object.
+        num(idx) {
+            const v = this.keys[idx];
+            const obj = (v && typeof v === 'object' && !Array.isArray(v)) ? v : {};
+            return {
+                mode: obj.mode === 'text' ? 'text' : 'number',
+                value: obj.value == null ? '' : obj.value,
+                tolerance: obj.tolerance == null ? 0 : obj.tolerance,
+                accepted: Array.isArray(obj.accepted) ? obj.accepted : [],
+            };
+        },
+        numField(idx, field, value) {
+            this.markDirty(idx);
+            const v = this.num(idx);
+            v[field] = value;
+            this.keys[idx] = v;
+        },
+        numMode(idx, mode) {
+            this.markDirty(idx);
+            const v = this.num(idx);
+            v.mode = mode === 'text' ? 'text' : 'number';
+            this.keys[idx] = v;
+        },
+        numAccepted(idx, text) {
+            this.markDirty(idx);
+            const v = this.num(idx);
+            v.accepted = String(text || '').split(',').map(s => s.trim()).filter(Boolean);
+            this.keys[idx] = v;
         },
         markDirty(idx) { this.dirty[idx] = true; },
         // The stored value can be a letter, a list, or nothing; every reader here
@@ -213,6 +378,25 @@ function answerKeyEditor() {
             let out = {};
             Object.keys(this.keys).forEach(k => {
                 if (!this.dirty[k]) return;
+                if (this.kinds[k] === 'numeric') {
+                    const v = this.num(k);
+                    if (v.mode === 'text') {
+                        out[k] = {mode: 'text',
+                                  accepted: (v.accepted || []).map(s => String(s).trim()).filter(Boolean)};
+                        return;
+                    }
+                    const raw = String(v.value == null ? '' : v.value).trim();
+                    const tol = String(v.tolerance == null ? '' : v.tolerance).trim();
+                    out[k] = {
+                        mode: 'number',
+                        // A blank stays blank: `numeric_value` reads it as "no key",
+                        // which is what an unfinished question is. A comma is read
+                        // as the decimal separator the same way the grader reads it.
+                        value: raw === '' ? '' : Number(raw.replace(',', '.')),
+                        tolerance: tol === '' ? 0 : Math.abs(Number(tol.replace(',', '.')) || 0),
+                    };
+                    return;
+                }
                 if (this.keys[k] === 'bonus') { out[k] = 'bonus'; return; }
                 const arr = this.letters(k);
                 // The shape the question's own type writes: a single-answer

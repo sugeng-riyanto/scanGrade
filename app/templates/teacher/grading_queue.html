@@ -62,7 +62,7 @@
             <button @click="bulkAiGrade()" :disabled="bulkAiLoading || pending === 0"
                     class="px-3 py-1.5 bg-gradient-to-r from-violet-500 to-purple-500 text-white text-[11px] font-bold rounded-lg hover:from-violet-600 hover:to-purple-600 disabled:opacity-50 transition shadow-sm flex items-center gap-1.5">
                 <i class="fas shrink-0" :class="bulkAiLoading ? 'fa-spinner fa-spin' : 'fa-wand-magic-sparkles'"></i>
-                <span class="hidden sm:inline" :lang="lang" x-text="bulkAiLoading ? t('AI memproses...','AI drafting...') : t('AI Koreksi Semua','AI grade all')"></span>
+                <span class="hidden sm:inline" x-text="bulkAiLoading ? 'AI memproses...' : 'AI Koreksi Semua'"></span>
             </button>
         </div>
     </div>
@@ -125,6 +125,15 @@
                                     </template>
                                     <span class="text-[9px] text-surface-400 ml-1" x-text="s.graded_essays + '/' + s.essay_count"></span>
                                     <span x-show="s.has_drawing" class="text-primary-400 ml-0.5"><i class="fas fa-paint-brush text-[8px]"></i></span>
+                                    {# A short answer the app could not decide. The count
+                                       is the paper's own `_needs_review`, so it is the
+                                       same list the marking page opens, and the badge is
+                                       the only warning a teacher gets before marking a
+                                       paper whose numeric answer is still unmet. #}
+                                    <span x-show="s.review_count" data-review-badge
+                                          class="ml-0.5 px-1 py-0.5 rounded text-[8px] font-extrabold bg-amber-100 text-amber-700 border border-amber-200 whitespace-nowrap"
+                                          :title="'Perlu ditinjau: ' + s.review_count + ' jawaban'"
+                                          x-text="'⚠ ' + s.review_count"></span>
                                     {# One click from the queue to that learner's own
                                        report. `@click.stop` because the row itself
                                        selects the student: without it, opening a
@@ -200,7 +209,7 @@
                                     <span class="text-surface-300">|</span>
                                     <span x-show="current.score != null" class="font-bold"
                                           :class="(current.score || 0) >= 70 ? 'text-emerald-600' : 'text-red-500'"
-                                          x-text="'Skor: ' + Math.round(current.score || 0)"></span>
+                                          x-text="'Skor: ' + (Math.round((current.score || 0) * 100) / 100)"></span>
                                 </div>
                             </div>
                         </div>
@@ -236,7 +245,13 @@
                                     <div class="flex items-center gap-2">
                                         <span class="text-xs font-extrabold text-surface-700" x-text="'Soal ' + (parseInt(q.index) + 1)"></span>
                                         <span class="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-surface-200 text-surface-500"
-                                              x-text="'Bobot: ' + (q.weight || 0)"></span>
+                                              x-text="'Bobot: ' + (q.weight || 0) + ' poin'"></span>
+                                        {# Answered in handwriting — said before the canvas loads,
+                                           because "this pupil drew something" is a fact the list
+                                           already carries and a teacher reads the header first. #}
+                                        <span x-show="q.canvas_pages"
+                                              class="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-orange-100 text-orange-700"
+                                              x-text="'Coretan: ' + q.canvas_pages + ' hal'"></span>
                                     </div>
                                     <div class="flex items-center gap-1">
                                         <span x-show="q.score !== null && q.score !== undefined"
@@ -247,9 +262,81 @@
                                 </div>
 
                                 <div class="px-3 sm:px-4 py-3 space-y-3">
-                                    <!-- Answer preview -->
-                                    <div x-show="q.preview" class="text-sm text-surface-700 bg-blue-50/50 rounded-lg px-3 py-2.5 border border-blue-100 max-h-56 overflow-y-auto whitespace-pre-wrap leading-relaxed" x-text="q.preview"></div>
-                                    <div x-show="!q.preview" class="text-xs text-surface-400 italic py-2">Tidak ada jawaban teks</div>
+                                    {# ── Both halves of one essay answer ──────────────────────────
+                                       A question answered on the canvas read "Tidak ada
+                                       jawaban teks" here, with nothing beside it: the
+                                       pupil's handwriting was in the submission the whole
+                                       time (its own detail page draws it) and the queue —
+                                       the screen a teacher marks a class from — could not
+                                       show it. The two panels are the two ways an essay is
+                                       answered, and a question that used only one of them
+                                       shows only that one; `flex` rather than a two-column
+                                       grid so a lone panel takes the full width instead of
+                                       leaving half the card empty.
+
+                                       The images are fetched for the selected paper alone
+                                       (see `loadAnswers`), because the queue's own list
+                                       endpoint answers for a whole class at once. #}
+                                    <div class="flex flex-col xl:flex-row gap-3" data-answer-panels>
+                                        <!-- the typed answer -->
+                                        <div x-show="answerText(q)" class="flex-1 min-w-0 space-y-1.5" data-answer-text>
+                                            <p class="text-[10px] font-extrabold text-surface-500">
+                                                <i class="fas fa-align-left mr-1"></i>Jawaban teks
+                                                <span class="font-bold text-surface-400" x-text="answerChars(q)"></span>
+                                            </p>
+                                            <div class="text-xs text-surface-700 bg-blue-50/50 rounded-lg px-3 py-2.5 border border-blue-100 max-h-48 overflow-y-auto whitespace-pre-wrap leading-relaxed" x-text="answerText(q)"></div>
+                                        </div>
+                                        <!-- the student's canvas, over the sheet it was written on -->
+                                        <div x-show="answerPages(q).length > 0" class="flex-1 min-w-0 space-y-1.5" data-answer-canvas>
+                                            <div class="flex items-center justify-between gap-2">
+                                                <p class="text-[10px] font-extrabold text-surface-500">
+                                                    <i class="fas fa-paint-brush mr-1"></i>Coretan siswa
+                                                </p>
+                                                <div class="flex items-center gap-1" x-show="answerPages(q).length > 1">
+                                                    <button type="button" @click="stepAnswerPage(q, -1)" :disabled="answerPageIdx(q) <= 0"
+                                                            class="w-8 h-8 rounded-lg bg-surface-100 hover:bg-surface-200 disabled:opacity-40 text-surface-600 text-[10px] font-bold transition" title="Halaman sebelumnya">
+                                                        <i class="fas fa-chevron-left"></i>
+                                                    </button>
+                                                    <span class="text-[10px] font-bold text-surface-500 tabular-nums" x-text="answerPageLabel(q)"></span>
+                                                    <button type="button" @click="stepAnswerPage(q, 1)" :disabled="answerPageIdx(q) >= answerPages(q).length - 1"
+                                                            class="w-8 h-8 rounded-lg bg-surface-100 hover:bg-surface-200 disabled:opacity-40 text-surface-600 text-[10px] font-bold transition" title="Halaman berikutnya">
+                                                        <i class="fas fa-chevron-right"></i>
+                                                    </button>
+                                                </div>
+                                                <span class="text-[10px] font-bold text-surface-400" x-show="answerPages(q).length === 1"
+                                                      x-text="answerPageLabel(q)"></span>
+                                            </div>
+                                            <div class="relative border-2 border-orange-200 rounded-xl overflow-hidden bg-white" data-answer-sheet>
+                                                <template x-if="answerPage(q) && answerPage(q).paper">
+                                                    <img :src="answerPage(q).paper" class="block w-full" alt="Kertas jawaban">
+                                                </template>
+                                                <template x-if="answerPage(q) && answerPage(q).canvas">
+                                                    <img :src="answerPage(q).canvas" class="absolute inset-0 w-full" style="opacity:0.7" alt="Coretan jawaban siswa">
+                                                </template>
+                                                {# A note the pupil typed onto the sheet — the other
+                                                   half of a canvas answer, and the reason a page
+                                                   can be drawn without carrying any ink. #}
+                                                <template x-for="(box, bi) in answerBoxes(q)" :key="'qb-' + bi">
+                                                    <div class="absolute max-w-[16rem]" :style="'left:' + (box.x_pct * 100) + '%; top:' + (box.y_pct * 100) + '%'">
+                                                        <span class="inline-block text-[10px] font-bold text-surface-700 bg-white/90 border border-orange-200 rounded px-1.5 py-0.5 whitespace-pre-wrap" x-text="box.text"></span>
+                                                    </div>
+                                                </template>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    {# Loading, failure and "answered nothing" are three different
+                                       facts and each says itself: a card that silently shows no
+                                       answer is how a teacher decides a pupil wrote nothing. #}
+                                    <div x-show="answersLoading && !answerText(q) && answerPages(q).length === 0"
+                                         class="text-[11px] text-surface-400 font-bold py-2">
+                                        <i class="fas fa-spinner fa-spin mr-1"></i>Memuat jawaban...
+                                    </div>
+                                    <div x-show="answersError" class="flex flex-wrap items-center gap-2 text-[11px] font-bold text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                                        <i class="fas fa-exclamation-triangle"></i><span x-text="answersError"></span>
+                                        <button type="button" @click="loadAnswers(true)" class="ml-auto text-[10px] font-bold text-red-700 underline">Coba lagi</button>
+                                    </div>
+                                    <div x-show="!answersLoading && !answersError && !answerText(q) && answerPages(q).length === 0"
+                                         class="text-xs text-surface-400 italic py-2">Tidak ada jawaban teks maupun coretan untuk soal ini</div>
 
                                     <!-- Quick score presets. They wrap instead of squeezing,
                                          so a 320 px phone shows two rows of three rather than
@@ -270,7 +357,15 @@
                                                min="0" max="100"
                                                class="w-14 text-center text-sm font-bold px-1 py-1 border-2 border-surface-200 rounded-lg focus:border-primary-500 focus:ring-0"
                                                :class="(qscores[q.index]||0) >= 70 ? 'text-emerald-600 border-emerald-300' : (qscores[q.index]||0) > 0 ? 'text-amber-600 border-amber-300' : ''">
-                                        <span class="text-[10px] text-surface-400 font-medium">/ 100</span>
+                                        <span class="text-[10px] text-surface-400 font-medium">%</span>
+                                        {# The percentage and what it pays out, both on screen. The
+                                           header says what the question is worth and this says what the
+                                           mark in the box earns of it — the same two readings the paper's
+                                           own marking page shows, because a bare "50" beside "15.2 poin"
+                                           is the pair a teacher cannot reconcile. #}
+                                        <span x-show="pointsGain(q) !== null" data-points-gain
+                                              class="text-[10px] font-bold text-surface-400 tabular-nums"
+                                              x-text="'= ' + pointsGain(q) + ' poin'"></span>
                                     </div>
 
                                     <!-- Comment (compact) -->
@@ -281,7 +376,7 @@
                                         <!-- AI per-question -->
                                         <button @click="aiGradeQuestion(q)" :disabled="q._aiLoading" :lang="lang"
                                                 class="px-2.5 py-1.5 bg-violet-50 text-violet-700 hover:bg-violet-100 rounded-lg text-[10px] font-bold transition flex items-center gap-1 shrink-0 disabled:opacity-50"
-                                                :title="t('AI koreksi','AI grade') + ' ' + (parseInt(q.index)+1)">
+                                                :title="'AI koreksi ' + (parseInt(q.index)+1)">
                                             <i class="fas" :class="q._aiLoading ? 'fa-spinner fa-spin' : 'fa-wand-magic-sparkles'"></i>
                                             <span x-text="q._aiLoading ? '' : 'AI'"></span>
                                         </button>
@@ -293,11 +388,12 @@
                                             <i class="fas fa-robot text-violet-500 mt-0.5 shrink-0"></i>
                                             <div class="flex-1">
                                                 <p class="whitespace-pre-wrap" x-text="q._aiResult"></p>
-                                                <div class="flex items-center gap-2 mt-1.5" x-show="q._aiScore !== undefined">
-                                                    <span class="font-bold text-violet-700" x-text="'Skor AI: ' + Math.round(q._aiScore)"></span>
+                                                <div class="flex flex-wrap items-center gap-2 mt-1.5" x-show="q._aiScore !== undefined">
+                                                    <span class="font-bold text-violet-700" x-text="'Saran: ' + Math.round(q._aiScore) + (q._aiMaxScore ? ' / ' + q._aiMaxScore : '')"></span>
                                                     <span class="text-surface-400">•</span>
                                                     <span class="text-surface-400" x-text="'Keyakinan: ' + Math.round((q._aiConfidence || 0) * 100) + '%'"></span>
-                                                    <button @click="applyAiScore(q)" class="text-[10px] font-bold text-emerald-600 hover:text-emerald-700 underline">Terapkan</button>
+                                                    <button @click="applyAiScore(q)" class="text-[10px] font-bold text-emerald-600 hover:text-emerald-700 underline" x-text="'Terapkan'"></button>
+                                                    <button @click="rejectAiScore(q)" class="text-[10px] font-bold text-surface-500 hover:text-surface-700 underline" x-text="'Abaikan'"></button>
                                                 </div>
                                             </div>
                                         </div>
@@ -348,6 +444,14 @@ function gradingApp() {
         saving: false,
         aiLoading: false,
         bulkAiLoading: false,
+        // The answers of the paper that is open, keyed by submission id and then by
+        // question index: `{submissionId: {'16': {text, pages: [...]}}}`. Fetched
+        // per paper rather than shipped with the queue — see `loadAnswers`.
+        answers: {},
+        answersLoading: false,
+        answersError: '',
+        // Which of a question's drawn pages is on screen, by question index.
+        qpage: {},
 
         get total() { return this.submissions.length; },
         get pending() { return this.submissions.filter(s => s.status === 'submitted').length; },
@@ -418,6 +522,7 @@ function gradingApp() {
             if (!this.current || !this.current.questions) return;
             this.qscores = {};
             this.qcomments = {};
+            this.qpage = {};
             this.current.questions.forEach(q => {
                 this.qscores[q.index] = q.score !== undefined && q.score !== null ? q.score : '';
                 this.qcomments[q.index] = q.comment || '';
@@ -426,6 +531,104 @@ function gradingApp() {
                 q._aiConfidence = undefined;
                 q._aiLoading = false;
             });
+            this.loadAnswers();
+        },
+
+        // One paper's essay answers: the text and the drawing, for the queue panel.
+        //
+        // The list endpoint answers for a whole class in one response and carries no
+        // images on purpose — a stored canvas is 50–100 KB, so every pupil's drawings
+        // behind one page load would be hundreds of megabytes. This asks for the
+        // paper a teacher actually opened, and remembers it: moving down the queue
+        // and back does not re-fetch what is already here.
+        loadAnswers(force) {
+            const sub = this.current;
+            this.answersError = '';
+            if (!sub) return;
+            if (this.answers[sub.id] && !force) return;
+            this.answersLoading = true;
+            fetch('/teacher/api/grading-queue/' + this.examId + '/answer/' + sub.id)
+                .then(r => r.json().then(d => ({ok: r.ok, d: d})))
+                .then(res => {
+                    if (!res.ok) throw new Error(res.d.error || 'Gagal memuat jawaban');
+                    // The paper may have changed while this was in flight; keying by
+                    // submission id means a late answer cannot land on another pupil.
+                    this.answers = {...this.answers, [sub.id]: res.d.questions || {}};
+                    this.answersLoading = false;
+                })
+                .catch(e => {
+                    this.answersLoading = false;
+                    this.answersError = e.message || 'Gagal memuat jawaban';
+                });
+        },
+
+        // The answers of one question on the paper that is open — text and pages.
+        answerData(q) {
+            const sub = this.current;
+            if (!sub) return null;
+            const paper = this.answers[sub.id];
+            return (paper && paper[String(q.index)]) || null;
+        },
+
+        // The whole answer, never a truncated preview: deciding a mark from the
+        // first hundred characters is how a five-paragraph essay is scored as a
+        // sentence. Empty until the fetch lands, and the loading note says so.
+        answerText(q) {
+            const d = this.answerData(q);
+            return (d && d.text) || '';
+        },
+
+        answerChars(q) {
+            const text = this.answerText(q);
+            return text ? text.length + ' karakter' : '';
+        },
+
+        answerPages(q) {
+            const d = this.answerData(q);
+            return (d && d.pages) || [];
+        },
+
+        // Which drawn page is on screen. It opens on the sheet the question was
+        // printed on when the pupil wrote there, and otherwise on their first page:
+        // a question on page 3 of a four-page paper should not open on page 1.
+        answerPageIdx(q) {
+            const pages = this.answerPages(q);
+            const key = String(q.index);
+            const stored = this.qpage[key];
+            if (stored !== undefined && stored >= 0 && stored < pages.length) return stored;
+            const d = this.answerData(q);
+            const printed = parseInt((d && d.question_page) || '', 10);
+            if (!isNaN(printed)) {
+                const found = pages.findIndex(p => p.page === printed - 1);
+                if (found >= 0) return found;
+            }
+            return 0;
+        },
+
+        answerPage(q) {
+            const pages = this.answerPages(q);
+            return pages[this.answerPageIdx(q)] || null;
+        },
+
+        answerBoxes(q) {
+            const page = this.answerPage(q);
+            return (page && page.textBoxes) || [];
+        },
+
+        answerPageLabel(q) {
+            const pages = this.answerPages(q);
+            if (!pages.length) return '';
+            const i = this.answerPageIdx(q);
+            const no = pages[i] ? pages[i].page + 1 : '';
+            return pages.length > 1 ? ('Hal ' + no + ' (' + (i + 1) + '/' + pages.length + ')') : ('Hal ' + no);
+        },
+
+        stepAnswerPage(q, delta) {
+            const pages = this.answerPages(q);
+            if (pages.length < 2) return;
+            const next = this.answerPageIdx(q) + delta;
+            if (next < 0 || next >= pages.length) return;
+            this.qpage = {...this.qpage, [String(q.index)]: next};
         },
 
         selectStudent(idx) {
@@ -462,27 +665,14 @@ function gradingApp() {
             // Mark as unsaved
         },
 
-        computeFinalScore() {
-            if (!this.current || !this.current.questions || this.current.questions.length === 0) return null;
-            const qs = this.current.questions;
-            let totalWeight = qs.reduce((s, q) => s + (q.weight || 0), 0);
-            if (totalWeight === 0) {
-                totalWeight = 100;
-                const each = 100 / qs.length;
-                let earned = 0;
-                qs.forEach(q => {
-                    const s = parseFloat(this.qscores[q.index]) || 0;
-                    earned += (s / 100) * each;
-                });
-                return Math.round(Math.min(earned, 100));
-            }
-            let earned = 0;
-            qs.forEach(q => {
-                const w = q.weight || 0;
-                const s = parseFloat(this.qscores[q.index]) || 0;
-                earned += (s / 100) * w;
-            });
-            return Math.round(Math.min(earned, 100));
+        // What the mark in the box pays out of the question's own points. The header
+        // chip says what the question is worth; this says what this mark earns of it.
+        pointsGain(q) {
+            const s = parseFloat(this.qscores[q.index]);
+            const w = parseFloat(q.weight);
+            if (!isFinite(s) || !isFinite(w) || w <= 0) return null;
+            const clamped = Math.min(Math.max(s, 0), 100);
+            return Math.round((clamped / 100) * w * 100) / 100;
         },
 
         saveGrade() {
@@ -496,20 +686,21 @@ function gradingApp() {
                 const c = this.qcomments[q.index];
                 if (c && c.trim()) comments[q.index] = c.trim();
             });
-            const finalScore = this.computeFinalScore();
-            const body = {
-                final_score: finalScore,
-                teacher_feedback: { scores, comments }
-            };
+            // Only the per-question marks are sent. This page has no objective score
+            // and no penalty to add in — its own sum of the essays was a number the
+            // results page had never heard of — so the final is the server's
+            // `exam_scoring` figure, and the header shows what came back.
             return fetch('/teacher/grade/' + this.current.id + '/override', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(body)
+                body: JSON.stringify({ teacher_feedback: { scores, comments } })
             })
             .then(r => r.json())
             .then(d => {
                 if (d.success) {
-                    this.current.score = finalScore;
+                    if (d.final_score !== null && d.final_score !== undefined) {
+                        this.current.score = d.final_score;
+                    }
                     this.current.graded_essays = Object.keys(scores).length;
                     if (this.current.status === 'submitted') this.current.status = 'graded';
                 }
@@ -538,6 +729,9 @@ function gradingApp() {
         },
 
         aiGradeQuestion(q) {
+            // Asks for a suggestion and shows it. The old call read
+            // `d.suggested_score` / `d.suggested_feedback`, which the endpoint never
+            // returned — so the panel was always empty and the button looked broken.
             if (q._aiLoading) return;
             q._aiLoading = true;
             q._aiResult = '';
@@ -551,10 +745,10 @@ function gradingApp() {
             })
             .then(r => r.json().then(d => ({ok: r.ok, d})))
             .then(({ok, d}) => {
-                if (!ok || d.error) { q._aiResult = d.error || t('Gagal meminta saran','Could not get a suggestion'); return; }
+                if (!ok || d.error) { q._aiResult = d.error || 'Gagal meminta saran'; return; }
                 this._pollAi(q, d.suggestion_id, 0);
             })
-            .catch(() => { q._aiResult = t('Gagal terhubung ke server AI','Could not reach the AI server'); })
+            .catch(() => { q._aiResult = 'Gagal terhubung ke server AI'; })
             .finally(() => { q._aiLoading = false; });
         },
 
@@ -573,7 +767,7 @@ function gradingApp() {
                     return;
                 }
                 if (d.status === 'failed') { q._aiResult = d.error || 'Gagal'; return; }
-                q._aiResult = t('AI sedang menilai…','AI is marking…');
+                q._aiResult = 'AI sedang menilai…';
                 setTimeout(() => this._pollAi(q, id, tries + 1), 1500);
             })
             .catch(() => setTimeout(() => this._pollAi(q, id, tries + 1), 2000));
@@ -617,7 +811,7 @@ function gradingApp() {
                 if (!d.queued) { alert('Tidak ada esai baru untuk dikoreksi.'); return; }
                 this._pollBatch(d.batch_id, 0);
             })
-            .catch(() => { alert(t('Gagal terhubung ke server AI','Could not reach the AI server')); })
+            .catch(() => { alert('Gagal terhubung ke server AI'); })
             .finally(() => { this.bulkAiLoading = false; });
         },
 

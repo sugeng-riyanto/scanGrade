@@ -42,6 +42,10 @@ EXEMPT = {
     "teacher_bp /assignments": "an assignment is per class-subject, not per year's marks",
     "teacher_bp /assignments/<assignment_id>": "same as /assignments",
     "teacher_bp /api/ai/test-demo": "a test call to the AI provider; writes nothing",
+    "teacher_bp /grade/<submission_id>/preview":
+        "asks what a save *would* score — the same arithmetic `scoring.preview` "
+        "runs for the writer, handed back and written nowhere; the paper is "
+        "guarded by _guard_submission like the save it previews",
     "teacher_bp /api/grading-assist/bank":
         "the marker's own reusable comments, not a year's marks; the page opens "
         "only on a running year anyway",

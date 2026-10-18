@@ -320,7 +320,7 @@
       "frozen": false
     },
     "guide/skor.html": {
-      "pairs": 219,
+      "pairs": 239,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -446,7 +446,7 @@
       "frozen": false
     },
     "student/take_exam.html": {
-      "pairs": 347,
+      "pairs": 378,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -488,7 +488,7 @@
       "frozen": false
     },
     "super_admin/deploy_status.html": {
-      "pairs": 490,
+      "pairs": 502,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -608,7 +608,7 @@
       "frozen": false
     },
     "teacher/ai_settings.html": {
-      "pairs": 133,
+      "pairs": 139,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -651,7 +651,7 @@
     },
     "teacher/answer_keys.html": {
       "pairs": 0,
-      "leftovers": 21,
+      "leftovers": 30,
       "coverage": 0.0,
       "frozen": false
     },
@@ -668,7 +668,7 @@
       "frozen": false
     },
     "teacher/exam_form.html": {
-      "pairs": 281,
+      "pairs": 329,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -687,26 +687,26 @@
     },
     "teacher/grade_detail.html": {
       "pairs": 0,
-      "leftovers": 40,
+      "leftovers": 70,
       "coverage": 0.0,
       "frozen": false
     },
     "teacher/grade_question.html": {
       "pairs": 0,
-      "leftovers": 17,
+      "leftovers": 29,
       "coverage": 0.0,
       "frozen": false
     },
     "teacher/grading.html": {
-      "pairs": 8,
+      "pairs": 13,
       "leftovers": 1,
-      "coverage": 88.9,
+      "coverage": 92.9,
       "frozen": true
     },
     "teacher/grading_queue.html": {
       "pairs": 1,
-      "leftovers": 23,
-      "coverage": 4.2,
+      "leftovers": 33,
+      "coverage": 2.9,
       "frozen": true
     },
     "teacher/import_students.html": {

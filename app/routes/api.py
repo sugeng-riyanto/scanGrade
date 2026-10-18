@@ -26,7 +26,7 @@ from app.services import seb_config_key
 from app.services import seb_service
 from app.services.question_types import (
     complete_weights, earned_points, grade_answer, is_objective,
-    normalize_answer_map, objective_result,
+    normalize_answer_map, objective_result, validate_answer_map,
 )
 from app.services.student_import import create_student_account, owned_class_id
 from app.utils.logger import get_logger
@@ -1220,6 +1220,25 @@ def student_sync_draft():
         # a page loaded before the teacher flipped the toggle is *read* into the
         # right shape rather than refused (see `question_types.normalize_answer`).
         answers = normalize_answer_map((exam_data or {}).get("question_types"), answers)
+        # ── The structure belongs to the server ──────────────────────────────
+        # A matrix answer naming a row the question does not have, or a checkbox
+        # index past the end of a grid, is dropped here rather than stored: the
+        # mark is unaffected either way, but a reload would draw a tick that does
+        # not exist, and the report would claim a pupil answered a row nobody
+        # wrote. Sanitised rather than refused — a stray key must not cost a
+        # sitting.
+        _akey = (exam_data or {}).get("answer_key") or {}
+        if isinstance(_akey, str):
+            try:
+                _akey = json.loads(_akey)
+            except (json.JSONDecodeError, TypeError):
+                _akey = {}
+        answers, _dropped = validate_answer_map(
+            (exam_data or {}).get("question_types"), _akey, answers)
+        if _dropped:
+            current_app.logger.info(
+                "sync-draft dropped %d out-of-shape answer(s) for exam %s user %s: %s",
+                len(_dropped), exam_id, g.user_id, _dropped[:5])
         existing = supabase.table("submissions").select("id,status,answers,started_at,updated_at").eq("exam_id", exam_id).eq("student_id", g.user_id).limit(1).execute().data
         if existing:
             sub = existing[0]

@@ -134,7 +134,7 @@
                unpinning it, and that is a job for the page, not for one badge. #}
             <div>
                 <h1 class="font-extrabold text-sm lg:text-base truncate max-w-[150px] lg:max-w-none text-stone-800">{{ exam.title }}</h1>
-                <span class="text-[10px] text-stone-400 font-semibold">{{ student.full_name or 'Siswa' }}{% if submission.submitted_late %} <span class="inline-flex items-center gap-1 align-middle px-1.5 py-0.5 text-[9px] font-bold rounded bg-amber-100 text-amber-700 border border-amber-200" title="Jawaban tiba setelah tenggat waktu ujian"><i class="fas fa-clock"></i> Terlambat</span>{% endif %} &middot; MCQ: {{ submission.score if submission.score is not none else '-' }} &middot; Final: <span id="final-display" class="text-orange-600 font-extrabold">{{ submission.final_score if submission.final_score is not none else (submission.score if submission.score is not none else '-') }}</span></span>
+                <span class="text-[10px] text-stone-400 font-semibold">{{ student.full_name or 'Siswa' }}{% if submission.submitted_late %} <span class="inline-flex items-center gap-1 align-middle px-1.5 py-0.5 text-[9px] font-bold rounded bg-amber-100 text-amber-700 border border-amber-200" title="Jawaban tiba setelah tenggat waktu ujian"><i class="fas fa-clock"></i> Terlambat</span>{% endif %} &middot; MCQ: <span id="mcq-display">{{ submission.score if submission.score is not none else '-' }}</span> &middot; Final: <span id="final-display" class="text-orange-600 font-extrabold">{{ submission.final_score if submission.final_score is not none else (submission.score if submission.score is not none else '-') }}</span></span>
             </div>
         </div>
         <div class="flex flex-wrap items-center justify-end gap-2 no-print ml-auto">
@@ -196,6 +196,95 @@
         <p class="mt-1.5 text-[11px] font-bold text-stone-400">Tidak ada catatan meninggalkan ujian untuk kertas ini.</p>
         {% endif %}
     </div>
+
+    {# ── The answers the app could not decide ────────────────────────────────
+       A numeric / short answer that matches nothing is *not* marked wrong by
+       the grader: a tolerance typed as zero, a synonym the teacher did not
+       list, or a unit left on the end all look exactly like a wrong answer,
+       and only a human can tell them apart. The flag travels on the paper
+       (`_needs_review`, written by `manual_review_map` on submit), so this is
+       the one place a teacher sees them all — a category here rather than a
+       page of its own, because "what still needs my attention" is one
+       question.
+
+       Plain Indonesian, like the rest of this page: it pins `content_lang =
+       'id'`, and a translation pair here would be the one string that switched
+       under an Indonesian `lang`. #}
+    {% set reviews = review_items|default([], true) %}
+    {% if reviews %}
+    <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-3 mb-3 border border-amber-200 no-print" data-review-queue>
+        <p class="text-[10px] font-extrabold text-amber-700 tracking-wide">
+            <i class="fas fa-magnifying-glass mr-1"></i>Perlu ditinjau
+            <span class="ml-1 font-bold text-amber-500/80">({{ reviews|length }} jawaban tidak cocok otomatis)</span>
+        </p>
+        <ul class="mt-2 space-y-1.5">
+            {% for item in reviews %}
+            <li class="rounded-xl border border-amber-100 bg-amber-50/50 px-2.5 py-2">
+                <div class="flex flex-wrap items-center gap-x-2 text-[11px] leading-relaxed">
+                    <span class="font-extrabold text-stone-700">Soal {{ item.number }}</span>
+                    <span class="font-bold text-amber-700">{{ item.reason_label }}</span>
+                </div>
+                <div class="mt-0.5 flex flex-wrap gap-x-3 text-[11px]">
+                    <span class="text-stone-500">Jawaban murid: <span class="font-bold text-stone-700">{{ item.answer or '(kosong)' }}</span></span>
+                    {% if item.expected %}
+                    <span class="text-stone-500">Kunci: <span class="font-bold text-stone-700">{{ item.expected }}</span></span>
+                    {% endif %}
+                </div>
+            </li>
+            {% endfor %}
+        </ul>
+        <p class="mt-2 text-[11px] font-semibold text-stone-500">
+            Nilai otomatis untuk jawaban ini masih 0 dan belum diputuskan salah. Bila ejaan atau
+            toleransinya yang kurang, perbaiki kunci soal di halaman
+            <a href="/teacher/exams/{{ exam_id }}/answer-keys" class="font-bold text-primary-600 hover:underline">Kunci Jawaban</a>
+            lalu nilai dihitung ulang. Bila memang salah, biarkan apa adanya.
+        </p>
+    </div>
+    {% endif %}
+
+    {# ── The answers the app could not decide ────────────────────────────────
+       A numeric or short answer that matches nothing is *not* marked wrong by
+       the grader: a tolerance typed as zero, a synonym the teacher did not
+       list, or a unit left on the end all look exactly like a wrong answer, and
+       only a human can tell them apart. The flag travels on the paper
+       (`_needs_review`, written when the paper was graded), so this is the one
+       place a teacher sees them all — a category here rather than a page of its
+       own, because "what still needs my attention" is one question.
+
+       Plain Indonesian, like the rest of this page: it pins `content_lang =
+       'id'`, and a translation pair here would be the one string that switched
+       under an Indonesian `lang`. #}
+    {% set reviews = review_items|default([], true) %}
+    {% if reviews %}
+    <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-3 mb-3 border border-amber-200 no-print" data-review-queue>
+        <p class="text-[10px] font-extrabold text-amber-700 tracking-wide">
+            <i class="fas fa-magnifying-glass mr-1"></i>Perlu ditinjau
+            <span class="ml-1 font-bold text-amber-500/80">({{ reviews|length }} jawaban tidak cocok otomatis)</span>
+        </p>
+        <ul class="mt-2 space-y-1.5">
+            {% for item in reviews %}
+            <li class="rounded-xl border border-amber-100 bg-amber-50/50 px-2.5 py-2">
+                <div class="flex flex-wrap items-center gap-x-2 text-[11px] leading-relaxed">
+                    <span class="font-extrabold text-stone-700">Soal {{ item.number }}</span>
+                    <span class="font-bold text-amber-700">{{ item.reason_label }}</span>
+                </div>
+                <div class="mt-0.5 flex flex-wrap gap-x-3 text-[11px]">
+                    <span class="text-stone-500">Jawaban murid: <span class="font-bold text-stone-700">{{ item.answer or '(kosong)' }}</span></span>
+                    {% if item.expected %}
+                    <span class="text-stone-500">Kunci: <span class="font-bold text-stone-700">{{ item.expected }}</span></span>
+                    {% endif %}
+                </div>
+            </li>
+            {% endfor %}
+        </ul>
+        <p class="mt-2 text-[11px] font-semibold text-stone-500">
+            Nilai otomatis untuk jawaban ini masih 0 dan belum diputuskan salah. Bila ejaan atau
+            toleransinya yang kurang, perbaiki kunci soal di halaman
+            <a href="/teacher/exams/{{ exam_id }}/answer-keys" class="font-bold text-primary-600 hover:underline">Kunci Jawaban</a>,
+            lalu nilai dihitung ulang. Bila memang salah, biarkan apa adanya.
+        </p>
+    </div>
+    {% endif %}
 
     <form method="POST" action="/teacher/grade/{{ submission.id }}/override" id="grade-form">
         <input type="hidden" name="teacher_feedback" id="feedback-input" value="">
@@ -639,7 +728,15 @@
                                             </button>
                                         </div>
                                     </div>
-                                    <p class="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">{{ student_text }}</p>
+                                    {# The whole answer, not its first 300 characters. A
+                                       teacher marking a five-paragraph essay was reading a
+                                       third of it and a band where the rest should be, with
+                                       nothing on screen saying so — the marking page is the
+                                       one place the answer has to be complete. The box
+                                       scrolls; the count beside it is how a truncation would
+                                       be visible if one ever came back. #}
+                                    <div class="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed max-h-72 overflow-y-auto">{{ student_text }}</div>
+                                    <p class="text-[10px] text-slate-400 mt-1">{{ student_text|length }} karakter</p>
                                     <!-- OCR Canvas Result Area (hidden by default) -->
                                     <div :id="'ocr-area-' + {{ i }}" class="hidden mt-2">
                                         <div class="flex items-center gap-2 mb-1">
@@ -672,14 +769,29 @@
                                 <div id="ai-body-{{ i }}" class="mt-1.5 text-[11px] text-slate-700"></div>
                             </div>
                             {% endif %}
-                            <label class="text-xs font-extrabold text-stone-700">Skor #{{ i+1 }} <span class="text-orange-500">({{ qweight }} poin)</span>:</label>
-                            <input type="number" x-model="scoreVal" min="0" max="100"
+                            {# The box is a percentage and the question is worth {{ qweight }}
+                               points, and for a long time the label said neither: it read
+                               "(15.2 poin)" beside a field that took 0-100, so a teacher
+                               typing the 12 they meant as points scored 12% of 15.2. The
+                               unit is written, the conversion is shown live, and Enter
+                               saves and moves to the next question. #}
+                            <label class="text-xs font-extrabold text-stone-700" :for="'score-' + qIdx">Skor #{{ i+1 }} <span class="text-orange-500">(maks {{ qweight }} poin)</span>:</label>
+                            <input type="number" x-model="scoreVal" min="0" max="100" step="0.5" inputmode="decimal"
+                                   :id="'score-' + qIdx"
+                                   data-score-input="{{ i }}"
                                    class="w-20 px-3 py-1.5 border-2 border-stone-200 rounded-xl text-center font-extrabold text-lg focus:border-orange-500"
-                                   @input="scheduleSave" @keydown.enter.prevent="">
-                            <label class="text-xs font-extrabold text-stone-700 ml-2">Komentar:</label>
-                            <input type="text" x-model="commentVal" placeholder="Komentar..."
+                                   @input="onScoreInput" @change="onScoreInput"
+                                   @keydown.enter.prevent="saveAndGoNext()">
+                            <span class="text-xs font-extrabold text-stone-400">%</span>
+                            <span class="text-[11px] font-extrabold text-orange-600 whitespace-nowrap"
+                                  x-show="pointsHint" x-text="pointsHint"></span>
+                            <span class="text-[10px] font-bold text-emerald-600" x-show="savedTick">tersimpan</span>
+                            <label class="text-xs font-extrabold text-stone-700 ml-2" :for="'comment-' + qIdx">Komentar:</label>
+                            <input type="text" x-model="commentVal" :id="'comment-' + qIdx"
+                                   data-comment-input="{{ i }}"
+                                   placeholder="Komentar otomatis dari skor — boleh diubah"
                                    class="flex-1 px-3 py-1.5 border-2 border-stone-200 rounded-xl text-xs font-bold focus:border-orange-500"
-                                   @input="scheduleSave" @keydown.enter.prevent="">
+                                   @input="commentEdited" @keydown.enter.prevent="saveAndGoNext()">
                         </div>
                     </div>
                 </div>
@@ -756,6 +868,7 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="/static/js/ai-suggestion.js"></script>
 <script>
 const GRADE_STATE = {};
 const QUESTION_INSTANCES = {};
@@ -768,7 +881,28 @@ const TOTAL_Q = {{ exam.total_questions }};
 const PDF_LEN = PDF_PAGES.length;
 const MCQ_TOTAL = {{ (exam.answer_key or {}) | length }};
 const QUESTION_PAGES = {{ (exam.question_pages or {}) | tojson | safe }};
+// What each question is worth, so the score box can say what a percentage means.
+// The label used to read "(15.2 poin)" next to a 0–100 field, which invites a
+// teacher to type the points they mean and record a percentage instead.
+const Q_POINTS = {{ (exam.question_weights or {}) | tojson | safe }};
 let autoSaveTimer = null;
+
+// The comment a mark earns, in the page's own language (this page pins `id`), so a
+// teacher marking two hundred papers is not composing the same sentence twice
+// hundred times. It fills the box only while the box is untouched — see
+// `syncCommentFromScore` — so a sentence the teacher wrote is never overwritten.
+function autoCommentFor(pct, earned, max) {
+    const p = Math.round(Number(pct));
+    const head = (earned !== null && max)
+        ? earned + ' dari ' + max + ' poin — '
+        : '';
+    if (p >= 90) return head + 'sangat baik: jawaban lengkap dan tepat.';
+    if (p >= 70) return head + 'baik: sebagian besar poin kunci tercakup.';
+    if (p >= 50) return head + 'cukup: beberapa poin penting belum tercakup.';
+    if (p >= 30) return head + 'kurang: banyak poin kunci belum muncul.';
+    if (p > 0) return head + 'sangat kurang: jawaban belum menjawab soal.';
+    return 'tidak ada jawaban yang bisa dinilai.';
+}
 
 function parsePageRange(str) {
     if (!str || typeof str !== 'string') return [];
@@ -851,13 +985,18 @@ function gradeApp() {
                 if (inst) inst.saveOverlayForPage();
             });
             const fb = collectFeedback();
-            const fs = calcFinal();
             const st = document.getElementById('auto-save-status');
             if(st) st.innerHTML='<i class="fas fa-spinner fa-spin mr-1 text-[8px]"></i>Menyimpan...';
+            // The marks, not a final. On this page the final was a second
+            // implementation of the scoring rule in JavaScript — MCQ keys and
+            // weights only, so a matching or partial-credit question paid nothing
+            // and the penalty was the page's own guess. The route writes
+            // `exam_scoring`'s number and returns it (see `calcFinal`), so what a
+            // teacher commits is the mark the results page will show.
             fetch('/teacher/grade/{{ submission.id }}/override', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({teacher_feedback: fb, final_score: fs})
+                body: JSON.stringify({teacher_feedback: fb})
             })
             .then(r => { if(r.ok) window.location.href = '/teacher/results?exam_id={{ exam_id }}'; else return r.json().then(d => alert(d.error||'Gagal')); })
             .catch(e => alert('Gagal: '+e.message));
@@ -886,6 +1025,60 @@ function gradeQuestion(qIdx) {
         ctx: null, canvas: null, drawing: false, lx: 0, ly: 0, history: [],
         scoreVal: SAVED_SCORES[qIdx] || '',
         commentVal: SAVED_COMMENTS[qIdx] || '',
+        // True while the comment shown is the one this page generated from the
+        // score. It is what stops the generator from overwriting a sentence the
+        // teacher typed — the value in the box is theirs the moment they touch it.
+        commentAuto: false,
+        savedTick: false,
+        // What this question is worth, from the paper's own mark scheme. Read from
+        // the server-rendered map rather than parsed out of the label text.
+        get maxPoints() {
+            const w = parseFloat(Q_POINTS[this.qIdx]);
+            return isFinite(w) && w > 0 ? w : 0;
+        },
+        get earnedPoints() {
+            const s = parseFloat(this.scoreVal);
+            if (!isFinite(s) || !this.maxPoints) return null;
+            return Math.round((Math.min(Math.max(s, 0), 100) / 100) * this.maxPoints * 100) / 100;
+        },
+        get pointsHint() {
+            const e = this.earnedPoints;
+            if (e === null) return '';
+            return '= ' + e + ' / ' + this.maxPoints + ' poin';
+        },
+        onScoreInput() {
+            this.syncCommentFromScore();
+            this.scheduleSave();
+        },
+        commentEdited() {
+            // A teacher's own words from here on. `scheduleSave` still saves them.
+            this.commentAuto = false;
+            this.scheduleSave();
+        },
+        syncCommentFromScore() {
+            if (!this.commentAuto && (this.commentVal || '').trim()) return;
+            const raw = parseFloat(this.scoreVal);
+            if (!isFinite(raw)) { return; }
+            this.commentVal = autoCommentFor(raw, this.earnedPoints, this.maxPoints);
+            this.commentAuto = true;
+        },
+        // Enter in the score box: record it now rather than waiting out the
+        // debounce, then move to the next question that still needs a mark. A
+        // marking run is one hand on the number pad, and the alternative is a
+        // teacher pressing Enter and then hunting for the next box with the mouse.
+        saveAndGoNext() {
+            if (autoSaveTimer) { clearTimeout(autoSaveTimer); autoSaveTimer = null; }
+            try { doAutoSave(); } catch (e) { /* the debounce retries on the next input */ }
+            this.savedTick = true;
+            setTimeout(() => { this.savedTick = false; }, 1500);
+            try { calcFinal(); } catch (e) {}
+            const next = document.getElementById('score-' + (this.qIdx + 1));
+            if (next) {
+                next.scrollIntoView({ block: 'center', behavior: 'smooth' });
+                next.focus();
+                if (next.select) next.select();
+            }
+        },
         get qPageLabel() {
             var raw = QUESTION_PAGES[this.qIdx] || '';
             if (!raw) return '';
@@ -1443,37 +1636,22 @@ function doAutoSave() {
 }
 setInterval(()=>doAutoSave(),15000);
 
-function calcFinal() {
-    const weights = {{ (exam.question_weights or {}) | tojson | safe }};
-    const answerKey = {{ (exam.answer_key or {}) | tojson | safe }};
-    const qTypes = {{ (exam.question_types or {}) | tojson | safe }};
-    const studentAns = {{ submission.answers | tojson | safe }};
-    let earned = 0;
+// The running total beside the pupil's name, asked of the server rather than
+// computed here. This page used to carry its own copy of the scoring rule — MCQ
+// keys, weights, penalty — and a copy cannot keep up with `exam_scoring`:
+// true/false, matching and ordering questions, partial credit and the AKM modes
+// all paid nothing in it. So the number here and the number on the results page
+// could differ for a paper whose marks nobody disputed. `preview` runs the same
+// function the save writes with, over the marks on screen, and writes nothing.
+var _finalSig = null, _finalTimer = null;
+
+function _scoresSignature() {
+    const parts = [];
     for (let q = 0; q < TOTAL_Q; q++) {
-        const w = parseFloat(weights[q] || 0);
-        if (w <= 0) continue;
-        const qtype = qTypes[q] || 'mcq';
-        const key = answerKey[q];
-        if (qtype === 'mcq' && key) {
-            const ans = studentAns[q];
-            let correct = false;
-            if (key === 'bonus') { correct = ans && String(ans).trim() !== ''; }
-            else if (Array.isArray(key)) { correct = key.includes(ans); }
-            else { correct = ans === key; }
-            if (correct) earned += w;
-        } else {
-            const inst = QUESTION_INSTANCES[q];
-            if (inst && inst.scoreVal !== undefined && inst.scoreVal !== '') {
-                const s = parseFloat(inst.scoreVal);
-                if (!isNaN(s)) earned += (s / 100) * w;
-            }
-        }
+        const inst = QUESTION_INSTANCES[q];
+        parts.push(inst && inst.scoreVal !== undefined && inst.scoreVal !== '' ? String(inst.scoreVal) : '');
     }
-    const penalty = {{ submission.penalty or 0 }};
-    const final = Math.max(0, Math.round(Math.min(earned, 100) * 100 - penalty * 100) / 100);
-    document.getElementById('final-score-hidden').value = final;
-    document.getElementById('final-display').textContent = final;
-    return final;
+    return parts.join('|');
 }
 
 // ── Saran AI: diminta asinkron, diterapkan oleh guru ────────────────────────
@@ -1604,6 +1782,32 @@ function applyAiSuggestion(i, id, percent) {
     .catch(() => alert('Gagal menerapkan saran AI'));
 }
 
+function calcFinal() {
+    // Only a changed mark is worth a request: the page polls this every two seconds,
+    // and a preview that asked on every tick would be a request per tick per paper.
+    const sig = _scoresSignature();
+    if (sig === _finalSig) return;
+    _finalSig = sig;
+    clearTimeout(_finalTimer);
+    _finalTimer = setTimeout(() => {
+        const scores = collectFeedback().scores;
+        fetch('/teacher/grade/{{ submission.id }}/preview', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({teacher_feedback: {scores: scores}})
+        })
+        .then(r => r.ok ? r.json() : null)
+        .then(d => {
+            if (!d || d.final_score === undefined) return;
+            document.getElementById('final-score-hidden').value = d.final_score;
+            document.getElementById('final-display').textContent = d.final_score;
+            const mcq = document.getElementById('mcq-display');
+            if (mcq) mcq.textContent = (d.score === null || d.score === undefined) ? '-' : d.score;
+        })
+        .catch(() => {});
+    }, 400);
+}
+
 function ignoreAiSuggestion(i, id) {
     fetch('/teacher/api/ai/suggestion/' + id + '/ignore', {
         method: 'POST',
@@ -1676,6 +1880,9 @@ function useOcrForAi(qIdx) {
     else if (ansData && ansData.text) origAnswer = ansData.text;
     else if (ansData && ansData.answer) origAnswer = ansData.answer;
 
+    // One line, with escaped newlines: a literal line break inside a single-quoted
+    // string is a SyntaxError, and this one was — which took the *whole* script down,
+    // so every control on the page (marks, comments, canvas tools, save) was inert.
     const combined = (origAnswer ? origAnswer + '\n\n---[OCR Canvas]---\n' : '') + ocrText;
     // Teks OCR ikut sebagai data jawaban; batas poin dan format keluaran tetap
     // ditentukan server.

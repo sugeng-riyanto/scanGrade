@@ -39,6 +39,7 @@ from __future__ import annotations
 import ast
 import pathlib
 import re
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -546,8 +547,12 @@ WINDOWS_EDGE = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
 SEB_UA = "SEB/3.6.0 (Windows NT 10.0; Win64; x64)"
 
 LATER = "2026-11-01T01:00:00+00:00"
-SOON = "2026-10-16T01:00:00+00:00"
-LONG_AGO = "2026-09-01T01:00:00+00:00"
+# Relative to the clock the code reads, not to the day the test was written: a
+# window literal goes stale the moment the wall clock passes it, and then a test
+# about *ordering* fails as if the ordering were wrong.
+_NOW = datetime.now(timezone.utc).replace(microsecond=0)
+SOON = (_NOW + timedelta(hours=2)).isoformat()
+LONG_AGO = (_NOW - timedelta(days=30)).isoformat()
 T1 = "2026-10-14T07:00:00+00:00"
 T2 = "2026-10-15T07:00:00+00:00"
 T3 = "2026-10-13T07:00:00+00:00"
@@ -649,14 +654,14 @@ class TestTheDeviceNames:
 
 class TestThePapersWorthPreparingFor:
     def test_the_scheduled_paper_comes_before_the_one_already_open(self):
-        out = log.papers_to_prepare([paper("p1", start="2026-10-15T00:00:00+00:00"),
+        out = log.papers_to_prepare([paper("p1", start=LONG_AGO),
                                      paper("p2", start=SOON)])
         assert [p["id"] for p in out] == ["p2", "p1"]
         assert [p["state"] for p in out] == ["before", "open"]
 
     def test_a_closed_paper_is_not_offered(self):
         out = log.papers_to_prepare([paper("p1", start=LONG_AGO,
-                                           end="2026-09-02T00:00:00+00:00")])
+                                           end=LONG_AGO)])
         assert out == [], "an admin cannot prepare for a window that has shut"
 
     def test_a_paper_with_no_window_is_not_called_upcoming(self):

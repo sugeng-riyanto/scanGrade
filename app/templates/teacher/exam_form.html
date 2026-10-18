@@ -1155,6 +1155,60 @@
                        x-text="t('Setiap soal punya pilihan tipenya sendiri dan bisa digeser — tombol panah atau tarik ikon ⠿ untuk mengubah urutan.',
                                  'Every question carries its own type and can be moved — use the arrow buttons or drag the ⠿ handle to reorder.')"></p>
 
+                    <!-- ── Stimulus ─────────────────────────────────────────────────
+                         One context, many sub-questions: a long reading, a picture or a
+                         data table the questions below it share. It is a container, so
+                         it has no type and no marks of its own — a paper with two choice
+                         questions and one numeric question under a stimulus still
+                         contributes 2 to the `mcq` bucket and 1 to the numeric one, and
+                         the mark scheme table above already counts it that way. Each
+                         question picks its stimulus from the select in its own header,
+                         so no second list has to be kept in step. -->
+                    <div class="mb-3" data-stimulus-panel>
+                        <div class="flex flex-wrap items-center gap-2 mb-2">
+                            <button type="button" @click="addStimulus()"
+                                    class="flex items-center gap-2 bg-cyan-50 hover:bg-cyan-100 text-cyan-700 px-3 py-2 rounded-xl font-bold text-sm border-2 border-cyan-200 transition">
+                                <i class="fas fa-plus"></i><span x-text="t('Tambah Stimulus','Add stimulus')"></span>
+                            </button>
+                            <span class="text-[11px] font-semibold text-slate-400"
+                                  x-text="t('Satu bacaan/gambar untuk beberapa sub-soal (gaya AKM & PISA).','One passage/image for several sub-questions (AKM & PISA style).')"></span>
+                        </div>
+                        <div class="space-y-2" x-show="(stimuli || []).length">
+                            <template x-for="(st, si) in stimuli" :key="'st-' + st.id">
+                                <div class="p-3 bg-white rounded-2xl border-2 border-cyan-100" :data-stimulus="st.id">
+                                    <div class="flex items-center gap-2 mb-2">
+                                        <span class="text-xs font-extrabold text-cyan-700" x-text="t('Stimulus ','Stimulus ') + (si + 1)"></span>
+                                        <span class="text-[10px] font-bold text-slate-400"
+                                              x-text="(stimulusGroups().filter(g => g.id === st.id)[0] || {}).numbers
+                                                      ? t('soal ','questions ') + (stimulusGroups().filter(g => g.id === st.id)[0] || {}).numbers
+                                                      : t('belum ada soal di bawahnya','no question underneath yet')"></span>
+                                        <button type="button" @click="removeStimulus(st.id)"
+                                                class="ml-auto tap-44 w-8 h-8 rounded-lg text-slate-300 hover:text-red-500 transition">
+                                            <i class="fas fa-times text-xs"></i>
+                                        </button>
+                                    </div>
+                                    <input type="text" x-model="st.title"
+                                           :placeholder="t('Judul konteks, mis. Bacaan: Siklus Air','Context title, e.g. Reading: The Water Cycle')"
+                                           class="w-full text-xs font-bold border-2 border-slate-200 rounded-xl px-3 py-2 mb-2 focus:border-cyan-500 transition">
+                                    <textarea x-model="st.content" rows="4"
+                                              :placeholder="t('Tulis bacaan, data, atau tautan gambar di sini. Murid melihatnya utuh di atas sub-soalnya.','Write the passage, data or an image link here. The pupil sees it whole above the sub-questions.')"
+                                              class="w-full text-xs font-semibold border-2 border-slate-200 rounded-xl px-3 py-2 focus:border-cyan-500 transition resize-y"></textarea>
+                                </div>
+                            </template>
+                        </div>
+                        <details class="mt-2 rounded-xl border border-cyan-100 bg-cyan-50/60 px-3 py-2" x-show="(stimuli || []).length">
+                            <summary class="text-[11px] font-extrabold text-cyan-700 cursor-pointer" x-text="t('Cara pakai & cara penilaian','How it works & how it is marked')"></summary>
+                            <div class="mt-2 space-y-1 text-[11px] font-semibold text-cyan-700/90">
+                                <p x-text="t('Cara pakai: buat stimulus, tulis konteksnya, lalu pada tiap soal pilih stimulus itu di daftar Stimulus. Sub-soal bisa bertipe apa pun, termasuk Angka/Isian dan Matriks.',
+                                              'How to use: add a stimulus, write the context, then pick that stimulus from the Stimulus list on each question. A sub-question may be of any type, including Numeric and Matrix.')"></p>
+                                <p x-text="t('Cara penilaian: stimulus sendiri tidak dinilai dan tidak punya poin. Tiap sub-soal dinilai menurut tipenya masing-masing dan masuk barisnya sendiri di tabel di atas, lalu dijumlahkan seperti soal biasa.',
+                                              'How it is marked: the stimulus itself is never marked and carries no points. Every sub-question is marked by its own type, appears in its own row of the table above, and is summed like any other question.')"></p>
+                                <p x-text="t('Urutan sub-soal tetap diacak per murid (anti-kolusi), tetapi satu kelompok stimulus tidak pernah dipisah.',
+                                              'Sub-question order is still shuffled per pupil (anti-collusion), but one stimulus group is never split apart.')"></p>
+                            </div>
+                        </details>
+                    </div>
+
                     <template x-if="questions.length === 0">
                         <div class="text-center py-8 text-slate-400">
                             <i class="fas fa-inbox text-3xl mb-2"></i>
@@ -1205,6 +1259,19 @@
                                             <option value="" x-text="t('Tingkat kognitif…','Cognitive level…')"></option>
                                             <template x-for="lv in SG_LEVELS" :key="lv.key">
                                                 <option :value="lv.key" x-text="sgLevelLabel(lv)"></option>
+                                            </template>
+                                        </select>
+                                        <!-- Which stimulus this question sits under. Only
+                                             offered when the paper has one, so a teacher who
+                                             never uses stimuli sees no extra control. -->
+                                        <select x-show="(stimuli || []).length" x-model="q.stimulus"
+                                                :title="t('Stimulus induk','Parent stimulus')"
+                                                :aria-label="t('Stimulus induk','Parent stimulus')"
+                                                class="text-xs font-extrabold rounded-lg border-2 bg-white px-2 py-1 transition max-w-[11rem]"
+                                                :class="q.stimulus ? 'border-cyan-300 text-cyan-700' : 'border-slate-200 text-slate-400'">
+                                            <option value="" x-text="t('Tanpa stimulus','No stimulus')"></option>
+                                            <template x-for="(st, si) in stimuli" :key="'sel-' + st.id">
+                                                <option :value="st.id" x-text="t('Stimulus ','Stimulus ') + (si + 1)"></option>
                                             </template>
                                         </select>
                                         <span x-show="q.bonus" class="text-xs px-2 py-1 rounded-full font-extrabold bg-purple-100 text-purple-700">Bonus</span>
@@ -1602,7 +1669,26 @@
                                         </div>
                                     </div>
 
-                                    <div class="space-y-1.5">
+                                    <!-- Two shapes, one type. `single` judges every statement
+                                         against the categories (the AKM grid); `multi` asks
+                                         which statements are true and shows one checkbox per
+                                         row. A teacher picks the shape here because the
+                                         question is the same either way. -->
+                                    <div class="flex flex-wrap items-center gap-1.5">
+                                        <span class="text-[10px] font-extrabold text-slate-400" x-text="t('Bentuk jawaban:','Answer shape:')"></span>
+                                        <button type="button" @click="setPgkSelect(i, 'single')"
+                                                class="text-[11px] font-bold px-2.5 py-1.5 rounded-lg border-2 transition"
+                                                :class="q.pgkSelect === 'multi' ? 'bg-white border-slate-200 text-slate-600 hover:border-teal-200' : 'bg-teal-50 border-teal-300 text-teal-700'">
+                                            <span x-text="t('Satu kategori per pernyataan','One category per statement')"></span>
+                                        </button>
+                                        <button type="button" @click="setPgkSelect(i, 'multi')"
+                                                class="text-[11px] font-bold px-2.5 py-1.5 rounded-lg border-2 transition"
+                                                :class="q.pgkSelect === 'multi' ? 'bg-teal-50 border-teal-300 text-teal-700' : 'bg-white border-slate-200 text-slate-600 hover:border-teal-200'">
+                                            <span x-text="t('Centang semua yang benar','Tick everything that is true')"></span>
+                                        </button>
+                                    </div>
+
+                                    <div class="space-y-1.5" x-show="q.pgkSelect !== 'multi'">
                                         <div class="flex flex-wrap items-center gap-1.5">
                                             <span class="text-[10px] font-extrabold text-slate-400" x-text="t('Kategori:','Categories:')"></span>
                                             <template x-for="preset in PGK_PRESETS" :key="'pp-' + q._id + '-' + (preset[0] || []).join('/')">
@@ -1620,7 +1706,11 @@
                                     </div>
 
                                     <p class="text-[11px] font-semibold text-slate-400"
-                                       x-text="t('Setiap pernyataan punya satu jawaban benar. Ketuk kategori di kanan sebagai kunci.','Every statement has one correct judgement. Tap the category on the right as the key.')"></p>
+                                       x-text="q.pgkSelect === 'multi'
+                                           ? t('Murid mencentang setiap pernyataan yang menurutnya benar. Skor = pernyataan yang centangannya tepat / jumlah pernyataan.',
+                                               'The pupil ticks every statement that is true. Score = statements whose tick is right / number of statements.')
+                                           : t('Setiap pernyataan punya satu jawaban benar. Ketuk kategori di kanan sebagai kunci.',
+                                               'Every statement has one correct judgement. Tap the category on the right as the key.')"></p>
 
                                     <template x-for="(s, si) in (q.pgkStatements || [])" :key="'pgk-' + q._id + '-' + si">
                                         <div class="flex items-start gap-2">
@@ -1628,7 +1718,7 @@
                                             <input type="text" x-model="q.pgkStatements[si]"
                                                    :placeholder="t('pernyataan','statement')"
                                                    class="flex-1 min-w-0 text-xs font-bold border-2 border-slate-200 rounded-xl px-3 py-2 focus:border-primary-500 transition">
-                                            <div class="flex flex-wrap gap-1 shrink-0 max-w-[45%] justify-end">
+                                            <div x-show="q.pgkSelect !== 'multi'" class="flex flex-wrap gap-1 shrink-0 max-w-[45%] justify-end">
                                                 <template x-for="(cat, ci) in (q.pgkCategories || [])" :key="'pk-' + q._id + '-' + si + '-' + ci">
                                                     <button type="button" @click="pgkPickKey(i, si, ci)"
                                                             class="text-[10px] font-bold px-2 py-1 rounded-lg border-2 transition"
@@ -1637,6 +1727,12 @@
                                                     </button>
                                                 </template>
                                             </div>
+                                            <button type="button" x-show="q.pgkSelect === 'multi'" @click="pgkToggleMulti(i, si)"
+                                                    class="shrink-0 flex items-center gap-1.5 text-[10px] font-bold px-2 py-1.5 rounded-lg border-2 transition"
+                                                    :class="(q.pgkMultiKey || []).indexOf(si) > -1 ? 'bg-emerald-50 border-emerald-300 text-emerald-700' : 'bg-white border-slate-200 text-slate-500'">
+                                                <i class="fas" :class="(q.pgkMultiKey || []).indexOf(si) > -1 ? 'fa-square-check' : 'fa-square'"></i>
+                                                <span x-text="t('Benar','True')"></span>
+                                            </button>
                                             <button type="button" @click="pgkRemoveStatement(i, si)"
                                                     :disabled="(q.pgkStatements || []).length <= PGK_MIN"
                                                     class="tap-44 w-9 h-9 rounded-lg text-slate-300 hover:text-red-500 disabled:opacity-25 transition shrink-0">
@@ -1645,13 +1741,19 @@
                                         </div>
                                     </template>
 
-                                    <div class="rounded-xl border border-primary-100 bg-primary-50/60 px-3 py-2">
+                                    <div x-show="q.pgkSelect !== 'multi'" class="rounded-xl border border-primary-100 bg-primary-50/60 px-3 py-2">
                                         <p class="text-[11px] font-bold text-primary-700" x-text="t('Mode skor: Standar AKM','Scoring mode: AKM standard')"></p>
                                         <p class="text-[10px] font-semibold text-primary-600/80"
                                            x-text="t('3-5 pernyataan dengan 2 kategori dinilai 1/0; di luar itu 2/1/0. Mode lain menyusul setelah mode ini terbukti.','3-5 statements with 2 categories score 1/0; outside that, 2/1/0. Other modes follow once this one is proven.')"></p>
                                     </div>
+                                    <div x-show="q.pgkSelect === 'multi'" class="rounded-xl border border-primary-100 bg-primary-50/60 px-3 py-2">
+                                        <p class="text-[11px] font-bold text-primary-700" x-text="t('Mode skor: bagian per pernyataan','Scoring mode: part credit per statement')"></p>
+                                        <p class="text-[10px] font-semibold text-primary-600/80"
+                                           x-text="t('Skor = pernyataan yang centangannya tepat / jumlah pernyataan. Pernyataan yang dibiarkan kosong dihitung sebagai tidak dicentang, dan soal kosong tetap bernilai 0.',
+                                                   'Score = statements whose tick is right / number of statements. A statement left alone counts as not ticked, and a wholly blank answer still scores 0.')"></p>
+                                    </div>
 
-                                    <div class="rounded-xl border border-slate-200 overflow-hidden">
+                                    <div x-show="q.pgkSelect !== 'multi'" class="rounded-xl border border-slate-200 overflow-hidden">
                                         <div class="flex items-center justify-between px-3 py-2 bg-slate-50">
                                             <span class="text-[11px] font-extrabold text-slate-600" x-text="t('Simulasi skor','Score simulation')"></span>
                                             <span class="text-[10px] font-bold px-2 py-0.5 rounded-full"
@@ -1687,6 +1789,152 @@
                                     </div>
                                 </div>
 
+                                <!-- Numeric / short answer: one box the pupil types into.
+                                     The teacher picks whether the box holds a number (with a
+                                     tolerance) or a word (with every spelling they will
+                                     accept), because those are two different marking rules and
+                                     a single "answer" field would have to guess which one a
+                                     teacher meant. -->
+                                <div x-show="kindOf(q) === 'numeric'" class="space-y-3">
+                                    <div class="flex flex-wrap items-center gap-1.5">
+                                        <span class="text-[10px] font-extrabold text-slate-400" x-text="t('Jenis jawaban:','Answer type:')"></span>
+                                        <button type="button" @click="setNumericMode(i, 'number')"
+                                                class="text-[11px] font-bold px-2.5 py-1.5 rounded-lg border-2 transition"
+                                                :class="q.numMode === 'text' ? 'bg-white border-slate-200 text-slate-600 hover:border-indigo-200' : 'bg-indigo-50 border-indigo-300 text-indigo-700'">
+                                            <i class="fas fa-hashtag mr-1"></i><span x-text="t('Angka','Number')"></span>
+                                        </button>
+                                        <button type="button" @click="setNumericMode(i, 'text')"
+                                                class="text-[11px] font-bold px-2.5 py-1.5 rounded-lg border-2 transition"
+                                                :class="q.numMode === 'text' ? 'bg-indigo-50 border-indigo-300 text-indigo-700' : 'bg-white border-slate-200 text-slate-600 hover:border-indigo-200'">
+                                            <i class="fas fa-font mr-1"></i><span x-text="t('Teks singkat','Short text')"></span>
+                                        </button>
+                                    </div>
+
+                                    <div x-show="q.numMode !== 'text'" class="grid grid-cols-2 gap-2">
+                                        <div>
+                                            <label class="text-[10px] font-extrabold text-slate-400" x-text="t('Jawaban benar','Correct answer')"></label>
+                                            <input type="text" inputmode="decimal" x-model="q.numValue"
+                                                   placeholder="9,8"
+                                                   class="w-full text-xs font-bold border-2 border-slate-200 rounded-xl px-3 py-2 focus:border-indigo-500 transition">
+                                        </div>
+                                        <div>
+                                            <label class="text-[10px] font-extrabold text-slate-400" x-text="t('Toleransi (opsional)','Tolerance (optional)')"></label>
+                                            <input type="text" inputmode="decimal" x-model="q.numTolerance"
+                                                   placeholder="0"
+                                                   class="w-full text-xs font-bold border-2 border-slate-200 rounded-xl px-3 py-2 focus:border-indigo-500 transition">
+                                        </div>
+                                    </div>
+
+                                    <div x-show="q.numMode === 'text'" class="space-y-2">
+                                        <label class="text-[10px] font-extrabold text-slate-400" x-text="t('Ejaan yang diterima (semua variasi):','Accepted spellings (every variant):')"></label>
+                                        <div class="flex items-center gap-2">
+                                            <input type="text" x-model="q._accInput" @keydown.enter.prevent="addAccepted(i)"
+                                                   :placeholder="t('mis. fotosintesis','e.g. photosynthesis')"
+                                                   class="flex-1 min-w-0 text-xs font-bold border-2 border-dashed border-slate-200 rounded-xl px-3 py-2 focus:border-indigo-500 transition">
+                                            <button type="button" @click="addAccepted(i)" class="tap-44 w-9 h-9 rounded-lg bg-slate-100 text-slate-500 hover:bg-indigo-50 hover:text-indigo-600 transition shrink-0">
+                                                <i class="fas fa-plus text-xs"></i>
+                                            </button>
+                                        </div>
+                                        <div class="flex flex-wrap gap-1.5" x-show="(q.numAccepted || []).length">
+                                            <template x-for="(a, ai) in q.numAccepted" :key="'acc-' + q._id + '-' + ai">
+                                                <span class="inline-flex items-center gap-1 text-[11px] font-bold bg-indigo-100 text-indigo-700 rounded-full pl-2.5 pr-1 py-1">
+                                                    <span x-text="a"></span>
+                                                    <button type="button" @click="q.numAccepted.splice(ai, 1)" class="tap-44 w-5 h-5 rounded-full hover:bg-indigo-200"><i class="fas fa-times text-[9px]"></i></button>
+                                                </span>
+                                            </template>
+                                        </div>
+                                    </div>
+
+                                    <details class="rounded-xl border border-indigo-100 bg-indigo-50/60 px-3 py-2">
+                                        <summary class="text-[11px] font-extrabold text-indigo-700 cursor-pointer" x-text="t('Cara pakai & cara penilaian','How it works & how it is marked')"></summary>
+                                        <div class="mt-2 space-y-1 text-[11px] font-semibold text-indigo-700/90">
+                                            <p x-text="t('Cara pakai: tulis soal yang jawabannya satu angka atau satu kata. Untuk angka, isi jawaban benar dan toleransi bila jawaban boleh bergeser (mis. 0,2). Untuk teks, tambahkan semua ejaan yang Anda terima.',
+                                                          'How to use: write a question whose answer is one number or one word. For a number, enter the correct value and a tolerance if answers may drift (e.g. 0.2). For text, add every spelling you accept.')"></p>
+                                            <p x-text="t('Cara penilaian: otomatis benar bila selisih angka dalam toleransi, atau teks cocok dengan daftar (tanpa beda huruf besar/kecil dan spasi berlebih). Jawaban yang tidak cocok TIDAK otomatis salah - masuk antrean Perlu Ditinjau agar Anda putuskan.',
+                                                          'How it is marked: automatically correct when the number is within tolerance, or the text matches the list (ignoring case and extra spaces). An answer that does not match is NOT marked wrong automatically - it goes to the Needs review queue for you to decide.')"></p>
+                                        </div>
+                                    </details>
+                                </div>
+
+                                <!-- Matrix / grid: rows are the statements, columns are the
+                                     shared options. Rendered as stacked cards, never as a
+                                     wide table, so the same editor works on a phone. -->
+                                <div x-show="kindOf(q) === 'matrix'" class="space-y-3">
+                                    <div class="flex flex-wrap items-center gap-1.5">
+                                        <span class="text-[10px] font-extrabold text-slate-400" x-text="t('Jawaban per baris:','Answer per row:')"></span>
+                                        <button type="button" @click="setMatrixMode(i, 'single')"
+                                                class="text-[11px] font-bold px-2.5 py-1.5 rounded-lg border-2 transition"
+                                                :class="q.mxMode === 'multi' ? 'bg-white border-slate-200 text-slate-600 hover:border-fuchsia-200' : 'bg-fuchsia-50 border-fuchsia-300 text-fuchsia-700'">
+                                            <i class="fas fa-circle-dot mr-1"></i><span x-text="t('Satu pilihan','One choice')"></span>
+                                        </button>
+                                        <button type="button" @click="setMatrixMode(i, 'multi')"
+                                                class="text-[11px] font-bold px-2.5 py-1.5 rounded-lg border-2 transition"
+                                                :class="q.mxMode === 'multi' ? 'bg-fuchsia-50 border-fuchsia-300 text-fuchsia-700' : 'bg-white border-slate-200 text-slate-600 hover:border-fuchsia-200'">
+                                            <i class="fas fa-square-check mr-1"></i><span x-text="t('Banyak pilihan','Several choices')"></span>
+                                        </button>
+                                    </div>
+
+                                    <div class="space-y-1.5">
+                                        <div class="flex flex-wrap items-center gap-1.5">
+                                            <span class="text-[10px] font-extrabold text-slate-400" x-text="t('Opsi bersama:','Shared options:')"></span>
+                                            <template x-for="preset in PGK_PRESETS" :key="'mp-' + q._id + '-' + (preset[0] || []).join('/')">
+                                                <button type="button" @click="mxSetColumns(i, mxPresetNames(preset))"
+                                                        class="text-[11px] font-bold px-2 py-1 rounded-lg border-2 transition"
+                                                        :class="sgSameList(q.mxColumns, mxPresetNames(preset)) ? 'bg-fuchsia-50 border-fuchsia-300 text-fuchsia-700' : 'bg-white border-slate-200 text-slate-600 hover:border-fuchsia-200'">
+                                                    <span x-text="mxPresetNames(preset).join(' / ')"></span>
+                                                </button>
+                                            </template>
+                                        </div>
+                                        <input type="text" :value="(q.mxColumns || []).join(', ')"
+                                               @change="mxSetCustomColumns(i, $el.value)"
+                                               :placeholder="t('Opsi sendiri, dipisah koma','Your own options, comma separated')"
+                                               class="w-full text-xs font-bold border-2 border-dashed border-slate-200 rounded-xl px-3 py-2 focus:border-fuchsia-500 transition">
+                                    </div>
+
+                                    <div class="flex items-center justify-between">
+                                        <label class="text-xs font-extrabold text-slate-500" x-text="t('Baris & kunci jawaban:','Rows & answer key:')"></label>
+                                        <button type="button" @click="mxAddRow(i)" :disabled="(q.mxRows || []).length >= PGK_MAX"
+                                                class="text-xs font-bold text-fuchsia-600 hover:underline disabled:opacity-40">
+                                            <i class="fas fa-plus mr-0.5"></i><span x-text="t('Tambah baris','Add row')"></span>
+                                        </button>
+                                    </div>
+
+                                    <template x-for="(row, ri) in (q.mxRows || [])" :key="'mx-' + q._id + '-' + ri">
+                                        <div class="rounded-2xl border-2 border-slate-200 bg-white p-2.5 space-y-2">
+                                            <div class="flex items-center gap-1.5">
+                                                <span class="w-5 text-[11px] font-extrabold text-slate-400 text-center shrink-0" x-text="ri + 1"></span>
+                                                <input type="text" x-model="row.text" :placeholder="t('pernyataan atau item','statement or item')"
+                                                       class="flex-1 min-w-0 text-xs font-bold border-2 border-slate-200 rounded-xl px-3 py-2 focus:border-fuchsia-500 transition">
+                                                <button type="button" @click="mxMoveRow(i, ri, -1)" :disabled="ri === 0"
+                                                        class="tap-44 w-8 h-8 rounded-lg text-slate-400 hover:text-fuchsia-600 disabled:opacity-25 transition shrink-0"><i class="fas fa-arrow-up text-xs"></i></button>
+                                                <button type="button" @click="mxMoveRow(i, ri, 1)" :disabled="ri === (q.mxRows || []).length - 1"
+                                                        class="tap-44 w-8 h-8 rounded-lg text-slate-400 hover:text-fuchsia-600 disabled:opacity-25 transition shrink-0"><i class="fas fa-arrow-down text-xs"></i></button>
+                                                <button type="button" @click="mxRemoveRow(i, ri)" :disabled="(q.mxRows || []).length <= 1"
+                                                        class="tap-44 w-8 h-8 rounded-lg text-slate-300 hover:text-red-500 disabled:opacity-25 transition shrink-0"><i class="fas fa-times text-xs"></i></button>
+                                            </div>
+                                            <div class="flex flex-wrap gap-1 pl-6">
+                                                <template x-for="(col, ci) in (q.mxColumns || [])" :key="'mk-' + q._id + '-' + ri + '-' + ci">
+                                                    <button type="button" @click="mxPickKey(i, ri, ci)"
+                                                            class="text-[10px] font-bold px-2 py-1 rounded-lg border-2 transition"
+                                                            :class="(row.key || []).indexOf(ci) > -1 ? 'bg-emerald-50 border-emerald-300 text-emerald-700' : 'bg-white border-slate-200 text-slate-500'">
+                                                        <span x-text="col"></span>
+                                                    </button>
+                                                </template>
+                                            </div>
+                                        </div>
+                                    </template>
+
+                                    <details class="rounded-xl border border-fuchsia-100 bg-fuchsia-50/60 px-3 py-2">
+                                        <summary class="text-[11px] font-extrabold text-fuchsia-700 cursor-pointer" x-text="t('Cara pakai & cara penilaian','How it works & how it is marked')"></summary>
+                                        <div class="mt-2 space-y-1 text-[11px] font-semibold text-fuchsia-700/90">
+                                            <p x-text="t('Cara pakai: tulis baris (pernyataan/item) dan opsi yang dipakai bersama semua baris. Pilih Satu pilihan bila tiap baris hanya punya satu jawaban benar, atau Banyak pilihan bila satu baris bisa punya beberapa.',
+                                                          'How to use: write the rows (statements/items) and the options shared by every row. Choose One choice when each row has a single correct answer, or Several choices when a row may have more than one.')"></p>
+                                            <p x-text="t('Cara penilaian: tiap baris bernilai sama. Satu pilihan: baris benar bila pilihannya tepat. Banyak pilihan: baris benar hanya bila SEMUA pilihan benar dicentang dan tidak ada yang salah (semua-atau-tidak per baris). Skor = baris benar / total baris, tanpa pembulatan di tengah jalan.',
+                                                          'How it is marked: every row is worth the same. One choice: the row is right when its option is exact. Several choices: the row is right only when ALL correct options are ticked and no wrong one is (all-or-nothing per row). Score = rows right / total rows, with no rounding in between.')"></p>
+                                        </div>
+                                    </details>
+                                </div>
+
                                 <div x-show="kindOf(q) === 'essay'" class="text-xs font-bold text-emerald-700 bg-emerald-50 rounded-xl px-3 py-2 border border-emerald-100">
                                     <i class="fas fa-pencil-alt mr-1"></i><span x-text="t('Siswa mengetik jawaban (wajib) + menggambar di atas PDF (opsional)',
                                                                                             'Students type their answer (required) + draw on the PDF (optional)')"></span>
@@ -1701,6 +1949,7 @@
                     <input type="hidden" name="question_weights" id="question-weights-input" :value="getWeightsJson()">
                     <input type="hidden" name="question_pages" id="question-pages-input" :value="getPagesJson()">
                     <input type="hidden" name="question_audio" id="question-audio-input" :value="getAudioJson()">
+                    <input type="hidden" name="question_stimuli" id="question-stimuli-input" :value="getStimuliJson()">
                     <input type="hidden" name="question_cognitive" id="question-cognitive-input" :value="getLevelsJson()">
                 </div>
 
@@ -1927,6 +2176,20 @@ const SG_QT = {{ q_vocabulary() | tojson | safe }};
 // agree on six names and three bands; writing them out here is how those two stop
 // agreeing. `app/services/analysis_frameworks.py` is the authority.
 const SG_LEVELS = {{ cognitive_levels() | tojson | safe }};
+// ── stimulus ────────────────────────────────────────────────────────────────
+// `{id: {title, content, questions:[index]}}` — the shape `exams.question_stimuli`
+// stores (migrasi 069). A stimulus is a *container*: it has no type, no key and no
+// marks, and each sub-question keeps its own, which is why it needs no bucket in
+// the mark scheme and no rule in the grader. The index → stimulus map below is
+// built here rather than in the component's own builder because the question list
+// is constructed by a plain IIFE that has no `this`.
+const SG_STIMULI = {{ ((exam.question_stimuli if exam else {}) or {}) | tojson | safe }};
+const SG_STIMULUS_OF = {};
+Object.keys(SG_STIMULI || {}).forEach(function (sid) {
+    ((SG_STIMULI[sid] || {}).questions || []).forEach(function (idx) {
+        SG_STIMULUS_OF[String(idx)] = sid;
+    });
+});
 function sgLevelLabel(lv) { return sgT(lv.name.id, lv.name.en); }
 function sgLevelBand(lv) { return lv.band; }
 function sgKind(type) { return SG_QT.kinds[type || SG_QT.default] || SG_QT.kinds[SG_QT.default]; }
@@ -2038,10 +2301,12 @@ function sgPct(score) { return Math.round((+score || 0) * 100) + '%'; }
 // drag & drop, ordering and the essay each carry their own marks. The objective
 // pool this list replaced is what made a matching question share one weight with
 // the fifty choice questions beside it.
-const SG_SCHEME_ORDER = ['mcq', 'true_false', 'complex_multiple_choice', 'match', 'drag_drop', 'order', 'essay_canvas'];
+const SG_SCHEME_ORDER = ['mcq', 'true_false', 'complex_multiple_choice', 'match', 'drag_drop', 'order',
+                         'numeric_short_answer', 'matrix', 'essay_canvas'];
 const SG_MARK_STEP = 0.1;
 const SG_MARK_DEFAULTS = {mcq: 1, true_false: 1, complex_multiple_choice: 3, match: 3,
                           drag_drop: 3, order: 3,
+                          numeric_short_answer: 1, matrix: 3,
                           essay_canvas: 10, essay_text: 10, essay: 10};
 // The *bucket* a stored type is priced and totalled in, named rather than inferred.
 // A question with the multi-answer exception is still one multiple choice question
@@ -2103,6 +2368,21 @@ function sgSchemeType(type) {
 
 function questionManager() {
     return {
+        // The stimuli themselves, in the teacher's order. An id of its own (not a
+        // list position) so deleting the first one does not silently re-home every
+        // question under the next.
+        stimuli: (function() {
+            var out = [];
+            Object.keys(SG_STIMULI || {}).forEach(function (sid) {
+                var s = SG_STIMULI[sid] || {};
+                out.push({id: sid, title: s.title || '', content: s.content || ''});
+            });
+            return out;
+        })(),
+        _stimulusSeq: (function() {
+            var ids = Object.keys(SG_STIMULI || {});
+            return ids.length;
+        })(),
         questions: (function() {
             try {
                 var qtypes = {{ (exam.question_types if exam else {}) | tojson | safe }};
@@ -2129,6 +2409,11 @@ function questionManager() {
                              // (`multiWidened`), so a fresh question's default `['A']`
                              // does not raise a notice nobody asked for.
                              _stored: true,
+                             // Which stimulus this question belongs to, if any. Read
+                             // from the stored container's own membership list, so a
+                             // question moved between stimuli needs one edit, not
+                             // two lists to keep in step.
+                             stimulus: SG_STIMULUS_OF[String(i)] || '',
                              level: plevel[i] || '',
                              audio: m.audio || '', youtube: m.youtube || '', _showMedia: false,
                              // The play allowance travels with the question's media; a paper
@@ -2173,17 +2458,42 @@ function questionManager() {
                         q.pgkStatements = ((k && k.statements) || []).slice();
                         q.pgkCategories = ((k && k.categories) || []).slice();
                         q.pgkKey = ((k && k.key) || []).slice();
-                        // A question opened from storage must never be blanker than a
+                        q.pgkSelect = (k && k.select === 'multi') ? 'multi' : 'single';
+                        q.pgkMultiKey = q.pgkSelect === 'multi' ? ((k && k.key) || []).slice() : [];
+                        // A grid opened from storage must never be blanker than a
                         // new one, or the editor shows an empty grid the teacher has
                         // to work out from scratch.
-                        if (!q.pgkStatements.length || !q.pgkCategories.length ||
-                            q.pgkKey.length !== q.pgkStatements.length) {
+                        if (!q.pgkStatements.length ||
+                            (q.pgkSelect === 'single' && !q.pgkCategories.length) ||
+                            (q.pgkSelect === 'single' &&
+                             q.pgkKey.length !== q.pgkStatements.length)) {
                             // The same defaults a brand-new question gets, so a
                             // question opened from storage is never blanker than one
                             // just added.
                             q.pgkStatements = [sgStatementLabel(1), sgStatementLabel(2), sgStatementLabel(3)];
                             q.pgkCategories = PGK_PRESETS[0].map(function (p) { return p[0]; });
                             q.pgkKey = [0, 0, 0];
+                            q.pgkSelect = 'single';
+                            q.pgkMultiKey = [];
+                        }
+                    } else if (kind === 'numeric') {
+                        var nm = (k && k.mode) === 'text' ? 'text' : 'number';
+                        q.numMode = nm;
+                        q.numValue = (k && k.value != null) ? String(k.value) : '';
+                        q.numTolerance = (k && k.tolerance != null) ? String(k.tolerance) : '';
+                        q.numAccepted = ((k && k.accepted) || []).slice();
+                        q._accInput = '';
+                    } else if (kind === 'matrix') {
+                        q.mxColumns = ((k && k.columns) || []).slice();
+                        q.mxRows = ((k && k.rows) || []).map(function (row) {
+                            return {text: (row && row.text) || '',
+                                    key: ((row && row.key) || []).slice()};
+                        });
+                        q.mxMode = (k && k.mode) === 'multi' ? 'multi' : 'single';
+                        if (!q.mxColumns.length) q.mxColumns = PGK_PRESETS[0].map(function (p) { return p[0]; });
+                        if (!q.mxRows.length) {
+                            q.mxRows = [{text: sgStatementLabel(1), key: [0]},
+                                        {text: sgStatementLabel(2), key: [0]}];
                         }
                     }
                     q._extraInput = '';
@@ -2231,6 +2541,8 @@ function questionManager() {
                 match:     {id:'Menjodohkan',   en:'Matching',        icon:'fa-arrows-left-right', btn:'bg-violet-50 hover:bg-violet-100 text-violet-700 border-violet-200'},
                 dragdrop:  {id:'Tarik & Letakkan', en:'Drag & drop',   icon:'fa-hand-pointer',      btn:'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200'},
                 ordering:  {id:'Mengurutkan',   en:'Ordering',        icon:'fa-arrow-down-1-9',    btn:'bg-sky-50 hover:bg-sky-100 text-sky-700 border-sky-200'},
+                numeric:   {id:'Angka / Isian Singkat', en:'Numeric / Short answer', icon:'fa-hashtag', btn:'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border-indigo-200'},
+                matrix:    {id:'Matriks / Tabel Pilihan', en:'Matrix / Grid', icon:'fa-table-cells', btn:'bg-fuchsia-50 hover:bg-fuchsia-100 text-fuchsia-700 border-fuchsia-200'},
                 essay:     {id:'Esai',          en:'Essay',           icon:'fa-pencil-alt',        btn:'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'},
             };
             return (SG_QT.picker || []).map(function(c) {
@@ -2258,7 +2570,7 @@ function questionManager() {
             var self = this;
             return this.questions.some(function(q) {
                 var k = self.kindOf(q);
-                return k === 'match' || k === 'dragdrop' || k === 'ordering';
+                return k === 'match' || k === 'dragdrop' || k === 'ordering' || k === 'matrix';
             });
         },
         marksOf(type) {
@@ -2422,7 +2734,8 @@ function questionManager() {
         _pgkSim: {},
         _pgkTimers: {},
         blankQuestion(type) {
-            const q = {_id: 'n' + (++this._cid), type: type, pages: '', level: '', audio: '', youtube: '', _showMedia: false,
+            const q = {_id: 'n' + (++this._cid), type: type, pages: '', level: '',
+                       stimulus: '', audio: '', youtube: '', _showMedia: false,
                        plays: 1,
                        file: '', url: '', name: '', kind: 'audio', fileKind: 'audio',
                        _uploading: false, _uploadError: ''};
@@ -2433,6 +2746,8 @@ function questionManager() {
             if (kind === 'match') { q.pairs = [this.newPair(1)]; q.extra = []; q._extraInput = ''; }
             if (kind === 'dragdrop' || kind === 'ordering') { q.order = ['']; q.extra = []; q._extraInput = ''; }
             if (kind === 'pgk') this.seedPgk(q);
+            if (kind === 'numeric') this.seedNumeric(q);
+            if (kind === 'matrix') this.seedMatrix(q);
             return q;
         },
         // One matching row, both columns filled: a half-filled pair is dropped on
@@ -2448,6 +2763,131 @@ function questionManager() {
             q.pgkStatements = [sgStatementLabel(1), sgStatementLabel(2), sgStatementLabel(3)];
             q.pgkCategories = this.pgkPresetNames(PGK_PRESETS[0]);
             q.pgkKey = [0, 0, 0];
+            // `single` = one judgement per statement (the AKM grid this type has
+            // always been); `multi` = one checkbox per statement. Same question,
+            // same statements, one control different — which is why it is a mode on
+            // this type and not a fifth type a teacher has to tell apart.
+            if (!q.pgkSelect) q.pgkSelect = 'single';
+        },
+        // ── numeric / short answer ──────────────────────────────────────────
+        // A number with a tolerance, or a word with a list of accepted spellings.
+        // The default is a number, because that is the common case on an AKM paper
+        // and because a text key with no accepted spellings is an unkeyed question.
+        seedNumeric(q) {
+            q.numMode = q.numMode || 'number';
+            if (q.numValue == null) q.numValue = '';
+            if (q.numTolerance == null) q.numTolerance = '';
+            if (!q.numAccepted) q.numAccepted = [];
+            q._accInput = '';
+        },
+        setNumericMode(i, mode) {
+            const q = this.questions[i];
+            q.numMode = mode === 'text' ? 'text' : 'number';
+            if (q.numMode === 'text' && !(q.numAccepted || []).length) q.numAccepted = [];
+        },
+        addAccepted(i) {
+            const q = this.questions[i];
+            const text = String(q._accInput || '').trim();
+            if (!text) return;
+            if (!q.numAccepted) q.numAccepted = [];
+            if (q.numAccepted.indexOf(text) === -1) q.numAccepted.push(text);
+            q._accInput = '';
+        },
+        // ── matrix / grid ───────────────────────────────────────────────────
+        // Rows are the statements, columns are the shared options. Two rows and a
+        // True/False pair is the smallest matrix a teacher could mean; the defaults
+        // give them that so the editor opens on something readable.
+        seedMatrix(q) {
+            if (q.mxMode !== 'single' && q.mxMode !== 'multi') q.mxMode = 'single';
+            if (!(q.mxColumns || []).length) q.mxColumns = this.mxPresetNames(PGK_PRESETS[0]);
+            if (!(q.mxRows || []).length) {
+                q.mxRows = [{text: sgStatementLabel(1), key: [0]},
+                            {text: sgStatementLabel(2), key: [0]}];
+            }
+        },
+        mxPresetNames(preset) { return this.pgkPresetNames(preset); },
+        mxAddRow(i) {
+            const q = this.questions[i];
+            if (!q.mxRows) q.mxRows = [];
+            if (q.mxRows.length >= PGK_MAX) return;
+            q.mxRows.push({text: sgStatementLabel(q.mxRows.length + 1), key: [0]});
+        },
+        mxRemoveRow(i, ri) {
+            const q = this.questions[i];
+            if (!q.mxRows || q.mxRows.length <= 1) return;
+            q.mxRows.splice(ri, 1);
+        },
+        mxMoveRow(i, ri, delta) {
+            const q = this.questions[i];
+            const to = ri + delta;
+            if (!q.mxRows || to < 0 || to >= q.mxRows.length) return;
+            const moved = q.mxRows.splice(ri, 1)[0];
+            q.mxRows.splice(to, 0, moved);
+        },
+        mxSetColumns(i, list) {
+            const q = this.questions[i];
+            q.mxColumns = list.slice();
+            const n = list.length;
+            // Every row's key is an index into the *columns*, so a removed column
+            // must not leave a row pointing at one that is no longer there.
+            (q.mxRows || []).forEach(function(row) {
+                row.key = (row.key || []).filter(c => typeof c === 'number' && c >= 0 && c < n);
+                if (!row.key.length) row.key = [0];
+                if (q.mxMode === 'single') row.key = row.key.slice(0, 1);
+            });
+        },
+        mxSetCustomColumns(i, text) {
+            const parts = String(text || '').split(',').map(s => s.trim()).filter(Boolean);
+            if (parts.length < 2) return;
+            this.mxSetColumns(i, parts);
+        },
+        setMatrixMode(i, mode) {
+            const q = this.questions[i];
+            q.mxMode = mode === 'multi' ? 'multi' : 'single';
+            // Single-per-row keeps one index; a row that had several cannot go on
+            // holding them, or the saved key would say a mode the control does not.
+            if (q.mxMode === 'single') (q.mxRows || []).forEach(row => { row.key = (row.key || []).slice(0, 1); });
+        },
+        mxPickKey(i, ri, ci) {
+            const q = this.questions[i];
+            const row = (q.mxRows || [])[ri];
+            if (!row) return;
+            if (!row.key) row.key = [];
+            if (q.mxMode === 'single') {
+                row.key = [ci];
+                return;
+            }
+            const at = row.key.indexOf(ci);
+            if (at > -1) row.key.splice(at, 1); else row.key.push(ci);
+            // A row with no correct option is not a question: it can never be
+            // answered right, so it would silently cost every pupil a share. The
+            // last tick stays, the same rule the bonus toggle follows.
+            if (!row.key.length) row.key = [ci];
+            row.key = row.key.slice().sort(function(a, b) { return a - b; });
+        },
+        // The statement-grid mode: one judgement per statement, or a checkbox per
+        // statement. Switching resets the key, because the two shapes hold different
+        // things (a category index versus a set of statement indexes) and keeping
+        // one as the other is how a grid is graded under the wrong rule.
+        setPgkSelect(i, mode) {
+            const q = this.questions[i];
+            q.pgkSelect = mode === 'multi' ? 'multi' : 'single';
+            if (q.pgkSelect === 'multi') {
+                q.pgkMultiKey = (q.pgkMultiKey || []).filter(function(si) {
+                    return si >= 0 && si < (q.pgkStatements || []).length;
+                });
+            } else {
+                q.pgkKey = (q.pgkStatements || []).map(function() { return 0; });
+            }
+            this.pgkSimulate(i);
+        },
+        pgkToggleMulti(i, si) {
+            const q = this.questions[i];
+            if (!q.pgkMultiKey) q.pgkMultiKey = [];
+            const at = q.pgkMultiKey.indexOf(si);
+            if (at > -1) q.pgkMultiKey.splice(at, 1); else q.pgkMultiKey.push(si);
+            q.pgkMultiKey.sort(function(a, b) { return a - b; });
+            this.pgkSimulate(i);
         },
         // A preset's category names in the reader's language. Reads `this.lang` so
         // every label bound to it re-renders when the toggle moves, which a plain
@@ -2455,6 +2895,31 @@ function questionManager() {
         pgkPresetNames(preset) {
             const en = this.lang === 'en';
             return (preset || []).map(p => en ? p[1] : p[0]);
+        },
+        // ── stimulus ────────────────────────────────────────────────────────
+        // A context the reader shares: a long passage, a picture, a data table.
+        // Nothing about the sub-questions changes — they are ordinary questions
+        // with their own types and marks, and the only thing this adds is a panel
+        // above them on the pupil's page.
+        addStimulus() {
+            this._stimulusSeq = (this._stimulusSeq || 0) + 1;
+            this.stimuli.push({id: 's' + this._stimulusSeq, title: '', content: ''});
+        },
+        removeStimulus(sid) {
+            this.stimuli = this.stimuli.filter(function (s) { return s.id !== sid; });
+            // The questions under it are *kept* and become ordinary questions. The
+            // alternative — deleting them with their container — would bin a set of
+            // questions because a teacher removed the passage above them.
+            this.questions.forEach(function (q) { if (q.stimulus === sid) q.stimulus = ''; });
+        },
+        stimulusOf(q) { return (q && q.stimulus) || ''; },
+        stimulusGroups() {
+            var self = this;
+            return this.stimuli.map(function (st) {
+                var idxs = [];
+                self.questions.forEach(function (q, i) { if (q.stimulus === st.id) idxs.push(i + 1); });
+                return {id: st.id, numbers: idxs.join(', ')};
+            });
         },
         addQuestionOf(type) { this.questions.push(this.blankQuestion(type)); },
         addMcq() { this.addQuestionOf('mcq'); },
@@ -2591,8 +3056,10 @@ function questionManager() {
             if (!q.pgkStatements) q.pgkStatements = [];
             if (q.pgkStatements.length >= PGK_MAX) return;
             q.pgkStatements.push(sgStatementLabel(q.pgkStatements.length + 1));
-            if (!q.pgkKey) q.pgkKey = [];
-            q.pgkKey.push(0);
+            if (q.pgkSelect !== 'multi') {
+                if (!q.pgkKey) q.pgkKey = [];
+                q.pgkKey.push(0);
+            }
             this.pgkSimulate(i);
         },
         pgkRemoveStatement(i, si) {
@@ -2602,7 +3069,16 @@ function questionManager() {
             // the button enforces rather than a validation message after the fact.
             if (!q.pgkStatements || q.pgkStatements.length <= PGK_MIN) return;
             q.pgkStatements.splice(si, 1);
-            if (q.pgkKey) q.pgkKey.splice(si, 1);
+            if (q.pgkSelect === 'multi') {
+                // The multi key holds statement *indexes*, so removing statement 2
+                // moves every later index down by one; a stale index would leave the
+                // key naming a statement the question no longer has.
+                q.pgkMultiKey = (q.pgkMultiKey || [])
+                    .filter(function (k) { return k !== si; })
+                    .map(function (k) { return k > si ? k - 1 : k; });
+            } else if (q.pgkKey) {
+                q.pgkKey.splice(si, 1);
+            }
             this.pgkSimulate(i);
         },
         pgkSetPreset(i, list) {
@@ -2711,7 +3187,11 @@ function questionManager() {
                 return String(w || '').trim();
             });
             if (kind === 'pgk') return !!((q.pgkStatements || []).length) &&
-                (q.pgkKey || []).length === (q.pgkStatements || []).length;
+                (q.pgkSelect === 'multi' || (q.pgkKey || []).length === (q.pgkStatements || []).length);
+            if (kind === 'numeric') return q.numMode === 'text'
+                ? !!(q.numAccepted || []).length
+                : String(q.numValue == null ? '' : q.numValue).trim() !== '';
+            if (kind === 'matrix') return !!((q.mxRows || []).length) && !!((q.mxColumns || []).length);
             return false;                    // an essay has no key to lose
         },
         dismissKeyWarning(i) { delete this.keyWarnings[i]; },
@@ -2738,6 +3218,8 @@ function questionManager() {
             if (kind === 'match' && (!q.pairs || !q.pairs.length)) q.pairs = [this.newPair(1)];
             if ((kind === 'dragdrop' || kind === 'ordering') && (!q.order || !q.order.length)) q.order = [''];
             if (kind === 'pgk' && (!q.pgkStatements || !q.pgkStatements.length)) this.seedPgk(q);
+            if (kind === 'numeric') this.seedNumeric(q);
+            if (kind === 'matrix' && (!q.mxColumns || !q.mxColumns.length || !q.mxRows || !q.mxRows.length)) this.seedMatrix(q);
             if (kind !== 'choice') q.answers = [];
             if (kind !== 'match' && kind !== 'dragdrop' && kind !== 'ordering') q.extra = [];
         },
@@ -2792,10 +3274,47 @@ function questionManager() {
                 // unfilled statement then makes the whole key unreadable, which is
                 // what an unfinished question is, instead of shifting every later
                 // key onto the wrong statement.
-                const cats = (q.pgkCategories || []).map(c => String(c).trim()).filter(Boolean);
                 const stmts = (q.pgkStatements || []).map(s => String(s).trim());
+                if (q.pgkSelect === 'multi') {
+                    // No categories in this shape: the key is which statements hold.
+                    // An empty set is a real key ("none of these"), so it is written
+                    // as one rather than folded away.
+                    const checked = (q.pgkMultiKey || [])
+                        .filter(si => typeof si === 'number' && si >= 0 && si < stmts.length)
+                        .slice().sort(function (a, b) { return a - b; });
+                    return {select: 'multi', statements: stmts, key: checked};
+                }
+                const cats = (q.pgkCategories || []).map(c => String(c).trim()).filter(Boolean);
                 const key = (q.pgkKey || []).map(v => (typeof v === 'number' ? v : 0));
                 return {categories: cats, statements: stmts, key: key.slice(0, stmts.length)};
+            }
+            if (kind === 'numeric') {
+                if (q.numMode === 'text') {
+                    const accepted = (q.numAccepted || [])
+                        .map(a => String(a).trim()).filter(Boolean);
+                    return {mode: 'text', accepted: accepted};
+                }
+                // A blank value stays blank: `question_types.numeric_value` reads an
+                // empty string as "no key", so an unfinished question is reported as
+                // unfinished rather than keyed to zero — the answer a pupil would
+                // then be marked against by accident.
+                const raw = String(q.numValue == null ? '' : q.numValue).trim();
+                const tol = String(q.numTolerance == null ? '' : q.numTolerance).trim();
+                return {mode: 'number',
+                        value: raw === '' ? '' : Number(raw.replace(',', '.')),
+                        tolerance: tol === '' ? 0 : Math.abs(Number(tol.replace(',', '.')) || 0)};
+            }
+            if (kind === 'matrix') {
+                const cols = (q.mxColumns || []).map(c => String(c).trim()).filter(Boolean);
+                const multi = q.mxMode === 'multi';
+                const rows = (q.mxRows || []).map(function (row) {
+                    let picked = (row.key || [])
+                        .filter(c => typeof c === 'number' && c >= 0 && c < cols.length)
+                        .slice().sort(function (a, b) { return a - b; });
+                    if (!multi) picked = picked.slice(0, 1);
+                    return {text: String(row.text || '').trim(), key: picked};
+                });
+                return {columns: cols, rows: rows, mode: multi ? 'multi' : 'single'};
             }
             return 'essay';
         },
@@ -2824,6 +3343,22 @@ function questionManager() {
         },
         getPagesJson() {
             return JSON.stringify(Object.fromEntries(this.questions.map((q,i) => [i, q.pages || ''])));
+        },
+        // The container, with its membership worked out from the questions
+        // themselves. A stimulus nobody is under is not written at all: a context
+        // with no question is not a question, and storing it would put an empty
+        // panel on the pupil's page forever.
+        getStimuliJson() {
+            var self = this, out = {};
+            this.stimuli.forEach(function (st) {
+                var idxs = [];
+                self.questions.forEach(function (q, i) { if (q.stimulus === st.id) idxs.push(i); });
+                if (!idxs.length) return;
+                out[st.id] = {title: String(st.title || '').trim(),
+                              content: String(st.content || ''),
+                              questions: idxs};
+            });
+            return JSON.stringify(out);
         },
         // Only the labelled questions are posted. An empty string would be a value
         // the report has to interpret ("explicitly no level?"), where an absent key

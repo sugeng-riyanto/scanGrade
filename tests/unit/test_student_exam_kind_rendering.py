@@ -147,20 +147,42 @@ def _take_exam_body() -> str:
 
 
 class TestTheAnswerNeverReachesThePaper:
-    def test_public_options_hands_out_flat_strings_and_never_the_pairing(self):
-        """The one function that decides it, driven by the shapes a key really has."""
+    def test_public_options_hands_out_flat_values_and_never_the_pairing(self):
+        """The one function that decides it, driven by the shapes a key really has.
+
+        Flat at the *leaf*: a value may be a list of strings (the matching columns,
+        the chip bank), a scalar (a numeric pad's `mode`, a grid's `select`), or a
+        list of single-text rows (a matrix row, which is a label and not an answer),
+        and nothing deeper. A nested dict or a list inside a list is the shape a
+        pairing rides in, which is what this refuses.
+        """
         from app.services.question_types import public_options
+
+        def leaves(value, nested=False):
+            if isinstance(value, dict):
+                for k, v in value.items():
+                    if nested:
+                        assert k in ("text",), f"a nested mapping publishes {k!r}"
+                    yield from leaves(v, nested=True)
+            elif isinstance(value, (list, tuple)):
+                for item in value:
+                    yield from leaves(item, nested=nested)
+            else:
+                yield value
 
         for qtype, key in (("match", PAIRING),
                            ("drag_drop", {"chips": ["p", "q"]}),
+                           ("numeric_short_answer", {"mode": "number", "value": 9.8}),
+                           ("matrix", {"columns": ["Benar", "Salah"], "mode": "single",
+                                       "rows": [{"text": "a", "answer": "Benar"}]}),
                            ("complex_multiple_choice",
                             {"statements": ["a", "b"], "categories": ["Benar", "Salah"],
                              "answers": {"a": "Benar"}})):
             public = public_options(qtype, key)
             if public is None:
                 continue
-            assert all(isinstance(v, list) and all(isinstance(x, str) for x in v)
-                       for v in public.values()), (
+            assert all(not isinstance(v, (dict, list))
+                       for value in public.values() for v in leaves(value)), (
                 f"{qtype} hands the pupil a structure a pairing can ride in: {public!r}")
             for name in ("pairs", "matches", "key", "answer", "answers", "solution"):
                 assert name not in public, (

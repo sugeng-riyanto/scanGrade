@@ -252,11 +252,13 @@
                             </div>
                             <div class="flex items-center gap-1 shrink-0">
                                 <form method="POST" :action="'/teacher/ai-settings/' + k.id + '/toggle'" class="inline">
+                                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                                     <button type="submit" class="text-[9px] font-bold px-2 py-1 rounded-lg border transition"
                                             :class="k.is_active ? 'bg-white text-surface-500 border-surface-200 hover:bg-surface-50' : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'"
                                             x-text="k.is_active ? t('Nonaktifkan','Disable') : t('Aktifkan','Enable')"></button>
                                 </form>
                                 <form method="POST" :action="'/teacher/ai-settings/' + k.id + '/delete'" class="inline" onsubmit="return confirm(sgT('Hapus key ini?','Delete this key?'))">
+                                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                                     <button type="submit" class="text-[9px] font-bold px-2 py-1 rounded-lg bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 transition"><i class="fas fa-trash"></i></button>
                                 </form>
                             </div>
@@ -329,11 +331,13 @@
                     </div>
                     <div class="flex items-center gap-1">
                         <form method="POST" :action="'/teacher/ai-settings/' + k.id + '/toggle'" class="inline">
+                                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                             <button type="submit" class="text-[10px] font-bold px-2 py-1 rounded-lg border transition"
                                     :class="k.is_active ? 'bg-surface-50 text-surface-500 border-surface-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'"
                                     x-text="k.is_active ? t('Nonaktifkan','Disable') : t('Aktifkan','Enable')"></button>
                         </form>
                         <form method="POST" :action="'/teacher/ai-settings/' + k.id + '/delete'" class="inline" onsubmit="return confirm(sgT('Hapus key ini?','Delete this key?'))">
+                                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                             <button type="submit" class="text-[10px] font-bold px-2 py-1 rounded-lg bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 transition" x-text="t('Hapus','Delete')"></button>
                         </form>
                     </div>
@@ -349,6 +353,7 @@
             <div class="space-y-3 mb-5">
                 {% for key, row in saved_prompts.items() %}
                 <form method="POST" action="/teacher/ai-settings/prompt" class="border border-surface-200 rounded-xl p-3 bg-surface-50">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                     <input type="hidden" name="subject" value="{{ key }}">
                     <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
                         <span class="text-xs font-extrabold text-surface-700">{{ row.subject_label or key }}</span>
@@ -368,6 +373,7 @@
             {% endif %}
 
             <form method="POST" action="/teacher/ai-settings/prompt" class="border-t border-surface-200 pt-4 space-y-2">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                 <label class="block text-[11px] font-extrabold text-surface-600" for="prompt-subject" x-text="t('Mapel','Subject')"></label>
                 <select id="prompt-subject" name="subject" required
                         class="w-full px-3 py-2 border border-surface-200 rounded-lg text-xs font-semibold focus:border-primary-400 focus:ring-1 focus:ring-primary-200">
