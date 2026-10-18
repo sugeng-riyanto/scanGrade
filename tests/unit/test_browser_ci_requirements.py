@@ -44,3 +44,16 @@ def test_missing_browser_fails_instead_of_skipping(tmp_path):
     assert result.returncode == 1
     assert '::error::no Chrome/Chromium' in result.stdout
     assert not export.exists()
+
+
+def test_claims_wiring_uses_a_disposable_offline_roster(tmp_path):
+    script = next(block for block in _shell_blocks(WORKFLOW.read_text())
+                  if 'python deploy/claims_gate.py' in block)
+    # A wiring test must never become a load test by dropping this flag.
+    assert 'python deploy/claims_gate.py --roster "$roster" --check' in script
+    result = subprocess.run(['/bin/bash', '-e', '-c', script], cwd=ROOT,
+                            env={**os.environ, 'TMPDIR': str(tmp_path)},
+                            capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 'CHECK OK' in result.stdout
+    assert list(tmp_path.iterdir()) == [], 'the synthetic roster must be cleaned up'

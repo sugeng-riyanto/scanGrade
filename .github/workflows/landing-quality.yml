@@ -60,7 +60,19 @@ jobs:
       - name: Theme gate (includes static claims checks)
         run: bash deploy/theme_gate.sh
       - name: Claims gate wiring (not a production load test)
-        run: python deploy/claims_gate.py --check
+        run: |
+          roster="$(mktemp)"
+          trap 'rm -f "$roster"' EXIT
+          # --check validates local wiring only. These synthetic identities are
+          # never provisioned or used for login, and contain no real credentials.
+          python - "$roster" <<'PY'
+          import json, sys
+          from pathlib import Path
+          accounts = [{"id": f"ci-student-{i}", "role": "murid"} for i in range(60)]
+          accounts.append({"id": "ci-teacher", "role": "guru"})
+          Path(sys.argv[1]).write_text(json.dumps(accounts), encoding="utf-8")
+          PY
+          python deploy/claims_gate.py --roster "$roster" --check
 
   offline-env-regressions:
     name: Offline environment-backed regressions
