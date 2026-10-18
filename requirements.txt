@@ -29,6 +29,11 @@ websockets==15.0.1
 xhtml2pdf==0.2.17
 pytest==8.3.5
 pytest-env==1.1.5
+# `tests/unit/test_ci_workflows.py` parses every workflow in `.github/workflows/`,
+# because a workflow with a YAML error never runs and GitHub reports nothing about
+# it: a job that never starts cannot fail, which is the one failure mode a CI check
+# cannot announce about itself.
+PyYAML==6.0.2
 black==25.1.0
 ruff==0.10.0
 # imported by app code directly, not only pulled in by locust

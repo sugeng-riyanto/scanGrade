@@ -158,9 +158,12 @@ done | sort -u | cut -d' ' -f1 | sort | uniq -c
 
 Nine of the branch's 48 paths came out as main's, and that nine **is** §2's audit — six
 dropped on purpose (§4's `dropped` group), three main's own copies. A branch-changed file
-that came out identical to main is the shape of a dropped feature; the six are why. The
-22 `both` paths are the rows §4 spells out half by half, and the 17 identical to the
-branch are the question types and their suites.
+that came out identical to main is the shape of a dropped feature; the six are why.
+The 22 `both` paths are the rows §4 spells out half by half, and the 17 identical to the
+branch are the question types, their suites, and the release-claim suite that came with
+the branch's `deploy_status` work. `tests/unit/test_merge_runbook.py` re-runs the loop
+above against these refs and fails if a row's label stops matching, or if a classified
+path has no row — which is how that seventeenth row was found to be missing.
 
 ### main wins — the AI marking path
 
@@ -190,6 +193,7 @@ branch are the question types and their suites.
 | `docs/features/new-question-types.md` | branch | new. The one exception to "byte-identical": a pointer to this runbook was appended afterwards, so the file no longer matches `bca30d3` — the feature is unchanged, the paragraph is new. |
 | `tests/unit/test_new_question_types.py`, `test_mark_agreement.py`, `test_grading_queue_canvas.py`, `test_essay_score_autosave.py`, `test_essay_answer_reaches_teacher.py`, `test_unlock_code_visibility.py`, `test_csrf_dynamic_forms.py` | branch | the branch's own contracts for the above |
 | `tests/unit/test_answer_key_source.py`, `test_core.py`, `test_objective_types.py` | branch | extended for the new kinds |
+| `tests/unit/test_release_claim.py` | branch | the branch's release-claim suite — `served == released` as a question of its own, and the two states where it comes apart from `served == held`; it arrived with the branch's `deploy_status` work, which is why it is here and not among the question types |
 
 ### both — one file, two halves
 
@@ -260,7 +264,7 @@ are worth reading before the next one, because none of them was the conflict its
 ## 6. Database — already done
 
 The only schema change in this reconciliation is the stimulus column, and **it is
-already applied to the live project** (`roshkbkbzgfedowozfo`). Recorded so a later
+already applied to the live project** (`roshkbzgfzpfedowozfo`). Recorded so a later
 session does not apply it twice or assume it is pending:
 
 ```bash

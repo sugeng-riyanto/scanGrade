@@ -40,7 +40,15 @@ CHANGED=$(git diff --cached --name-only --diff-filter=ACMR)
 # to catch was committed in `deploy/bootstrap.sh`. A filter that watched only the
 # contract file there would have let the very commit that leaked a service-role
 # key through the hook that was meant to warn about it.
-if ! printf '%s\n' "$CHANGED" | grep -qE '^app/templates/.*\.html$|^app/static/css/|^tailwind\.config\.js$|^package\.json$|^app/.*\.py$|^supabase/.*\.sql$|^deploy/.*\.(sh|py)$'; then
+# Markdown and PowerShell are in it for the region guard, and for the same reason:
+# the typo it exists for shipped in `AGENTS.md`, was copied into a merge runbook and
+# into the Windows dev script, and none of those three would have triggered a filter
+# that only watched templates, stylesheets, Python, SQL and `deploy/`. A documentation
+# edit is a release of the record as much as a template edit is a release of a page.
+# `.github/` is here for the workflow guard: a job that stops running the suite is
+# invisible — it goes green by never starting — so the commit that edits a workflow
+# is exactly the commit that has to judge it.
+if ! printf '%s\n' "$CHANGED" | grep -qE '^app/templates/.*\.html$|^app/static/css/|^tailwind\.config\.js$|^package\.json$|^app/.*\.py$|^supabase/.*\.sql$|^deploy/.*\.(sh|py)$|^\.github/.*\.ya?ml$|^.*\.md$|^.*\.ps1$'; then
   exit 0
 fi
 
