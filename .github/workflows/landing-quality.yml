@@ -32,6 +32,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
+          python -m pip check
       - name: Install JS dependencies
         run: npm install --no-audit --no-fund
       - name: Build CSS
@@ -67,7 +68,10 @@ jobs:
           python-version: '3.12'
           cache: pip
       - name: Install test dependencies
-        run: python -m pip install -r requirements.txt
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip check
       - name: Create disposable environment fixture
         run: |
           touch .env
