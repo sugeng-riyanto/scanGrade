@@ -40,7 +40,7 @@ jobs:
       - name: Landing claim regression tests
         run: python -m pytest tests/unit/test_landing_ai_claim_honesty.py -q
       - name: Full test suite
-        run: python -m pytest tests -q
+        run: python -m pytest tests -q -ra
       - name: Theme gate (includes static claims checks)
         run: bash deploy/theme_gate.sh
       - name: Claims gate wiring (not a production load test)
