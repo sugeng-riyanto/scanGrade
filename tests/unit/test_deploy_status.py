@@ -209,7 +209,7 @@ class TestWhatIsInstalled:
             "the runner no longer mentions the placeholder, so this fixture has stopped "
             "reproducing the shape that caught the defect — look for the token's new "
             "home before relaxing this test")
-        state = state_of(tmp_path, repo, "scangrade-deploy", runner)
+        state = state_of(tmp_path, repo, "scangrade-deploy", runner + "\n# installed copy drift\n")
         assert state["kind"] == "copy", "a copy of the runner was read as a launcher"
         assert state["reason_key"] == "drifted"
         assert state["differs_from_checkout"] is True, (
@@ -480,7 +480,7 @@ class TestWhatItAddsUpTo:
         the headline rather than a footnote."""
         report = self._report(
             tmp_path, ahead=True,
-            installed=(ROOT / "deploy/scangrade-deploy.sh").read_text(encoding="utf-8"))
+            installed=(ROOT / "deploy/scangrade-deploy.sh").read_text(encoding="utf-8") + "\n# installed copy drift\n")
         verdict = report["verdict"]
         assert verdict["level"] == status.BROKEN
         assert verdict["key"] == "copy_drifted"
