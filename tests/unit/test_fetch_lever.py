@@ -131,6 +131,9 @@ class Box:
         _git(self.repo, "commit", "-q", "-m", "init")
         subprocess.run(["git", "init", "-q", "--bare", str(self.origin)],
                        capture_output=True, text=True, env=git_env())
+        # A bare repository starts with an implementation-dependent HEAD. Pin it
+        # to the branch pushed below so `git clone` checks out the fixture files.
+        _bare_git(self.origin, "symbolic-ref", "HEAD", "refs/heads/main")
         _git(self.repo, "remote", "add", "origin", str(self.origin))
         _git(self.repo, "push", "-q", "-u", "origin", "main")
 

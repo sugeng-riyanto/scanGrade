@@ -75,12 +75,12 @@ class _Query:
         self._op = "select"
         return self
 
-    def insert(self, payload):
+    def insert(self, payload, *, returning="representation"):
         self._op = "insert"
         self._payload = dict(payload)
         return self
 
-    def update(self, payload):
+    def update(self, payload, *, returning="representation"):
         self._op = "update"
         self._payload = dict(payload)
         return self

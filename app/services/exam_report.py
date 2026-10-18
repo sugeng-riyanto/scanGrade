@@ -499,7 +499,7 @@ def insights(analysis: Any, stats: Mapping[str, Any]) -> list[Finding]:
     """Findings a teacher can act on, strongest first.
 
     The thresholds are conventions and each is stated in the finding itself
-    (`docs/features/ANALYSIS.md` records the sources):
+    (`docs/features/RESULTS_REPORT.md` records where each one comes from):
     difficulty 0.30–0.85, discrimination ≥ 0.20, reliability ≥ 0.70, and a
     distractor nobody chose. A finding that fires only when the number crosses a
     named line is a finding a teacher can argue with; "the AI thinks" is not.

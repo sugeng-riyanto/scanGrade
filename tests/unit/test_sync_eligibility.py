@@ -338,11 +338,11 @@ class FakeTable:
         self._single, self._maybe = True, True
         return self
 
-    def insert(self, data):
+    def insert(self, data, *, returning="representation"):
         self._mode, self._payload = "insert", data
         return self
 
-    def update(self, data):
+    def update(self, data, *, returning="representation"):
         self._mode, self._payload = "update", data
         return self
 

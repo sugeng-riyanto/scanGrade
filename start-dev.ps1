@@ -27,7 +27,7 @@ Write-Host "Using: $PYTHON" -ForegroundColor Green
 if (-not (Test-Path ".env")) {
     Copy-Item ".env.example" ".env"
     Write-Host ".env created — ISI SUPABASE KEY DAHULU" -ForegroundColor Yellow
-    Write-Host "  Buka: https://supabase.com/dashboard/project/roshkbkbzgfedowozfo/settings/api" -ForegroundColor Yellow
+    Write-Host "  Buka: https://supabase.com/dashboard/project/roshkbzgfzpfedowozfo/settings/api" -ForegroundColor Yellow
     Write-Host "  Lalu isi SUPABASE_ANON_KEY dan SUPABASE_SERVICE_KEY di .env" -ForegroundColor Yellow
     Start-Sleep 2
 }

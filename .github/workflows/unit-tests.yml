@@ -1,0 +1,179 @@
+name: unit suite
+
+# The whole of `tests/unit`, on every push and every pull request.
+#
+# The other two workflows here each judge one subject — the project ref and the
+# database's region, and the shipped pages in a headless browser — and they exist
+# because those two things had no reader at all. Everything else had a suite and
+# no runner: `deploy/theme_gate.sh` runs the suites somebody listed in it on the
+# box, and the pre-commit hook runs the gate. But a guard added after that list was
+# written — or after the hook was installed — ran nowhere until somebody remembered
+# to run it, and a suite whose only runner is a person is a paragraph with tests
+# around it. That is not hypothetical here: a region was recorded wrong on a UU PDP
+# disclosure for weeks and nothing failed, because nothing executed anything that
+# read it.
+#
+# So this job is the floor under all of it: the whole directory, on the committed
+# tree, with nothing filtered out.
+#
+# What it deliberately does **not** do is name files. `python -m pytest tests/unit`
+# names a directory, so a suite added tomorrow runs without anyone editing this
+# file — and `tests/unit/test_ci_workflows.py` refuses a release where this
+# command grows an `--ignore`, a `-k`, a `-m`, a `--deselect`, a `continue-on-error`
+# or a `|| true`, because each of those is a way to keep the job green about a
+# suite nobody executed.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A second push to the same branch replaces the first: the suite is a verdict
+# about the tree, and the tree that supersedes it is the one worth a runner.
+concurrency:
+  group: unit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  suite:
+    name: every guard in tests/unit
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      # Full history, not the default single commit. `tests/unit/test_merge_runbook.py`
+      # re-runs the loop that classified a merge's 48 files and needs the four
+      # commits that merge records; a shallow clone is the state its own deploy gate
+      # names as "cannot look", which that gate reports and this suite refuses. The
+      # repository is small enough that the whole history is the cheap answer.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # The floor `pyproject.toml` declares and `.python-version` records. A run on
+      # 3.11 dies at collection on the two files that use PEP 701 f-strings, so the
+      # version is pinned here rather than left to the runner's default.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: install the app's dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # The suite takes a different shape with a `.env` in the tree — tests that
+      # refuse a reading of one skip when there is nothing to refuse — and a
+      # committed `.env` is a leaked service-role key besides. CI has none by
+      # construction, and this step keeps it so: the job then measures exactly the
+      # tree a clone gets.
+      - name: this checkout has no .env, and that is the tree being measured
+        run: |
+          if [ -e .env ]; then
+            echo "::error::a .env is present in the checkout: the suite behaves differently with one, and a committed .env is a leaked key"
+            exit 1
+          fi
+          echo "no .env here: the suite runs against the committed tree"
+
+      # Two suites execute JavaScript rather than reading it: the exam page's
+      # editor in jsdom (`test_essay_toolbar.py`, `test_essay_answer_integrity.py`)
+      # and the stylesheet rebuild (`test_css_freshness.py`, which compares the
+      # committed `tailwind.css` with the output of the project's own `css:build`).
+      # Without `node_modules` both skip, by name — and a skip is exactly the green
+      # about a check nobody ran that this job exists to prevent. So the toolchain
+      # is installed instead of skipped.
+      #
+      # The version is jsdom's own: its `engines` field asks for `^22.22.2 ||
+      # ^24.15.0 || >=26`, and `tests/unit/test_ci_workflows.py` holds this number
+      # to that line so a bump in `package-lock.json` cannot leave the job on a
+      # Node the suite refuses.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: install the node dependencies the suites execute against
+        run: |
+          npm ci --no-audit --no-fund
+          node --version
+          npm --version
+
+      # The browser gates in `tests/unit` skip *by name* on a machine with no
+      # Chrome, which is honest on a laptop and unacceptable here: the runner ships
+      # one, so a job that cannot find it fails loudly rather than passing over the
+      # gates it could not run. Located the way the gates already locate it —
+      # `SG_CHROME` first, then the usual names — and handed to the suite below.
+      - name: find a browser
+        id: browser
+        run: |
+          for candidate in google-chrome google-chrome-stable chromium chromium-browser; do
+            found="$(command -v "$candidate" || true)"
+            if [ -n "$found" ]; then
+              echo "path=$found" >> "$GITHUB_OUTPUT"
+              echo "using $found"
+              exit 0
+            fi
+          done
+          echo "::error::no Chrome/Chromium on this runner, so the browser-gate suites cannot measure anything"
+          exit 1
+
+      # The directory, once. No `-x` (one finding must not hide the next), no file
+      # list, no marker filter. `-rs` prints why anything was skipped, so a skip is
+      # a line in the log rather than a number in a summary nobody reads.
+      - name: the unit suite
+        env:
+          SG_CHROME: ${{ steps.browser.outputs.path }}
+        run: python -m pytest tests/unit -q -rs --junitxml=unit-suite.xml
+
+      # The count, on the run's own page: a suite that reports "0 tests" and a
+      # suite that reports 800 look identical in a green tick, and only one of them
+      # is evidence.
+      - name: the reading
+        if: always()
+        run: |
+          {
+            echo "### unit suite"
+            echo
+            python - <<'PY'
+          import os
+          import xml.etree.ElementTree as ET
+
+          path = "unit-suite.xml"
+          if not os.path.exists(path):
+              print("no reading was written — the suite did not get far enough to report")
+              raise SystemExit(0)
+          try:
+              root = ET.parse(path).getroot()
+          except ET.ParseError as exc:
+              print(f"the report could not be read: {exc}")
+              raise SystemExit(0)
+          suites = [root] if root.tag == "testsuite" else list(root.iter("testsuite"))
+          counts = {key: 0 for key in ("tests", "failures", "errors", "skipped")}
+          for suite in suites:
+              for key in counts:
+                  counts[key] += int(suite.get(key) or 0)
+          slowest = []
+          for case in root.iter("testcase"):
+              if case.get("time"):
+                  slowest.append((float(case.get("time")), case.get("name")))
+          print("| tests | failures | errors | skipped |")
+          print("| --- | --- | --- | --- |")
+          print("| {tests} | {failures} | {errors} | {skipped} |".format(**counts))
+          if slowest:
+              print()
+              print("slowest: " + ", ".join(
+                  f"`{name}` ({seconds:.1f}s)"
+                  for seconds, name in sorted(slowest, reverse=True)[:5]))
+          PY
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: keep the report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-suite-report
+          path: unit-suite.xml
+          if-no-files-found: warn

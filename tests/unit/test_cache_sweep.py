@@ -150,12 +150,15 @@ class TestTheLiveSittingGuard:
 
     def test_it_bounds_the_question_by_time_so_it_can_never_block_forever(self):
         fake = FakeSitting()
+        before = dt.datetime.now(dt.timezone.utc)
         sweep.live_sitting(supabase=fake)
+        after = dt.datetime.now(dt.timezone.utc)
         gte = [value for kind, column, value in fake.filters if kind == "gte"]
         assert gte, "a guard that cannot clear itself is a guard that stops the sweep"
         since = dt.datetime.fromisoformat(gte[0])
-        age = dt.datetime.now(dt.timezone.utc) - since
-        assert age == pytest.approx(sweep.LIVE_SITTING_GRACE, abs=dt.timedelta(minutes=1))
+        # Bound against the actual call interval; timedelta approx rounds to exact
+        # equality and fails on normal microseconds of elapsed wall time.
+        assert before - sweep.LIVE_SITTING_GRACE <= since <= after - sweep.LIVE_SITTING_GRACE
 
     def test_it_reads_one_row_and_not_a_count(self):
         fake = FakeSitting()

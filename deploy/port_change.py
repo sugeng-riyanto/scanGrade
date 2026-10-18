@@ -614,8 +614,9 @@ def claims_in(lines: list[str]) -> list[dict]:
 def resolve_test(target: Target, subject: str) -> tuple[str | None, str]:
     """Where a claimed test module is here, or why it cannot be named.
 
-    A bullet names its first suite in full and the rest by basename (`tests/unit/a.py`
-    (17), `b.py` (15)), so a basename has to be resolvable — but only when it resolves
+    A bullet names its first suite in full and the rest by basename — for example
+    `tests/unit/a.py` (17), `b.py` (15) — so a basename has to be resolvable, but
+    only when it resolves
     to exactly one file. Two candidates means the claim cannot be attributed to either,
     and picking one would answer a question nobody asked with a number that happens to
     be handy.

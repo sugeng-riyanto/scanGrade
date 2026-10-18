@@ -290,17 +290,72 @@ class TestCrossSchoolAPIAccess:
         self._assert_school_block(resp)
 
 
-# ── Supabase RLS policy tests (requires real Supabase) ────────
+# ── Real Supabase RLS integration tests (staging only) ──────────
+#
+# These tests deliberately require pre-provisioned staging data and a REAL
+# teacher-A access token. Never use a service-role key to verify RLS: that
+# role bypasses policies and produces a false sense of security.
+#
+# Required environment variables:
+#   SCANGRADE_RLS_URL, SCANGRADE_RLS_ANON_KEY,
+#   SCANGRADE_RLS_TEACHER_A_JWT, SCANGRADE_RLS_SCHOOL_B_EXAM_ID,
+#   SCANGRADE_RLS_SCHOOL_B_SUBMISSION_ID
+#
+# Missing prerequisites are errors when these tests are explicitly selected.
 
-@pytest.mark.skip(reason="Requires real Supabase connection with anon key")
 class TestSupabaseRLSPolicies:
-    """Verify RLS actually blocks cross-school queries at the DB level."""
+    """Verify real PostgREST RLS using an authenticated school-A teacher."""
 
-    def test_rls_blocks_cross_school_exam_select(self):
-        """Using anon key, teacher from school A cannot SELECT exams from school B."""
-        # This test needs a real Supabase client with anon key
-        pass
+    @pytest.fixture(scope="class")
+    def staging(self):
+        import os
+        import requests
 
-    def test_rls_blocks_cross_school_submission_select(self):
-        """Using anon key, teacher from school A cannot SELECT submissions from school B."""
-        pass
+        names = (
+            "SCANGRADE_RLS_URL",
+            "SCANGRADE_RLS_ANON_KEY",
+            "SCANGRADE_RLS_TEACHER_A_JWT",
+            "SCANGRADE_RLS_SCHOOL_B_EXAM_ID",
+            "SCANGRADE_RLS_SCHOOL_B_SUBMISSION_ID",
+        )
+        missing = [name for name in names if not os.environ.get(name)]
+        if missing:
+            pytest.fail("Staging RLS test configuration missing: " + ", ".join(missing))
+        url = os.environ["SCANGRADE_RLS_URL"].rstrip("/")
+        if not url.startswith("https://") or "example.invalid" in url:
+            pytest.fail("RLS tests require an actual HTTPS staging Supabase URL")
+        return requests.Session(), url, {
+            "apikey": os.environ["SCANGRADE_RLS_ANON_KEY"],
+            "Authorization": "Bearer " + os.environ["SCANGRADE_RLS_TEACHER_A_JWT"],
+            "Accept": "application/json",
+        }
+
+    @staticmethod
+    def _assert_invisible(staging, table, identifier):
+        import os
+        session, url, headers = staging
+        response = session.get(
+            f"{url}/rest/v1/{table}",
+            params={"id": f"eq.{identifier}", "select": "id"},
+            headers=headers,
+            timeout=15,
+        )
+        assert response.status_code == 200, (
+            f"RLS integration query failed ({table}): HTTP {response.status_code} "
+            f"{response.text[:300]}"
+        )
+        assert response.json() == [], (
+            f"SECURITY: school-A teacher can read school-B {table} record"
+        )
+
+    def test_rls_blocks_cross_school_exam_select(self, staging):
+        import os
+        self._assert_invisible(
+            staging, "exams", os.environ["SCANGRADE_RLS_SCHOOL_B_EXAM_ID"]
+        )
+
+    def test_rls_blocks_cross_school_submission_select(self, staging):
+        import os
+        self._assert_invisible(
+            staging, "submissions", os.environ["SCANGRADE_RLS_SCHOOL_B_SUBMISSION_ID"]
+        )

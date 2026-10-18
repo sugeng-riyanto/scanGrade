@@ -296,11 +296,11 @@ class _Table:
         self._one = True
         return self
 
-    def insert(self, payload):
+    def insert(self, payload, *, returning="representation"):
         self._pending = ("insert", dict(payload))
         return self
 
-    def update(self, payload):
+    def update(self, payload, *, returning="representation"):
         self._pending = ("update", dict(payload))
         return self
 

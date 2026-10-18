@@ -1,0 +1,30 @@
+# References that are deliberately to a file this checkout does not have.
+#
+# `deploy/doc_links.py` refuses a document that names a missing path. Four kinds
+# of mention are exempt by structure — scratch (`.freebuff/`), planning pages, a
+# heading that says a table is dropped, and the words that say a file is gone
+# within a line of it. Everything else has to be recorded here, one line each,
+# with the reason written down: an exception is a decision, and a decision nobody
+# can read is the same as no rule at all.
+#
+# Format, tab separated, one per line:
+#
+#     <doc relative to the checkout>	<path as the doc writes it>	<why it is not there>
+#
+# The list is held in both directions. An entry whose path now resolves is a
+# refusal ("the file exists again — drop the exception"), and so is one whose
+# document no longer names it. An exemption nobody needs is how the next real
+# reference goes unnoticed.
+#
+# Six of these are copy describing something other than this tree: an example of
+# a name a bug produced (recorded three times, once per place the same story is
+# told), an artifact a probe writes for one Preview check, a suite whose deletion
+# the same entry records, a load test's HTML report, and the accounts file the
+# load test writes for its next run.
+AGENTS.md	app/cr.py	illustrative: the mangled name an earlier reader produced, not a file
+app/services/deploy_status_service.py	app/cr.py	the same illustration: what a trimming reader would report for a path, not a path
+app/utils/checkout_integrity.py	app/cr.py	the same illustration, in the module whose docstring records the bug
+AGENTS.md	app/static/pgk-review-fixture.html	written by a probe for one Preview check, never committed
+AGENTS.md	tests/unit/test_sync_throttle_shared.py	the entry records that it was deleted; the sentence saying so is further down the bullet
+locustfile.py	docs/measurements/locust-050.html	written by the run (`--html=`) and never committed; the tracked report of that run is the `.json` beside it
+test_scripts/load_test_exam.py	test_scripts/load_test_accounts.json	written by the script on its first run, read by the next one; never committed

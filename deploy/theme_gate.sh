@@ -123,6 +123,31 @@
 #     the guard cannot pass by looking at nothing nor fail on a placeholder that
 #     grants nothing.
 #
+#   deploy/supabase_region.py
+#     which project this app talks to, and where that database is. `AGENTS.md`
+#     recorded the project ref one letter short — 19 characters where the real one
+#     has 20 — and it was copied from there into a merge runbook and the Windows dev
+#     script; the same bullet put the database in Singapore on a **UU PDP
+#     disclosure**. Nothing read either fact for weeks. The tool holds the record
+#     to itself, to the disclosure, to the capacity row, and to this checkout's
+#     `.env` when there is one; a release whose `.env` names another project is a
+#     release whose data is in another tenant, and every page still answers 200.
+#     Where there is no `.env` it *says so* in one line (`the configuration was
+#     NOT measured`) instead of skipping the comparison, and the sentence this
+#     gate prints then claims only the record.
+#
+#   tests/unit/test_merge_runbook.py (as a command, not a pytest file)
+#     whether `docs/deploy/QUESTION_TYPES_MERGE_RUNBOOK.md` still says which side
+#     won each file. Its tables are a measurement — the page prints the recipe and
+#     the counts — and a record nobody re-runs is a paragraph claiming to be one.
+#     The module re-applies the classifier to the merge the page records and
+#     refuses a row whose label has drifted. One case is not a refusal, on purpose:
+#     a **shallow clone** does not carry the three historical commits the record
+#     names, and that is a property of the box rather than of the release — so it
+#     exits 0 and says `were NOT re-run`, and the sentence below withholds its
+#     claim. A full clone whose refs are missing is exit 2, and a doc whose labels
+#     disagree is exit 1.
+#
 # All of them belong in this gate because they fail the same way — invisibly,
 # with the page answering 200 and the other theme looking fine. The secret scan
 # fails invisibly in the sharpest sense: the release works exactly as intended,
@@ -197,7 +222,7 @@ set -uo pipefail
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # Word-split on purpose: pytest takes them as separate paths.
-TESTS="tests/unit/test_dark_theme_contrast.py tests/unit/test_tailwind_class_names.py tests/unit/test_theme_stylesheet.py tests/unit/test_language_toggle.py tests/unit/test_i18n_coverage.py tests/unit/test_css_freshness.py tests/unit/test_landing_facilities.py tests/unit/test_static_tree.py tests/unit/test_no_committed_secrets.py tests/unit/test_render_fixture_gate.py tests/unit/test_template_artifacts.py tests/unit/test_rendered_absence.py tests/unit/test_essay_answer_integrity.py"
+TESTS="tests/unit/test_dark_theme_contrast.py tests/unit/test_tailwind_class_names.py tests/unit/test_theme_stylesheet.py tests/unit/test_language_toggle.py tests/unit/test_i18n_coverage.py tests/unit/test_css_freshness.py tests/unit/test_landing_facilities.py tests/unit/test_static_tree.py tests/unit/test_no_committed_secrets.py tests/unit/test_render_fixture_gate.py tests/unit/test_template_artifacts.py tests/unit/test_rendered_absence.py tests/unit/test_essay_answer_integrity.py tests/unit/test_essay_toolbar.py tests/unit/test_doc_links.py tests/unit/test_supabase_region.py tests/unit/test_ci_workflows.py"
 
 # The app's own refusal markers, and the reason they are named here rather than
 # spelled out in the block that reads them: they are literals in
@@ -216,7 +241,7 @@ ALLOW_DIRTY_VAR="SCANGRADE_ALLOW_DIRTY_CHECKOUT"
 # next defect, and every release after it ships unexamined. So the list is
 # checked up front, and a missing file is exit 3 (about the release), not exit 2
 # (about the box).
-ARMAMENT="$TESTS deploy/i18n_coverage.py deploy/css_freshness.py deploy/schema_contract.py deploy/render_fixture_gate.py deploy/school_authority_gate.py"
+ARMAMENT="$TESTS tests/unit/test_merge_runbook.py deploy/i18n_coverage.py deploy/css_freshness.py deploy/schema_contract.py deploy/render_fixture_gate.py deploy/school_authority_gate.py deploy/doc_links.py deploy/doc_links_gone.txt deploy/supabase_region.py"
 for check in $ARMAMENT; do
   # `-s` and not `-f`: a file that exists and holds nothing is the same release
   # as one where it was deleted, only quieter.
@@ -322,6 +347,142 @@ if [ "$COV_RC" -ne 0 ]; then
   echo "theme gate: FAILED — the language coverage check refused this release." >&2
   exit 1
 fi
+
+# The documentation half: a page is the only part of this repository nothing
+# executes, so a path it names rots in silence. Both kinds were in this tree when
+# the check was written — a merge runbook listing six files it had dropped, and a
+# `## Key Files` block naming four templates a rename had left behind — and every
+# one of those pages opened, rendered, and sent its reader nowhere. Its exit codes
+# are its own: 0 pass, 1 a reference names something this repository does not track
+# (or the recorded-exception list has gone stale), 2 could not measure — no tracked
+# markdown, no git in the tree — which is a property of the box and refuses nothing.
+# It asks the *repository* and not the disk, so the answer is the same for the box
+# that clones it as for the box that wrote it — and a page naming a file that has
+# been written but not yet `git add`ed is exactly the state a commit is about to
+# fix, which is why this gate is the one place that asks.
+# doclinks:start
+DOCLINKS_CLAIM=""
+DOCLINKS_OUT=$("$PY" "$REPO/deploy/doc_links.py" 2>&1)
+DOCLINKS_RC=$?
+if [ "$DOCLINKS_RC" -eq 1 ]; then
+  echo >&2
+  echo "theme gate: FAILED — a page, a docstring or a gate's own message names a" >&2
+  echo "            path this repository does not track. Nothing renders wrong and every" >&2
+  echo "            page still answers 200: the cost is paid later, by whoever follows the" >&2
+  echo "            page — or reads the \"run this script\" line mid-incident — and finds" >&2
+  echo "            nothing there. The same is true of a link's '#section': the page is" >&2
+  echo "            there and the heading is not, so the reader lands at the top of a page" >&2
+  echo "            that no longer says what the link promised. If the file exists on this" >&2
+  echo "            box, it is not in git — stage it, or drop the reference." >&2
+  printf '%s\n' "$DOCLINKS_OUT" | sed 's/^/    /' >&2
+  exit 1
+fi
+if [ "$DOCLINKS_RC" -eq 2 ]; then
+  echo "theme gate: the documentation links were NOT checked — this release carries" >&2
+  echo "            no claim that its pages resolve. That is a property of this box," >&2
+  echo "            not of the release." >&2
+  printf '%s\n' "$DOCLINKS_OUT" | sed 's/^/    /' >&2
+fi
+if [ "$DOCLINKS_RC" -eq 0 ]; then
+  DOCLINKS_CLAIM=", and every path a page, a docstring or a gate's own message names is one this repository tracks, with every anchor a link names one the page it points at carries"
+  printf '%s\n' "$DOCLINKS_OUT"
+fi
+# doclinks:end
+
+# ── The merge runbook's labels, re-run ──────────────
+# Its tables claim which side won each file, and the page prints the recipe that
+# classified them. Re-running that recipe is what makes the record a measurement
+# instead of prose: a row relabelled, a section retitled, or a row moved into the
+# wrong table are all green in every other check and wrong to the reader who acts on
+# them. It runs here because the pre-commit hook is where a page is still changeable;
+# the suite keeps its own assertions about the real document.
+#
+# The one non-refusal is a **shallow clone**. A record of three historical commits
+# cannot be re-read where they were never fetched, and that is a property of the box
+# — the way somebody cloned it — not of the release. So that case exits 0 and says
+# `were NOT re-run`, and the claim below is withheld on that phrase. Exit 2 (a full
+# clone whose refs are missing, or a git that will not answer) is this box failing to
+# look, reported rather than refused, exactly as the other tool blocks do.
+# runbook:start
+RUNBOOK_CLAIM=""
+RUNBOOK_OUT=$("$PY" -m tests.unit.test_merge_runbook 2>&1)
+RUNBOOK_RC=$?
+if [ "$RUNBOOK_RC" -eq 1 ]; then
+  echo >&2
+  echo "theme gate: FAILED — the question-types merge runbook no longer says which" >&2
+  echo "            side won each file. Nothing renders wrong and the page still" >&2
+  echo "            opens: a reader acts on a row that the recorded merge contradicts." >&2
+  echo "            The tool names the row and the evidence either way:" >&2
+  echo "                $PY -m tests.unit.test_merge_runbook" >&2
+  printf '%s\n' "$RUNBOOK_OUT" | sed 's/^/    /' >&2
+  exit 1
+fi
+if [ "$RUNBOOK_RC" -eq 2 ]; then
+  echo "theme gate: the merge runbook's labels were NOT re-run — this clone does not" >&2
+  echo "            carry the commits the record names, or git would not answer. That" >&2
+  echo "            is a property of this box, not of the release, so nothing is" >&2
+  echo "            refused and nothing is claimed either." >&2
+  printf '%s\n' "$RUNBOOK_OUT" | sed 's/^/    /' >&2
+fi
+if [ "$RUNBOOK_RC" -eq 0 ]; then
+  case "$RUNBOOK_OUT" in
+    *"were NOT re-run"*)
+      # A shallow clone: the tool's own sentence says it did not compare, so the
+      # success sentence must not claim that it did.
+      printf '%s\n' "$RUNBOOK_OUT" ;;
+    *)
+      RUNBOOK_CLAIM=", and every row of the question-types merge runbook still names the side the recorded merge gives its file"
+      printf '%s\n' "$RUNBOOK_OUT" ;;
+  esac
+fi
+# runbook:end
+
+# ── Which project this app talks to, and where that database is ─────────────
+# The ref was wrong in the tree for weeks — a 19-character typo in `AGENTS.md`,
+# copied from there into a merge runbook and the Windows dev script — and the
+# same bullet had the database in Singapore on a UU PDP disclosure. Nothing read
+# either one: the app takes its URL from `.env`, and `.env` was right. So the
+# tool holds the record to itself and to the disclosure, and to this checkout's
+# `.env` where there is one.
+#
+# Its exit codes are its own: 0 the record is one ref in one region (and the
+# configuration agrees or is named as unmeasured), 1 a real disagreement, 2 could
+# not measure (no tracked files, no git). A run with no `.env` is not a skip and
+# not a finding: it prints `the configuration was NOT measured` and the success
+# sentence below claims only the record — the box, whose `.env` is what the app
+# serves from, gets the other half judged.
+# region:start
+REGION_CLAIM=""
+REGION_OUT=$("$PY" "$REPO/deploy/supabase_region.py" 2>&1)
+REGION_RC=$?
+if [ "$REGION_RC" -eq 1 ]; then
+  echo >&2
+  echo "theme gate: FAILED — the project ref or the database's region is not one" >&2
+  echo "            value in this release. A host that reaches another Supabase" >&2
+  echo "            project is another tenant's data, and a disclosure that names" >&2
+  echo "            the wrong region is a UU PDP statement that is false; every page" >&2
+  echo "            still answers 200 in both cases." >&2
+  printf '%s\n' "$REGION_OUT" | sed 's/^/    /' >&2
+  exit 1
+fi
+if [ "$REGION_RC" -eq 2 ]; then
+  echo "theme gate: the project ref and the database's region were NOT read — this" >&2
+  echo "            checkout has no git or no tracked files, so nothing about the" >&2
+  echo "            release's record was proven. That is a property of this box, not" >&2
+  echo "            of the release, so nothing is refused." >&2
+  printf '%s\n' "$REGION_OUT" | sed 's/^/    /' >&2
+fi
+if [ "$REGION_RC" -eq 0 ]; then
+  REGION_CLAIM=", and every place this repository records the Supabase project — the ref in six files, the capacity row and every dashboard link — names one project in one region, which is the one region the UU PDP disclosure and the capacity page both render from configuration instead of spelling"
+  # Only a run that read the configuration may say it agreed with it. The phrase
+  # is the tool's own sentence, and the suite pins both halves of this contract.
+  case "$REGION_OUT" in
+    *"the configuration was measured"*)
+      REGION_CLAIM="$REGION_CLAIM, confirmed against this checkout's .env" ;;
+  esac
+  printf '%s\n' "$REGION_OUT"
+fi
+# region:end
 
 # The report documents and the fixtures that render them, in one matrix: every
 # document against every fixture, rendered with `StrictUndefined`, so a key a
@@ -475,7 +636,7 @@ fi
 # prints — the release is then "tested" by a run that never touched it. The exit-5
 # arm below covers a file that collected nothing; this covers the quieter version,
 # where the tests exist and refused to run.
-skip_arm:start
+# skip_arm:start
 SKIPPED=$(printf '%s\n' "$OUTPUT" | grep -oE '[0-9]+ skipped' | grep -oE '[0-9]+' | tail -1 || true)
 SKIPPED=${SKIPPED:-0}
 if [ "$RC" -eq 0 ] && [ "$SKIPPED" -gt 0 ]; then
@@ -504,7 +665,7 @@ if [ "$RC" -eq 0 ] && [ "$SKIPPED" -gt 0 ]; then
   echo "                npm install" >&2
   exit 2
 fi
-skip_arm:end
+# skip_arm:end
 
 if [ "$RC" -eq 0 ]; then
   if [ "$SCHEMA_RC" -eq 2 ]; then
@@ -528,7 +689,7 @@ if [ "$RC" -eq 0 ]; then
     echo "$CSS_OUT"
     echo "$FIXTURES_OUT"
     echo "$SCHOOL_OUT"
-    echo "theme gate: OK — readable in both themes, every named utility is compiled, the committed stylesheet is the one the templates produce, the app's own stylesheet stays a cached file, every file under /static/ is one the app asks for and in a commit, every page declares the language of its own copy, no template prints a Jinja closer as text, no rendered document shows a value only a server-side object could produce, no template translates less than it did, the essay editor's behaviour was executed in a real DOM rather than skipped, no tracked file carries a service-role key or a hard-coded Flask secret, and every table, column and policy the code names is one this repository declares, with every role it compares against one the database holds${APPLIED_CLAIM}${FIXTURES_CLAIM}, and every facility the landing page advertises one this repository can show, and every teacher-facing write route files its rows under the school of this request"
+    echo "theme gate: OK — readable in both themes, every named utility is compiled, the committed stylesheet is the one the templates produce, the app's own stylesheet stays a cached file, every file under /static/ is one the app asks for and in a commit, every page declares the language of its own copy, no template prints a Jinja closer as text, no rendered document shows a value only a server-side object could produce, no template translates less than it did, the essay editor's behaviour was executed in a real DOM rather than skipped, no tracked file carries a service-role key or a hard-coded Flask secret, and every table, column and policy the code names is one this repository declares, with every role it compares against one the database holds${APPLIED_CLAIM}${FIXTURES_CLAIM}, and every facility the landing page advertises one this repository can show, and every teacher-facing write route files its rows under the school of this request${DOCLINKS_CLAIM}${RUNBOOK_CLAIM}${REGION_CLAIM}"
     exit 0
   fi
   echo >&2
