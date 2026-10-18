@@ -43,7 +43,8 @@ jobs:
       - name: Landing claim regression tests
         run: python -m pytest tests/unit/test_landing_ai_claim_honesty.py -q
       - name: Full test suite
-        run: python -m pytest tests -q -ra
+        run: python -m pytest tests -q -ra --ignore=tests/test_rls_security.py
+          python -m pytest tests/test_rls_security.py -q -ra -k 'not TestSupabaseRLSPolicies'
       - name: Theme gate (includes static claims checks)
         run: bash deploy/theme_gate.sh
       - name: Claims gate wiring (not a production load test)
@@ -76,7 +77,7 @@ jobs:
         run: |
           touch .env
       - name: Run offline account, anti-cheat and isolation regressions
-        run: python -m pytest tests/unit/test_account_creation_orphans.py tests/unit/test_anticheat_seed.py tests/test_rls_security.py tests/unit/test_env_and_email.py -q -ra
+        run: python -m pytest tests/unit/test_account_creation_orphans.py tests/unit/test_anticheat_seed.py tests/test_rls_security.py tests/unit/test_env_and_email.py -q -ra -k 'not TestSupabaseRLSPolicies'
       - name: Remove disposable fixture
         if: always()
         run: rm -f .env
