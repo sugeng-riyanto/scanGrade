@@ -80,3 +80,22 @@ jobs:
       - name: Remove disposable fixture
         if: always()
         run: rm -f .env
+
+  dependency-compatibility:
+    name: Python 3.13 compatibility (non-blocking)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Resolve dependencies and check compatibility
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip check
+      - name: Run interpreter and configuration regression tests
+        run: python -m pytest tests/unit/test_python_requirement.py tests/unit/test_env_and_email.py -q -ra
