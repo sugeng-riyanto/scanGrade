@@ -40,6 +40,32 @@ TEACHER_EMAIL = "lt-guru-{:02d}@loadtest.scan-grade.app"
 ROSTER_PATH = Path(__file__).resolve().parent / ".freebuff" / "lt_roster.json"
 
 
+def clear_first_sign_in(svc, school_id) -> int:
+    """Clear `profiles.must_change_password` for this school's accounts.
+
+    Every account `app.services.account_creation.create_account` builds carries that
+    flag (`password_change.account_fields`), which is right for a pupil and wrong for
+    a load-test one: the first sign-in is bounced to `/auth/change-password`, the
+    harness never reaches a dashboard, and both the claims and the performance gate
+    answer *could not measure* — exit 2, which the deploy reports as a check that
+    declined to run. Measured on the box on 2026-10-19: 20 of 22 sessions landed on
+    `/auth/change-password` after their login succeeded, and the gates had been
+    unmeasurable since the roster's accounts were recreated.
+
+    Cleared for this school's accounts only, and for the same reason a demo account
+    clears it (`super_admin.py`): nobody is here to change the password, so a flag
+    that only ever produces a dead end is not a safety feature on an account whose
+    whole purpose is to be signed in by a script.
+    """
+    rows = svc.table("profiles").select("id") \
+        .eq("school_id", school_id).eq("must_change_password", True).execute().data
+    ids = [row["id"] for row in rows]
+    if not ids:
+        return 0
+    svc.table("profiles").update({"must_change_password": False}).in_("id", ids).execute()
+    return len(ids)
+
+
 def write_roster(svc):
     """Dump email/name/id per account so the load test can verify identity.
 
@@ -181,6 +207,10 @@ def provision(n_students, n_teachers):
         }).execute()
         made += 1
     print(f"teachers: {made} created")
+
+    # ── and the flag that would keep every one of them out ──
+    cleared = clear_first_sign_in(svc, school_id)
+    print(f"first sign-in flag cleared: {cleared} account(s) can reach a dashboard")
 
     write_roster(svc)
     print("\nLOAD TEST ROSTER")

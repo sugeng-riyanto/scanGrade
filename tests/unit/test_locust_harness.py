@@ -202,6 +202,136 @@ print(json.dumps(out))
 '''
 
 
+# ── the roster the harness signs in with ─────────────────────────────────────
+# A roster whose accounts cannot reach a dashboard is a roster that makes both
+# post-release gates answer "could not measure": `perf_gate` refuses to compare a
+# run in which only the teachers signed in, and `claims_gate` has no request to
+# time at all. Measured on the box on 2026-10-19: 20 of 22 sessions landed on
+# `/auth/change-password`, because `account_creation.create_account` marks every
+# issued password `must_change_password = True` — right for a pupil, a dead end for
+# an account whose only purpose is to be signed in by a script.
+
+ROSTER_PROBE = r'''
+import importlib.util, json, sys
+
+spec = importlib.util.spec_from_file_location("pl", sys.argv[1])
+pl = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(pl)
+
+
+class Result:
+    def __init__(self, data):
+        self.data = data
+
+
+class Query:
+    def __init__(self, log, rows):
+        self.log, self.rows = log, rows
+
+    def select(self, columns):
+        self.log.append(("select", columns))
+        return self
+
+    def eq(self, column, value):
+        self.log.append(("eq", column, value))
+        return self
+
+    def update(self, values):
+        self.log.append(("update", values))
+        return self
+
+    def in_(self, column, values):
+        self.log.append(("in_", column, list(values)))
+        return self
+
+    def execute(self):
+        return Result(self.rows)
+
+
+class Client:
+    """Records the calls; `profiles` holds two flagged rows and one unflagged one."""
+
+    def __init__(self, flagged):
+        self.log = []
+        self.flagged = flagged
+
+    def table(self, name):
+        assert name == "profiles", name
+        rows = [{"id": i} for i in self.flagged] if self._reading_update() else []
+        return Query(self.log, rows)
+
+    def _reading_update(self):
+        # select() is the read; update() is the write that must not be handed rows
+        return not any(call[0] == "update" for call in self.log)
+
+
+client = Client(["id-1", "id-2"])
+cleared = pl.clear_first_sign_in(client, "school-9")
+out = {"cleared": cleared, "calls": client.log}
+
+# a school with nothing flagged must not issue an update at all
+empty = Client([])
+out["empty_cleared"] = pl.clear_first_sign_in(empty, "school-9")
+out["empty_calls"] = empty.log
+
+print(json.dumps(out))
+'''
+
+
+@pytest.fixture(scope="module")
+def roster_probe():
+    result = subprocess.run(
+        [sys.executable, "-c", ROSTER_PROBE, str(ROOT / "provision_loadtest.py")],
+        capture_output=True, text=True, cwd=str(ROOT), timeout=180,
+    )
+    assert result.returncode == 0, (
+        "the provisioner could not be imported or driven:\n"
+        f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+    )
+    return json.loads(result.stdout.strip().splitlines()[-1])
+
+
+class TestTheRosterCanSignIn:
+    def test_the_provisioner_clears_the_first_sign_in_flag(self, roster_probe):
+        assert roster_probe["cleared"] == 2, (
+            "the provisioner did not clear `must_change_password` for the flagged accounts, "
+            "so every session it creates stops at /auth/change-password and the claims and "
+            "performance gates can only report 'could not measure'."
+        )
+        writes = [call for call in roster_probe["calls"] if call[0] == "update"]
+        # JSON turned the probe's tuples into lists; the shape is what is compared, and
+        # one write is the whole claim.
+        assert writes == [["update", {"must_change_password": False}]], (
+            f"the flag was not cleared with the value the sign-in guard reads: {writes}"
+        )
+
+    def test_only_this_school_s_flagged_accounts_are_touched(self, roster_probe):
+        scout = [call for call in roster_probe["calls"] if call[0] == "eq"]
+        assert ["eq", "school_id", "school-9"] in scout, (
+            "the update is scoped to a school, so a school id that never reached the query "
+            "would clear the flag for every account in the deployment."
+        )
+        assert ["eq", "must_change_password", True] in scout, (
+            "the read no longer asks which accounts are flagged, so it clears a flag it never "
+            "found — and reports a count it did not write."
+        )
+        assert ["in_", "id", ["id-1", "id-2"]] in roster_probe["calls"], (
+            "the write is not limited to the flagged ids"
+        )
+
+    def test_a_school_with_nothing_flagged_is_left_alone(self, roster_probe):
+        assert roster_probe["empty_cleared"] == 0
+        assert not [c for c in roster_probe["empty_calls"] if c[0] == "update"], (
+            "an update was issued for a school that had nothing to clear"
+        )
+
+    def test_provision_calls_it(self):
+        source = (ROOT / "provision_loadtest.py").read_text(encoding="utf-8")
+        assert "clear_first_sign_in(svc, school_id)" in source, (
+            "the helper exists but `provision()` never calls it"
+        )
+
+
 @pytest.fixture(scope="module")
 def probe():
     """Run the probes once, in a child interpreter, and hand back its findings."""
