@@ -6,6 +6,6 @@
 #
 # Obeyed once per exact content: the `issued` stamp below is what makes a
 # re-issued command a new plan rather than one already obeyed.
-command: release
-issued: 2026-10-17T05:10:57Z
-note: the printed report card's stray %} is fixed on main (77aa922); production still serves 3227772
+command: recover
+issued: 2026-10-19T09:13:50Z
+note: production serves 17665b2 since 2026-10-17 while main is b2c64ee; run the lever and land the release
