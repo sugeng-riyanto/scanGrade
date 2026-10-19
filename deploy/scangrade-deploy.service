@@ -10,7 +10,17 @@ ExecStart=/usr/local/bin/scangrade-deploy
 
 # A deploy that needs longer than this is not making progress; the script's own
 # rollback path runs well inside it.
-TimeoutStartSec=900
+#
+# 900 s was measured too short on the box on 2026-10-19: the release was merged,
+# reloaded and verified as serving (theme gate OK after 9m36s, smoke 72 checks
+# green, touch gate 276 controls), and then systemd killed the run at 16:51:19
+# mid-verify — so `last-deploy` kept naming the previous commit while the app was
+# already serving the new one. The theme gate got slower for a good reason: with
+# Node 24 and jsdom installed it now *executes* the essay editor's DOM cases
+# instead of skipping them (the skip arm refuses that as DISARMED). 1800 s keeps
+# the same meaning — a run that is not progressing is still bounded — with the
+# post-release checks given the time they actually take on this hardware.
+TimeoutStartSec=1800
 
 # Keep the deploy from competing with students taking an exam.
 Nice=10
