@@ -327,7 +327,7 @@ class _Query:
         self.mode, self.payload = "insert", payload
         return self
 
-    def update(self, payload):
+    def update(self, payload, *, returning="representation"):
         self.mode, self.payload = "update", payload
         return self
 

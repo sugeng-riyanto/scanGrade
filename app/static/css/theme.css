@@ -430,6 +430,13 @@ html { transition: background-color .3s, color .3s; }
         :where(.dark) :is(.text-surface-600,.text-surface-700,.text-surface-800,.text-surface-900,.text-slate-600,.text-slate-700,.text-slate-800,.text-slate-900,.text-stone-600,.text-stone-700,.text-stone-800,.text-gray-600,.text-gray-700,.text-gray-800) { color: var(--text); }
         :where(.dark) :is(.text-surface-400,.text-surface-500,.text-slate-400,.text-slate-500,.text-stone-400,.text-stone-500,.text-gray-400,.text-gray-500) { color: var(--text-dim); }
         :where(.dark) :is(.text-surface-200,.text-surface-300,.text-slate-200,.text-slate-300,.text-stone-200,.text-stone-300) { color: var(--text-muted); }
+        /* The same three steps for a hover *target*. An icon button that starts
+           at `text-surface-400` and darkens to `hover:text-surface-800` was the
+           one shape the block above missed: the base class is remapped, the
+           hover class is not, so on a dark page hovering painted near-black on
+           near-black instead of brightening. Same order, same tokens. */
+        :where(.dark) :is(.hover\:text-surface-600:hover,.hover\:text-surface-700:hover,.hover\:text-surface-800:hover,.hover\:text-surface-900:hover,.hover\:text-slate-600:hover,.hover\:text-slate-700:hover,.hover\:text-slate-800:hover,.hover\:text-slate-900:hover) { color: var(--text); }
+        :where(.dark) :is(.hover\:text-surface-400:hover,.hover\:text-surface-500:hover,.hover\:text-slate-400:hover,.hover\:text-slate-500:hover) { color: var(--text-dim); }
 
         /* ── Form controls that carry no fill of their own ────────────────────
            140 of the 204 text/select/textarea elements in the templates have

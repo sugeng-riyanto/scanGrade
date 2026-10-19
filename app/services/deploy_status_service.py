@@ -2743,7 +2743,7 @@ def runner_state(path: pathlib.Path, repo: pathlib.Path, *,
             state["reason_key"] = "launcher_stale"
         return state
 
-    if UNRENDERED in text:
+    if re.search(r'^REPO="@REPO@"$', text, re.M):
         state["kind"] = "copy"
         state["reason_key"] = "unrendered"
         return state

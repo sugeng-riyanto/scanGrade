@@ -533,7 +533,7 @@ class _Table:
         self.payload, self.verb = dict(payload), "insert"
         return self
 
-    def update(self, payload):
+    def update(self, payload, *, returning="representation"):
         self.payload, self.verb = dict(payload), "update"
         return self
 

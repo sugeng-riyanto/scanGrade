@@ -66,13 +66,10 @@ no browser here", which is the same switch the gates themselves honour.
 
 The third part, and where its proof lives
 -----------------------------------------
-`deploy/browser_gate.py` has three parts. The handshake half is driven by
-`deploy/seb_door_gate.py`, which **this branch does not ship** — so a broken
-handshake page cannot be driven here, and this file does not write a case for a
-file it cannot run. What it asserts instead is the property that matters when a
-part is missing: the wrapper answers that part as *unmeasured and named*, never as
-a pass. On a branch that ships the door, its broken page belongs in this file next
-to the other two.
+`deploy/browser_gate.py` has three parts. This file also simulates a release
+without the optional SEB driver, both in process and in the CLI child, so that
+absence remains unmeasured and named even when this checkout ships the driver.
+The shipped handshake is measured by the browser-gate workflow against the app.
 """
 from __future__ import annotations
 
@@ -562,10 +559,20 @@ class TestTheWrapperCanFail:
     would make the run exit 2, and a run that exits 2 keeps the release.
     """
 
-    def _cli(self, pages, *, only="touch,render", extra=()):
+    def _cli(self, pages, *, only="touch,render", extra=(), missing_seb=False):
         command = [sys.executable, str(BROWSER_GATE_PATH),
                    "--base-url", pages.base_url, "--teacher", TEACHER,
                    "--student", STUDENT, "--only", only, *extra]
+        if missing_seb:
+            # Simulate a release without the optional driver in the child process
+            # too; whether this checkout ships it must not disable this regression.
+            bootstrap = (
+                "import sys; "
+                f"sys.path.insert(0, {str(DEPLOY)!r}); "
+                "import browser_gate; browser_gate._seb_module = lambda: None; "
+                "sys.exit(browser_gate.main())"
+            )
+            command = [sys.executable, "-c", bootstrap, *command[2:]]
         done = subprocess.run(command, capture_output=True, text=True, encoding="utf-8",
                               errors="replace", timeout=600)
         return done
@@ -604,17 +611,15 @@ class TestTheWrapperCanFail:
         assert states.get("render") == "finding", states
         assert "unmeasured" not in states.values(), states
 
-    def test_a_part_this_branch_cannot_drive_is_never_a_pass(self, wrapper, pages):
-        """The handshake half, on a branch that ships no `deploy/seb_door_gate.py`.
+    def test_a_part_this_branch_cannot_drive_is_never_a_pass(self, wrapper, pages, monkeypatch):
+        """The handshake half, simulating a release without its optional driver.
 
         It cannot be driven, and the wrapper's answer to that has to be *unmeasured
         and named* — never a pass, because a part folded into a pass is a part
         nobody will ever notice is missing, and never a finding, because a missing
         driver is not a regression in the release.
         """
-        if SEB_GATE_PATH.exists():
-            pytest.skip("this branch ships the handshake gate: its own page belongs in "
-                        "this file, next to the builder's and the pupil's")
+        monkeypatch.setattr(wrapper, "_seb_module", lambda: None)
         part = wrapper.seb_part(pages.base_url, STUDENT, EXAM_ID)
         assert part["state"] == wrapper.STATE_UNMEASURED, part
         assert part["state"] not in (wrapper.STATE_OK, wrapper.STATE_FINDING), part
@@ -622,7 +627,7 @@ class TestTheWrapperCanFail:
 
         # ...and through the command line, so the exit code the deploy reads is 2
         # rather than the 0 a "not shipped" part would give.
-        done = self._cli(pages, only="seb", extra=("--seb-exam", EXAM_ID))
+        done = self._cli(pages, only="seb", extra=("--seb-exam", EXAM_ID), missing_seb=True)
         text = done.stdout + done.stderr
         assert done.returncode == 2, (
             f"a part that cannot be driven answered {done.returncode}:\n{text}")
