@@ -2659,6 +2659,163 @@ worker and process gates each append it to their refusal (the runner passes `--r
 and `--unit`), so the quarantine record and the card carry e.g. "running `62fa16f`,
 3 commit(s) behind `a8889f8` — … restart `scangrade-celery`" instead of two hashes.
 
+## After a release: verifying it from the box
+
+The runner refuses a release it cannot verify, so this section answers the other
+question: **is the release I just pushed the one a pupil is being served?** It is a
+sequence an operator can follow without opening the script, and every value below is
+the script's own default — `REPO=/opt/scangrade`, `SERVICE=scangrade`,
+`APP_PORT=8000`, `STATE_DIR=/var/lib/scangrade-deploy`, branch `main`. A box that
+overrode one passes the flag; the tools take `--repo`, `--base`, `--unit`,
+`--state-dir` for exactly that.
+
+Run them on the box, as root or as the checkout's owner. Steps 1-5 change nothing — the
+only `systemctl` verbs that do are in the last table, as remedies. One rule makes the
+sequence work: **the loopback answer is the process, nginx's is the site.** A reload that did
+not take is visible on `127.0.0.1:8000` and hidden by the public address, because
+nginx answers from whichever worker it likes.
+
+### 1. Did a tick run, and did it say it landed?
+
+```bash
+systemctl is-active scangrade-deploy.timer
+systemctl list-timers scangrade-deploy.timer
+journalctl -u scangrade-deploy --since '20 min ago' --no-pager \
+  | grep -E 'DEPLOY OK|did not pass verification|rolling back|quarantined|FAILED'
+```
+
+`DEPLOY OK: 8abe6fc -> 5c42727` is the line a released tick leaves, `BEFORE -> AFTER`
+as short shas. `did not pass verification` or `quarantined` is a refusal, not a slow
+tick — the refusal's numbers are in the same journal and step 4 is the next move.
+
+An `inactive` timer deploys nothing however green GitHub looks:
+`sudo systemctl enable --now scangrade-deploy.timer`. A box frozen on purpose carries
+`/etc/scangrade-deploy.pause`; the first line of
+`/var/lib/scangrade-deploy/quarantined` is a refused commit, and the next tick skips it
+instead of retrying it every two minutes.
+
+### 2. Does the checkout hold it, and did the runner record it?
+
+```bash
+git -c safe.directory=/opt/scangrade -C /opt/scangrade rev-parse --short HEAD
+head -1 /var/lib/scangrade-deploy/last-deploy
+sed -n '2,3p' /var/lib/scangrade-deploy/last-deploy
+```
+
+The first two must name the release (`5c42727`); the next two lines say when it landed
+and where the recovery point was taken (empty when the release shipped no migration). The
+`safe.directory` exemption is the one the app itself passes: as root on a checkout
+owned by the deploy user, plain `git` refuses with `dubious ownership`, which is a
+reading of the operator's identity rather than of the box.
+
+`HEAD` moved and the record did not is a tick that stopped before it wrote one — the
+journal says at which step. The record moved and `HEAD` did not is a rollback that has
+already happened.
+
+### 3. Is that commit the one being served?
+
+This is the claim the other steps cannot substitute for, and the command is the one the
+runner itself runs after a reload:
+
+```bash
+cd /opt/scangrade && .venv/bin/python deploy/served_commit_gate.py \
+  --base http://127.0.0.1:8000 \
+  --commit "$(git -c safe.directory=/opt/scangrade -C /opt/scangrade rev-parse HEAD)" \
+  --repo /opt/scangrade --unit scangrade \
+  --reporter /opt/scangrade/app/__init__.py; echo "exit=$?"
+```
+
+| exit | reading | next move |
+|---|---|---|
+| `0` | the process is serving this commit | done; steps 4-5 are the wider reading |
+| `3` | another commit answered every probe | `systemctl restart scangrade`, then run it again — still `3` means the process was not started from this checkout |
+| `2` | the app answered without a usable reading, or could not be asked | `systemctl status scangrade`, then read the gate's `why` on the line above; an unmeasured box is not a bad release |
+
+`--commit` takes the **full** sha because the comparison is exact (the abbreviation is
+display only — two commits can share seven characters, and that is the collision where
+the answer matters). Five probes two seconds apart are deliberate — a graceful reload
+can answer once from a worker that is finishing — so a single old answer is the
+transition, and the gate refuses only when none of them named the merged commit.
+
+`--reporter` is not decoration either, and the difference it makes is subtle enough to
+state: the merged tree carries the reading (`served-commit:start` in
+`app/__init__.py`), so an app that answers with **no commit block at all** cannot be
+this release, and the gate refuses (`3`) rather than reading silence as unmeasured. An
+app that answers with a block saying it *cannot* name its commit is `2`, not `3` — the
+same shape a new release on an unreadable checkout has, and the gate will not guess
+between them. When that happens, `commit_readers` is the sharper witness: it ships with
+this release, so an answer **without that key** is a process older than it, whatever
+its `commit` block says (see step 5).
+
+### 4. The whole box in one command
+
+```bash
+cd /opt/scangrade && .venv/bin/python deploy/box_report.py; echo "exit=$?"
+```
+
+It samples `/health` fifteen times and reads the checkout, the release record, the
+journal and the arm check, so it answers "what is this box doing" rather than one
+question. Read `served :`, `readers:`, `verdict: ARMED`, and the `-- not measured --`
+list, which must be empty. Exit `0` every input was read · `1` a gap was named · `2`
+neither the app nor the checkout answered — the last two mean the gaps it printed are
+the finding, not a footnote.
+
+Keep one reading, so the next release can be compared against it:
+
+```bash
+cd /opt/scangrade && .venv/bin/python deploy/box_report.py --json > /tmp/box-$(date +%F).json
+```
+
+The object is key-sorted and its tallies are sorted by key, so `diff` of two runs shows
+what changed on the box — a commit, a new gap, a worker that went blind — and not the
+order the samples happened to arrive in. `schema` is there so a comparison can refuse
+two files it does not know how to read.
+
+If the app answers but `deploy/box_report.py` is not in the checkout (a box still on a
+release from before it landed), the raw shape is:
+
+```bash
+for i in $(seq 1 15); do curl -fsS http://127.0.0.1:8000/health; echo; done \
+| python3 -c 'import sys, json, collections
+c = collections.Counter()
+for line in sys.stdin:
+    commit = (json.loads(line).get("commit") or {})
+    c[commit.get("full_commit") or ("BLIND:" + str(commit.get("reason_key")))] += 1
+print(c)'
+```
+
+One sha with fifteen counts is a box whose workers agree. Two shas is a reload that
+reached some of them; `BLIND:<reason>` is a worker that cannot name its own commit, and
+those are the two states a single `curl` cannot show.
+
+### 5. Through the door a pupil uses
+
+```bash
+curl -fsS https://scangrade.web.id/health | python3 -m json.tool \
+  | grep -E '"commit"|"full_commit"|"key"|"seen"|"blind"'
+```
+
+This proves the site is reachable and which commit the door's answer came from, and it
+carries one check the loopback steps cannot make for an old release: **the presence of
+`commit_readers` is itself a release marker.** The key ships with this release, so a
+`/health` body without it is a process older than the release — even when its `commit`
+block says `available: false` because that worker cannot read its own checkout. Once the
+key is there, `key` (`uniform` / `mixed` / `unmeasured`), `seen` and `blind` are the
+app's own count of every worker, so `uniform` here covers processes step 3 never asked.
+The block does not prove the reload by itself, for the reason at the top: only step 3
+asks the process that was reloaded.
+
+### When the step does not match
+
+| what you see | what it means | what to do |
+|---|---|---|
+| timer `inactive` | no tick will run | `sudo systemctl enable --now scangrade-deploy.timer` |
+| `did not pass verification` | a gate refused and the runner rolled back | read the refusal's numbers above that line; `/var/lib/scangrade-deploy/quarantined` holds the refused commit on line 1 and the reason on line 3, and the next tick skips it |
+| `last-deploy` is not the release | the tick stopped before the record | the journal's last step names what stopped it |
+| `served commit: REFUSED` (exit `3`) | the reload did not take | `systemctl restart scangrade`, then step 3 again |
+| `readers: mixed` (exit `1`) | some workers serve another commit, or cannot name one | restart the app; a worker frozen at import is the only one a reload cannot fix |
+| `NOT MEASURED` with a reason | an input could not be read | the reason is the fix: the URL, the unit name, the path |
+
 ## The way in: the box installs its own key
 
 Every section above assumes something can reach the box. A runner that refuses
