@@ -65,6 +65,10 @@ BUILD_INFO = ROOT / "app" / "utils" / "build_info.py"
 #: `build_info` resolves its own path through this module, so a scratch checkout
 #: that copies only the former cannot import it at all.
 IMPORT_SAFETY = ROOT / "app" / "utils" / "import_safety.py"
+#: And it publishes its reading through this one, so a scratch checkout that copies
+#: only `build_info` fails with an ImportError that says nothing about the reading
+#: this file is about. Both links of the chain travel; see the fixture below.
+COMMIT_READERS = ROOT / "app" / "utils" / "commit_readers.py"
 GIT = shutil.which("git")
 SERVICE = ROOT / "app" / "services" / "deploy_status_service.py"
 TEMPLATE = ROOT / "app" / "templates" / "super_admin" / "deploy_status.html"
@@ -213,6 +217,7 @@ def _checkout_with_the_module(tmp_path: Path) -> Path:
     (repo / "app" / "__init__.py").write_text("", encoding="utf-8")
     shutil.copy(BUILD_INFO, repo / "app" / "utils" / "build_info.py")
     shutil.copy(IMPORT_SAFETY, repo / "app" / "utils" / "import_safety.py")
+    shutil.copy(COMMIT_READERS, repo / "app" / "utils" / "commit_readers.py")
     subprocess.run([GIT, "init", "-q", str(repo)], check=True, capture_output=True,
                    env=git_env())
     for key, value in (("user.email", "t@example.com"), ("user.name", "t")):

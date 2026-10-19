@@ -29,6 +29,7 @@ what is being served right now, not about what the next tick would do.
 from __future__ import annotations
 
 import datetime as _dt
+import os
 import re
 import shutil
 import subprocess
@@ -156,14 +157,195 @@ class TestTheProcessKnowsItsOwnCommit:
     def test_every_git_call_carries_the_no_locks_flag(self):
         """The same rule the checkout reader holds, and for the same reason: a
         status page must not be a writer on the checkout the deploy is about to
-        use. An allowlist rather than a blocklist, so a new call site has to be
-        argued for here instead of quietly joining the reader without it."""
+        use. The argv is built in one place now (`_git_argv`), so the guard is that
+        every probe goes through it: a call site that spells its own argv is the one
+        that would quietly drop a flag."""
         source = (ROOT / "app" / "utils" / "build_info.py").read_text(encoding="utf-8")
-        calls = source.count("[git, ")
-        assert calls >= 3, "no git call sites found — did the reader stop reading?"
-        assert source.count('[git, "--no-optional-locks"') == calls, (
-            "a git call was added without --no-optional-locks, so this page can "
-            "take a lock on the checkout")
+        assert source.count('"--no-optional-locks"') == 1, (
+            "the lock flag is spelled outside `_git_argv`, so a probe can take a "
+            "lock on the checkout or skip the exemption")
+        probes = [line for line in source.splitlines() if "_run(_git_argv(" in line]
+        calls = [line for line in source.splitlines()
+                 if "_run(" in line and not line.lstrip().startswith("def ")]
+        assert len(probes) >= 3, "no git call sites found — did the reader stop reading?"
+        assert len(calls) == len(probes), (
+            "a git call was added without `_git_argv`, so it reads the checkout with "
+            "whatever config the box happens to have")
+
+
+class TestATimeoutIsNotABrokenCheckout:
+    """Five seconds on a cold box is a deadline, not a verdict — and frozen at import it is forever.
+
+    The reading below is taken once and handed out for the life of the process, so a
+    worker that misses it answers `unreadable` until it is replaced. Measured on the
+    box: one worker in three, for days, while the other two read the same checkout
+    normally. That is the shape a timeout makes, and the two failures have opposite
+    next steps — the checkout is fine and worth one more ask, or it is missing and
+    asking again says the same thing more slowly.
+    """
+
+    def test_the_probe_itself_reports_the_deadline_apart(self):
+        """Real signal, not a mocked exception: the process is asked, and it does
+        not answer in time."""
+        rc, out, err = build_info._run(
+            [sys.executable, "-c", "import time; time.sleep(5)"], timeout=0.2)
+        assert rc == build_info.EXIT_TIMEOUT == 124
+        assert out == ""
+        assert "no answer within" in err
+
+    def test_a_timed_out_probe_is_its_own_reason(self, tmp_path, monkeypatch):
+        repo = repo_with_commits(tmp_path)
+        monkeypatch.setattr(
+            build_info, "_run",
+            lambda argv, timeout=build_info.PROBE_TIMEOUT:
+            (build_info.EXIT_TIMEOUT, "", "no answer within 5s"))
+        snap = build_info.read_commit(repo)
+        assert snap["available"] is False
+        assert snap["reason_key"] == "timeout", snap
+        assert "no answer within 5s" in snap["detail"]
+
+    def test_the_import_time_reading_asks_once_more(self, monkeypatch):
+        readings = [
+            {"available": False, "reason_key": "timeout", "detail": "no answer within 5s"},
+            {"available": True, "reason_key": None, "commit": "abc1234",
+             "detail": None},
+        ]
+        calls = []
+
+        def fake_reading(repo=build_info.CODE_ROOT):
+            calls.append(repo)
+            return readings[min(len(calls) - 1, 1)]
+
+        monkeypatch.setattr(build_info, "read_commit", fake_reading)
+        snap = build_info.read_own_commit(pause=0)
+        assert len(calls) == 2, "a timeout at import was not retried"
+        assert snap["available"] is True and snap["commit"] == "abc1234"
+
+    def test_an_answer_that_is_not_a_timeout_is_not_asked_twice(self, monkeypatch):
+        calls = []
+
+        def fake_reading(repo=build_info.CODE_ROOT):
+            calls.append(repo)
+            return {"available": False, "reason_key": "not_a_checkout", "detail": None}
+
+        monkeypatch.setattr(build_info, "read_commit", fake_reading)
+        assert build_info.read_own_commit(pause=0)["reason_key"] == "not_a_checkout"
+        assert len(calls) == 1, "a broken checkout was re-read as if it might heal"
+
+    def test_two_timeouts_say_it_was_tried_twice(self, monkeypatch):
+        monkeypatch.setattr(
+            build_info, "read_commit",
+            lambda repo=build_info.CODE_ROOT:
+            {"available": False, "reason_key": "timeout",
+             "detail": "no answer within 5s"})
+        snap = build_info.read_own_commit(pause=0)
+        assert snap["reason_key"] == "timeout"
+        assert "twice at import" in snap["detail"]
+
+    def test_the_reader_stays_a_single_attempt(self, tmp_path, monkeypatch):
+        """The retry belongs to the import-time reading. A page asking about some
+        other checkout must not pay for a second probe it did not ask for."""
+        repo = repo_with_commits(tmp_path)
+        calls = []
+
+        def fake_run(argv, timeout=build_info.PROBE_TIMEOUT):
+            calls.append(argv)
+            return build_info.EXIT_TIMEOUT, "", "no answer within 5s"
+
+        monkeypatch.setattr(build_info, "_run", fake_run)
+        snap = build_info.read_commit(repo)
+        assert snap["reason_key"] == "timeout"
+        assert len(calls) == 1, calls
+
+
+class TestACheckoutGitRefusesIsStillRead:
+    """The one failure that looks like a healthy site.
+
+    Since 2.35.2 git refuses every command in a repository owned by another user,
+    with "detected dubious ownership". For a box whose checkout belongs to the
+    deploy user while the app runs as the service user that refusal is certain, and
+    it is indistinguishable from a broken checkout: `/health` answers `unreadable`
+    (measured on the box, one worker in three, cause unsettled) while every page is
+    fine — and a served-commit gate that cannot be told a sha does not refuse a
+    release, it reports *could not measure*. The remedy had been a global
+    `safe.directory`, which is a file in the service user's home that an app cannot
+    write and an operator with no shell cannot add.
+
+    The fixture is git's own: `GIT_TEST_ASSUME_DIFFERENT_OWNER` makes it treat the
+    checkout as someone else's, and both config scopes are emptied first — the
+    workstation this suite runs on carries `safe.directory = *`, which would make
+    every test below pass while reproducing nothing. That is asserted as a control
+    rather than assumed: a fixture that stopped refusing would report green about
+    an exemption nobody needed.
+    """
+
+    @staticmethod
+    def _as_another_user(monkeypatch) -> None:
+        monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+        monkeypatch.setenv("GIT_CONFIG_SYSTEM", os.devnull)
+        monkeypatch.setenv("GIT_TEST_ASSUME_DIFFERENT_OWNER", "1")
+
+    def test_the_fixture_reproduces_the_box(self, tmp_path, monkeypatch):
+        repo = repo_with_commits(tmp_path)
+        self._as_another_user(monkeypatch)
+        refused = _git("rev-parse", "HEAD", cwd=repo)
+        assert refused.returncode != 0, (
+            "git read the checkout anyway, so this class measures no refusal — a "
+            "config file on this box is exempting it")
+        assert "dubious ownership" in refused.stderr, refused.stderr
+
+    def test_it_reads_its_own_commit_anyway(self, tmp_path, monkeypatch):
+        repo = repo_with_commits(tmp_path)
+        expected = short_of(repo)
+        self._as_another_user(monkeypatch)
+        snap = build_info.read_commit(repo)
+        assert snap["available"] is True, snap["detail"]
+        assert snap["commit"] == expected
+        assert snap["subject"] == "first"
+        assert snap["committed_at"], "the exemption must not cost the rest of the reading"
+
+    def test_a_refusal_without_the_exemption_names_its_cause(self, tmp_path, monkeypatch):
+        """`unreadable` on its own is what sent an operator looking for a broken
+        checkout while the site was healthy and the cause was an ownership check.
+        Git writes the sentence to stderr, so stderr is where the reason is read."""
+        repo = repo_with_commits(tmp_path)
+        self._as_another_user(monkeypatch)
+        monkeypatch.setattr(
+            build_info, "_git_argv",
+            lambda git, repo, *probe: [git, "--no-optional-locks", "-C", str(repo),
+                                       *probe])
+        snap = build_info.read_commit(repo)
+        assert snap["available"] is False and snap["reason_key"] == "unreadable"
+        assert "dubious ownership" in (snap["detail"] or ""), (
+            "the refusal is reported without the sentence that explains it")
+
+    def test_every_probe_carries_the_exemption_for_the_resolved_directory(
+            self, tmp_path, monkeypatch):
+        """Reached through a symlink, so the path handed to `safe.directory` is not
+        the path handed to `-C`: git compares the directory it resolved, and an
+        unresolved spelling is an exemption that is accepted and then matches
+        nothing — a silent no, at the exact moment the box needs a sha."""
+        repo = repo_with_commits(tmp_path)
+        link = tmp_path / "linked-checkout"
+        try:
+            link.symlink_to(repo, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            pytest.skip("this box cannot make a symlink to a checkout")
+        seen: list[list[str]] = []
+        real_run = build_info._run
+
+        def recording(argv, timeout=5):
+            seen.append(list(argv))
+            return real_run(argv, timeout=timeout)
+
+        monkeypatch.setattr(build_info, "_run", recording)
+        assert build_info.read_commit(link)["available"] is True
+        assert len(seen) >= 3, "the reading stopped asking git"
+        exempt = f"safe.directory={repo.resolve()}"
+        for argv in seen:
+            assert "--no-optional-locks" in argv
+            assert exempt in argv, (
+                f"a probe did not exempt the resolved checkout: {argv}")
 
 
 # ── where the running code sits ──────────────────────────────────────────────

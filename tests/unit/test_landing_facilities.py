@@ -88,7 +88,8 @@ EVIDENCE: dict[str, list[tuple[str, list[str]]]] = {
                                             r"\bdef get_trial_days\b"]),
     ],
     "scientific-calculator": [
-        ("app/templates/student/take_exam.html", [r"\bcalcSciFunc\b", r"\{l:'sin'"]),
+        ("app/templates/student/take_exam.html", [r"\bcalcSciFunc\b",
+                                                  r"calcSciFunc\('sin'\)"]),
     ],
     # The answer sheet is both *made* and *read* by this app, so the card has to
     # name both halves: a generator with no reader is a PDF, and a reader with no

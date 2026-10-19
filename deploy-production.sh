@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # ─── ScanGrade Production Deploy ─────────────────────────────────
 # Run this on the VPS via Biznet GIO web console
 # Usage: bash deploy-production.sh

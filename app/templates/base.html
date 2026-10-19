@@ -828,8 +828,15 @@ window.sgSavePrefs = function (patch) {
         </header>
 
         <!-- Page Content -->
+        {# `sg-content` names this element, and that is a contract like the three
+           `sg-app-*` hooks above: a page that needs the width of its *device*
+           rather than the 80rem reading column asks for it by naming this
+           element, and its own stylesheet then turns the cap off
+           (`body.sg-exam .sg-content` in `student/take_exam.html`). Measured at
+           1440px the cap left 74px of the screen empty on each side, and 320px at
+           1920 — the room the exam paper and its options could have had. #}
         <main class="flex-1 overflow-y-auto">
-            <div class="p-4 lg:p-6 max-w-7xl mx-auto animate-fade-in">
+            <div class="sg-content p-4 lg:p-6 max-w-7xl mx-auto animate-fade-in">
                 {% block content %}{% endblock %}
             </div>
         </main>

@@ -209,6 +209,19 @@
 #     page that grows an extra value satisfies every one of those assertions; the
 #     marker list is measured against the whole corpus at zero hits before it ships.
 #
+#   tests/unit/test_shell_path_portability.py
+#     a test or tool that runs a shell by an absolute path — `["/bin/bash",
+#     script]`, `os.system("/bin/sh -c …")`, `shutil.which("/bin/bash")` — which
+#     passes on the box and dies on the Windows checkout the same suite also runs
+#     on; and the same claim one line earlier, in a tracked script's `#!` line.
+#     The rule is about paths rather than interpreters: a bare name,
+#     `sys.executable`, `#!/usr/bin/env bash` and `#!/bin/sh` all pass. Python is
+#     read with `ast` rather than grepped, because a sentence *about* `/bin/bash`
+#     is not a process call and a guard that reads prose refuses its own
+#     explanation; it reads `tests/` and `deploy/` — the trees a checkout runs on
+#     either machine — and the shebang half reads the files git tracks, so a
+#     scratch script in a working tree is not a claim about what a clone has.
+#
 #   deploy/render_fixture_gate.py
 #     whether the report documents and the fixtures that render them still agree.
 #     A sheet that starts reading a key its fixture never supplies draws the hole as
@@ -222,7 +235,7 @@ set -uo pipefail
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # Word-split on purpose: pytest takes them as separate paths.
-TESTS="tests/unit/test_dark_theme_contrast.py tests/unit/test_tailwind_class_names.py tests/unit/test_theme_stylesheet.py tests/unit/test_language_toggle.py tests/unit/test_i18n_coverage.py tests/unit/test_css_freshness.py tests/unit/test_landing_facilities.py tests/unit/test_static_tree.py tests/unit/test_no_committed_secrets.py tests/unit/test_render_fixture_gate.py tests/unit/test_template_artifacts.py tests/unit/test_rendered_absence.py tests/unit/test_essay_answer_integrity.py tests/unit/test_doc_links.py tests/unit/test_supabase_region.py tests/unit/test_ci_workflows.py"
+TESTS="tests/unit/test_dark_theme_contrast.py tests/unit/test_tailwind_class_names.py tests/unit/test_theme_stylesheet.py tests/unit/test_language_toggle.py tests/unit/test_i18n_coverage.py tests/unit/test_css_freshness.py tests/unit/test_landing_facilities.py tests/unit/test_static_tree.py tests/unit/test_no_committed_secrets.py tests/unit/test_render_fixture_gate.py tests/unit/test_template_artifacts.py tests/unit/test_rendered_absence.py tests/unit/test_essay_answer_integrity.py tests/unit/test_essay_toolbar.py tests/unit/test_doc_links.py tests/unit/test_supabase_region.py tests/unit/test_ci_workflows.py tests/unit/test_shell_path_portability.py"
 
 # The app's own refusal markers, and the reason they are named here rather than
 # spelled out in the block that reads them: they are literals in

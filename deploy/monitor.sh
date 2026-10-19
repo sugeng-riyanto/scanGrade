@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # ============================================================
 # ScanGrade — Lightweight System Monitor
 # Logs CPU, RAM, Disk, response time every 5 minutes

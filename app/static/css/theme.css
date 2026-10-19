@@ -461,7 +461,7 @@ html { transition: background-color .3s, color .3s; }
            hues that already read on dark, and are left alone.
            ═════════════════════════════════════════════════════════════════════ */
         :where(.dark) :is(.hover\:bg-surface-50,.hover\:bg-surface-100,.hover\:bg-surface-200,.hover\:bg-slate-50,.hover\:bg-slate-100,.hover\:bg-slate-200,.hover\:bg-slate-300,.hover\:bg-stone-50,.hover\:bg-stone-100,.hover\:bg-stone-300,.hover\:bg-gray-50,.hover\:bg-gray-100,.hover\:bg-gray-200,.hover\:bg-white):hover { background: var(--bg-hover); }
-        :where(.dark) :is(.hover\:text-surface-600,.hover\:text-surface-700,.hover\:text-slate-600,.hover\:text-slate-700,.hover\:text-stone-600,.hover\:text-stone-700,.hover\:text-gray-600,.hover\:text-gray-700):hover { color: var(--text); }
+        :where(.dark) :is(.hover\:text-surface-600,.hover\:text-surface-700,.hover\:text-surface-800,.hover\:text-surface-900,.hover\:text-slate-600,.hover\:text-slate-700,.hover\:text-stone-600,.hover\:text-stone-700,.hover\:text-gray-600,.hover\:text-gray-700):hover { color: var(--text); }
         :where(.dark) :is(.hover\:text-surface-400,.hover\:text-surface-500,.hover\:text-slate-400,.hover\:text-slate-500,.hover\:text-stone-400,.hover\:text-stone-500,.hover\:text-gray-400,.hover\:text-gray-500):hover { color: var(--text-dim); }
         :where(.dark) :is(.hover\:border-surface-200,.hover\:border-surface-300,.hover\:border-slate-300):hover { border-color: var(--border); }
 
@@ -832,3 +832,16 @@ html { transition: background-color .3s, color .3s; }
         .sg-essay-para ul ul { list-style: circle outside; }
         .sg-essay-para ul ul ul { list-style: square outside; }
         .sg-essay-para ol ol { list-style: lower-alpha outside; }
+        /* A table the pupil inserts is drawn on the sheet's own tokens: a border
+           fixed to slate would be a light-grey line on a dark sheet. The cells are
+           editable like the rest of the paragraph, and `textOf` reads them apart
+           by a tab and their rows by a line, so the stored answer is a table and
+           not every cell run together. */
+        .sg-essay-para table { border-collapse: collapse; margin: .4rem 0; }
+        .sg-essay-para td,
+        .sg-essay-para th {
+            border: 1px solid var(--border-strong);
+            min-width: 2.5rem;
+            padding: .25rem .5rem;
+            vertical-align: top;
+        }

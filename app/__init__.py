@@ -114,6 +114,44 @@ def served_commit():
 # served-commit:end
 
 
+# ── the rest of the box's workers ────────────────────────────────────────────
+#
+# `served_commit` above is one worker's answer, and `/health` is answered by
+# whichever worker the connection reached — so a box where one worker cannot read
+# its own checkout looked exactly like a healthy one, once per sample. That is not
+# hypothetical: one worker in three answered `unreadable` for two days while every
+# page kept serving.
+#
+# `app/utils/commit_readers.py` collects each worker's frozen reading into a marker
+# at import, so this route can count them in one request: how many named a commit,
+# how many could not and why, whether they named the *same* commit (a reload that
+# landed in some of them is the other half of "mixed"), and how many are missing
+# against `GUNICORN_WORKERS`.
+#
+# The site stays 200 and keeps `status: "ok"` when this block says `mixed`: a blind
+# worker needs a restart, not an outage, and a health endpoint that takes the box
+# out of rotation for a bookkeeping fault is a worse failure than the one it
+# reports. Nothing new is published about the release either — the sha and a reason
+# are what `served_commit` already carries publicly; the commit's subject is not.
+#: What `/health` publishes about the box's workers: a projection rather than the
+#: service's own dict, for the same reason `served_commit` is one. The marker
+#: directory is a path on this host and is nobody's business, and a field added to
+#: `commit_readers.state()` from here on has to be a decision rather than a
+#: widening. `tests/unit/test_commit_readers.py` asserts this exact set.
+COMMIT_READERS_FIELDS = ("key", "seen", "blind", "commits", "reasons", "skipped",
+                         "expected", "unregistered", "detail")
+
+
+def commit_readers_state() -> dict:
+    """The workers this request did not reach, counted from their own markers."""
+    try:
+        from app.utils import build_info, commit_readers
+        reading = commit_readers.state(repo=build_info.CODE_ROOT)
+    except Exception as exc:  # a reading the endpoint cannot take is not a 500
+        reading = {"key": "unmeasured", "detail": "%s: %s" % (type(exc).__name__, exc)}
+    return {field: reading.get(field) for field in COMMIT_READERS_FIELDS}
+
+
 def create_app(env=None):
     app = Flask(__name__)
     cfg = get_config(env)
@@ -658,6 +696,10 @@ def create_app(env=None):
             # commit it just merged, so a reload that silently did nothing is refused
             # instead of serving stale code behind gates that describe the wrong release.
             "commit": served_commit(),
+            # And the same reading for the workers that did not answer this request —
+            # `commit_readers_state` above. `key: "mixed"` is the sentence a single
+            # sample could never produce.
+            "commit_readers": commit_readers_state(),
         })
 
     @app.route("/monitor")

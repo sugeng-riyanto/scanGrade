@@ -82,8 +82,12 @@ MUTATIONS = [
 
     ('the deploy gate stops running this guard',
      'deploy/theme_gate.sh',
-     ' tests/unit/test_ci_workflows.py"',
-     '"'),
+     # Name *and* trailing space: the anchor used to include the closing quote, which
+     # stopped matching the moment another suite was appended to the same list — the
+     # one shape a mutation harness must not have, since a "not injected" line reads
+     # like a clean score to anyone skimming the run.
+     'tests/unit/test_ci_workflows.py ',
+     ''),
 
     ('the workflow stops parsing, so the job never starts at all',
      WORKFLOW,
