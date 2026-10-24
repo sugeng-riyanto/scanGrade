@@ -1,4 +1,5 @@
 """Isolated staging gate tests using stdlib only (fast independent CI)."""
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -62,17 +63,43 @@ class ScanMeetStagingBoundary(unittest.TestCase):
             secret = tmp_path / "outside.env"
             secret.write_text("example=not-a-secret")
             secret.chmod(0o644)
-            self.assertTrue(any("0600" in s for s in gate.validate_file(secret, checkout)))
+            self.assertTrue(any("0600" in s
+                                for s in gate.validate_file(secret, checkout, measure=True)))
 
     def test_check_file_accepts_external_private_secret(self):
+        """No rule but the mode refuses this file, on every platform.
+
+        The mode half is asked separately below with a synthetic integer: Windows
+        cannot produce a 0600 file, so a test that asserted `[]` here would fail on
+        the developer checkout for a reason that is not a defect — and a test that
+        patched the flag would be asserting its own patch.
+        """
         with tempfile.TemporaryDirectory() as root:
             tmp_path = Path(root)
             checkout = tmp_path / "checkout"
             checkout.mkdir()
             secret = tmp_path / "outside.env"
             secret.write_text("example=not-a-secret")
-            secret.chmod(0o600)
-            self.assertEqual(gate.validate_file(secret, checkout), [])
+            self.assertEqual(gate.validate_file(secret, checkout, measure=False), [])
+
+    def test_private_mode_is_accepted(self):
+        self.assertEqual(gate.mode_problem(0o100600, measure=True), [])
+
+    def test_world_readable_mode_is_refused(self):
+        self.assertTrue(any("0600" in s for s in gate.mode_problem(0o100644, measure=True)))
+
+    def test_group_or_other_write_is_refused(self):
+        self.assertTrue(any("0600" in s for s in gate.mode_problem(0o100620, measure=True)))
+
+    def test_a_directory_is_not_an_env_file(self):
+        self.assertTrue(gate.mode_problem(0o040700, measure=True))
+
+    def test_a_platform_without_posix_bits_does_not_pretend_to_have_measured(self):
+        """Windows reports 0o666 for a chmod-0600 file; claiming 0600 was checked
+        there would refuse every valid env and pass the world-readable test while
+        reading nothing."""
+        self.assertEqual(gate.mode_problem(0o100644, measure=False), [])
+        self.assertEqual(gate.MEASURE_MODES, os.name == "posix")
 
     def test_check_file_refuses_symlink(self):
         with tempfile.TemporaryDirectory() as root:

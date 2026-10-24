@@ -18,6 +18,15 @@ from urllib.parse import urlsplit
 
 from deploy.livekit_preflight import audit, parse_env
 
+#: POSIX mode bits exist only where the platform implements them. On Windows
+#: `stat().st_mode` reports 0o666 for a file that `chmod(0o600)` was applied to,
+#: so requiring 0600 there refused *every* valid staging env — and, worse, the
+#: "world-readable" refusal passed without reading anything, because both files
+#: look the same. The mode is therefore measured only where it means something,
+#: and `main()` says out loud when it was not measured: a pass that claims a
+#: permission check nobody made is the defect, not a caveat.
+MEASURE_MODES = os.name == "posix"
+
 PRODUCTION_CHECKOUT = Path("/opt/scangrade")
 PRODUCTION_SITE = "scan-grade.app"
 REQUIRED = ("SUPABASE_URL", "SUPABASE_SERVICE_KEY",
@@ -61,7 +70,24 @@ def validate(settings: dict[str, str], production_ref: str) -> list[str]:
     return problems
 
 
-def validate_file(path: Path, checkout: Path) -> list[str]:
+def mode_problem(mode: int, measure: bool | None = None) -> list[str]:
+    """What a file's mode says about it — the half that is a pure function.
+
+    Split out so the rule is testable on any platform with a synthetic integer:
+    the Windows checkout cannot produce a 0644/0600 pair, and a test that only
+    runs where the difference exists would leave the rule unread on the machine
+    this repository is developed on.
+    """
+    measured = MEASURE_MODES if measure is None else measure
+    problems = []
+    if not stat.S_ISREG(mode):
+        problems.append("Private staging env is not a regular file")
+    if measured and mode & (stat.S_IRWXG | stat.S_IRWXO):
+        problems.append("Private staging env must have permissions 0600")
+    return problems
+
+
+def validate_file(path: Path, checkout: Path, measure: bool | None = None) -> list[str]:
     """Refuse prod checkout, in-repo secrets, symlinks and unsafe file mode."""
     problems = []
     directory = checkout.resolve()
@@ -73,11 +99,7 @@ def validate_file(path: Path, checkout: Path) -> list[str]:
     if path.is_symlink():
         problems.append("Private staging env must not be a symlink")
     try:
-        mode = path.stat().st_mode
-        if not stat.S_ISREG(mode):
-            problems.append("Private staging env is not a regular file")
-        if mode & (stat.S_IRWXG | stat.S_IRWXO):
-            problems.append("Private staging env must have permissions 0600")
+        problems.extend(mode_problem(path.stat().st_mode, measure))
     except OSError:
         problems.append("Private staging env is not readable")
     return problems
@@ -107,6 +129,13 @@ def main(argv=None) -> int:
         for issue in issues:
             print("FAIL: " + issue)
         return 1
+    if not MEASURE_MODES:
+        # Said before PASS, because the reader has to know what this run did not
+        # check. The staging host is Linux, so the file is made with `umask 077`
+        # there; this note only keeps a Windows dry-run from overclaiming.
+        print("NOTE: file permissions were NOT measured on this platform "
+              "(no POSIX group/other bits); create the env file with umask 077 "
+              "on the staging host")
     print("PASS: isolated ScanMeet staging configuration (offline)")
     if args.probe_livekit:
         try:
