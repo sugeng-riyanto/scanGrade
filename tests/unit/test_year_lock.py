@@ -41,6 +41,9 @@ EXEMPT = {
         "records a pupil's temporary request to speak; no exam state is changed",
     "live_bp /sessions/<sid>/hand-raises/<rid>/<action>":
         "authorises only a temporary LiveKit microphone; no year's records change",
+    "live_bp /sessions/<sid>/hand-raises/<rid>/reconcile":
+        "clears a microphone grant stuck mid-moderation in the isolated media "
+        "tables, muting the pupil; no year's records change",
     "live_bp /sessions/<sid>/end":
         "closes media supervision, not the exam sitting or any submitted answer",
     "live_bp /sessions/<sid>/token":
