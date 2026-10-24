@@ -73,4 +73,11 @@ def allowed_sources(role: str, microphone_approved: bool = False) -> list[str]:
     raise ValueError("Unrecognized Live participant role")
 
 
+#: The statuses migration 070's `scan_live_one_open_request` index counts as one
+#: open request per pupil. `closing` belongs here because a close in flight still
+#: owns the microphone: a pupil whose row is parked in `closing` has an open
+#: request, and the route must show them that row instead of inserting a second
+#: one the partial index will refuse.
+OPEN_GRANTS = ("pending", "approving", "approved", "closing")
+
 TOKEN_TTL = timedelta(minutes=5)
