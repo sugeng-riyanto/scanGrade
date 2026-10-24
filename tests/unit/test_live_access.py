@@ -78,16 +78,17 @@ def test_join_token_grants_without_network(monkeypatch):
     cfg = {"LIVEKIT_URL": "wss://example.invalid",
            "LIVEKIT_API_KEY": "test-key", "LIVEKIT_API_SECRET": "test-secret"}
     result = livekit_gateway.issue_join_token(
-        cfg, "s1", "room-1", "u1", "student")
+        cfg, "s1", "room-1", "u1", "student", supervisor_id="teacher-1")
     assert result["token"] == "signed-fixture"
     assert result["room"] == "room-1"
     assert result["mic_approved"] is False
+    assert result["supervisor_identity"] == live_policy.participant_identity(cfg, "s1", "teacher-1")
     assert grants_seen[0].can_publish_sources == ["camera"]
     assert grants_seen[0].can_publish_data is False
     assert grants_seen[0].room_admin is False
     assert grants_seen[0].room_record is False
     assert metadata_seen[0] == '{"role":"student"}'
-    livekit_gateway.issue_join_token(cfg, "s1", "room-1", "u1", "student", True)
+    livekit_gateway.issue_join_token(cfg, "s1", "room-1", "u1", "student", True, supervisor_id="teacher-1")
     assert grants_seen[1].can_publish_sources == ["camera", "microphone"]
 
 
@@ -98,3 +99,14 @@ def test_permissions_reject_unknown_role():
         pass
     else:
         raise AssertionError("unknown role must not get publish permission")
+
+
+def test_student_join_fails_closed_without_supervisor():
+    cfg = {"LIVEKIT_URL": "wss://example.invalid",
+           "LIVEKIT_API_KEY": "test-key", "LIVEKIT_API_SECRET": "test-secret"}
+    try:
+        livekit_gateway.issue_join_token(cfg, "s1", "room", "student", "student")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("student token must require an invigilator identity")

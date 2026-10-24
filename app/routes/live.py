@@ -138,7 +138,7 @@ def join_token(sid):
     try:
         result = livekit_gateway.issue_join_token(
             current_app.config, sid, session["room_name"], g.user_id,
-            role, approved)
+            role, approved, supervisor_id=session.get("created_by"))
     except (ImportError, RuntimeError, ValueError):
         log.warning("LiveKit join token unavailable", exc_info=True)
         return _unavailable()

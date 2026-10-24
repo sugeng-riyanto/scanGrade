@@ -99,6 +99,18 @@
         message("Koneksi pengawasan terputus. Ujian tetap berjalan.", true);
       });
       await room.connect(grant.url, grant.token);
+      // LiveKit enforces this at the SFU. A pupil only permits the room
+      // supervisor to receive their camera/mic, even if another pupil hacks
+      // their own canSubscribe client. Set BEFORE any track is published.
+      if (!staff) {
+        if (!grant.supervisor_identity ||
+            typeof room.localParticipant.setTrackSubscriptionPermissions !== "function") {
+          throw Error("Media subscription privacy guard missing");
+        }
+        room.localParticipant.setTrackSubscriptionPermissions(false, [{
+          participantIdentity: grant.supervisor_identity, allowAll: true,
+        }]);
+      }
       try {
         await room.localParticipant.setCameraEnabled(true);
       } catch (e) {

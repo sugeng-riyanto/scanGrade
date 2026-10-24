@@ -48,8 +48,11 @@ Implementation branch: feature/scangrade-livekit-exam-20261024.
   requires cleanup. Already-issued tokens are short-lived.
 - Rate limits, load test, cross-tenant integration tests and secret management are
   required prior to enabling production. Vendor the JS SDK instead of CDN.
-- Student can_subscribe=true currently permits requesting other student tracks;
-  UI hiding does NOT enforce privacy. Enforce subscription permissions before release.
+- Pilot student publisher sets SFU track subscription permissions BEFORE publishing
+  so only the room creator can subscribe to that pupil. Needs independent security
+  verification and malicious-client testing before rollout; an altered publisher
+  could loosen permissions on its own camera. Additional teacher observers require
+  explicit allowance, not UI-only filtering.
 - Never run migration, set flags or deploy to production just by merging this branch.
 
 ## Rollback

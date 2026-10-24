@@ -8,12 +8,17 @@ from app.services.live_policy import (
 
 
 def issue_join_token(config, session_id: str, room: str, user_id: str,
-                     role: str, microphone_approved: bool = False) -> dict:
+                     role: str, microphone_approved: bool = False,
+                     supervisor_id: str | None = None) -> dict:
     if not client_ready(config):
         raise RuntimeError("LiveKit credentials are not configured")
     from livekit import api
 
     identity = participant_identity(config, session_id, user_id)
+    if role == "student" and not supervisor_id:
+        raise ValueError("Exam supervisor is required for student track isolation")
+    supervisor_identity = (participant_identity(config, session_id, supervisor_id)
+                           if role == "student" else None)
     grants = api.VideoGrants(
         room=room, room_join=True, room_admin=False, room_record=False,
         room_create=False, can_publish=True, can_subscribe=True,
@@ -26,7 +31,8 @@ def issue_join_token(config, session_id: str, room: str, user_id: str,
            .with_grants(grants).with_ttl(TOKEN_TTL).to_jwt())
     return {"url": setting(config, "LIVEKIT_URL"), "token": jwt,
             "room": room, "identity": identity, "role": role,
-            "mic_approved": bool(microphone_approved)}
+            "mic_approved": bool(microphone_approved),
+            "supervisor_identity": supervisor_identity}
 
 
 async def _set_student_mic(config, session_id, room, student_id, enabled):
