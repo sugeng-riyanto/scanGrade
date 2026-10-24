@@ -12,8 +12,15 @@ import argparse
 import asyncio
 from pathlib import Path
 
-from app.services.live_policy import server_api_url
 from deploy.livekit_preflight import audit, parse_env
+
+
+def _server_api_url(settings: dict[str, str]) -> str:
+    """LiveKit API endpoint without importing the Flask application in preflight."""
+    url = settings.get("LIVEKIT_URL", "")
+    if not url.startswith("wss://") or not url[6:]:
+        raise ValueError("LIVEKIT_URL must be a secure wss:// endpoint")
+    return "https://" + url[6:]
 
 
 class MissingSdk(RuntimeError):
@@ -45,7 +52,7 @@ async def probe(settings: dict[str, str]) -> None:
     api = _api()
 
     client = api.LiveKitAPI(
-        url=server_api_url(settings),
+        url=_server_api_url(settings),
         api_key=settings["LIVEKIT_API_KEY"],
         api_secret=settings["LIVEKIT_API_SECRET"],
     )
