@@ -2651,16 +2651,16 @@ body.sg-exam .sg-content { max-width: none; margin-left: 0; margin-right: 0; }
    execution, so the globals exist when `x-data` is evaluated — the same way the
    exam builder loads this file. See tests/unit/test_exam_script_order.py. #}
 {% block scripts %}
-<script src="/static/js/exam-media.js"></script>
-<script src="/static/js/tools.js"></script>
+<script src="{{ asset_v('js/exam-media.js') }}"></script>
+<script src="{{ asset_v('js/tools.js') }}"></script>
 <!-- Classic, for the same reason as the two above: `examApp(...)` reads the
      module while it is built, and a deferred helper would not exist yet. -->
-<script src="/static/js/exam-view.js"></script>
+<script src="{{ asset_v('js/exam-view.js') }}"></script>
 <!-- The essay surface's list/font/paste behaviour. Classic, like the two above,
      because the component reads `window.SGEssayEditor` while it is built. -->
-<script src="/static/js/exam-graph.js"></script>
-<script src="/static/js/exam-graph-local.js"></script>
-<script src="/static/js/essay-editor.js"></script>
+<script src="{{ asset_v('js/exam-graph.js') }}"></script>
+<script src="{{ asset_v('js/exam-graph-local.js') }}"></script>
+<script src="{{ asset_v('js/essay-editor.js') }}"></script>
 <script>
 // The lightbox is page furniture rather than exam state, so it is wired here and
 // not inside Alpine: the overlay has to work while a panel covers the exam bar.
@@ -5961,11 +5961,21 @@ function examApp(duration, totalQ) {
         // the empty one. Measured on the live preview paper before this change:
         // `div.sg-essay-para` held "halo dunia", `answersText[1]` was "".
         paragraphEl(qIdx, para) {
-            if (!para) return null;
-            const wanted = qIdx + ':' + para.id;
             const nodes = document.querySelectorAll('[data-para]');
+            const wanted = para ? qIdx + ':' + para.id : '';
             for (let i = 0; i < nodes.length; i += 1) {
                 if (nodes[i].getAttribute('data-para') === wanted) return nodes[i];
+            }
+            // No stored row for this question: the sheet on screen was drawn by the
+            // `x-for` fallback (`paragraphs[i] || [{id: 'p0', …}]`), which is what a
+            // paper whose question order was rebuilt after seeding looks like from
+            // the state's side. The paragraph the pupil is looking at is still the
+            // one to act on, so it is found by its prefix. Answering `null` here is
+            // what left every writing tool dead on a box that typing worked in —
+            // the input handler creates the row, and a toolbar never did.
+            const prefix = qIdx + ':';
+            for (let i = 0; i < nodes.length; i += 1) {
+                if ((nodes[i].getAttribute('data-para') || '').indexOf(prefix) === 0) return nodes[i];
             }
             return null;
         },
@@ -6175,14 +6185,20 @@ function examApp(duration, totalQ) {
                 this.onParagraphInput(qIdx, pIdx, ev.target);
             }
         },
+        // Enter is a **line** break inside the paragraph; `+ Paragraph` is what
+        // adds a paragraph. It used to add a paragraph too, so two presses in the
+        // middle of one answer left three boxes and one paragraph's worth of text
+        // — the sheet, the counter and the toolbar all disagree about what the
+        // pupil had written. Inside a list the browser's own Enter makes the next
+        // bullet (and an empty item leaves the list), which is what a bulleted
+        // answer needs, so that case is left alone.
         onParagraphEnter(qIdx, pIdx, ev) {
-            if (ev.shiftKey) return;             // a soft line break inside this block
-            // Inside a list item the browser's own Enter makes the next bullet (and
-            // an empty item leaves the list), which is the behaviour a pupil expects;
-            // only outside a list does the page add a paragraph.
             if (window.SGEssayEditor && window.SGEssayEditor.inListItem(ev.target)) return;
             ev.preventDefault();
-            this.addParagraph(qIdx, pIdx + 1);
+            if (!window.SGEssayEditor) return;
+            if (window.SGEssayEditor.lineBreak(ev.target)) {
+                this.onParagraphInput(qIdx, pIdx, ev.target);
+            }
         },
         onParagraphPaste(qIdx, pIdx, ev) {
             // Plain text only: a pasted web page would otherwise bring its own fonts

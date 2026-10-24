@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 from app.services.live_policy import (
-    TOKEN_TTL, allowed_sources, client_ready, participant_identity, setting,
+    TOKEN_TTL, LIVE_STUDENT, allowed_sources, client_ready, participant_identity, setting,
 )
 
 
@@ -12,13 +12,14 @@ def issue_join_token(config, session_id: str, room: str, user_id: str,
                      supervisor_id: str | None = None) -> dict:
     if not client_ready(config):
         raise RuntimeError("LiveKit credentials are not configured")
+    # Fail closed even without the optional SDK; validation must precede import.
+    if role == LIVE_STUDENT and not supervisor_id:
+        raise ValueError("Exam supervisor is required for student track isolation")
     from livekit import api
 
     identity = participant_identity(config, session_id, user_id)
-    if role == "student" and not supervisor_id:
-        raise ValueError("Exam supervisor is required for student track isolation")
     supervisor_identity = (participant_identity(config, session_id, supervisor_id)
-                           if role == "student" else None)
+                           if role == LIVE_STUDENT else None)
     grants = api.VideoGrants(
         room=room, room_join=True, room_admin=False, room_record=False,
         room_create=False, can_publish=True, can_subscribe=True,

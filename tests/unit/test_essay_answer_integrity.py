@@ -585,10 +585,15 @@ class TestTheEditorInARealDom:
 class TestTheWiring:
     def test_the_editor_module_is_loaded_before_the_component(self):
         src = TAKE.read_text(encoding="utf-8")
-        loaded = src.index('<script src="/static/js/essay-editor.js"></script>')
+        tag = "<script src=\"{{ asset_v('js/essay-editor.js') }}\"></script>"
+        loaded = src.index(tag)
         component = src.index("        execCmd(qIdx, cmd) {")
         assert loaded < component, "the module must be loaded before it is read"
-        assert '<script src="/static/js/essay-editor.js"></script>' in src
+        # Versioned, not a bare path: /static/ is cached immutable for a year in
+        # nginx, so an editor fix behind a bare URL reaches only a browser that
+        # has never opened the page. Measured live: `window.SGEssayEditor` had no
+        # `lineBreak` on a page served after the deploy that added it.
+        assert tag in src
 
     def test_the_list_buttons_keep_the_caret(self):
         """`@click` alone lets the button take focus first; `mousedown.prevent` is
@@ -670,7 +675,9 @@ class TestTheRenderedPage:
         assert page.count("x-text=\"syncLabel\"") >= 3
 
     def test_the_editor_module_is_served(self, page):
-        assert '<script src="/static/js/essay-editor.js"></script>' in page
+        assert "/static/js/essay-editor.js?v=" in page, (
+            "the served URL carries the file's hash, so a changed editor is a "
+            "changed URL")
 
     def test_the_stage_still_asks_for_the_essay_exception(self, page):
         assert "!isEssayCurrent ? 'exam-stage--left'" in page
@@ -751,8 +758,16 @@ record('a paragraph is found by question and id',
        api.paragraphEl(0, { id: 'p0' }).getAttribute('data-para'), '0:p0');
 record('another question is a different element',
        api.paragraphEl(1, { id: 'p7' }).getAttribute('data-para'), '1:p7');
-record('a paragraph that is not there is null', api.paragraphEl(0, { id: 'p9' }), null);
-record('no paragraph is null', api.paragraphEl(0, null), null);
+/* A question whose stored row is missing still has a sheet on screen (the
+   `x-for` fallback draws it), so the lookup falls back to that question's own
+   element by its prefix rather than answering null and leaving the toolbar
+   dead. Measured live: the paragraph was visible and editable, and pressing
+   Bold did nothing at all. */
+record('a missing id falls back to that question\'s sheet',
+       api.paragraphEl(0, { id: 'p9' }).getAttribute('data-para'), '0:p0');
+record('no row at all is still that question\'s sheet',
+       api.paragraphEl(0, null).getAttribute('data-para'), '0:p0');
+record('a question with no sheet is null', api.paragraphEl(9, null), null);
 record('a box is found by question and index',
        api.boxEl(0, 0).getAttribute('data-box'), '0:0');
 record('a box falls back to the active one',
@@ -779,8 +794,9 @@ class TestTheLookupItself:
     @pytest.mark.parametrize("name", [
         "a paragraph is found by question and id",
         "another question is a different element",
-        "a paragraph that is not there is null",
-        "no paragraph is null",
+        "a missing id falls back to that question's sheet",
+        "no row at all is still that question's sheet",
+        "a question with no sheet is null",
         "a box is found by question and index",
         "a box falls back to the active one",
         "a box that is not there is null",

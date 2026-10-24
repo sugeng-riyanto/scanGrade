@@ -84,6 +84,13 @@
                 {# The live room and the pattern view are one page now; these two
                    doors are its two halves, so a teacher lands on the one they came
                    for. Both point at the survivor page, whose two anchors are below. #}
+                {# A separate, feature-gated LiveKit pilot. The existing invigilation
+                    page remains the default route and production flow. #}
+                {% if config.get('SCANGRADE_LIVE_ENABLED') and config.get('SCANGRADE_LIVE_EXAM_ENABLED') %}
+                <a href="{{ url_for('live_ui.live_exam_page', exam_id=exam.id) }}"
+                   class="h-10 px-3 rounded-xl border border-surface-200 text-surface-600 hover:text-primary-600 hover:border-primary-200 text-xs font-bold inline-flex items-center gap-1.5 transition"
+                   x-text="t('Uji Video LiveKit','LiveKit Video Pilot')"></a>
+                {% endif %}
                 <a href="{{ url_for('teacher.exam_sessions', exam_id=exam.id) }}#room"
                    class="h-10 px-3 rounded-xl border border-surface-200 text-surface-600 hover:text-primary-600 hover:border-primary-200 text-xs font-bold inline-flex items-center gap-1.5 transition">
                     <i class="fas fa-tower-broadcast"></i><span x-text="t('Pengawasan Langsung','Live proctoring')"></span>
@@ -2165,7 +2172,7 @@
      resolves links through the same file the student's exam page uses. It is the
      one implementation of "a pasted link" in the app: see
      app/static/js/exam-media.js. -->
-<script src="/static/js/exam-media.js"></script>
+<script src="{{ asset_v('js/exam-media.js') }}"></script>
 <script>
 // The question-type vocabulary, handed over by the server. Writing the names out
 // again here is how a page and the grader stop agreeing about what a true/false
@@ -3538,7 +3545,7 @@ function deleteExam(id) {
     }
 }
 </script>
-<script src="/static/js/exam-window.js"></script>
+<script src="{{ asset_v('js/exam-window.js') }}"></script>
 <script>
 /* One toggle, two clocks: the duration the form already collects, and the window
    end it used to leave the teacher to work out by hand. `onLoad` is the single
@@ -3559,7 +3566,7 @@ function deleteExam(id) {
     });
 })();
 </script>
-<script src="/static/js/exam-autosave.js"></script>
+<script src="{{ asset_v('js/exam-autosave.js') }}"></script>
 <script>
 /* The draft writes itself while the teacher works. Loaded here, at the end of
    the body, so the form and its status line exist.
