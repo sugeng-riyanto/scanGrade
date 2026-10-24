@@ -746,3 +746,174 @@ menjawab empat pertanyaan yang sama dengan jawaban yang sama).
 `.freebuff/mutate_pupil_class_scope.py` **9/9 cacat tertangkap** (filter sekolah dihapus,
 hasil kosong dibaca sebagai milik sendiri, pembacaan gagal dibaca sebagai izin, kelas
 kosong dibaca sebagai kelas asing, dan masing-masing dari empat pintu berhenti bertanya).
+
+---
+
+## Q&A — setelan, wewenang, dan hal teknis
+
+Bagian ini menjawab pertanyaan yang benar-benar muncul dari sekolah dan dari guru, bukan
+yang mudah ditulis. Setiap jawaban menyebut **pintu** (route/halaman) atau **berkas** yang
+menegakkannya, supaya pembaca bisa memeriksa sendiri alih-alih percaya pada dokumen. Kalau
+sebuah jawaban di sini berbeda dengan perilaku aplikasi, aplikasinya yang benar dan bagian
+ini yang harus diperbaiki.
+
+### S. Setelan
+
+**S1. Siapa yang boleh mengubah setelan sekolah?**
+`admin_sekolah` — dan hanya lewat pintu yang memang ada: `/admin-sekolah/profile` (identitas
+sekolah), `/admin-sekolah/school-years` (tahun ajaran, termasuk menutupnya),
+`/admin-sekolah/grade-weights` (bobot nilai), `/admin-sekolah/emails/template` (template
+email), `/admin-sekolah/subscription` dan `/admin-sekolah/invoices` (langganan).
+`principal` dan `vice_principal` **tidak punya satu pun pintu tulis** di sana; mereka membaca.
+Guru tidak punya pintu tulis tingkat sekolah sama sekali.
+
+**S2. Kepala sekolah punya akses lebih daripada guru?**
+Lebih **luas untuk membaca** (seluruh sekolahnya), bukan lebih tinggi untuk menulis. Bila
+ditugaskan sebagai guru mapel, ia menulis sebagai guru: hanya ujian miliknya sendiri
+(`exam_access.can_manage_exam`), hanya di kelas/mapel yang ditugaskan. Menghapus atau membuat
+akun tetap milik `admin_sekolah` — yang tahu siapa kepala sekolahnya adalah sekolahnya.
+
+**S3. Siapa pemilik kunci API AI, dan apakah terlihat oleh guru lain?**
+Guru pemiliknya sendiri. `teacher_ai_keys` difilter `teacher_id` di setiap route
+(`/teacher/ai-settings/add-key`, `/<key_id>/toggle`, `/<key_id>/delete`) dan rubrik per mapel
+ada di `teacher_ai_settings` dengan filter yang sama. Tidak ada route yang membaca kunci guru
+lain, dan admin sekolah tidak bisa melihat maupun memakai kunci guru. Halaman itu menandai
+satu kunci `is_active` pada satu waktu: mengaktifkan yang baru menonaktifkan yang lama.
+
+**S4. Apakah nilai AI menggantikan nilai guru?**
+Tidak. AI mengembalikan **saran** skor beserta alasannya; yang tersimpan adalah angka yang
+ditekan guru. Karena itu fitur ini juga dijaga langganan: route-nya memakai
+`require_subscription("ai_grading")`, jadi sekolah tanpa fitur itu mendapat penolakan yang
+dijelaskan, bukan tombol yang gagal diam-diam.
+
+**S5. Siapa yang mengatur pengiriman email (SMTP)?**
+`super_admin`, di `/super-admin/email-settings`. Kata sandi kotak surat bersifat
+**tulis-saja**: tidak pernah dikirim ke template, dan simpanan kosong mempertahankan yang
+tersimpan (bukan menghapusnya). Ini pintu yang menggantikan `SMTP_PASSWORD=` kosong di
+`.env` yang dulu membuat "kirim kode reset" selalu gagal tanpa jalan keluar selain root.
+
+**S6. Kenapa guru tidak bisa mengubah bobot nilai atau tahun ajaran?**
+Karena keduanya berlaku untuk **seluruh sekolah**, bukan untuk satu ujian: bobot dipakai
+semua guru di rapor, dan tahun ajaran menutup arsip semua orang. Pintunya ada di
+`admin_sekolah`. Yang bisa diatur guru per ujian adalah bobot per tipe soal di dalam ujian
+itu sendiri (mark scheme), karena itu milik makalahnya.
+
+**S7. Apa yang terjadi pada ujian di tahun ajaran yang sudah ditutup?**
+Penulisan ditolak, termasuk dari layar koreksi, editor kunci jawaban, tombol hitung ulang
+dan override — bukan hanya dari wizard penutupan. Penegaknya `app/decorators/year_lock.py`,
+yang membaca method request (jadi membaca tetap boleh) dan menyelesaikan tahun dari
+**sumber dayanya**, bukan dari sesi: guru bisa masuk di tahun berjalan dan tetap membuka
+form milik makalah tahun lalu. Pesannya menyebut tahun tutup sebagai arsip, bukan "akses
+ditolak".
+
+**S8. Di mana murid mengatur akunnya?**
+`/student/settings` (kata sandi) dan `/student/dashboard`. Murid tidak punya pintu untuk
+mengubah data akademik (kelas, NISN) — itu milik sekolah, karena data itulah yang dicetak
+di rapor dan dipakai mencocokkan lembar jawaban.
+
+**S9. Bagaimana permintaan data pribadi (UU PDP) dilakukan?**
+Guru dan staf memakai `/teacher/settings`: **Ekspor Data Pribadi**
+(`/api/account/export-data`) dan **permintaan penghapusan**
+(`/api/account/delete-request`, status di `/api/account/deletion-status`). Permintaan itu
+diproses lewat `app/services/data_retention_service.py`, dan admin sekolah melihat bahwa
+ekspor kredensial termasuk hal yang dibatasi kebijakan retensi. Detail kewajiban dan
+jangka waktunya ada di `docs/COMPLIANCE.md`, sedangkan pernyataan yang dibaca publik
+(termasuk di mana data disimpan) dirender oleh `app/templates/compliance/privacy.html` dari
+konfigurasi, bukan ditulis tangan di halaman itu.
+
+### T. Teknis
+
+**T1. Saya membuka ujian milik guru lain, lalu muncul "Ujian ini tidak tersedia untuk
+akun Anda" di halaman lain (mis. AI Grading). Peringatan apa itu?**
+Itu **pesan sisa dari penolakan sebelumnya**, bukan pesan tentang halaman yang sedang
+dibuka. Penolakan ujian memakai `flash(...)` lalu mengalihkan ke `/teacher/grading`
+(`_guard_exam` di `app/routes/teacher.py`, kalimatnya di `app/utils/denials.py`), sedangkan
+`teacher/grading.html` tidak merender pesan flash — jadi pesan itu menunggu di sesi dan
+baru tampil di halaman berikutnya yang merendernya (`ai_settings`, `exams`, `results`,
+`subjects`, `invigilation`, `grading_queue`). Artinya: **tidak ada akses yang bocor dan
+tidak ada fitur AI yang rusak**; yang terjadi adalah satu tautan ke makalah yang bukan
+milik akun itu. Muat ulang halaman sekali dan pesan itu hilang.
+
+**T2. Kenapa guru tidak bisa membuka ujian koleganya, padahal satu sekolah?**
+Karena "satu sekolah" bukan izin. `app/utils/exam_access.py` menanyakan satu pertanyaan:
+pemilik makalah (`teacher_id` = pemanggil) **atau** admin sekolahnya. Admin sekolah boleh
+mengelola semua ujian sekolahnya; guru boleh mengelola miliknya sendiri. Route yang hanya
+**melaporkan** (cetak, ekspor, pratinjau, analisis) memakai `ACCESS_READ`; route yang
+mengubah memakai `ACCESS_MANAGE`.
+
+**T3. Guru mengajar di dua sekolah (dua NPSN). Kenapa menyimpan ditolak?**
+Karena kertas itu milik sekolah yang lain dari yang sedang aktif di sesi, dan bobot, murid,
+serta nilainya mengikuti sekolah kertas itu. Penolakannya menyebut **dua nama sekolah**
+("Kertas ini milik X, sedangkan sesi Anda di Y. Pindah ke X dulu…"), jadi jalan keluarnya
+ada di kalimatnya. Yang **boleh** dilakukan dari sekolah lain adalah membaca laporan
+makalah sendiri (`ACCESS_READ`).
+
+**T4. Berapa lama sesi berlaku?**
+`app/utils/auth.py` (`SESSION_TIMEOUTS`), dihitung per peran, dengan dua batas sekaligus —
+idle dan absolut:
+
+| Peran | Idle | Absolut |
+|-------|------|---------|
+| `super_admin` | 15 menit | 4 jam |
+| `admin_sekolah` | 30 menit | 8 jam |
+| `principal`, `vice_principal` | 45 menit | 10 jam |
+| `guru` | 60 menit | 12 jam |
+| `murid` | 120 menit | 24 jam |
+
+Sesi yang habis tidak mengalihkan ke pintu yang salah: `login_door_for(role, path)` memilih
+halaman login menurut peran, dan menurut URL yang sedang dibuka bila perannya tidak diketahui.
+
+**T5. Kenapa menu saya berbeda dengan menu guru lain?**
+Sidebar di `app/templates/base.html` disusun per peran, bukan dengan menyembunyikan tautan
+yang sama. Karena itu tautan yang tidak boleh dipakai tidak dirender sama sekali — dan
+route-nya tetap dijaga sendiri, jadi menghapus atribut di DevTools tidak membuka pintu.
+Akun yang belum terhubung ke sekolah ditolak dengan kalimat `NO_SCHOOL` di pintu yang
+membutuhkan sekolah, bukan dengan daftar yang kosong tanpa alasan.
+
+**T6. Penolakan kadang 403 JSON, kadang kembali ke halaman. Mana yang benar?**
+Keduanya, dan pemilihnya satu fungsi, `_wants_json()`: browser yang mengirim form mendapat
+alih halaman + pesan (bisa dibaca manusia), sedangkan `fetch`/API yang meminta
+`application/json` mendapat **403** yang bisa dibaca kode — karena 302 ke halaman HTML akan
+terlihat seperti sukses dan menyembunyikan penolakan.
+
+**T7. Siapa yang boleh memakai `/tools` (lembar jawaban OMR, pratinjau perangkat)?**
+Staf saja: `super_admin`, `admin_sekolah`, `guru` (`app/routes/tools.py`, `staff_required`).
+Murid mendapat **403** yang menyebut perannya, bukan halaman yang kosong atau galat 500 —
+dulu `login_required` saja membuat murid bisa membuka alat internal itu. Pratinjau perangkat
+tetap memakai **sesi si pembuka**: halaman milik peran lain akan dialihkan, dan halaman itu
+mengatakannya terang-terangan alih-alih diam-diam menampilkan halaman lain.
+
+**T8. Form yang dirender belakangan (daftar kunci AI) tidak bisa menyimpan. Kenapa?**
+Token CSRF dipasang pada event **submit** (fase capture), bukan sekali saat halaman selesai
+dimuat: form yang lahir dari `<template x-for>` setelah `DOMContentLoaded` tidak pernah
+mendapat token dengan cara lama. Itulah sebabnya semua form dinamis bisa menyimpan tanpa
+satu pun `onsubmit` tambahan, dan halaman yang scripting-nya mati tetap membawa token di
+markup-nya.
+
+**T9. Bahasa apa yang dipakai halaman, dan mengapa ada halaman yang tetap Indonesia?**
+Defaultnya Inggris; pilihan pembaca disimpan di `localStorage.sg_lang` dan selalu menang.
+Halaman yang copy-nya memang belum diterjemahkan memaku dirinya (`content_lang = 'id'`),
+dan itu disengaja: toggle tidak bisa menerjemahkan kalimat yang tidak ada. Yang tetap
+mengikuti toggle di halaman semacam itu adalah chrome (sidebar, top bar, footer), karena
+bagian itulah yang memang punya dua bahasa. Dokumen cetak (`monitor.html`,
+`print/report_card.html`, `student/result_detail_pdf.html`, `teacher/print_exam_report.html`)
+selalu Indonesia karena targetnya kertas, bukan layar.
+
+**T10. Kenapa jawaban esai tidak hilang walau WiFi putus?**
+Halaman ujian menulis draf ke `localStorage` lebih dulu dan menyinkronkan ke server saat
+online (`app/static/js/exam-autosave.js`), dengan status di bilah ujian dan di bawah lembar
+jawaban. Itu juga alasan `MAX_CONTENT_LENGTH` 50 MB: gambar/canvas satu halaman ikut terkirim
+saat jaringan kembali.
+
+**T11. Nilai sudah tampil, lalu berubah setelah "hitung ulang". Kenapa?**
+Karena nilai akhir dihitung dari **jawaban tersimpan + skema bobot yang dibekukan**
+(`app/services/exam_scoring.py`), bukan dari angka yang dikirim halaman. Tombol hitung ulang
+membaca ulang keduanya; karena itu nilai bisa bergerak bila kunci jawaban, bobot, atau
+penalti berubah setelah pengumpulan — dan justru itu gunanya: satu penjumlahan, bukan dua
+yang berbeda diam-diam.
+
+**T12. Siapa yang boleh mengoreksi esai, dan apakah koreksi bisa diambil alih?**
+Guru pemilik ujian (dan admin sekolahnya). Setiap tulisan pada lembar diperiksa ulang ke
+ujiannya, jadi skor tidak bisa ditulis ke lembar milik ujian orang lain hanya dengan menebak
+id. Yang mengubah nilai akhir tetap satu jalur: `exam_scoring`, yang juga dipakai tombol
+hitung ulang.
