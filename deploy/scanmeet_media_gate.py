@@ -1147,6 +1147,48 @@ ROW_ORDER = (
 )
 
 
+def signoff_markdown(*, base_url: str, exam_id: str, code: int,
+                     rows: list[Row], fake_devices: bool = True) -> str:
+    """Pasteable evidence, preserving skipped reasons and exit verdict.
+
+    This formats the gate's actual readings, never invents PASS rows. Credentials,
+    session cookies, and join tokens must never be added to this output.
+    """
+    from urllib.parse import urlsplit, urlunsplit
+
+    parsed = urlsplit(base_url)
+    # Never echo URL userinfo, query tokens or fragments into a report.
+    safe_url = urlunsplit((parsed.scheme, parsed.hostname or "",
+                          parsed.path.rstrip("/"), "", ""))
+    states = {EXIT_OK: "PASS", EXIT_FINDING: "FAIL",
+              EXIT_CANNOT_MEASURE: "INCOMPLETE"}
+    result = states.get(code, "INCOMPLETE")
+    lines = [
+        "# ScanMeet media staging sign-off",
+        "",
+        f"- **Staging URL:** `{safe_url}`",
+        f"- **Exam:** `{str(exam_id).replace(chr(96), '')}`",
+        f"- **Media device:** {'Chrome synthetic' if fake_devices else 'physical'}",
+        f"- **Verdict:** **{result}** (exit {code})",
+        "",
+        "| # | Check | Result | Evidence / reason |",
+        "|---:|---|---|---|",
+    ]
+    found = {r.name: r for r in rows}
+    for index, name in enumerate(ROW_ORDER, 1):
+        item = found.get(name, Row(name, "skipped", "no measurement returned"))
+        # Escape Markdown cells and embedded formatting; do not distort status.
+        detail = str(item.detail).replace("|", r"\|").replace("\n", " ").replace("\r", " ")
+        lines.append(f"| {index} | `{name}` | {item.state.upper()} | {detail} |")
+    lines.extend(("", "**Sign-off:** " +
+                  ("All 12 measurements passed." if code == EXIT_OK and
+                   len(rows) == len(ROW_ORDER) and
+                   all(r.state == "pass" for r in rows)
+                   else "NOT APPROVED — resolve every FAIL/SKIPPED row and rerun."),
+                  ""))
+    return "\n".join(lines)
+
+
 def run(*, base_url: str, exam_id: str, accounts: dict, insecure: bool = False,
         binary: str = "", fake: bool = True, video_file: str = "",
         keep_room: bool = False):
@@ -1183,6 +1225,8 @@ def main(argv=None) -> int:
                         help="a .y4m file to feed the synthetic camera")
     parser.add_argument("--keep-room", action="store_true",
                         help="leave the room open for a human pilot afterwards")
+    parser.add_argument("--signoff", action="store_true",
+                        help="print a pasteable twelve-row Markdown sign-off sheet")
     parser.add_argument("--json", action="store_true",
                         help="print the whole reading as JSON on stdout")
     args = parser.parse_args(argv)
@@ -1212,8 +1256,13 @@ def main(argv=None) -> int:
         fake=not args.no_fake_devices, video_file=args.video_file,
         keep_room=args.keep_room)
 
+    if args.signoff:
+        print(signoff_markdown(base_url=args.url, exam_id=args.exam, code=code,
+                               rows=rows, fake_devices=not args.no_fake_devices))
     if args.json:
         print(json.dumps(payload, indent=1, ensure_ascii=True, default=str))
+        return code
+    if args.signoff:
         return code
 
     print(ascii_safe(
