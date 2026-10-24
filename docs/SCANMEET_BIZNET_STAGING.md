@@ -148,9 +148,50 @@ produced.
 
 ### 2. Two real browsers, real media
 
-Use two different browsers (or one normal plus one private window) signed in as
-the teacher and as an assigned pupil, and a third as a pupil of **another
-school**. Cameras and microphones on, no fake devices.
+Half of this section is driven rather than watched. Three of its readings cannot
+be taken by looking at a page — a frame counter that is moving, a microphone the
+**SFU** refuses rather than a button the page hides, and media one pupil's
+browser did *not* receive — so `deploy/scanmeet_media_gate.py` takes them, in
+three headless browsers, and prints one row per claim.
+
+With the env file exported on the staging host:
+
+```bash
+set -a; . ~/.config/scanmeet/staging.env; set +a
+python -m deploy.scanmeet_media_gate \
+  --url "$SCANMEET_STAGING_URL" --exam <exam_id> \
+  --teacher guru@school:pw --student murid1@school:pw \
+  --student2 murid2@school:pw --outsider murid@other-school:pw
+```
+
+Expected: twelve `PASS` rows — `sdk-loaded`, `session`, `pupil-camera`,
+`teacher-receives-camera`, `pupil-isolation`, `mic-starts-closed`, `hand-raise`,
+`mic-approved`, `audio-reaches-teacher`, `mic-closed`, `outsider-refused`,
+`room-ended` — and a closing `PASS: 12/12 rows`. The driver reads each page
+**and** the join token the server issues, because the token's
+`canPublishSources` is what LiveKit enforces while the DOM is only what the page
+drew: `mic-starts-closed` is a camera-only grant, `mic-approved` is
+camera + microphone, and `mic-closed` is the camera again.
+
+Exit codes: 0 every row passed · 1 a row disagreed (the row naming the defect) ·
+2 could not measure — a missing account, Live off, a page that never loaded, or a
+run that ended early. **2 is not a pass**: an unfinished run names the rows it
+never took instead of printing a shorter list of passes.
+
+What the driver covers, from the table below: 01, 02, 03, 04, 05, 06, 07 and 10,
+plus the isolation reading the table asks a person to take from two console
+snippets. What stays manual: **08** (a pupil trying chat, screen share or
+recording — the grant row already shows those sources are absent, but a person
+pressing the control is the pilot's own evidence) and **09** (a ~30 s network
+drop and reconnect). Its cameras are Chrome's synthetic device
+(`--use-fake-device-for-media-stream`: a real `getUserMedia` track, a real
+publish, a real SFU subscription and real decoded frames, with a test pattern
+where a face would be); `--no-fake-devices` uses the box's hardware instead, and
+the header line always says which.
+
+For the pilot itself — real cameras, real people — use two different browsers
+(or one normal plus one private window) signed in as the teacher and as an
+assigned pupil, and a third as a pupil of **another school**.
 
 | # | Action | Evidence to record |
 |---|---|---|
