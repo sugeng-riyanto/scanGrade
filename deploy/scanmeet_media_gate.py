@@ -83,9 +83,7 @@ import json
 import os
 import re
 import shutil
-import subprocess
 import sys
-import tempfile
 import time
 import urllib.parse
 from dataclasses import dataclass, field
@@ -430,9 +428,9 @@ def ascii_safe(text) -> str:
 # --------------------------------------------------------------------------- #
 # One browser: launched, driven and read over the tree's own CDP client
 # --------------------------------------------------------------------------- #
-def launch_argv(binary: str, port: int, profile: str, *, fake: bool = True,
-                video_file: str = "", size=(1280, 900)) -> tuple[list, dict]:
-    """The launcher `touch_gate` builds, plus what a media page needs from it.
+def media_flags(*, fake: bool = True, video_file: str = "",
+                size=(1280, 900)) -> list:
+    """What a media page needs on top of the launcher `touch_gate` builds.
 
     Four additions matter and each was learned the hard way:
 
@@ -445,13 +443,13 @@ def launch_argv(binary: str, port: int, profile: str, *, fake: bool = True,
     * the three backgrounding flags — a headless tab that Chrome decides is
       hidden stops its media loop, and a frame counter is exactly what stops
       with it.
-    * ``--disable-dev-shm-usage`` — a container's `/dev/shm` is 64 MB, and two
-      browsers decoding video at once is what this driver adds. A renderer that
-      cannot get shared memory dies before the browser offers a debug target,
-      which reads as "the browser never started" rather than as the resource it
-      is. Harmless on a box with a real `/dev/shm`.
+
+    ``--disable-dev-shm-usage`` is **not** here: it is `browser_launch`'s now,
+    because every gate that starts a browser needed it (two browsers decoding
+    video at once is what this driver adds, and a renderer that cannot get shared
+    memory dies before the browser offers a debug target). One copy, in the one
+    place that builds argv.
     """
-    argv, env = touch_gate.browser_launch(binary, port, profile)
     extra = [
         f"--window-size={int(size[0])},{int(size[1])}",
         "--autoplay-policy=no-user-gesture-required",
@@ -459,13 +457,12 @@ def launch_argv(binary: str, port: int, profile: str, *, fake: bool = True,
         "--disable-background-timer-throttling",
         "--disable-renderer-backgrounding",
         "--disable-backgrounding-occluded-windows",
-        "--disable-dev-shm-usage",
     ]
     if fake:
         extra.append("--use-fake-device-for-media-stream")
         if video_file:
             extra.append(f"--use-file-for-fake-video-capture={video_file}")
-    return argv[:-1] + extra + argv[-1:], env
+    return extra
 
 
 class Browser:
@@ -474,7 +471,10 @@ class Browser:
     `touch_gate._measure` launches its browser for a single measurement and quits;
     a room needs three of them to stay joined while the others act, so this owns
     the process and the socket for the length of the run and closes both in
-    `close()` whatever happened.
+    `close()` whatever happened. What it does **not** own is the launch: starting
+    the browser, waiting for its debug target, retrying a launch that never came
+    up and remembering what Chrome said are `touch_gate.start_browser`'s, so this
+    driver cannot drift away from the three gates on any of them.
     """
 
     def __init__(self, name: str, base_url: str, cookies: dict, *, binary: str,
@@ -491,7 +491,6 @@ class Browser:
         self.profile = ""
         self.ws = None
         self.cdp = None
-        self.port = 0
         #: Ids for presses written without awaiting a reply, in a range no
         #: awaited command reaches, so a stray reply can never be taken for one.
         self._tap_id = 10 ** 6
@@ -500,16 +499,21 @@ class Browser:
     async def open(self):
         import websockets
 
-        self.port = touch_gate._free_port()
-        self.profile = tempfile.mkdtemp(prefix=f"sg-media-{self.name}-")
-        argv, env = launch_argv(self.binary, self.port, self.profile,
-                                fake=self.fake, video_file=self.video_file,
-                                size=self.size)
-        self.proc = subprocess.Popen(argv, stdout=subprocess.DEVNULL,
-                                     stderr=subprocess.DEVNULL, env=env)
-        target = await self._target()
-        if not target:
-            raise CannotMeasure("the browser never offered a debug target")
+        # Through the shared launcher, in a thread: it polls in blocking
+        # `time.sleep`, and three of these open at once — a blocking wait on this
+        # loop would serialize the launches and stall the two browsers already
+        # talking over the socket. The process and the profile are taken before
+        # anything can raise, because `close()` is what ends them.
+        proc, target, profile, reason = await asyncio.to_thread(
+            touch_gate.start_browser,
+            self.binary,
+            extra_args=tuple(
+                media_flags(fake=self.fake, video_file=self.video_file, size=self.size)
+            ),
+        )
+        self.proc, self.profile = proc, profile
+        if target is None:
+            raise CannotMeasure(reason)
         self.ws = await websockets.connect(target, max_size=64 * 1024 * 1024)
         self.cdp = touch_gate._CDP(self.ws)
         await self.cdp.send("Network.enable")
@@ -520,24 +524,6 @@ class Browser:
             await self.cdp.send("Network.setCookie", name=name, value=value,
                                 domain=host, path="/")
         await self._grant_media()
-
-    async def _target(self):
-        import requests
-
-        for _ in range(80):
-            try:
-                pages = [
-                    item for item in requests.get(
-                        f"http://127.0.0.1:{self.port}/json/list", timeout=2
-                    ).json()
-                    if item.get("type") == "page"
-                ]
-                if pages:
-                    return pages[0]["webSocketDebuggerUrl"]
-            except Exception:  # noqa: BLE001 - the browser is still starting
-                pass
-            await asyncio.sleep(0.25)
-        return None
 
     async def _grant_media(self):
         """Pre-grant the camera and microphone to this origin, if Chrome allows.
@@ -562,11 +548,7 @@ class Browser:
             pass
         self.ws = None
         if self.proc is not None:
-            self.proc.terminate()
-            try:
-                self.proc.wait(timeout=10)
-            except Exception:  # noqa: BLE001
-                self.proc.kill()
+            touch_gate._stop(self.proc)
             self.proc = None
         if self.profile:
             shutil.rmtree(self.profile, ignore_errors=True)
