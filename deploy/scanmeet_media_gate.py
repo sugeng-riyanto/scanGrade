@@ -434,7 +434,7 @@ def launch_argv(binary: str, port: int, profile: str, *, fake: bool = True,
                 video_file: str = "", size=(1280, 900)) -> tuple[list, dict]:
     """The launcher `touch_gate` builds, plus what a media page needs from it.
 
-    Three additions matter and each was learned the hard way:
+    Four additions matter and each was learned the hard way:
 
     * ``--autoplay-policy=no-user-gesture-required`` — the page attaches a remote
       camera **unmuted**, and Chrome refuses to autoplay that without a gesture,
@@ -445,6 +445,11 @@ def launch_argv(binary: str, port: int, profile: str, *, fake: bool = True,
     * the three backgrounding flags — a headless tab that Chrome decides is
       hidden stops its media loop, and a frame counter is exactly what stops
       with it.
+    * ``--disable-dev-shm-usage`` — a container's `/dev/shm` is 64 MB, and two
+      browsers decoding video at once is what this driver adds. A renderer that
+      cannot get shared memory dies before the browser offers a debug target,
+      which reads as "the browser never started" rather than as the resource it
+      is. Harmless on a box with a real `/dev/shm`.
     """
     argv, env = touch_gate.browser_launch(binary, port, profile)
     extra = [
@@ -454,6 +459,7 @@ def launch_argv(binary: str, port: int, profile: str, *, fake: bool = True,
         "--disable-background-timer-throttling",
         "--disable-renderer-backgrounding",
         "--disable-backgrounding-occluded-windows",
+        "--disable-dev-shm-usage",
     ]
     if fake:
         extra.append("--use-fake-device-for-media-stream")

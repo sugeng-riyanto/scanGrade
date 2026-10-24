@@ -222,6 +222,27 @@ def test_a_page_with_no_video_says_so_instead_of_passing():
         other_pupil="p_other")
 
 
+def test_the_launcher_passes_what_a_media_page_needs():
+    """The flags, because each absent one is a reading that lies.
+
+    No autoplay policy and every remote camera reads as dead; no fake UI and a
+    headless browser never publishes at all; no shm escape and a container's
+    64 MB kills the renderer before there is a page to read.
+    """
+    argv, env = GATE.launch_argv("/usr/bin/google-chrome", 9222, "/tmp/profile")
+    for flag in ("--autoplay-policy=no-user-gesture-required",
+                 "--use-fake-ui-for-media-stream",
+                 "--use-fake-device-for-media-stream",
+                 "--disable-dev-shm-usage"):
+        assert flag in argv, f"{flag} is missing from the launch"
+    # The extras go before the URL the launcher ends on, not after it.
+    assert argv[-1] == "about:blank"
+    assert env["HOME"] == "/tmp/profile"
+    real, _ = GATE.launch_argv("/usr/bin/google-chrome", 9222, "/tmp/p", fake=False)
+    assert "--use-fake-device-for-media-stream" not in real
+    assert "--use-fake-ui-for-media-stream" in real
+
+
 def test_the_grant_is_what_the_sfu_enforces():
     assert GATE.publish_sources(token_with(["camera"])) == ["camera"]
     assert GATE.publish_sources(token_with(["camera", "microphone"])) == [
