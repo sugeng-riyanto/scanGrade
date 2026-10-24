@@ -19,6 +19,7 @@ Implementation branch: feature/scangrade-livekit-exam-20261024.
    verify \`schools\`, \`exams\`, and \`profiles\` references and service-role RLS.
 2. Install optional \`pip install -r requirements-live.txt\` on the staging worker.
 3. Set LIVEKIT_URL=wss://..., LIVEKIT_API_KEY and LIVEKIT_API_SECRET only on server.
+   Configure LiveKit webhook to https://<staging-host>/webhook/livekit.
 4. Configure network/TURN and LiveKit egress policy with recording **disabled**.
 5. Enable both feature flags for staging only; leave production OFF.
    Open /live/exam/<exam_id> with a logged-in teacher or eligible student.
@@ -32,6 +33,7 @@ Implementation branch: feature/scangrade-livekit-exam-20261024.
 - POST /api/live/sessions/<id>/token (staff or authorized pupil; 5-min room token)
 - POST /api/live/sessions/<id>/hand-raises (authorized pupil)
 - GET  /api/live/sessions/<id>/hand-raises (authorized staff)
+- GET  /api/live/sessions/<id>/events (authorized staff; signed webhook audit)
 - POST /api/live/sessions/<id>/hand-raises/<request_id>/approve
 - POST /api/live/sessions/<id>/hand-raises/<request_id>/reject
 - POST /api/live/sessions/<id>/hand-raises/<request_id>/close
@@ -40,8 +42,10 @@ Implementation branch: feature/scangrade-livekit-exam-20261024.
 ## Operational caveats / missing work before production
 
 - A standalone staging UI is at /live/exam/<exam_id> but intentionally not linked from active exam pages.
-- Pilot UI uses polling and camera checks. Add push notifications, verified/deduplicated
-  webhooks, and backend camera-off alerts before production.
+- Pilot includes verified and deduplicated LiveKit webhook audit: /webhook/livekit;
+  configure the webhook in LiveKit staging and verify signature/room scope.
+  Teacher UI polls /api/live/sessions/<id>/events. Add push notifications, track
+  connection reconciliation, and definitive camera-off alerts before production.
 - On abnormal worker exit, transitional \`approving\`/\`closing\` states need
   reconciliation; do not enable unattended production exam monitoring before it.
 - After \`end\`, database rejects new token minting; a room deletion failure

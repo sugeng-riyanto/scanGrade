@@ -34,3 +34,20 @@ REVOKE ALL ON public.scan_live_sessions FROM anon, authenticated;
 REVOKE ALL ON public.scan_live_hand_raises FROM anon, authenticated;
 -- Only the backend service-role connection can access these tables.
 -- Never expose this service key to browser or LiveKit.
+
+
+-- Signed webhook audit only. A second table keeps event delivery separate from
+-- both examination data and real-time student presence decisions.
+CREATE TABLE IF NOT EXISTS public.scan_live_events (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  school_id uuid NOT NULL REFERENCES public.schools(id) ON DELETE CASCADE,
+  session_id uuid NOT NULL REFERENCES public.scan_live_sessions(id) ON DELETE CASCADE,
+  event_key text NOT NULL UNIQUE,
+  event_type text NOT NULL,
+  participant_identity text,
+  received_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS scan_live_events_session_idx
+  ON public.scan_live_events (school_id,session_id,received_at DESC);
+ALTER TABLE public.scan_live_events ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.scan_live_events FROM anon, authenticated;

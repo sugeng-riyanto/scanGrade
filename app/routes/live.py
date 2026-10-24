@@ -318,3 +318,19 @@ def live_exam_page(exam_id):
     if not role:
         return _denied()
     return render_template("live/exam.html", live_exam_id=exam_id, live_role=role)
+
+
+@live_bp.route("/sessions/<sid>/events", methods=["GET"])
+@login_required
+def recent_events(sid):
+    if (off := _off()) is not None:
+        return off
+    db = get_supabase()
+    session = _session(db, sid)
+    if _check(db, session, staff_only=True) != "teacher":
+        return _denied()
+    rows = (db.table("scan_live_events")
+            .select("event_type,participant_identity,received_at")
+            .eq("school_id", session["school_id"]).eq("session_id", sid)
+            .order("received_at", desc=True).limit(25).execute().data or [])
+    return jsonify({"events": rows})

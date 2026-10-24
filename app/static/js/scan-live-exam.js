@@ -160,6 +160,19 @@
     try {
       const data = await call("/api/live/sessions/" + sid + "/hand-raises");
       if (staff) {
+        const audit = await call("/api/live/sessions/" + sid + "/events");
+        const eventsEl = $("live-events");
+        eventsEl.replaceChildren();
+        for (const ev of (audit.events || []).slice(0, 8)) {
+          const row = document.createElement("p");
+          const ident = names[ev.participant_identity] || "Peserta";
+          row.textContent = ident + ": " + ev.event_type;
+          if (["track_unpublished", "participant_left",
+               "participant_connection_aborted"].includes(ev.event_type)) {
+            row.className = "text-amber-700";
+          }
+          eventsEl.append(row);
+        }
         queue.replaceChildren();
         const requests = data.requests || [];
         if (!requests.length) queue.textContent = "Belum ada permintaan.";

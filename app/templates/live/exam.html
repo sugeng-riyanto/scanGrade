@@ -30,6 +30,8 @@
       {% if live_role == "teacher" %}
       <p class="text-sm">Permintaan berbicara:</p>
       <div id="live-queue" class="space-y-2 text-sm" aria-live="polite"></div>
+      <h3 class="font-bold mt-4">Koneksi peserta (audit LiveKit)</h3>
+      <div id="live-events" class="space-y-1 text-xs" aria-live="polite"></div>
       {% else %}
       <p id="live-raise-status" class="text-sm">Mikrofon menunggu persetujuan guru.</p>
       {% endif %}
