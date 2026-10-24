@@ -292,6 +292,7 @@ def roster(sid):
     members = exam_targets.roster_for_classes(
         db, session["school_id"], exam_class_ids(exam))
     names = {}
+    by_student = {}
     for member in members:
         student_id = member.get("student_id")
         if not student_id:
@@ -302,7 +303,8 @@ def roster(sid):
         name_key = live_policy.participant_identity(
             current_app.config, sid, student_id)
         names[name_key] = member.get("full_name") or "Peserta"
-    return jsonify({"participants": names})
+        by_student[str(student_id)] = names[name_key]
+    return jsonify({"participants": names, "students": by_student})
 
 
 @live_ui_bp.route("/exam/<exam_id>", methods=["GET"])

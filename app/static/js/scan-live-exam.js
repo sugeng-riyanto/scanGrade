@@ -9,7 +9,7 @@
   const csrf = root.dataset.csrf;
   const grid = $("live-grid"), start = $("live-start"), end = $("live-end");
   const hand = $("live-hand"), mic = $("live-mic"), queue = $("live-queue");
-  let room = null, sid = null, connecting = false, names = {}, micAllowed = false;
+  let room = null, sid = null, connecting = false, names = {}, students = {}, micAllowed = false;
 
   function message(msg, failed = false) {
     $("live-status").textContent = msg;
@@ -74,7 +74,9 @@
   }
   async function roster() {
     if (!staff || !sid) return;
-    names = (await call("/api/live/sessions/" + sid + "/roster")).participants || {};
+    const result = await call("/api/live/sessions/" + sid + "/roster");
+    names = result.participants || {};
+    students = result.students || {};
   }
   async function connect() {
     if (connecting || room || !sid) return;
@@ -100,10 +102,13 @@
       try {
         await room.localParticipant.setCameraEnabled(true);
       } catch (e) {
-        message("Izinkan kamera untuk bergabung dengan Live. Ujian tidak terdampak.", true);
-        await room.disconnect();
-        room = null;
-        return;
+        if (!staff) {
+          message("Izinkan kamera untuk bergabung dengan Live. Ujian tidak terdampak.", true);
+          await room.disconnect();
+          room = null;
+          return;
+        }
+        message("Guru bergabung tanpa kamera.");
       }
       const camera = room.localParticipant.getTrackPublication("camera");
       if (camera && camera.track) attach(camera.track, camera, room.localParticipant);
@@ -150,7 +155,7 @@
           const line = document.createElement("div");
           line.className = "rounded-lg border p-2 space-y-2";
           const desc = document.createElement("div");
-          desc.textContent = item.student_id.slice(0, 8) + " — " + item.status;
+          desc.textContent = (students[item.student_id] || item.student_id.slice(0, 8)) + " — " + item.status;
           line.append(desc);
           const actions = item.status === "pending"
             ? [["approve", "Izinkan"], ["reject", "Tolak"]]
