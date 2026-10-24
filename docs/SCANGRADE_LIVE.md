@@ -38,6 +38,8 @@ User-facing name: **ScanMeet**. Backend module names remain `scan_live_*` for mi
 - POST /api/live/sessions/<id>/hand-raises/<request_id>/approve
 - POST /api/live/sessions/<id>/hand-raises/<request_id>/reject
 - POST /api/live/sessions/<id>/hand-raises/<request_id>/close
+- POST /api/live/sessions/<id>/hand-raises/<request_id>/reconcile
+  (authorized staff; clears a grant parked in `approving`/`closing`)
 - POST /api/live/sessions/<id>/end
 
 ## Operational caveats / missing work before production
@@ -47,8 +49,17 @@ User-facing name: **ScanMeet**. Backend module names remain `scan_live_*` for mi
   configure the webhook in LiveKit staging and verify signature/room scope.
   Teacher UI polls /api/live/sessions/<id>/events. Add push notifications, track
   connection reconciliation, and definitive camera-off alerts before production.
-- On abnormal worker exit, transitional \`approving\`/\`closing\` states need
-  reconciliation; do not enable unattended production exam monitoring before it.
+- On abnormal worker exit, a grant can be parked in `approving`/`closing`: the
+  pupil's `hand_raise` keeps returning that row and `moderate` refuses it with
+  409, because `approve`/`close` only reset the state on their own error path.
+  `reconcile` repairs it **fail-closed** — it mutes the pupil through LiveKit
+  first, then moves `approving` back to `pending` (the teacher decides again) or
+  `closing` to `closed` (the teacher already asked for silence), conditional on
+  the state it read, so a decision made meanwhile wins. The teacher console
+  offers the action on exactly those two states. What is still missing is
+  *detection*: nothing polls for a parked row, so a teacher has to notice it in
+  the queue before pushing it. Wire that timer before unattended production exam
+  monitoring.
 - After \`end\`, database rejects new token minting; a room deletion failure
   requires cleanup. Already-issued tokens are short-lived.
 - Rate limits, load test, cross-tenant integration tests and secret management are

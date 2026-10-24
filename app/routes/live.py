@@ -266,6 +266,52 @@ def moderate(sid, rid, action):
     return jsonify({"status": final_state})
 
 
+@live_bp.route("/sessions/<sid>/hand-raises/<rid>/reconcile", methods=["POST"])
+@login_required
+def reconcile(sid, rid):
+    """Clear a transitional grant left behind by an interrupted moderation.
+
+    ``approve``/``close`` park the row in ``approving``/``closing`` before the
+    LiveKit permission call and only their own error path resets it, so a worker
+    that dies in between (or whose reset also fails) leaves a row the student's
+    ``hand_raise`` keeps returning and the teacher cannot decide. Repair is
+    always fail-closed: mute the pupil, then step back to a decided state.
+    """
+    if (off := _off()) is not None:
+        return off
+    db = get_supabase()
+    session = _session(db, sid)
+    if _check(db, session, staff_only=True) != live_policy.LIVE_TEACHER:
+        return _denied()
+    raise_row = _one(db.table("scan_live_hand_raises").select("*")
+                     .eq("id", rid).eq("session_id", sid)
+                     .eq("school_id", session["school_id"]))
+    if not raise_row:
+        return _denied()
+    stuck = raise_row["status"]
+    if stuck not in ("approving", "closing"):
+        return jsonify({"error": "Nothing to reconcile"}), 409
+    # Mute first: an interrupted ``close`` may still be publishing audio, and an
+    # interrupted ``approve`` must not hand the pupil an open microphone back.
+    try:
+        livekit_gateway.set_student_mic(
+            current_app.config, sid, session["room_name"],
+            raise_row["student_id"], False)
+    except Exception:
+        log.exception("Live reconcile could not mute %s", rid)
+        return _unavailable()
+    # ``approving`` goes back to pending so the teacher decides again;
+    # ``closing`` is finished, because the teacher already asked for silence.
+    final_state = "pending" if stuck == "approving" else "closed"
+    updated = (db.table("scan_live_hand_raises").update({"status": final_state})
+               .eq("id", rid).eq("session_id", sid)
+               .eq("school_id", session["school_id"])
+               .eq("status", stuck).execute().data or [])
+    if not updated:
+        return jsonify({"error": "Request state has changed"}), 409
+    return jsonify({"status": final_state})
+
+
 @live_bp.route("/sessions/<sid>/end", methods=["POST"])
 @login_required
 def end_session(sid):
