@@ -881,6 +881,8 @@ def _register_blueprints(app):
     from app.routes.students import student_bp as students_bp
     from app.routes.media import media_bp
     from app.routes.seb import seb_bp
+    from app.routes.live import live_bp, live_ui_bp
+    from app.routes.live_webhook import live_webhook_bp
 
     app.register_blueprint(super_bp)
     app.register_blueprint(public_bp)
@@ -918,6 +920,10 @@ def _register_blueprints(app):
     # (`/teacher/…`, `/student/…`, `/panduan/…`) rather than a prefix that would
     # have to lie about one of them.
     app.register_blueprint(seb_bp)
+    # Dormant unless both SCANGRADE_LIVE_* feature flags are enabled.
+    app.register_blueprint(live_bp)
+    app.register_blueprint(live_ui_bp)
+    app.register_blueprint(live_webhook_bp)
 
     # Whiteboard blueprints (registered but heavy imports deferred)
     try:
