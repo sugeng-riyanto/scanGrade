@@ -60,7 +60,10 @@ def _check(db, session, staff_only=False):
     if not session or session.get("status") != "active":
         return None
     exam = _exam(db, session["exam_id"])
-    return _access(db, exam, staff_only=staff_only)
+    role = _access(db, exam, staff_only=staff_only)
+    if role == "teacher" and str(session.get("created_by") or "") != str(g.get("user_id") or ""):
+        return None  # A second teacher cannot see pupil tracks allowed to the room creator.
+    return role
 
 
 def _denied():
@@ -82,9 +85,11 @@ def status(exam_id):
     if not role:
         return _denied()
     session = _one(db.table("scan_live_sessions").select(
-        "id,exam_id,status,created_at"
+        "id,exam_id,status,created_at,created_by"
     ).eq("exam_id", exam_id).eq("school_id", exam["school_id"])
         .eq("status", "active"))
+    if role == "teacher" and session and str(session.get("created_by") or "") != str(g.user_id):
+        return jsonify({"error": "Another teacher already supervises this Live session"}), 409
     return jsonify({"session": session, "role": role,
                     "policy": live_policy.EXAM_POLICY})
 
@@ -104,6 +109,8 @@ def create_session(exam_id):
                     .eq("school_id", exam["school_id"]).eq("exam_id", exam_id)
                     .eq("status", "active"))
     if existing:
+        if str(existing.get("created_by") or "") != str(g.user_id):
+            return jsonify({"error": "Another teacher already supervises this Live session"}), 409
         return jsonify({"session_id": existing["id"], "existing": True})
     # Unique partial index prevents parallel callers creating two active rooms.
     row = {
