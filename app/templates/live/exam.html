@@ -1,13 +1,13 @@
 {% set content_lang = 'id' %}
 {% extends "base.html" %}
-{% block title %}ScanGrade Live — Exam Mode{% endblock %}
-{% block page_title %}ScanGrade Live{% endblock %}
+{% block title %}ScanMeet — Exam Mode{% endblock %}
+{% block page_title %}ScanMeet{% endblock %}
 {% block content %}
 <section id="scan-live" data-exam-id="{{ live_exam_id | e }}"
          data-role="{{ live_role | e }}" data-csrf="{{ csrf_token() }}"
          class="space-y-5">
   <header class="card p-5 space-y-3">
-    <h1 class="font-extrabold text-xl">ScanGrade Live — Exam Mode</h1>
+    <h1 class="font-extrabold text-xl">ScanMeet — Exam Mode</h1>
     <p class="text-sm text-surface-500">Kamera wajib · Mikrofon dengan izin guru · Chat dan rekaman nonaktif · Grid</p>
     <div class="flex flex-wrap gap-3">
       {% if live_role == "teacher" %}
