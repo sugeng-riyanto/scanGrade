@@ -41,6 +41,32 @@ User-facing name: **ScanMeet**. Backend module names remain `scan_live_*` for mi
 - POST /api/live/sessions/<id>/hand-raises/<request_id>/reconcile
   (authorized staff; clears a grant parked in `approving`/`closing`)
 - POST /api/live/sessions/<id>/end
+- POST /api/live/exams/<exam_id>/enabled  `{"enabled": true|false}` (exam's own
+  teacher or the school admin; see the switch below)
+
+## The per-examination switch (migration 071)
+
+`exams.scan_live_enabled` is the teacher's decision about a paper. It is the
+value the join routes read, so it — not the existence of a room — is what makes
+ScanMeet available for an exam. Migration 070 remains as it was; 071 only adds
+the column (default `false`, reversible with `DROP COLUMN IF EXISTS
+scan_live_enabled`), and a staging box that has not applied it reads every paper
+as OFF rather than answering with a PostgREST error.
+
+| Request | What happens |
+|---|---|
+| `GET /api/live/exams/<id>` | returns `enabled` beside the session, so the page paints the stored value |
+| `POST .../enabled {"enabled": true}` | stores ON. **Never creates a room**: `POST /sessions` stays the explicit start, so two ON requests cannot produce two rooms |
+| `POST .../enabled {"enabled": false}` | stores OFF, ends the active session row (`status='ended'`, the gate every join token checks), then asks LiveKit to delete the room |
+| LiveKit delete fails | the toggle still succeeds and reports `media_cleanup: pending`; new tokens are already refused |
+| Student, or a teacher who does not manage the paper, or another school | 403 |
+| Body is not a JSON boolean | 400 |
+| Either `SCANGRADE_LIVE_*` flag is off | 404, as everywhere else |
+
+The two environment flags remain deployment-level kill switches: the paper's
+switch can only narrow access, never widen it. The page consults the server on
+every load — the button text is never the authority, so a second device sees
+the stored state instead of overwriting it.
 
 ## Microphone-approval state machine
 

@@ -5,7 +5,7 @@ import logging
 import secrets
 
 from flask import Blueprint, current_app, g, jsonify, request, render_template
-from app.services import live_policy, livekit_gateway
+from app.services import live_exam_toggle, live_policy, livekit_gateway
 from app.utils.auth import get_supabase, login_required
 from app.utils.exam_access import can_manage_exam, exam_sitting_allowed
 
@@ -33,10 +33,28 @@ def _one(query):
     return rows[0] if rows else None
 
 
+EXAM_COLUMNS = "id,school_id,teacher_id,is_published,status,class_ids,target_mode"
+#: Migration 071's per-exam switch. Asked for separately from the columns above
+#: because a box that has not applied the migration must read as OFF (the feature
+#: default) rather than answer every page with a PostgREST error.
+EXAM_COLUMNS_SWITCHED = EXAM_COLUMNS + "," + live_exam_toggle.ENABLED_COLUMN
+
+
 def _exam(db, exam_id):
-    return _one(db.table("exams").select(
-        "id,school_id,teacher_id,is_published,status,class_ids,target_mode"
-    ).eq("id", exam_id))
+    try:
+        return _one(db.table("exams").select(EXAM_COLUMNS_SWITCHED)
+                    .eq("id", exam_id))
+    except Exception as exc:
+        if live_exam_toggle.ENABLED_COLUMN not in str(exc):
+            raise
+        log.warning("exams.%s is missing; migration 071 is not applied, so "
+                    "ScanMeet stays OFF", live_exam_toggle.ENABLED_COLUMN)
+        return _one(db.table("exams").select(EXAM_COLUMNS).eq("id", exam_id))
+
+
+def _switch_off():
+    """This paper's teacher switch is OFF, independently of the kill switches."""
+    return jsonify({"error": "ScanMeet is off for this exam"}), 409
 
 
 def _access(db, exam, *, staff_only=False):
@@ -98,6 +116,7 @@ def status(exam_id):
     if role == live_policy.LIVE_TEACHER and session and str(session.get("created_by") or "") != str(g.user_id):
         return jsonify({"error": "Another teacher already supervises this Live session"}), 409
     return jsonify({"session": session, "role": role,
+                    "enabled": live_exam_toggle.enabled(exam),
                     "policy": live_policy.EXAM_POLICY})
 
 
@@ -112,6 +131,8 @@ def create_session(exam_id):
     exam = _exam(db, exam_id)
     if _access(db, exam, staff_only=True) != live_policy.LIVE_TEACHER:
         return _denied()
+    if not live_exam_toggle.enabled(exam):
+        return _switch_off()
     existing = _one(db.table("scan_live_sessions").select("*")
                     .eq("school_id", exam["school_id"]).eq("exam_id", exam_id)
                     .eq("status", "active"))
@@ -134,6 +155,39 @@ def create_session(exam_id):
     return jsonify({"session_id": created["id"], "existing": False}), 201
 
 
+@live_bp.route("/exams/<exam_id>/enabled", methods=["POST"])
+@login_required
+def set_exam_enabled(exam_id):
+    """The per-examination ScanMeet switch. Server-side authorization only.
+
+    OFF ends an active room and refuses every subsequent join token; ON permits
+    an explicit `POST /sessions` but never creates one here. The two environment
+    flags remain the deployment-level kill switch, checked before this runs.
+    """
+    if (off := _off()) is not None:
+        return off
+    db = get_supabase()
+    exam = _exam(db, exam_id)
+    if _access(db, exam, staff_only=True) != live_policy.LIVE_TEACHER:
+        return _denied()
+    body = request.get_json(silent=True) or {}
+    value = body.get("enabled")
+    if not isinstance(value, bool):
+        return jsonify({"error": "enabled must be true or false"}), 400
+    try:
+        result = live_exam_toggle.set_enabled(
+            db, exam, value=value,
+            end_room=lambda room: livekit_gateway.end_room(
+                current_app.config, room))
+    except live_exam_toggle.Refused as exc:
+        log.warning("ScanMeet switch refused for %s: %s", exam_id, exc)
+        return jsonify({"error": "Could not save the ScanMeet switch; exam unaffected"}), 409
+    except Exception:
+        log.warning("ScanMeet switch unavailable for %s", exam_id, exc_info=True)
+        return jsonify({"error": "Could not save the ScanMeet switch; exam unaffected"}), 503
+    return jsonify(result)
+
+
 @live_bp.route("/sessions/<sid>/token", methods=["POST"])
 @login_required
 def join_token(sid):
@@ -144,6 +198,11 @@ def join_token(sid):
     role = _check(db, session)
     if not role:
         return _denied()
+    # A session that exists is not permission to join it: the teacher may have
+    # switched the paper off after the room was created, and the row's cleanup
+    # is the only thing between that decision and a pupil's camera.
+    if not live_exam_toggle.enabled(_exam(db, session["exam_id"]) or {}):
+        return _switch_off()
     approved = False
     if role == live_policy.LIVE_STUDENT:
         approved = bool(_one(db.table("scan_live_hand_raises").select("id")
