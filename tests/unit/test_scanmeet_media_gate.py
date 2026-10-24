@@ -226,21 +226,60 @@ def test_the_launcher_passes_what_a_media_page_needs():
     """The flags, because each absent one is a reading that lies.
 
     No autoplay policy and every remote camera reads as dead; no fake UI and a
-    headless browser never publishes at all; no shm escape and a container's
-    64 MB kills the renderer before there is a page to read.
+    headless browser never publishes at all. The `/dev/shm` escape is asserted
+    where it now lives — the shared launcher — rather than in a second copy here.
     """
-    argv, env = GATE.launch_argv("/usr/bin/google-chrome", 9222, "/tmp/profile")
+    flags = GATE.media_flags()
     for flag in ("--autoplay-policy=no-user-gesture-required",
                  "--use-fake-ui-for-media-stream",
-                 "--use-fake-device-for-media-stream",
-                 "--disable-dev-shm-usage"):
-        assert flag in argv, f"{flag} is missing from the launch"
-    # The extras go before the URL the launcher ends on, not after it.
-    assert argv[-1] == "about:blank"
-    assert env["HOME"] == "/tmp/profile"
-    real, _ = GATE.launch_argv("/usr/bin/google-chrome", 9222, "/tmp/p", fake=False)
+                 "--use-fake-device-for-media-stream"):
+        assert flag in flags, f"{flag} is missing from the launch"
+    assert "--use-file-for-fake-video-capture=/clip.y4m" in GATE.media_flags(
+        video_file="/clip.y4m")
+    real = GATE.media_flags(fake=False)
     assert "--use-fake-device-for-media-stream" not in real
     assert "--use-fake-ui-for-media-stream" in real
+
+    # One launch path: the flags are extras for it, and the container's 64 MB
+    # `/dev/shm` is handled there for every gate that starts a browser.
+    argv, env = GATE.touch_gate.browser_launch(
+        "/usr/bin/google-chrome", 9222, "/tmp/profile")
+    assert "--disable-dev-shm-usage" in argv
+    assert argv[-1] == "about:blank", (
+        "the shared launcher must still end on the blank page: a flag appended "
+        "after it would be read as a URL"
+    )
+    assert env["HOME"] == "/tmp/profile"
+
+
+def test_the_browser_starts_through_the_shared_retried_launcher(monkeypatch):
+    """One launch path, and the media flags arrive as its `extra_args`.
+
+    The driver used to own its own `Popen` and its own 25-line wait for a debug
+    target, so a launch that lost a race cost a whole run and said nothing about
+    why (the same defect `touch_gate.start_browser` was written for).
+    """
+    import asyncio
+
+    seen = []
+
+    def fake_start(browser, **kwargs):
+        seen.append((browser, kwargs))
+        return None, None, None, (
+            "the browser never offered a debug target (chrome said: boom) — after 2 launches")
+
+    monkeypatch.setattr(GATE.touch_gate, "start_browser", fake_start)
+    browser = GATE.Browser("teacher", "http://127.0.0.1:9", {}, binary="/bin/chrome")
+    with pytest.raises(GATE.CannotMeasure) as caught:
+        asyncio.run(browser.open())
+    assert "boom" in str(caught.value), (
+        "the reason Chrome gave is the only thing that can tell a race from a "
+        "broken box, and the driver must not drop it"
+    )
+    assert seen == [(  
+        "/bin/chrome",
+        {"extra_args": tuple(GATE.media_flags())},
+    )], "the driver must start its browser through `touch_gate.start_browser`"
 
 
 def test_the_grant_is_what_the_sfu_enforces():
