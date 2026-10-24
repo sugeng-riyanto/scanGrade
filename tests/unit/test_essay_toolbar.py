@@ -298,7 +298,10 @@ ctx.essayTarget = api.essayTarget;
 
 let commanded = null;
 doc.execCommand = function (cmd) { commanded = cmd; return true; };
-dom.window.SGEssayEditor = { remember: function () {}, restore: function () { return true; } };
+/* The real module rather than a stub: the page calls into it, and a stub that
+   answered for it would be testing the stub. */
+dom.window.eval(fs.readFileSync(process.env.SG_ESSAY_EDITOR, 'utf8'));
+const editorApi = dom.window.SGEssayEditor;
 
 doc.body.focus();
 record('nothing was focused to begin with', doc.activeElement === doc.body, true);
@@ -331,6 +334,33 @@ sel.addRange(range);
 api.essayTarget.call(ctx, 0);
 record('a selection the pupil made is kept', String(sel), 'siap');
 
+/* Focus is not where the selection lives.
+
+   Every control in the toolbar that is not a button — the font, size and
+   alignment selects, the Teks/Canvas tabs — takes the focus away from the
+   paragraph while leaving the pupil's selection exactly where they put it. The
+   resolver tested `document.activeElement`, so in that state it re-focused the
+   paragraph and replaced the selection with a caret at the end: Bold added no
+   markup, the list buttons did nothing, and a pupil who had just picked Serif
+   read the whole toolbar as dead. */
+const picker = doc.createElement('select');
+picker.appendChild(doc.createElement('option'));
+doc.body.appendChild(picker);
+sel.removeAllRanges();
+sel.addRange(range);
+editorApi.remember(el);              // the paragraph's own @mouseup, on the real page
+picker.focus();
+record('the paragraph remembers the selection', String(editorApi.savedRange(el)), 'siap');
+record('the toolbar control holds the focus', doc.activeElement === picker, true);
+
+let commandedWith = null;
+doc.execCommand = function (cmd) { commandedWith = cmd; return true; };
+api.execCmd.call(ctx, 0, 'bold');
+record('the command reaches the browser', commandedWith, 'bold');
+record('it is given the selection the pupil made', String(sel), 'siap');
+record('with the caret back in the paragraph', doc.activeElement === el, true);
+record('and the page still saves the paragraph', saved.length >= 2, true);
+
 process.stdout.write(JSON.stringify(results));
 """
 
@@ -338,6 +368,7 @@ process.stdout.write(JSON.stringify(results));
 def _run_target_harness():
     env = dict(os.environ)
     env["SG_TAKE_EXAM"] = str(TAKE)
+    env["SG_ESSAY_EDITOR"] = str(MODULE)
     proc = subprocess.run([NODE, "-e", TARGET_HARNESS], cwd=str(ROOT), env=env,
                           capture_output=True, text=True, timeout=120)
     assert proc.returncode == 0, proc.stderr
@@ -547,6 +578,12 @@ class TestTheWiring:
         assert results["the paragraph is found without a stored row"] is True
         assert results["and a question with no sheet answers null"] is None
         assert results["a selection the pupil made is kept"] == "siap"
+        assert results["the toolbar control holds the focus"] is True
+        assert results["the paragraph remembers the selection"] == "siap"
+        assert results["it is given the selection the pupil made"] == "siap", (
+            "a control that took the focus erased the selection, so the command "
+            "ran on an empty caret and the toolbar looked dead")
+        assert results["with the caret back in the paragraph"] is True
         assert results["the command reached the browser"] == "bold"
         assert results["the page was told to save the paragraph"] is True
 

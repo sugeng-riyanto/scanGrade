@@ -28,7 +28,17 @@ from deploy.livekit_preflight import audit, parse_env
 MEASURE_MODES = os.name == "posix"
 
 PRODUCTION_CHECKOUT = Path("/opt/scangrade")
-PRODUCTION_SITE = "scan-grade.app"
+#: Where the live app answers. `scan-grade.app` was recorded here as the
+#: production *site*, but it is the demo email domain in `manage.py`; the deployed
+#: site is `scangrade.web.id` (`README.md`), and `lmsshb.scangrade.web.id` serves
+#: the same box (both names hold a certificate under `/etc/letsencrypt/live`).
+#: Staging pointed at either was accepted as "a real separate HTTPS host" -- the
+#: one sentence a UU PDP pilot cannot get wrong.
+PRODUCTION_DOMAIN = "scangrade.web.id"
+PRODUCTION_SITE = PRODUCTION_DOMAIN
+PRODUCTION_HOSTS = (PRODUCTION_DOMAIN, "www." + PRODUCTION_DOMAIN,
+                    "lmsshb." + PRODUCTION_DOMAIN,
+                    "scan-grade.app", "www.scan-grade.app")
 REQUIRED = ("SUPABASE_URL", "SUPABASE_SERVICE_KEY",
             "SUPABASE_ANON_KEY", "FLASK_SECRET_KEY", "SCANMEET_STAGING_URL")
 
@@ -60,8 +70,11 @@ def validate(settings: dict[str, str], production_ref: str) -> list[str]:
     try:
         web = urlsplit(raw_web)
         host = (web.hostname or "").lower()
-        if (web.scheme != "https" or not host or host in (
-                PRODUCTION_SITE, "www." + PRODUCTION_SITE, "localhost", "127.0.0.1")
+        if (web.scheme != "https" or not host
+                or host in PRODUCTION_HOSTS or host in ("localhost", "127.0.0.1")
+                # Every name under the live domain reaches the live box, so a
+                # subdomain there is not a separate host either.
+                or host.endswith("." + PRODUCTION_DOMAIN)
                 or host.endswith((".example", ".invalid", ".test"))
                 or web.username or web.password or web.query or web.fragment):
             problems.append("SCANMEET_STAGING_URL must be a real separate HTTPS host")
@@ -98,6 +111,13 @@ def validate_file(path: Path, checkout: Path, measure: bool | None = None) -> li
         problems.append("Private staging env must be outside the Git checkout")
     if path.is_symlink():
         problems.append("Private staging env must not be a symlink")
+    if not path.exists():
+        # `stat()` failing covered this case as "not readable", which is the
+        # wrong sentence for the state a fresh box is in: there is nothing to
+        # read yet. Reported before the mode is measured, because there is none.
+        problems.append("Private staging env does not exist (create it with umask "
+                        "077 on the staging host)")
+        return problems
     try:
         problems.extend(mode_problem(path.stat().st_mode, measure))
     except OSError:
@@ -138,10 +158,25 @@ def main(argv=None) -> int:
               "on the staging host")
     print("PASS: isolated ScanMeet staging configuration (offline)")
     if args.probe_livekit:
+        # The import is separated from the call: this module is standard library
+        # only, and the staging suite runs it where `requirements.txt` is not
+        # installed, so a failed import here is about the probe -- not about the
+        # credentials it would have checked.
+        try:
+            from deploy.livekit_connectivity import MissingSdk, probe
+        except ImportError as exc:
+            print(f"FAIL: the LiveKit probe could not be loaded ({exc}) - "
+                  "pip install -r requirements-live.txt")
+            return 2
         try:
             import asyncio
-            from deploy.livekit_connectivity import probe
             asyncio.run(probe(settings))
+        except MissingSdk as exc:
+            # A venv without requirements-live.txt is not a credential problem,
+            # and saying so is the difference between a one-line fix and an hour
+            # spent re-reading the LiveKit dashboard.
+            print(f"FAIL: {exc}")
+            return 2
         except Exception:
             print("FAIL: LiveKit read-only connectivity/authentication")
             return 1

@@ -97,7 +97,8 @@
             projectorMode: false,
             /* A paper is not a graph: the axes labels are useful, the degree-mode
              * menu is a distraction in a two-hour sitting. It stays reachable from
-             * the wrench, which is what a Cambridge paper expects. */
+             * the wrench, which is the convention an external board's papers
+             * assume — the setting exists without spending screen on it. */
             administerSecretFolders: false
         }, options || {}));
 

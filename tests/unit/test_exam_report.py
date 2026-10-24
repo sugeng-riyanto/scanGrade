@@ -498,10 +498,20 @@ class TestThePage:
         IB/A-Level teacher" makes the same claim to the model that a page makes to
         a school. Both are checked, because a rule that only holds where the reader
         can see it is a rule about the reader and not about the app.
+
+        The page's own scripts are read too. A comment is not a place a claim is
+        hidden from the reader — it is where the *next* reader finds the reasoning,
+        and the exam page's calculator and graph helpers carry exactly the kind of
+        prose this rule is about: a comment in `static/js/exam-graph.js` once named
+        a board while describing the graphing calculator's settings menu, and no
+        template scan could see it. Vendored third-party code under `static/vendor/`
+        is deliberately out of scope: it is other people's prose, and the app is not
+        its author.
         """
         app = pathlib.Path(__file__).resolve().parents[2] / "app"
         sources = sorted(list((app / "templates").rglob("*.html"))
-                         + list(app.rglob("*.py")))
+                         + list(app.rglob("*.py"))
+                         + list((app / "static" / "js").rglob("*.js")))
         offenders = []
         for path in sources:
             text = path.read_text(encoding="utf-8")

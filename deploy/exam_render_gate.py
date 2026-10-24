@@ -74,23 +74,24 @@ import json
 import os
 import re
 import shutil
-import subprocess
 import sys
-import tempfile
 import time
 import urllib.parse
 
-# The gate reuses the touch gate's browser locator, sign-in, port helper and CDP
-# client — the same box, the same account shape, the same socket plumbing, so there
-# is one copy. The CDP client keeps the *events* (`send` used to drop everything but
-# its own reply), which is what makes a page error visible here at all.
+# The gate reuses the touch gate's browser locator, sign-in and CDP client — the
+# same box, the same account shape, the same socket plumbing, so there is one copy.
+# Starting the browser is `start_browser`'s job rather than a second copy of the
+# launch-wait here: it owns the debug-target wait, the retry for a launch that never
+# came up, and the browser's own last words when it did not. The CDP client keeps
+# the *events* (`send` used to drop everything but its own reply), which is what
+# makes a page error visible here at all.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from touch_gate import (  # noqa: E402
     _CDP,
-    _free_port,
-    browser_launch,
+    _stop,
     locate_browser,
     sign_in,
+    start_browser,
 )
 
 EXIT_OK = 0
@@ -537,39 +538,19 @@ async def read_once(cdp, value):
 
 
 async def _render(base_url, browser, cookies, exam_path):
-    """Drive one headless browser to the exam page. Returns `(reading, events, reason)`."""
-    import requests
+    """Drive one headless browser to the exam page. Returns `(reading, events, reason)`.
+
+    Starting the browser, waiting for its debug target and retrying a *launch* that
+    never came up are `start_browser`'s job — one copy of how this box starts
+    Chrome, so the retry and Chrome's own last words reach this gate too. What is
+    not retried is the page: a reading that came back empty is the page's answer.
+    """
     import websockets
 
-    port = _free_port()
-    profile = tempfile.mkdtemp(prefix="sg-render-")
-    argv, env = browser_launch(browser, port, profile)
-    proc = subprocess.Popen(
-        argv,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        env=env,
-    )
+    proc, target, profile, reason = start_browser(browser)
+    if target is None:
+        return None, [], reason
     try:
-        target = None
-        for _ in range(80):
-            try:
-                pages = [
-                    t
-                    for t in requests.get(
-                        f"http://127.0.0.1:{port}/json/list", timeout=2
-                    ).json()
-                    if t.get("type") == "page"
-                ]
-                if pages:
-                    target = pages[0]["webSocketDebuggerUrl"]
-                    break
-            except Exception:  # noqa: BLE001 - the browser is still starting
-                pass
-            time.sleep(0.25)
-        if not target:
-            return None, [], "the browser never offered a debug target"
-
         host = urllib.parse.urlparse(base_url).hostname or "127.0.0.1"
         events = []
         async with websockets.connect(target, max_size=64 * 1024 * 1024) as ws:
@@ -615,11 +596,7 @@ async def _render(base_url, browser, cookies, exam_path):
                     break
         return value, events, None
     finally:
-        proc.terminate()
-        try:
-            proc.wait(timeout=10)
-        except Exception:  # noqa: BLE001
-            proc.kill()
+        _stop(proc)
         shutil.rmtree(profile, ignore_errors=True)
 
 

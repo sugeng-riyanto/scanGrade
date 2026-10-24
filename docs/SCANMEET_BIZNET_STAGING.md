@@ -148,9 +148,69 @@ produced.
 
 ### 2. Two real browsers, real media
 
-Use two different browsers (or one normal plus one private window) signed in as
-the teacher and as an assigned pupil, and a third as a pupil of **another
-school**. Cameras and microphones on, no fake devices.
+Half of this section is driven rather than watched. Three of its readings cannot
+be taken by looking at a page — a frame counter that is moving, a microphone the
+**SFU** refuses rather than a button the page hides, and media one pupil's
+browser did *not* receive — so `deploy/scanmeet_media_gate.py` takes them, in
+three headless browsers, and prints one row per claim.
+
+With the env file exported on the staging host:
+
+```bash
+set -a; . ~/.config/scanmeet/staging.env; set +a
+python -m deploy.scanmeet_media_gate \
+  --url "$SCANMEET_STAGING_URL" --exam <exam_id> \
+  --teacher guru@school:pw --student murid1@school:pw \
+  --student2 murid2@school:pw --outsider murid@other-school:pw
+```
+
+Expected: twelve `PASS` rows — `sdk-loaded`, `session`, `pupil-camera`,
+`teacher-receives-camera`, `pupil-isolation`, `mic-starts-closed`, `hand-raise`,
+`mic-approved`, `audio-reaches-teacher`, `mic-closed`, `outsider-refused`,
+`room-ended` — and a closing `PASS: 12/12 rows`. The driver reads each page
+**and** the join token the server issues, because the token's
+`canPublishSources` is what LiveKit enforces while the DOM is only what the page
+drew: `mic-starts-closed` is a camera-only grant, `mic-approved` is
+camera + microphone, and `mic-closed` is the camera again.
+
+Exit codes: 0 every row passed · 1 a row disagreed (the row naming the defect) ·
+2 could not measure — a missing account, Live off, a page that never loaded, or a
+run that ended early. **2 is not a pass**: an unfinished run names the rows it
+never took instead of printing a shorter list of passes.
+
+Add `--signoff` to print those twelve rows as the Markdown sheet this section
+ends with — the URL, the exam id, when it ran, the browser it drove and the
+verdict the run earned, ready to paste into the pilot's record. The sheet carries
+the verdict it earned rather than the one the reader hopes for: a run that could
+not take a row heads its table with `CANNOT MEASURE` and says in words that it is
+not a sign-off. Keep the raw reading beside it with
+`--signoff --json-out reading.json`; `--json` and `--signoff` are refused
+together, because both write stdout and the run that asked for a sheet would
+otherwise get a JSON blob and no sheet at all.
+
+The driver refuses the live site — `scangrade.web.id`, its `www.`, the
+`lmsshb.` name and every other subdomain of that domain — unless
+`--allow-production`, because a stale `$SCANMEET_STAGING_URL` would otherwise open
+a real room and press a real teacher's controls on the exams pupils are sitting:
+the escape hatch is for a deliberate pilot, never a copy-paste. (`scan-grade.app`
+is the demo *email* domain in `manage.py`, not where the app is deployed; the
+guard lists it too, so pointing a staging run there is refused rather than
+silently measuring nothing.)
+
+What the driver covers, from the table below: 01, 02, 03, 04, 05, 06, 07 and 10,
+plus the isolation reading the table asks a person to take from two console
+snippets. What stays manual: **08** (a pupil trying chat, screen share or
+recording — the grant row already shows those sources are absent, but a person
+pressing the control is the pilot's own evidence) and **09** (a ~30 s network
+drop and reconnect). Its cameras are Chrome's synthetic device
+(`--use-fake-device-for-media-stream`: a real `getUserMedia` track, a real
+publish, a real SFU subscription and real decoded frames, with a test pattern
+where a face would be); `--no-fake-devices` uses the box's hardware instead, and
+the header line always says which.
+
+For the pilot itself — real cameras, real people — use two different browsers
+(or one normal plus one private window) signed in as the teacher and as an
+assigned pupil, and a third as a pupil of **another school**.
 
 | # | Action | Evidence to record |
 |---|---|---|
@@ -190,6 +250,47 @@ Paste in the **teacher's** page to see the room's actual topology:
 
 Anything above 0 means the browser really reached the LiveKit host; a page that
 only ever shows "Memeriksa sesi Live..." never did.
+
+#### The sheet `--signoff` prints
+
+This is the artefact — not a summary of it — for a run that took all twelve rows.
+It is the output of `deploy/scanmeet_media_gate.py`'s own sheet renderer, so the
+wording below is the wording a pilot's ticket will carry; the four header values
+are the run's (URL, exam id, when it ran, which browser), and every cell in the
+table comes from a reading the driver took, never from this page.
+
+```markdown
+## ScanMeet media sign-off - https://staging.your-school-domain.com
+
+- **Verdict:** `SIGNED OFF` (exit 0) - 12/12 row(s) passed
+- **Exam:** `9f4c2a10-8d3e-4b71-9c55-2e7a1b0d6f38`
+- **Run at:** 2026-10-24T09:12:44+07:00
+- **Browser:** `/usr/bin/google-chrome` (synthetic devices)
+
+| # | Row | State | What this run observed |
+| --- | --- | --- | --- |
+| 1 | `sdk-loaded` | PASS | the page reached the pinned SDK |
+| 2 | `session` | PASS | the room opened (7c1e4a92...) and the teacher joined it |
+| 3 | `pupil-camera` | PASS | the pupil's page is decoding its own camera, and the frames were still rising 3s later |
+| 4 | `teacher-receives-camera` | PASS | the teacher's grid is decoding 2 pupil camera(s) |
+| 5 | `pupil-isolation` | PASS | neither pupil's page holds any camera but their own and the supervisor's, while the other is in the room |
+| 6 | `mic-starts-closed` | PASS | a fresh pupil token grants the camera only, and the page offers no microphone control |
+| 7 | `hand-raise` | PASS | the request is pending in the API and a row the teacher can see in the queue |
+| 8 | `mic-approved` | PASS | approval grants camera + microphone and the pupil's control appears |
+| 9 | `audio-reaches-teacher` | PASS | the teacher's page holds a live audio track for the room |
+| 10 | `mic-closed` | PASS | the close takes the grant back to the camera, the control away and the teacher's live audio with it |
+| 11 | `outsider-refused` | PASS | another school's pupil is refused both the page and the token |
+| 12 | `room-ended` | PASS | *Akhiri Live* is confirmed, and the next join token is refused |
+
+Every row passed: cameras decode, the microphone is refused until a teacher approves it and revoked after, no pupil receives another's media, and the ended room admits nobody.
+```
+
+The verdict line is the one a reader checks first, and it is earned rather than
+assumed: `--signoff` on a run that skipped a row prints `CANNOT MEASURE` with the
+same table and a closing sentence saying it is **not** a sign-off. A sheet with a
+`**SKIP**` or a `**FAIL**` in it is a finding to send back, not a pilot to file —
+`test_the_runbook_shows_the_sheet_the_driver_prints` reads this block and fails
+if the twelve row names or the closing sentence stop matching the tool.
 
 ### 3. What to send back
 
