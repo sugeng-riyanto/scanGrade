@@ -86,7 +86,7 @@
                    for. Both point at the survivor page, whose two anchors are below. #}
                 {# A separate, feature-gated LiveKit pilot. The existing invigilation
                     page remains the default route and production flow. #}
-                {% if config.get('SCANGRADE_LIVE_ENABLED') and config.get('SCANGRADE_LIVE_EXAM_ENABLED') %}
+                {% if scanmeet_enabled %}
                 <a href="{{ url_for('live_ui.live_exam_page', exam_id=exam.id) }}"
                    class="h-10 px-3 rounded-xl border border-surface-200 text-surface-600 hover:text-primary-600 hover:border-primary-200 text-xs font-bold inline-flex items-center gap-1.5 transition"
                    x-text="t('Uji Video LiveKit','LiveKit Video Pilot')"></a>

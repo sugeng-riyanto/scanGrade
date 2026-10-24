@@ -1,0 +1,39 @@
+name: ScanMeet staging SDK contract
+on:
+  pull_request:
+    paths:
+      - 'app/services/livekit_gateway.py'
+      - 'app/services/live_policy.py'
+      - 'app/routes/live.py'
+      - 'app/templates/live/**'
+      - 'app/templates/teacher/exam_form.html'
+      - 'deploy/livekit_*.py'
+      - 'requirements-live.txt'
+      - '.github/workflows/scanmeet-sdk.yml'
+      - 'tests/unit/test_live_*.py'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  sdk-contract:
+    name: Real pinned LiveKit SDK + offline staging guards
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install application and pinned LiveKit SDK
+        run: |
+          python -m pip install -r requirements.txt -r requirements-live.txt
+          python -m pip check
+      - name: Verify actual SDK JWT/grants and admin API URL offline
+        run: python -m deploy.livekit_sdk_contract
+      - name: Verify isolated LiveKit route, policy and staging guards
+        run: |
+          python -m pytest tests/unit/test_live_access.py tests/unit/test_live_creator.py \
+            tests/unit/test_live_policy.py tests/unit/test_live_preflight.py \
+            tests/unit/test_live_connectivity.py tests/unit/test_live_webhook.py -q -ra
+          python deploy/livekit_preflight.py --env deploy/livekit-staging.env.example
