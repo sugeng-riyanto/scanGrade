@@ -1,0 +1,86 @@
+name: ScanMeet CDP E2E
+
+# Offline contracts run on a PR. Real LiveKit/media runs ONLY when deliberately
+# dispatched against a protected staging GitHub environment.
+on:
+  pull_request:
+    paths:
+      - 'deploy/scanmeet_cdp_e2e.py'
+      - 'tests/unit/test_scanmeet_cdp_e2e.py'
+      - 'docs/SCANMEET_CDP_E2E.md'
+      - '.github/workflows/scanmeet-cdp-e2e.yml'
+  workflow_dispatch:
+    inputs:
+      staging_confirmation:
+        description: 'Type STAGING_ONLY to run real media against staging'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    name: Offline CDP acceptance contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Exercise negative media / privacy and safety findings
+        run: |
+          python -m unittest tests.unit.test_scanmeet_cdp_e2e -v
+          python -m compileall -q deploy/scanmeet_cdp_e2e.py
+
+  staging-media:
+    name: Real Chrome/WebRTC staging media (manual only)
+    if: github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'
+    needs: contract
+    environment: scanmeet-staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SCANMEET_STAGING_URL: ${{ vars.SCANMEET_STAGING_URL }}
+      SCANMEET_EXAM_ID: ${{ vars.SCANMEET_EXAM_ID }}
+      SCANMEET_TEACHER_LOGIN: ${{ secrets.SCANMEET_TEACHER_LOGIN }}
+      SCANMEET_PUPIL_A_LOGIN: ${{ secrets.SCANMEET_PUPIL_A_LOGIN }}
+      SCANMEET_PUPIL_B_LOGIN: ${{ secrets.SCANMEET_PUPIL_B_LOGIN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Require explicit staging confirmation
+        env:
+          CONFIRM: ${{ inputs.staging_confirmation }}
+        run: |
+          if [ "$CONFIRM" != 'STAGING_ONLY' ]; then
+            echo '::error::Real media requires the exact STAGING_ONLY confirmation'
+            exit 2
+          fi
+      - name: Install browser-driver-only dependencies
+        run: python -m pip install requests==2.32.3 websockets==15.0.1
+      - name: Find Chrome binary
+        run: |
+          for candidate in google-chrome google-chrome-stable chromium chromium-browser; do
+            found="$(command -v "$candidate" || true)"
+            if [ -n "$found" ]; then
+              echo "SG_CHROME=$found" >> "$GITHUB_ENV"
+              exit 0
+            fi
+          done
+          echo '::error::CDP could not be measured: no Chrome installed'
+          exit 2
+      - name: Run real LiveKit video, privacy and microphone assertions
+        run: |
+          python -m deploy.scanmeet_cdp_e2e --confirm-staging \
+            --json-out scanmeet-e2e.json
+      - name: Keep sanitized verdict only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scanmeet-cdp-e2e-verdict
+          path: scanmeet-e2e.json
+          if-no-files-found: warn
