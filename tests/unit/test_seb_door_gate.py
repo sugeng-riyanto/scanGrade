@@ -732,7 +732,7 @@ class TestTheDeployRunsItBeforeCallingTheReleaseHealthy:
 
     def test_both_scripts_still_parse(self):
         for script in (DEPLOY, INSTALL):
-            done = subprocess.run(["bash", "-n", str(script)], capture_output=True,
+            done = subprocess.run([shutil.which("bash") or "bash", "-n", str(script)], capture_output=True,
                                   text=True)
             assert done.returncode == 0, f"{script.name}: {done.stderr}"
 

@@ -1082,7 +1082,7 @@ class TestTheGateRunsIt:
             stub.write_text(f"#!/usr/bin/env bash\ncat <<'EOF'\n{out}\nEOF\nexit {rc}\n",
                             encoding="utf-8")
             stub.chmod(0o755)
-            return subprocess.run(["bash", "-c", program], capture_output=True,
+            return subprocess.run([shutil.which("bash") or "bash", "-c", program], capture_output=True,
                                   text=True, encoding="utf-8", errors="replace")
 
         gap = run(1, "declared here but not in the live schema (unapplied migrations): 1\n"

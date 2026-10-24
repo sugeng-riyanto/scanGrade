@@ -98,7 +98,7 @@ def run_gate_in(tmp_path: Path, *, missing=(), empty=()) -> subprocess.Completed
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("" if rel in empty else "# placeholder\n", encoding="utf-8")
 
-    return subprocess.run(["bash", str(target)], cwd=tmp_path,
+    return subprocess.run([shutil.which("bash") or "bash", str(target)], cwd=tmp_path,
                           capture_output=True, text=True, encoding="utf-8",
                           errors="replace")
 
@@ -373,7 +373,7 @@ class TestTheShippedRollbackActuallyRollsBack:
         script = tmp_path / "harness.sh"
         script.write_text(HARNESS.replace("@@BLOCK@@", theme_exit_block()),
                           encoding="utf-8")
-        proc = subprocess.run(["bash", str(script), str(repo), before, str(theme_rc)],
+        proc = subprocess.run([shutil.which("bash") or "bash", str(script), str(repo), before, str(theme_rc)],
                               capture_output=True, text=True, encoding="utf-8",
                               errors="replace")
         head = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=repo,

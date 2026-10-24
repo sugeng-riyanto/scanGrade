@@ -39,6 +39,8 @@ check on the check. What it has to answer, in the order a reader would ask it:
 """
 from __future__ import annotations
 
+import shutil
+
 import os
 import subprocess
 import sys
@@ -855,7 +857,7 @@ class TestTheGateRefuses:
         env = dict(os.environ)
         env["PY"] = sys.executable
         env["REPO"] = str(repo)
-        return subprocess.run(["bash", str(script)], capture_output=True,
+        return subprocess.run([shutil.which("bash") or "bash", str(script)], capture_output=True,
                               text=True, encoding="utf-8", errors="replace", env=env)
 
     def test_a_broken_reference_stops_the_commit(self, tmp_path):

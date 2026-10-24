@@ -1044,6 +1044,14 @@
                 </div>
                 {% endif %}
 
+                {% if q.box_report %}
+                <details class="mt-4 pt-4 border-t border-surface-200" data-box-report>
+                    <summary class="cursor-pointer text-sm font-bold text-surface-700"
+                             x-text="t('Diagnostik server saat rilis ditolak (tanpa shell)','Server diagnostics at refusal (no shell)')"></summary>
+                    <pre class="mt-2 p-3 rounded-lg bg-surface-100 text-[11px] leading-relaxed font-mono text-surface-700 whitespace-pre-wrap break-all max-h-72 overflow-auto">{{ q.box_report }}</pre>
+                </details>
+                {% endif %}
+
                 {% if status.situation is not defined or status.situation.key != 'present' %}
                 <div class="mt-4 pt-4 border-t border-surface-200">
                     {% if status.request_pending or status.release_file_present or status.rebaseline_pending %}
@@ -1376,6 +1384,13 @@
                                     <p class="mt-1.5 text-xs text-surface-400"><span x-text="t('Menampilkan','Showing')"></span> {{ r.reasons|length }} <span x-text="t('dari','of')"></span> {{ r.reasons_total }} <span x-text="t('baris output gerbang','lines the gate printed')"></span></p>
                                     {% endif %}
                                 </div>
+                                {% endif %}
+                                {% if r.box_report %}
+                                <details class="pt-1" data-refusal-box-report>
+                                    <summary class="cursor-pointer text-xs font-bold text-surface-600"
+                                             x-text="t('Diagnostik server saat penolakan','Server diagnostics at refusal')"></summary>
+                                    <pre class="mt-2 p-3 rounded-lg bg-surface-100 text-[11px] leading-relaxed font-mono text-surface-700 whitespace-pre-wrap break-all max-h-72 overflow-auto">{{ r.box_report }}</pre>
+                                </details>
                                 {% endif %}
                                 {#
                                     The gate's own measurement, for every quarantined

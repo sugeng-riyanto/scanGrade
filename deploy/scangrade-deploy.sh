@@ -290,6 +290,23 @@ quarantine_write() {
       printf '%s\n' "$FAIL_DETAIL" \
         | cut -c-"$detail_width" | sed -n "1,${detail_lines}p"
     fi
+    # Keep the original three-line record when an older/minimal checkout
+    # cannot collect diagnostics. Real VPS deployments have REPO and the report.
+    # This also keeps pure gate/quarantine harnesses independent of the app.
+    if [ -n "${REPO:-}" ] && [ -f "$REPO/deploy/box_report.py" ]; then
+      printf '%s\n' '=== box_report snapshot ==='
+      if [ -x "$REPO/.venv/bin/python" ]; then
+        # A diagnostic must never delay the rollback indefinitely.
+        timeout 20s "$REPO/.venv/bin/python" "$REPO/deploy/box_report.py" \
+          --repo "$REPO" --state-dir "$STATE_DIR" --samples 1 \
+          --journal-lines 8 2>/dev/null \
+          | sed -n '1,70p' | cut -c-240 \
+          | sed -E 's/(eyJ[A-Za-z0-9_-]{18,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]+)/[redacted-token]/g; s/(Bearer[[:space:]]+)[^[:space:]]+/\\1[redacted]/Ig' || true
+      else
+        printf '%s\n' 'box_report cannot run: Python virtual environment missing'
+      fi
+      printf '%s\n' '=== end box_report snapshot ==='
+    fi
     true
   } > "$QUARANTINE_FILE" 2>/dev/null || true
   # Kept, before the detail is cleared: this is the copy that survives the lift, and

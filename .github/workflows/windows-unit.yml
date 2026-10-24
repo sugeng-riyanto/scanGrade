@@ -1,0 +1,128 @@
+name: Windows unit suite
+
+on:
+  push:
+    branches:
+      - main
+      - fix/windows-unit-and-release-diagnostics-20261024
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-unit-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-unit:
+    name: Windows tests (${{ matrix.shard }}/4)
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    timeout-minutes: 60
+    env:
+      SUPABASE_URL: https://example.invalid
+      FLASK_SECRET_KEY: ci-offline-test-only
+      TEST_SHARD: ${{ matrix.shard }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Set disposable offline-only JWT fixtures
+        shell: pwsh
+        run: python .github/scripts/create_offline_ci_jwt.py
+      - name: Select real Git Bash instead of Windows WSL launcher
+        shell: pwsh
+        run: |
+          # System32/bash.exe is a WSL launcher, not GNU Bash. The hosted
+          # Windows runner has no WSL distribution, causing every shell-based
+          # deploy test to report "no installed distributions" instead of
+          # testing ScanGrade. Git for Windows ships a real bash.exe.
+          $gitBash = Join-Path $env:ProgramFiles 'Git\\bin'
+          if (!(Test-Path (Join-Path $gitBash 'bash.exe'))) {
+            throw "Git for Windows Bash not installed: $gitBash"
+          }
+          $gitBash | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          & (Join-Path $gitBash 'bash.exe') --version
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip check
+      - name: Install JavaScript test dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Create disposable dotenv file
+        shell: pwsh
+        run: |
+          # Fixture contains no real credentials or database. The unit suite must
+          # see a syntactically complete region record when .env exists.
+          @'
+          SUPABASE_URL=https://roshkbzgfzpfedowozfo.supabase.co
+          '@ | Set-Content -Path .env -Encoding utf8
+      - name: Execute assigned tests/unit files on Windows
+        shell: pwsh
+        run: |
+          # Exactly one shard owns every test_*.py in tests/unit; tests are
+          # discovered recursively, with a stable lexical ordering.
+          $files = @(Get-ChildItem tests/unit -Recurse -File -Filter 'test_*.py' | Sort-Object FullName)
+          $shard = [int]$env:TEST_SHARD
+          $actualBash = (& python -c 'import shutil; print(shutil.which("bash"))')
+          Write-Host "Bash for this test run: $actualBash"
+          if ($actualBash -match 'System32') { throw "WSL launcher selected instead of Git Bash" }
+          $selected = @(
+            for ($i = 0; $i -lt $files.Count; $i++) {
+              if (($i % 4) -eq $shard) { $files[$i].FullName }
+            }
+          )
+          if ($selected.Count -eq 0) { throw "Unit test shard $shard has no files" }
+          Write-Host "Windows shard $shard runs $($selected.Count) of $($files.Count) unit test files"
+          & python -m pytest @selected -q -ra --junitxml="windows-unit-results-$shard.xml"
+          exit $LASTEXITCODE
+      - name: Publish Windows-specific failure evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-unit-results-${{ matrix.shard }}
+          path: windows-unit-results-${{ matrix.shard }}.xml
+          if-no-files-found: warn
+      - name: Clean up disposable dotenv file
+        if: always()
+        shell: pwsh
+        run: Remove-Item .env -ErrorAction SilentlyContinue
+
+  theme-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      SUPABASE_URL: https://example.invalid
+      FLASK_SECRET_KEY: ci-offline-test-only
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Set disposable offline-only JWT fixtures
+        run: python .github/scripts/create_offline_ci_jwt.py
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          npm ci --no-audit --no-fund
+      - name: Run actual release theme gate end to end
+        run: bash deploy/theme_gate.sh

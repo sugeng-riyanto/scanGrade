@@ -906,6 +906,17 @@ def _shim_dir(tmp_path: pathlib.Path, **commands: str) -> pathlib.Path:
 def _shimmed_env(tmp_path: pathlib.Path, shim: pathlib.Path) -> dict:
     env = dict(os.environ)
     env["PATH"] = str(shim) + os.pathsep + env.get("PATH", "")
+    # On Windows Git Bash may prepend its own /usr/bin over the PATH inherited
+    # from the Python test process. Noninteractive Bash reads BASH_ENV before
+    # the recovery script, so the mock id/stat/systemctl commands still take
+    # precedence; production code is never given this test-only prelude.
+    if os.name == "nt":
+        prelude = tmp_path / "sg-shell-test-env.sh"
+        prelude.write_text(
+            'export PATH="$(cygpath -u ' + shlex.quote(shim.as_posix()) + '):$PATH"\n',
+            encoding="utf-8", newline="\n")
+        p = prelude.as_posix()
+        env["BASH_ENV"] = "/" + p[0].lower() + p[2:] if p[1:3] == ":/" else p
     env["SG_REPO"] = str(tmp_path / "repo")
     env["SG_STATE_DIR"] = str(tmp_path / "state")
     return env

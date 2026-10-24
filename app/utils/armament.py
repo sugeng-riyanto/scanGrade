@@ -32,6 +32,7 @@ construct", which would send the next reader hunting for a Python fault.
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -68,7 +69,7 @@ def unarmed_reason(timeout: int = TIMEOUT_SECONDS) -> str | None:
 
     try:
         proc = subprocess.run(
-            ["bash", str(CHECKER), "--check"],
+            [shutil.which("bash") or "bash", str(CHECKER), "--check"],
             capture_output=True, text=True, timeout=timeout,
         )
     except subprocess.TimeoutExpired:
