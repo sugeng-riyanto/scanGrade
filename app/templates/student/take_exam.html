@@ -2651,16 +2651,16 @@ body.sg-exam .sg-content { max-width: none; margin-left: 0; margin-right: 0; }
    execution, so the globals exist when `x-data` is evaluated — the same way the
    exam builder loads this file. See tests/unit/test_exam_script_order.py. #}
 {% block scripts %}
-<script src="/static/js/exam-media.js"></script>
-<script src="/static/js/tools.js"></script>
+<script src="{{ asset_v('js/exam-media.js') }}"></script>
+<script src="{{ asset_v('js/tools.js') }}"></script>
 <!-- Classic, for the same reason as the two above: `examApp(...)` reads the
      module while it is built, and a deferred helper would not exist yet. -->
-<script src="/static/js/exam-view.js"></script>
+<script src="{{ asset_v('js/exam-view.js') }}"></script>
 <!-- The essay surface's list/font/paste behaviour. Classic, like the two above,
      because the component reads `window.SGEssayEditor` while it is built. -->
-<script src="/static/js/exam-graph.js"></script>
-<script src="/static/js/exam-graph-local.js"></script>
-<script src="/static/js/essay-editor.js"></script>
+<script src="{{ asset_v('js/exam-graph.js') }}"></script>
+<script src="{{ asset_v('js/exam-graph-local.js') }}"></script>
+<script src="{{ asset_v('js/essay-editor.js') }}"></script>
 <script>
 // The lightbox is page furniture rather than exam state, so it is wired here and
 // not inside Alpine: the overlay has to work while a panel covers the exam bar.

@@ -34,6 +34,7 @@ checker that cannot see must never be the reason a release is refused.
 """
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -49,6 +50,10 @@ GATE = ROOT / "deploy" / "theme_gate.sh"
 RUNTIME_DIRS = ("uploads",)
 
 #: Suffixes that can hold a static URL. Nothing here is read for its prose.
+#: A `<script src>` tag, whatever its other attributes — the same shape
+#: `test_loading_feedback` reads, because a script's URL is where the cache lives.
+SCRIPT_SRC = re.compile(r"<script\b[^>]*\bsrc\s*=\s*\"([^\"]+)\"", re.I | re.S)
+
 SOURCE_SUFFIXES = {".py", ".html", ".css", ".js", ".json", ".svg"}
 
 #: Files outside app/ that name static assets.
@@ -495,6 +500,42 @@ class TestThisCheckout:
             + "\n  ".join(
                 rel + "\n      " + why.replace("\n", " ")
                 for rel, why in bad.items()))
+
+
+class TestTheScriptsAreVersioned:
+    """A `<script>` under `/static/` is cached immutable for a year.
+
+    nginx serves everything under `/static/` with `expires 365d` and
+    `Cache-Control: public, immutable` (see `deploy/nginx.conf`). That is right
+    for a school on two bars of signal, and it has one sharp edge: a script that
+    keeps its URL is never re-fetched, so a *fix* inside it reaches only a browser
+    that has never opened the page. Measured on the live box: after the deploy
+    that added `lineBreak` to `essay-editor.js`, `window.SGEssayEditor` in a
+    browser still had the previous build and Enter did nothing at all — no error,
+    no clue. `asset_v()` is the fix, and it is only a fix if every script uses it:
+    one bare path left behind is one module that can never be repaired in place.
+    """
+
+    def test_no_page_names_a_script_by_a_bare_static_path(self):
+        offenders = []
+        for rel, text in url_sources(ROOT).items():
+            for match in SCRIPT_SRC.finditer(text):
+                url = match.group(1)
+                if url.startswith("/static/") and not url.startswith("/static/vendor/"):
+                    offenders.append(f"{rel}: {match.group(0)}")
+        assert not offenders, (
+            "these scripts are served from a year-long immutable cache by a bare "
+            "URL, so an edit to them never reaches a browser that has loaded them "
+            "— wrap the path in asset_v():\n  " + "\n  ".join(offenders))
+
+    def test_every_script_the_app_loads_is_versioned(self):
+        versioned = [
+            rel for rel, text in url_sources(ROOT).items()
+            if re.search(r"asset_v\(\s*['\"]js/", text)
+        ]
+        assert versioned, (
+            "no template versions a script, so this check would pass on a tree "
+            "that could not load one")
 
 
 class TestTheGateRunsIt:

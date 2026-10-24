@@ -585,10 +585,15 @@ class TestTheEditorInARealDom:
 class TestTheWiring:
     def test_the_editor_module_is_loaded_before_the_component(self):
         src = TAKE.read_text(encoding="utf-8")
-        loaded = src.index('<script src="/static/js/essay-editor.js"></script>')
+        tag = "<script src=\"{{ asset_v('js/essay-editor.js') }}\"></script>"
+        loaded = src.index(tag)
         component = src.index("        execCmd(qIdx, cmd) {")
         assert loaded < component, "the module must be loaded before it is read"
-        assert '<script src="/static/js/essay-editor.js"></script>' in src
+        # Versioned, not a bare path: /static/ is cached immutable for a year in
+        # nginx, so an editor fix behind a bare URL reaches only a browser that
+        # has never opened the page. Measured live: `window.SGEssayEditor` had no
+        # `lineBreak` on a page served after the deploy that added it.
+        assert tag in src
 
     def test_the_list_buttons_keep_the_caret(self):
         """`@click` alone lets the button take focus first; `mousedown.prevent` is
@@ -670,7 +675,9 @@ class TestTheRenderedPage:
         assert page.count("x-text=\"syncLabel\"") >= 3
 
     def test_the_editor_module_is_served(self, page):
-        assert '<script src="/static/js/essay-editor.js"></script>' in page
+        assert "/static/js/essay-editor.js?v=" in page, (
+            "the served URL carries the file's hash, so a changed editor is a "
+            "changed URL")
 
     def test_the_stage_still_asks_for_the_essay_exception(self, page):
         assert "!isEssayCurrent ? 'exam-stage--left'" in page

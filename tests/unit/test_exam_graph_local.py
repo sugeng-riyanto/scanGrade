@@ -269,8 +269,8 @@ class TestTheModuleIsSafeAndLocal:
 class TestThePageWiresItUp:
     def test_the_module_is_on_the_exam_page(self):
         text = TAKE.read_text(encoding="utf-8")
-        assert '<script src="/static/js/exam-graph.js"></script>' in text
-        assert '<script src="/static/js/exam-graph-local.js"></script>' in text
+        assert "asset_v('js/exam-graph.js')" in text
+        assert "asset_v('js/exam-graph-local.js')" in text
 
     def test_no_key_is_not_a_failure(self):
         text = TAKE.read_text(encoding="utf-8")

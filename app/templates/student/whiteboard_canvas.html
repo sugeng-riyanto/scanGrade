@@ -56,10 +56,10 @@
 
 {% block scripts %}
 <script src="/static/vendor/socket.io.min.js"></script>
-<script src="/static/js/tools.js"></script>
-<script src="/static/js/whiteboard-canvas.js"></script>
-<script src="/static/js/whiteboard-websocket.js"></script>
-<script src="/static/js/whiteboard-timer.js"></script>
+<script src="{{ asset_v('js/tools.js') }}"></script>
+<script src="{{ asset_v('js/whiteboard-canvas.js') }}"></script>
+<script src="{{ asset_v('js/whiteboard-websocket.js') }}"></script>
+<script src="{{ asset_v('js/whiteboard-timer.js') }}"></script>
 <script>
 function studentCanvas() {
     return {

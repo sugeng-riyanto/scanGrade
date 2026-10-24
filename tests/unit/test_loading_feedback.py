@@ -293,13 +293,13 @@ class TestTheHeadLoadsIt:
     def test_the_shared_feedback_is_loaded_once_after_the_content(self):
         assert UX_JS.is_file(), "app/static/js/sg-ux.js does not exist"
         html = BASE.read_text(encoding="utf-8")
-        assert script_tags(html, "/static/js/sg-ux.js"), (
+        assert script_tags(html, "js/sg-ux.js"), (
             "base.html does not load app/static/js/sg-ux.js, so the progress bar "
             "and the busy button reach no page")
-        assert len(script_tags(html, "/static/js/sg-ux.js")) == 1, (
+        assert len(script_tags(html, "js/sg-ux.js")) == 1, (
             "base.html loads sg-ux.js more than once, so the instrumentation is "
             "registered twice")
-        assert after_the_content(html, "/static/js/sg-ux.js"), (
+        assert after_the_content(html, "js/sg-ux.js"), (
             "sg-ux.js is loaded before the page content is parsed, so it is in "
             "the critical path of every page")
 

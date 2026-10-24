@@ -590,7 +590,7 @@ def _form() -> str:
 
 
 def test_the_form_loads_the_autosave_module():
-    assert '<script src="/static/js/exam-autosave.js"></script>' in _form(), (
+    assert "asset_v('js/exam-autosave.js')" in _form(), (
         "the loop is not on the page, so nothing is saved until Publish is pressed")
 
 

@@ -220,7 +220,7 @@ def _form() -> str:
 
 
 def test_the_form_loads_the_module():
-    assert '<script src="/static/js/exam-window.js"></script>' in _form(), (
+    assert "asset_v('js/exam-window.js')" in _form(), (
         "the arithmetic is not on the page, so the window is still the teacher's to work out")
 
 

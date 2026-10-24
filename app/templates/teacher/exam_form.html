@@ -2165,7 +2165,7 @@
      resolves links through the same file the student's exam page uses. It is the
      one implementation of "a pasted link" in the app: see
      app/static/js/exam-media.js. -->
-<script src="/static/js/exam-media.js"></script>
+<script src="{{ asset_v('js/exam-media.js') }}"></script>
 <script>
 // The question-type vocabulary, handed over by the server. Writing the names out
 // again here is how a page and the grader stop agreeing about what a true/false
@@ -3538,7 +3538,7 @@ function deleteExam(id) {
     }
 }
 </script>
-<script src="/static/js/exam-window.js"></script>
+<script src="{{ asset_v('js/exam-window.js') }}"></script>
 <script>
 /* One toggle, two clocks: the duration the form already collects, and the window
    end it used to leave the teacher to work out by hand. `onLoad` is the single
@@ -3559,7 +3559,7 @@ function deleteExam(id) {
     });
 })();
 </script>
-<script src="/static/js/exam-autosave.js"></script>
+<script src="{{ asset_v('js/exam-autosave.js') }}"></script>
 <script>
 /* The draft writes itself while the teacher works. Loaded here, at the end of
    the body, so the form and its status line exist.
