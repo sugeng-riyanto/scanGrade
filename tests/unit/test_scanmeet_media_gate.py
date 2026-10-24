@@ -222,6 +222,66 @@ def test_a_page_with_no_video_says_so_instead_of_passing():
         other_pupil="p_other")
 
 
+def test_the_launcher_passes_what_a_media_page_needs():
+    """The flags, because each absent one is a reading that lies.
+
+    No autoplay policy and every remote camera reads as dead; no fake UI and a
+    headless browser never publishes at all. The `/dev/shm` escape is asserted
+    where it now lives — the shared launcher — rather than in a second copy here.
+    """
+    flags = GATE.media_flags()
+    for flag in ("--autoplay-policy=no-user-gesture-required",
+                 "--use-fake-ui-for-media-stream",
+                 "--use-fake-device-for-media-stream"):
+        assert flag in flags, f"{flag} is missing from the launch"
+    assert "--use-file-for-fake-video-capture=/clip.y4m" in GATE.media_flags(
+        video_file="/clip.y4m")
+    real = GATE.media_flags(fake=False)
+    assert "--use-fake-device-for-media-stream" not in real
+    assert "--use-fake-ui-for-media-stream" in real
+
+    # One launch path: the flags are extras for it, and the container's 64 MB
+    # `/dev/shm` is handled there for every gate that starts a browser.
+    argv, env = GATE.touch_gate.browser_launch(
+        "/usr/bin/google-chrome", 9222, "/tmp/profile")
+    assert "--disable-dev-shm-usage" in argv
+    assert argv[-1] == "about:blank", (
+        "the shared launcher must still end on the blank page: a flag appended "
+        "after it would be read as a URL"
+    )
+    assert env["HOME"] == "/tmp/profile"
+
+
+def test_the_browser_starts_through_the_shared_retried_launcher(monkeypatch):
+    """One launch path, and the media flags arrive as its `extra_args`.
+
+    The driver used to own its own `Popen` and its own 25-line wait for a debug
+    target, so a launch that lost a race cost a whole run and said nothing about
+    why (the same defect `touch_gate.start_browser` was written for).
+    """
+    import asyncio
+
+    seen = []
+
+    def fake_start(browser, **kwargs):
+        seen.append((browser, kwargs))
+        return None, None, None, (
+            "the browser never offered a debug target (chrome said: boom) — after 2 launches")
+
+    monkeypatch.setattr(GATE.touch_gate, "start_browser", fake_start)
+    browser = GATE.Browser("teacher", "http://127.0.0.1:9", {}, binary="/bin/chrome")
+    with pytest.raises(GATE.CannotMeasure) as caught:
+        asyncio.run(browser.open())
+    assert "boom" in str(caught.value), (
+        "the reason Chrome gave is the only thing that can tell a race from a "
+        "broken box, and the driver must not drop it"
+    )
+    assert seen == [(  
+        "/bin/chrome",
+        {"extra_args": tuple(GATE.media_flags())},
+    )], "the driver must start its browser through `touch_gate.start_browser`"
+
+
 def test_the_grant_is_what_the_sfu_enforces():
     assert GATE.publish_sources(token_with(["camera"])) == ["camera"]
     assert GATE.publish_sources(token_with(["camera", "microphone"])) == [
@@ -425,3 +485,285 @@ def test_the_driver_can_see_a_room_when_there_is_one(harness):
     import asyncio
 
     asyncio.run(_drive(harness))
+
+
+# ── the sign-off sheet, which is the artefact a pilot files ──────────
+
+
+def _twelve(state="pass", detail="ok"):
+    return [GATE.Row(name, state, detail) for name in GATE.ROW_ORDER]
+
+
+def test_the_sheet_carries_the_url_the_exam_and_the_verdict():
+    sheet = GATE.signoff_sheet(
+        "https://staging.example.edu/", "9b17e852-565d-48de-a88c-8786d77f8014",
+        _twelve(), GATE.EXIT_OK, browser="/usr/bin/google-chrome",
+        devices="synthetic devices", run_at="2026-10-24T15:00:00+00:00")
+    assert "https://staging.example.edu" in sheet.splitlines()[0]
+    assert "/" * 2 in sheet.strip().splitlines()[0][:2] or sheet.startswith("## ")
+    assert "9b17e852-565d-48de-a88c-8786d77f8014" in sheet
+    assert "`SIGNED OFF` (exit 0) - 12/12" in sheet
+    assert "2026-10-24T15:00:00+00:00" in sheet
+    assert "/usr/bin/google-chrome" in sheet and "synthetic devices" in sheet
+    # The twelve rows, in the order the driver takes them, once each.
+    for index, name in enumerate(GATE.ROW_ORDER, start=1):
+        assert f"| {index} | `{name}` |" in sheet
+    assert sheet.count("| `") == len(GATE.ROW_ORDER)
+
+
+def test_a_sheet_that_measured_nothing_says_so_in_its_verdict_line():
+    """The whole point of the sheet: a gap cannot read as a complete table."""
+    rows = _twelve()
+    rows[8] = GATE.Row("audio-reaches-teacher", "skipped",
+                       "the teacher is not in the room")
+    sheet = GATE.signoff_sheet("https://staging.example.edu", "exam-1", rows,
+                               GATE.EXIT_CANNOT_MEASURE)
+    assert "`CANNOT MEASURE` (exit 2) - 11/12" in sheet
+    assert "not** a sign-off" in sheet
+    assert "the teacher is not in the room" in sheet
+    assert "**SKIP**" in sheet
+
+
+def test_a_finding_is_labelled_and_counted():
+    rows = _twelve()
+    rows[2] = GATE.Row("pupil-camera", "fail", "the camera produced no frames")
+    sheet = GATE.signoff_sheet("https://staging.example.edu", "exam-1", rows,
+                               GATE.EXIT_FINDING)
+    assert "`NOT SIGNED OFF` (exit 1) - 11/12" in sheet
+    assert "**FAIL**" in sheet
+    assert "1 row(s) disagreed and 0 could not be measured" in sheet
+    assert "not ready for pupils" in sheet
+
+
+def test_a_table_cell_cannot_break_the_table():
+    rows = _twelve()
+    rows[0] = GATE.Row("sdk-loaded", "pass", "a | b\nsecond line")
+    sheet = GATE.signoff_sheet("https://staging.example.edu", "exam-1", rows,
+                               GATE.EXIT_OK)
+    cell = [line for line in sheet.splitlines() if line.startswith("| 1 |")][0]
+    assert r"a \| b second line" in cell, (
+        "a pipe in a detail is GFM's cell escape or it is a fifth column")
+    assert len(cell.splitlines()) == 1
+    # Every table line has the same number of *columns* as the header. Counted
+    # without the escapes, since an escaped pipe is still a pipe character.
+    widths = {line.count("|") - line.count(r"\|")
+              for line in sheet.splitlines() if line.startswith("|")}
+    assert widths == {5}, f"a row broke the table: {widths}"
+
+
+def test_the_sheet_is_ascii_because_it_gets_pasted_into_a_console():
+    sheet = GATE.signoff_sheet("https://staging.example.edu", "exam-1",
+                               _twelve(detail="*Akhiri Live* — done → yes"),
+                               GATE.EXIT_OK)
+    assert all(ord(char) < 128 for char in sheet), (
+        "a sheet with a curly quote in it is a sheet that renders as ? on the "
+        "console that printed the gate's own lines")
+
+
+def test_the_signoff_flag_prints_the_sheet_and_keeps_the_exit_code(monkeypatch,
+                                                                  capsys):
+    calls = []
+
+    def fake_run(**kwargs):
+        calls.append(kwargs)
+        rows = _twelve()
+        rows[3] = GATE.Row("teacher-receives-camera", "skipped", "no tile arrived")
+        return GATE.verdict(rows), rows, {"rows": []}
+
+    monkeypatch.setattr(GATE.touch_gate, "locate_browser", lambda: "/bin/chrome")
+    monkeypatch.setattr(GATE, "run", fake_run)
+    code = GATE.main(["--url", "https://staging.example.edu", "--exam", "exam-1",
+                      "--teacher", "guru@x:pw", "--student", "murid@x:pw",
+                      "--signoff"])
+    out = capsys.readouterr().out
+    assert code == GATE.EXIT_CANNOT_MEASURE, (
+        "printing a sheet must not change what the run is worth")
+    assert out.startswith("## ScanMeet media sign-off")
+    assert "CANNOT MEASURE" in out and "no tile arrived" in out
+    assert calls and calls[0]["accounts"]["student"] == "murid@x:pw"
+
+
+def test_json_and_signoff_together_are_refused_before_a_browser_is_driven(
+        monkeypatch, capsys):
+    """The first version let `--json` win and dropped the sheet in silence.
+
+    A run that asked for a sign-off printed a JSON blob and exited 0, so nothing
+    said the sheet was never produced. It is refused up front instead — and the
+    refusal lands before the run, because driving three real browsers to then
+    print "pick one flag" is five minutes spent to learn nothing.
+    """
+    drove = []
+
+    def fake_run(**kwargs):
+        drove.append(kwargs)
+        return GATE.EXIT_OK, _twelve(), {}
+
+    monkeypatch.setattr(GATE.touch_gate, "locate_browser", lambda: "/bin/chrome")
+    monkeypatch.setattr(GATE, "run", fake_run)
+    code = GATE.main(["--url", "https://staging.example.edu", "--exam", "exam-1",
+                      "--teacher", "guru@x:pw", "--student", "murid@x:pw",
+                      "--signoff", "--json"])
+    out = capsys.readouterr().out
+    assert code == GATE.EXIT_CANNOT_MEASURE
+    assert drove == [], "a flag conflict must be refused before the room is opened"
+    assert "--json-out" in out, (
+        "the refusal has to name the flag that does let a caller keep both")
+
+
+def test_json_out_keeps_the_reading_beside_the_sheet(monkeypatch, capsys,
+                                                     tmp_path):
+    payload = {"rows": [{"name": "sdk-loaded", "state": "pass", "detail": "ok"}]}
+    monkeypatch.setattr(GATE.touch_gate, "locate_browser", lambda: "/bin/chrome")
+    monkeypatch.setattr(
+        GATE, "run", lambda **kwargs: (GATE.EXIT_OK, _twelve(), payload))
+    out_file = tmp_path / "reading.json"
+    code = GATE.main(["--url", "https://staging.example.edu", "--exam", "exam-1",
+                      "--teacher", "guru@x:pw", "--student", "murid@x:pw",
+                      "--signoff", "--json-out", str(out_file)])
+    printed = capsys.readouterr().out
+    assert code == GATE.EXIT_OK
+    assert printed.startswith("## ScanMeet media sign-off")
+    assert json.loads(out_file.read_text(encoding="utf-8"))["rows"][0]["name"] == "sdk-loaded", (
+        "the sheet goes to stdout and the reading it was built from goes to the file")
+
+
+def test_a_reading_that_could_not_be_written_is_not_a_pass(monkeypatch, capsys,
+                                                           tmp_path):
+    monkeypatch.setattr(GATE.touch_gate, "locate_browser", lambda: "/bin/chrome")
+    monkeypatch.setattr(
+        GATE, "run", lambda **kwargs: (GATE.EXIT_OK, _twelve(), {"rows": []}))
+    code = GATE.main(["--url", "https://staging.example.edu", "--exam", "exam-1",
+                      "--teacher", "guru@x:pw", "--student", "murid@x:pw",
+                      "--signoff", "--json-out", str(tmp_path)])
+    out = capsys.readouterr().out
+    assert code == GATE.EXIT_CANNOT_MEASURE, (
+        "twelve rows nobody can file is not a sign-off, even when all twelve passed")
+    assert "could not write" in out
+
+
+# ── the one host this driver must never reach by accident ────────────
+
+
+def test_the_live_site_is_refused_before_a_room_is_opened(monkeypatch, capsys):
+    """A stale `$SCANMEET_STAGING_URL` is the whole failure mode this guards.
+
+    The driver opens a Live room and presses a teacher's controls; pointed at the
+    live site it would do that to a real exam. Refused up front, with the override
+    named, so the deliberate pilot is a decision and not a copy-paste.
+    """
+    drove = []
+    monkeypatch.setattr(GATE.touch_gate, "locate_browser", lambda: "/bin/chrome")
+    monkeypatch.setattr(
+        GATE, "run", lambda **kwargs: drove.append(kwargs) or (0, _twelve(), {}))
+    code = GATE.main(["--url", "https://scan-grade.app", "--exam", "exam-1",
+                      "--teacher", "guru@x:pw", "--student", "murid@x:pw"])
+    out = capsys.readouterr().out
+    assert code == GATE.EXIT_CANNOT_MEASURE
+    assert drove == [], "the live site must be refused before a browser is driven"
+    assert "--allow-production" in out
+
+
+def test_allow_production_lets_a_deliberate_pilot_through(monkeypatch, capsys):
+    monkeypatch.setattr(GATE.touch_gate, "locate_browser", lambda: "/bin/chrome")
+    monkeypatch.setattr(
+        GATE, "run", lambda **kwargs: (GATE.EXIT_OK, _twelve(), {"rows": []}))
+    code = GATE.main(["--url", "https://scan-grade.app", "--exam", "exam-1",
+                      "--teacher", "guru@x:pw", "--student", "murid@x:pw",
+                      "--signoff", "--allow-production"])
+    out = capsys.readouterr().out
+    assert code == GATE.EXIT_OK
+    assert out.startswith("## ScanMeet media sign-off")
+
+
+def test_the_live_hosts_are_the_ones_the_staging_gate_refuses():
+    """One fact, two files: held equal instead of trusted to stay equal."""
+    from deploy import scanmeet_staging_gate as staging
+
+    assert staging.PRODUCTION_SITE in GATE.PRODUCTION_HOSTS
+    assert "www." + staging.PRODUCTION_SITE in GATE.PRODUCTION_HOSTS
+    assert GATE.production_target("https://SCAN-GRADE.APP/live/exam/x") is True
+    assert GATE.production_target("https://staging.scan-grade.app") is False, (
+        "a subdomain is a different host, and refusing it here would refuse the "
+        "staging box someone sensibly named")
+
+
+def test_the_deployed_site_is_the_one_that_is_refused():
+    """A list of hosts that does not include the live one protects nothing.
+
+    Measured on the repository: `README.md` deploys to `scangrade.web.id`, and
+    `lmsshb.scangrade.web.id` answers on the same box (both names hold a
+    certificate there). The guard held `scan-grade.app` — the demo *email*
+    domain in `manage.py` — so `--url https://scangrade.web.id` drove production.
+    """
+    for live in ("https://scangrade.web.id", "https://www.scangrade.web.id",
+                 "https://lmsshb.scangrade.web.id",
+                 "https://staging.scangrade.web.id"):
+        assert GATE.production_target(live) is True, live
+    assert GATE.production_target("https://staging.example.edu") is False
+
+
+# ── the artefact the runbook promises ────────────────────────────────
+#
+# The runbook tells a reader that `--signoff` prints "the Markdown sheet this
+# section ends with", and a sheet nobody rendered is a paragraph again: the row
+# names, the table's shape and the closing sentence are all things the driver can
+# change without the page noticing. These read the block out of the page and hold
+# it to the tool.
+
+RUNBOOK = ROOT / "docs" / "SCANMEET_BIZNET_STAGING.md"
+
+
+def _runbook_sheet() -> str:
+    """The fenced ``markdown`` block whose heading is the sign-off sheet."""
+    text = RUNBOOK.read_text(encoding="utf-8")
+    match = re.search(r"```markdown\n(## ScanMeet media sign-off.*?)\n```", text, re.S)
+    assert match, ("docs/SCANMEET_BIZNET_STAGING.md no longer carries the example "
+                   "sign-off sheet §2 promises")
+    return match.group(1)
+
+
+def _sheet_rows(sheet: str) -> list[tuple[str, str, str]]:
+    """`(number, row name, state)` for each table line, in the page's order."""
+    rows = []
+    for line in sheet.splitlines():
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if len(cells) == 4 and cells[0].isdigit():
+            rows.append((cells[0], cells[1].strip("`"), cells[2]))
+    return rows
+
+
+def test_the_runbook_shows_the_sheet_the_driver_prints():
+    """A documented artefact has to be the one the tool produces."""
+    sheet = _runbook_sheet()
+    assert sheet.splitlines()[0] == (
+        "## ScanMeet media sign-off - https://staging.your-school-domain.com")
+    assert "- **Verdict:** `SIGNED OFF` (exit 0) - 12/12 row(s) passed" in sheet
+    assert "| # | Row | State | What this run observed |" in sheet
+
+    rows = _sheet_rows(sheet)
+    assert [name for _, name, _ in rows] == list(GATE.ROW_ORDER), (
+        "the page's twelve rows and the driver's twelve rows disagree")
+    assert [number for number, _, _ in rows] == [str(i) for i in range(1, 13)]
+    assert {state for _, _, state in rows} == {"PASS"}, (
+        "the example is the sheet of a complete run, so no row may be SKIP or FAIL")
+    assert all(detail for detail in (
+        line.split("|")[4].strip() for line in sheet.splitlines()
+        if line.startswith("| ") and line.split("|")[1].strip().isdigit())), (
+        "a row with an empty evidence cell reads as a row nobody took")
+
+    # The closing sentence is the renderer's own, not a paraphrase of it.
+    rendered = GATE.signoff_sheet(
+        "https://staging.your-school-domain.com", "exam",
+        [GATE.Row(name, "pass", "detail") for name in GATE.ROW_ORDER], GATE.EXIT_OK)
+    assert sheet.splitlines()[-1] == rendered.splitlines()[-1]
+
+
+def test_the_sheet_says_out_loud_when_it_is_not_a_signoff():
+    """The page promises an unfinished run heads its table with CANNOT MEASURE."""
+    rendered = GATE.signoff_sheet(
+        "https://staging.your-school-domain.com", "exam",
+        [GATE.Row(name, "skipped", "the browser never joined") for name in GATE.ROW_ORDER],
+        GATE.EXIT_CANNOT_MEASURE)
+    assert "`CANNOT MEASURE`" in rendered
+    assert "**not** a sign-off" in rendered
+    assert "SIGNED OFF" not in rendered

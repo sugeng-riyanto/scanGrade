@@ -23,6 +23,7 @@ browser's: `w=118 h=40`, `font=14px/700`, `pad=8px 20px 8px 20px`,
 """
 from __future__ import annotations
 
+import ast
 import shutil
 
 import importlib.util
@@ -161,22 +162,44 @@ class TestTheBrowserStartsWhereItCanRun:
 
         The gates run as the checkout owner via `runuser`, whose home need not
         exist (on the VPS `scangrade`'s does not), and Chrome died before reaching
-        its debug port because of it. The fix lives in `touch_gate.browser_launch`;
-        the render gate must use it too, or it answers "could not measure" on
+        its debug port because of it. That fix lives in `touch_gate.browser_launch`
+        and the wait-for-a-target, the retry for a launch that never came up and
+        Chrome's own last words live in `touch_gate.start_browser`; the render gate
+        must reach both through the import, or it answers "could not measure" on
         every release while its tests stay green.
+
+        Read as **code**, not as text: a docstring naming `start_browser` is a
+        sentence, and a sentence is how a guard passes on a file that lost the call
+        (the reason `deploy/theme_gate.sh` calls its own text a trap).
         """
-        src = GATE_PATH.read_text(encoding="utf-8")
-        assert "browser_launch(" in src, (
-            "the render gate must start the browser with a writable HOME and, as "
-            "root, no sandbox — or it can never measure the page"
+        tree = ast.parse(GATE_PATH.read_text(encoding="utf-8"))
+        imported = {
+            alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom) and node.module == "touch_gate"
+            for alias in node.names
+        }
+        assert "start_browser" in imported, (
+            "the render gate must start its browser through the shared helper, so "
+            "the two gates cannot drift apart on the launch, the retry or what "
+            "Chrome said when it did not come up"
         )
-        assert "from touch_gate import" in src, (
-            "browser_launch must come from the shared touch-gate module, so the two "
-            "gates cannot drift apart on how a browser is started"
-        )
-        import_block = src.split("from touch_gate import", 1)[1].split("\n\n", 1)[0]
-        assert "browser_launch" in import_block, (
-            "the shared browser_launch helper is not imported from touch_gate"
+        called = {
+            node.func.id
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+        }
+        assert "start_browser" in called, "the shared launcher is imported but unused"
+        attributes = {
+            f"{node.func.value.id}.{node.func.attr}"
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+        }
+        assert "subprocess.Popen" not in attributes, (
+            "a second copy of the launch is how the two gates drift apart on the "
+            "dev-shm flag, the retry and the diagnostics"
         )
 
 

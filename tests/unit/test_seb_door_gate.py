@@ -1339,14 +1339,29 @@ class TestTheClientHalfIsDrivenTheWayTheOtherGatesDrive:
         return rest.split("\n", 1)[0]
 
     def test_the_gate_uses_the_shared_browser_plumbing(self):
+        """One launch, one wait, one CDP client — and no second copy of either.
+
+        The list used to name `browser_launch` and `_free_port`, which the gate did
+        import — while still owning its own 25-line "launch it and poll for a debug
+        target" loop beside them. That loop is what turned one lost Chrome launch
+        into a red CI job (`touch_gate.start_browser` records the run), so the
+        shared thing is now the launcher *and* the wait, and this guard asks for
+        both the import and the absence of the copy that used to satisfy it.
+        """
         code = _code(_source(GATE))
         imported = self._imported(code)
-        for name in ("_CDP", "browser_launch", "locate_browser", "_free_port"):
+        for name in ("_CDP", "start_browser", "locate_browser", "_stop"):
             assert name in imported, f"{name} is not taken from the touch gate"
         assert "class _CDP" not in code, (
             "the gate carries its own CDP client: the events a page emits while it "
             "loads are the shared client's job, and a second copy is the copy that "
             "goes blind")
+        for own_copy in ("subprocess.Popen(", "tempfile.mkdtemp("):
+            assert own_copy not in code, (
+                f"{own_copy} is a second browser launch: the dev-shm flag, the "
+                "retry for a launch that never came up and the reason that carries "
+                "Chrome's own words all live in `start_browser`, so a copy here is "
+                "a gate that drifts away from them silently")
 
     def test_the_render_gate_shares_it_now_too(self):
         """The copy that existed was a *second* implementation of the same socket —

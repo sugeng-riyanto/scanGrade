@@ -74,6 +74,14 @@ Usage (on the staging host, with the staging env exported):
       --url https://staging.example.edu --exam 9b17e852-... \\
       --teacher guru@example.edu:pw --student murid1@example.edu:pw \\
       --student2 murid2@example.edu:pw --outsider murid@lain.example.edu:pw
+
+Add ``--signoff`` to print the same twelve rows as a Markdown sheet - the URL,
+``--exam``, when it ran, the browser it drove and the verdict the run earned -
+ready to paste into the staging ticket. The sheet carries the verdict it earned:
+a run that could not measure a row prints ``CANNOT MEASURE`` rather than a table
+that merely looks complete. ``--json-out <file>`` keeps the raw reading beside
+that sheet; ``--json`` and ``--signoff`` are refused together, because both write
+stdout and the first version dropped the sheet in silence.
 """
 from __future__ import annotations
 
@@ -83,9 +91,7 @@ import json
 import os
 import re
 import shutil
-import subprocess
 import sys
-import tempfile
 import time
 import urllib.parse
 from dataclasses import dataclass, field
@@ -97,6 +103,37 @@ import touch_gate  # noqa: E402  (the one CDP client, launcher and sign-in here)
 EXIT_OK = 0
 EXIT_FINDING = 1
 EXIT_CANNOT_MEASURE = 2
+
+#: The live site. This driver opens a Live room and presses a real teacher's
+#: controls, so the one host it must never reach by a stale `$SCANMEET_STAGING_URL`
+#: is the one pupils are sitting exams on. The same hosts
+#: `deploy/scanmeet_staging_gate.py` refuses as a staging target, and a test holds
+#: the two constants equal rather than trusting this copy to stay right.
+#:
+#: This list used to hold `scan-grade.app` and nothing else, which is the demo
+#: *email* domain in `manage.py` -- the deployed site is `scangrade.web.id`
+#: (`README.md`), and `lmsshb.scangrade.web.id` answers on the same box (both
+#: names have a certificate in `/etc/letsencrypt/live`). So the guard named a host
+#: that is not production and missed the one that is: pointed at the live URL, it
+#: opened a room on a real exam. The apex and every subdomain are refused; a
+#: deliberate pilot still has `--allow-production`.
+PRODUCTION_DOMAIN = "scangrade.web.id"
+PRODUCTION_HOSTS = (PRODUCTION_DOMAIN, "www." + PRODUCTION_DOMAIN,
+                    "lmsshb." + PRODUCTION_DOMAIN,
+                    "scan-grade.app", "www.scan-grade.app")
+
+
+def production_target(url: str) -> bool:
+    """True when `url` is the live site rather than a staging host.
+
+    The suffix rule is what makes a new name under the live domain production
+    too: `lmsshb.` already proves those names reach this box's app, so a driver
+    cannot tell a future alias from the site itself.
+    """
+    host = (urllib.parse.urlparse(url).hostname or "").lower()
+    return (host in PRODUCTION_HOSTS
+            or host == PRODUCTION_DOMAIN
+            or host.endswith("." + PRODUCTION_DOMAIN))
 
 PAGE = "/live/exam/{exam_id}"
 STATUS = "/api/live/exams/{exam_id}"
@@ -430,11 +467,11 @@ def ascii_safe(text) -> str:
 # --------------------------------------------------------------------------- #
 # One browser: launched, driven and read over the tree's own CDP client
 # --------------------------------------------------------------------------- #
-def launch_argv(binary: str, port: int, profile: str, *, fake: bool = True,
-                video_file: str = "", size=(1280, 900)) -> tuple[list, dict]:
-    """The launcher `touch_gate` builds, plus what a media page needs from it.
+def media_flags(*, fake: bool = True, video_file: str = "",
+                size=(1280, 900)) -> list:
+    """What a media page needs on top of the launcher `touch_gate` builds.
 
-    Three additions matter and each was learned the hard way:
+    Four additions matter and each was learned the hard way:
 
     * ``--autoplay-policy=no-user-gesture-required`` — the page attaches a remote
       camera **unmuted**, and Chrome refuses to autoplay that without a gesture,
@@ -445,8 +482,13 @@ def launch_argv(binary: str, port: int, profile: str, *, fake: bool = True,
     * the three backgrounding flags — a headless tab that Chrome decides is
       hidden stops its media loop, and a frame counter is exactly what stops
       with it.
+
+    ``--disable-dev-shm-usage`` is **not** here: it is `browser_launch`'s now,
+    because every gate that starts a browser needed it (two browsers decoding
+    video at once is what this driver adds, and a renderer that cannot get shared
+    memory dies before the browser offers a debug target). One copy, in the one
+    place that builds argv.
     """
-    argv, env = touch_gate.browser_launch(binary, port, profile)
     extra = [
         f"--window-size={int(size[0])},{int(size[1])}",
         "--autoplay-policy=no-user-gesture-required",
@@ -459,7 +501,7 @@ def launch_argv(binary: str, port: int, profile: str, *, fake: bool = True,
         extra.append("--use-fake-device-for-media-stream")
         if video_file:
             extra.append(f"--use-file-for-fake-video-capture={video_file}")
-    return argv[:-1] + extra + argv[-1:], env
+    return extra
 
 
 class Browser:
@@ -468,7 +510,10 @@ class Browser:
     `touch_gate._measure` launches its browser for a single measurement and quits;
     a room needs three of them to stay joined while the others act, so this owns
     the process and the socket for the length of the run and closes both in
-    `close()` whatever happened.
+    `close()` whatever happened. What it does **not** own is the launch: starting
+    the browser, waiting for its debug target, retrying a launch that never came
+    up and remembering what Chrome said are `touch_gate.start_browser`'s, so this
+    driver cannot drift away from the three gates on any of them.
     """
 
     def __init__(self, name: str, base_url: str, cookies: dict, *, binary: str,
@@ -485,7 +530,6 @@ class Browser:
         self.profile = ""
         self.ws = None
         self.cdp = None
-        self.port = 0
         #: Ids for presses written without awaiting a reply, in a range no
         #: awaited command reaches, so a stray reply can never be taken for one.
         self._tap_id = 10 ** 6
@@ -494,16 +538,21 @@ class Browser:
     async def open(self):
         import websockets
 
-        self.port = touch_gate._free_port()
-        self.profile = tempfile.mkdtemp(prefix=f"sg-media-{self.name}-")
-        argv, env = launch_argv(self.binary, self.port, self.profile,
-                                fake=self.fake, video_file=self.video_file,
-                                size=self.size)
-        self.proc = subprocess.Popen(argv, stdout=subprocess.DEVNULL,
-                                     stderr=subprocess.DEVNULL, env=env)
-        target = await self._target()
-        if not target:
-            raise CannotMeasure("the browser never offered a debug target")
+        # Through the shared launcher, in a thread: it polls in blocking
+        # `time.sleep`, and three of these open at once — a blocking wait on this
+        # loop would serialize the launches and stall the two browsers already
+        # talking over the socket. The process and the profile are taken before
+        # anything can raise, because `close()` is what ends them.
+        proc, target, profile, reason = await asyncio.to_thread(
+            touch_gate.start_browser,
+            self.binary,
+            extra_args=tuple(
+                media_flags(fake=self.fake, video_file=self.video_file, size=self.size)
+            ),
+        )
+        self.proc, self.profile = proc, profile
+        if target is None:
+            raise CannotMeasure(reason)
         self.ws = await websockets.connect(target, max_size=64 * 1024 * 1024)
         self.cdp = touch_gate._CDP(self.ws)
         await self.cdp.send("Network.enable")
@@ -514,24 +563,6 @@ class Browser:
             await self.cdp.send("Network.setCookie", name=name, value=value,
                                 domain=host, path="/")
         await self._grant_media()
-
-    async def _target(self):
-        import requests
-
-        for _ in range(80):
-            try:
-                pages = [
-                    item for item in requests.get(
-                        f"http://127.0.0.1:{self.port}/json/list", timeout=2
-                    ).json()
-                    if item.get("type") == "page"
-                ]
-                if pages:
-                    return pages[0]["webSocketDebuggerUrl"]
-            except Exception:  # noqa: BLE001 - the browser is still starting
-                pass
-            await asyncio.sleep(0.25)
-        return None
 
     async def _grant_media(self):
         """Pre-grant the camera and microphone to this origin, if Chrome allows.
@@ -556,11 +587,7 @@ class Browser:
             pass
         self.ws = None
         if self.proc is not None:
-            self.proc.terminate()
-            try:
-                self.proc.wait(timeout=10)
-            except Exception:  # noqa: BLE001
-                self.proc.kill()
+            touch_gate._stop(self.proc)
             self.proc = None
         if self.profile:
             shutil.rmtree(self.profile, ignore_errors=True)
@@ -937,10 +964,15 @@ class Driver:
             "teacher_after": teacher_second.as_dict(),
         }
 
+        # A pass has a sentence too: `camera_finding` returns "" when it finds
+        # nothing, so this row used to reach the sign-off sheet as twelve cells of
+        # evidence and one empty cell -- which reads as a row nobody took.
         rows.append(row(
             "pupil-camera",
             camera_finding(first["student"], second["student"],
-                           self.identities["student"], "the pupil's page")))
+                           self.identities["student"], "the pupil's page"),
+            ok=f"the pupil's page is decoding its own camera, and the frames were "
+               f"still rising {FLOORS:g}s later"))
 
         pupils_seen = [self.identities.get(role) for role in pupils
                        if self.identities.get(role)]
@@ -1159,6 +1191,96 @@ ROW_ORDER = (
 )
 
 
+#: What the sheet calls each exit code. The word matters more than the number:
+#: a person pastes this into a ticket, and "CANNOT MEASURE" beside a table of
+#: twelve rows is the difference between a pilot's evidence and a table nobody
+#: filled in.
+VERDICTS = {
+    EXIT_OK: "SIGNED OFF",
+    EXIT_FINDING: "NOT SIGNED OFF",
+    EXIT_CANNOT_MEASURE: "CANNOT MEASURE",
+}
+
+
+def _cell(text) -> str:
+    """One table cell: a single line, no column break, and ASCII.
+
+    A detail here is a sentence this driver wrote (`*Akhiri Live* is confirmed, and
+    the next join token is refused`) and may carry a pipe or a newline from a page
+    error; either one would split the row into the wrong columns, which is how a
+    table starts lying without anyone editing it.
+    """
+    flat = " ".join(str(text).split())
+    return ascii_safe(flat).replace("|", "\\|")
+
+
+def signoff_sheet(base_url: str, exam_id: str, rows: list, code: int, *,
+                  browser: str = "", devices: str = "", run_at: str = "") -> str:
+    """The twelve rows as a Markdown sign-off sheet a person can paste.
+
+    `docs/SCANMEET_BIZNET_STAGING.md` §2 ends with a sheet a person fills in by
+    hand, and the gate's own console table is not that: it has no verdict line, no
+    exam, no run time, and a reader cannot tell a `SKIP` in a two-column dump from
+    one in a signed page. This prints the same twelve readings **with the verdict
+    they earned** — including the verdicts that are not a sign-off, because a run
+    that could not measure two rows must not leave a table that looks complete.
+
+    Everything is ASCII for the same reason the rest of this file is: a Windows
+    console and a cp1252 log are both places this gets copied to.
+    """
+    passed = sum(1 for item in rows if item.state == "pass")
+    failed = [item for item in rows if item.state == "fail"]
+    skipped = [item for item in rows if item.state == "skipped"]
+    from urllib.parse import urlsplit, urlunsplit
+
+    parsed = urlsplit(base_url)
+    # The pasted report must not reveal URL credentials, query or fragment.
+    host = ascii_safe(urlunsplit((parsed.scheme, parsed.hostname or "",
+                                  parsed.path.rstrip("/"), "", "")))
+    lines = [
+        f"## ScanMeet media sign-off - {host}",
+        "",
+        f"- **Verdict:** `{VERDICTS.get(code, 'UNKNOWN')}` (exit {code}) - "
+        f"{passed}/{len(rows)} row(s) passed",
+        f"- **Exam:** `{_cell(exam_id)}`",
+    ]
+    if run_at:
+        lines.append(f"- **Run at:** {_cell(run_at)}")
+    if browser:
+        lines.append(f"- **Browser:** `{_cell(browser)}`"
+                     + (f" ({_cell(devices)})" if devices else ""))
+    lines += [
+        "",
+        "| # | Row | State | What this run observed |",
+        "| --- | --- | --- | --- |",
+    ]
+    for index, item in enumerate(rows, start=1):
+        # A gap is emphasised exactly as a finding is: in a sheet that is mostly
+        # PASS, the two rows that are not evidence are the two a reader must see.
+        state = {"pass": "PASS", "fail": "**FAIL**",
+                 "skipped": "**SKIP**"}.get(item.state, "**? **")
+        lines.append(
+            f"| {index} | `{_cell(item.name)}` | {state} | {_cell(item.detail)} |")
+    lines.append("")
+    if code == EXIT_OK:
+        lines.append(
+            "Every row passed: cameras decode, the microphone is refused until a "
+            "teacher approves it and revoked after, no pupil receives another's "
+            "media, and the ended room admits nobody.")
+    elif failed:
+        lines.append(
+            f"{len(failed)} row(s) disagreed and {len(skipped)} could not be "
+            "measured. A room is not ready for pupils until every row passes: "
+            "the rows above are the pilot's own evidence, not a checklist.")
+    else:
+        reasons = {ascii_safe(item.detail) for item in skipped}
+        lines.append(
+            f"{len(skipped)} of {len(rows)} row(s) were never taken, so this is "
+            "**not** a sign-off and must not be filed as one."
+            + (f" Every gap: {_cell(reasons.pop())}" if len(reasons) == 1 else ""))
+    return "\n".join(lines)
+
+
 def run(*, base_url: str, exam_id: str, accounts: dict, insecure: bool = False,
         binary: str = "", fake: bool = True, video_file: str = "",
         keep_room: bool = False):
@@ -1197,6 +1319,15 @@ def main(argv=None) -> int:
                         help="leave the room open for a human pilot afterwards")
     parser.add_argument("--json", action="store_true",
                         help="print the whole reading as JSON on stdout")
+    parser.add_argument("--json-out", default="", metavar="PATH",
+                        help="write the whole reading as JSON to this file — the "
+                             "way to keep it beside a --signoff sheet")
+    parser.add_argument("--signoff", action="store_true",
+                        help="print the twelve rows as a Markdown sign-off sheet "
+                             "carrying the run's URL, exam and verdict")
+    parser.add_argument("--allow-production", action="store_true",
+                        help="let the driver run against the live site (a deliberate "
+                             "pilot, never an accident)")
     args = parser.parse_args(argv)
 
     missing = [name for name, value in (
@@ -1206,6 +1337,23 @@ def main(argv=None) -> int:
         print("COULD NOT MEASURE: " + ", ".join(missing) + " is empty.")
         print("Pass the staging URL, the exam id and the teacher and pupil "
               "accounts as email:password; nothing is printed back.")
+        return EXIT_CANNOT_MEASURE
+
+    if production_target(args.url) and not args.allow_production:
+        print(f"COULD NOT MEASURE: {ascii_safe(args.url.rstrip('/'))} is the live site.")
+        print("This driver opens a Live room and presses a teacher's controls, so it "
+              "runs against staging. Pass --allow-production for a deliberate pilot "
+              "on the live site.")
+        return EXIT_CANNOT_MEASURE
+
+    # Two flags, one stream. The first version let `--json` win and dropped the
+    # sheet in silence — a run asked for a sign-off, printed a JSON blob and
+    # exited 0, so nothing anywhere said the sheet was never produced. Refused
+    # here, before three browsers are driven, rather than papered over later.
+    if args.json and args.signoff:
+        print("COULD NOT MEASURE: --json and --signoff both write stdout.")
+        print("Pass one of them, or add --json-out <file> to keep the reading "
+              "beside the sheet.")
         return EXIT_CANNOT_MEASURE
 
     binary = touch_gate.locate_browser()
@@ -1224,8 +1372,28 @@ def main(argv=None) -> int:
         fake=not args.no_fake_devices, video_file=args.video_file,
         keep_room=args.keep_room)
 
+    if args.json_out:
+        try:
+            with open(args.json_out, "w", encoding="utf-8", newline="\n") as handle:
+                json.dump(payload, handle, indent=1, ensure_ascii=True, default=str)
+                handle.write("\n")
+        except OSError as exc:
+            # The rows were measured; the record of them was not kept. That is a
+            # reading nobody can file, so it is not a pass.
+            print(f"COULD NOT MEASURE: could not write {args.json_out}: {exc}")
+            return EXIT_CANNOT_MEASURE
+
     if args.json:
         print(json.dumps(payload, indent=1, ensure_ascii=True, default=str))
+        return code
+
+    if args.signoff:
+        from datetime import datetime, timezone
+
+        print(signoff_sheet(
+            args.url, args.exam.strip(), rows, code, browser=binary,
+            devices="synthetic devices" if not args.no_fake_devices else "real devices",
+            run_at=datetime.now(timezone.utc).isoformat(timespec="seconds")))
         return code
 
     print(ascii_safe(

@@ -128,8 +128,16 @@ MUTATIONS = [
 
     ('the target stops putting the caret in the paragraph',
      PAGE,
-     "            target.el.focus();\n            const range = document.createRange();",
-     "            if (false) target.el.focus();\n            const range = document.createRange();"),
+     "            target.el.focus();\n            if (kept && selection) {",
+     "            if (false) target.el.focus();\n            if (kept && selection) {"),
+
+    # A select, a tab or `+ Paragraph` takes the focus off the paragraph and
+    # leaves the pupil's selection where it was. Reading the focus alone replaced
+    # that selection with a caret at the end, and the command then ran on nothing.
+    ("a control that took the focus erases the pupil's selection",
+     PAGE,
+     "            if (kept && selection) {",
+     "            if (false) {"),
 
     ('the format button forgets which question it is in',
      PAGE,
