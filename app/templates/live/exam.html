@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}ScanGrade Live — Exam Mode{% endblock %}
+{% block page_title %}ScanGrade Live{% endblock %}
+{% block content %}
+<section id="scan-live" data-exam-id="{{ live_exam_id | e }}"
+         data-role="{{ live_role | e }}" data-csrf="{{ csrf_token() }}"
+         class="space-y-5">
+  <header class="card p-5 space-y-3">
+    <h1 class="font-extrabold text-xl">ScanGrade Live — Exam Mode</h1>
+    <p class="text-sm text-surface-500">Kamera wajib · Mikrofon dengan izin guru · Chat dan rekaman nonaktif · Grid</p>
+    <div class="flex flex-wrap gap-3">
+      {% if live_role == "teacher" %}
+      <button id="live-start" type="button" class="px-4 py-2 rounded-lg bg-indigo-700 text-white">Mulai pengawasan</button>
+      <button id="live-end" type="button" hidden class="px-4 py-2 rounded-lg border border-red-500 text-red-600">Akhiri Live</button>
+      {% else %}
+      <button id="live-hand" type="button" disabled class="px-4 py-2 rounded-lg bg-indigo-700 text-white">✋ Angkat tangan</button>
+      {% endif %}
+      <button id="live-mic" type="button" hidden class="px-4 py-2 rounded-lg border border-indigo-300">Aktifkan mikrofon</button>
+    </div>
+    <p id="live-status" class="text-sm font-semibold" role="status" aria-live="polite">Memeriksa sesi Live...</p>
+    <p id="live-warning" class="text-sm text-amber-700" role="alert" hidden>Pengawasan terputus. Ujian dan autosave tetap berjalan.</p>
+  </header>
+  <div class="grid grid-cols-1 lg:grid-cols-4 gap-4">
+    <main class="lg:col-span-3 card p-4">
+      <h2 class="font-bold mb-3">Kamera peserta</h2>
+      <div id="live-grid" aria-label="Tampilan kamera" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3"></div>
+    </main>
+    <aside class="card p-4 space-y-3">
+      <h2 class="font-bold">Pengawasan</h2>
+      {% if live_role == "teacher" %}
+      <p class="text-sm">Permintaan berbicara:</p>
+      <div id="live-queue" class="space-y-2 text-sm" aria-live="polite"></div>
+      {% else %}
+      <p id="live-raise-status" class="text-sm">Mikrofon menunggu persetujuan guru.</p>
+      {% endif %}
+    </aside>
+  </div>
+</section>
+{# STAGING ONLY. Self-host the pinned SDK after browser and security review. #}
+<script defer src="https://cdn.jsdelivr.net/npm/livekit-client@2.23.0/dist/livekit-client.umd.min.js"></script>
+<script defer src="{{ url_for('static', filename='js/scan-live-exam.js') }}"></script>
+{% endblock %}

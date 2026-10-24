@@ -22,8 +22,8 @@ def issue_join_token(config, session_id: str, room: str, user_id: str,
     )
     jwt = (api.AccessToken(setting(config, "LIVEKIT_API_KEY"),
                            setting(config, "LIVEKIT_API_SECRET"))
-           .with_identity(identity).with_grants(grants)
-           .with_ttl(TOKEN_TTL).to_jwt())
+           .with_identity(identity).with_metadata('{"role":"' + role + '"}')
+           .with_grants(grants).with_ttl(TOKEN_TTL).to_jwt())
     return {"url": setting(config, "LIVEKIT_URL"), "token": jwt,
             "room": room, "identity": identity, "role": role,
             "mic_approved": bool(microphone_approved)}

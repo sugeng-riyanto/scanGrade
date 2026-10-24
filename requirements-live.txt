@@ -1,3 +1,2 @@
-# Optional LiveKit backend dependency. Install only on isolated Live-enabled workers.
-# Keep requirements.txt (production exam dependency set) untouched until pilot signoff.
-livekit-api>=1.0,<2
+# Optional staging-only dependency; keep the production examination requirements unchanged.
+livekit-api==1.2.2

@@ -4,12 +4,13 @@ from __future__ import annotations
 import logging
 import secrets
 
-from flask import Blueprint, current_app, g, jsonify, request
+from flask import Blueprint, current_app, g, jsonify, request, render_template
 from app.services import live_policy, livekit_gateway
 from app.utils.auth import get_supabase, login_required
 from app.utils.exam_access import can_manage_exam, exam_sitting_allowed
 
 live_bp = Blueprint("live", __name__, url_prefix="/api/live")
+live_ui_bp = Blueprint("live_ui", __name__, url_prefix="/live")
 log = logging.getLogger(__name__)
 STAFF = ("guru", "principal", "vice_principal", "admin_sekolah", "super_admin")
 
@@ -177,7 +178,14 @@ def hand_raise_queue(sid):
         return off
     db = get_supabase()
     session = _session(db, sid)
-    if _check(db, session, staff_only=True) != "teacher":
+    role = _check(db, session)
+    if role == "student":
+        own = _one(db.table("scan_live_hand_raises").select("id,status,created_at")
+                   .eq("session_id", sid).eq("school_id", session["school_id"])
+                   .eq("student_id", g.user_id)
+                   .order("created_at", desc=True))
+        return jsonify({"request": own})
+    if role != "teacher":
         return _denied()
     rows = (db.table("scan_live_hand_raises").select(
         "id,student_id,status,created_at"
@@ -266,3 +274,45 @@ def end_session(sid):
         log.exception("Live room cleanup failed for %s", sid)
         return jsonify({"status": "ended", "media_cleanup": "pending"}), 202
     return jsonify({"status": "ended"})
+
+
+@live_bp.route("/sessions/<sid>/roster", methods=["GET"])
+@login_required
+def roster(sid):
+    """Authorized teacher maps room pseudonyms to pupils."""
+    if (off := _off()) is not None:
+        return off
+    db = get_supabase()
+    session = _session(db, sid)
+    if _check(db, session, staff_only=True) != "teacher":
+        return _denied()
+    from app.services import exam_targets
+    from app.utils.exam_access import exam_class_ids
+    exam = _exam(db, session["exam_id"])
+    members = exam_targets.roster_for_classes(
+        db, session["school_id"], exam_class_ids(exam))
+    names = {}
+    for member in members:
+        student_id = member.get("student_id")
+        if not student_id:
+            continue
+        if exam.get("target_mode") == "students" and not exam_targets.student_is_included(
+                db, exam["id"], student_id):
+            continue
+        name_key = live_policy.participant_identity(
+            current_app.config, sid, student_id)
+        names[name_key] = member.get("full_name") or "Peserta"
+    return jsonify({"participants": names})
+
+
+@live_ui_bp.route("/exam/<exam_id>", methods=["GET"])
+@login_required
+def live_exam_page(exam_id):
+    if (off := _off()) is not None:
+        return off
+    db = get_supabase()
+    exam = _exam(db, exam_id)
+    role = _access(db, exam)
+    if not role:
+        return _denied()
+    return render_template("live/exam.html", live_exam_id=exam_id, live_role=role)

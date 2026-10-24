@@ -21,6 +21,7 @@ Implementation branch: feature/scangrade-livekit-exam-20261024.
 3. Set LIVEKIT_URL=wss://..., LIVEKIT_API_KEY and LIVEKIT_API_SECRET only on server.
 4. Configure network/TURN and LiveKit egress policy with recording **disabled**.
 5. Enable both feature flags for staging only; leave production OFF.
+   Open /live/exam/<exam_id> with a logged-in teacher or eligible student.
 6. Integration-test with a real teacher, assigned pupil and distinct school.
 7. Pilot after the tests below pass, and only then plan UI entry points.
 
@@ -38,15 +39,17 @@ Implementation branch: feature/scangrade-livekit-exam-20261024.
 
 ## Operational caveats / missing work before production
 
-- LiveKit is not yet connected to the teacher/student page. Backend-only pilot.
-- Add authenticated real-time notifications, connectivity state, local-camera
-  check, and LiveKit webhooks with signature verification / deduplication.
+- A standalone staging UI is at /live/exam/<exam_id> but intentionally not linked from active exam pages.
+- Pilot UI uses polling and camera checks. Add push notifications, verified/deduplicated
+  webhooks, and backend camera-off alerts before production.
 - On abnormal worker exit, transitional \`approving\`/\`closing\` states need
   reconciliation; do not enable unattended production exam monitoring before it.
 - After \`end\`, database rejects new token minting; a room deletion failure
   requires cleanup. Already-issued tokens are short-lived.
 - Rate limits, load test, cross-tenant integration tests and secret management are
-  required prior to enabling production. Vendor the JS SDK instead of ad-hoc CDN.
+  required prior to enabling production. Vendor the JS SDK instead of CDN.
+- Student can_subscribe=true currently permits requesting other student tracks;
+  UI hiding does NOT enforce privacy. Enforce subscription permissions before release.
 - Never run migration, set flags or deploy to production just by merging this branch.
 
 ## Rollback
