@@ -1,0 +1,2 @@
+# Optional staging-only dependency; keep the production examination requirements unchanged.
+livekit-api==1.2.2
