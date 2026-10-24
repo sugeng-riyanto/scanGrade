@@ -1226,7 +1226,12 @@ def signoff_sheet(base_url: str, exam_id: str, rows: list, code: int, *,
     passed = sum(1 for item in rows if item.state == "pass")
     failed = [item for item in rows if item.state == "fail"]
     skipped = [item for item in rows if item.state == "skipped"]
-    host = ascii_safe(base_url.rstrip("/"))
+    from urllib.parse import urlsplit, urlunsplit
+
+    parsed = urlsplit(base_url)
+    # The pasted report must not reveal URL credentials, query or fragment.
+    host = ascii_safe(urlunsplit((parsed.scheme, parsed.hostname or "",
+                                  parsed.path.rstrip("/"), "", "")))
     lines = [
         f"## ScanMeet media sign-off - {host}",
         "",
