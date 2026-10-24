@@ -267,6 +267,16 @@ Which engine runs is a state, not a guess:
 * **unconfigured** — neither engine could start, which means the page's own
   module did not load: a broken deployment, and the panel says exactly that.
 
+A key comes from Desmos' own portal (`desmos.com/my-api`), which offers a free
+**Personal** plan for school or personal projects and paid **Starter**/**Enterprise**
+plans for a commercial service — so whether a school needs to pay is a question
+for Desmos, not for this repository. The value is then set as `DESMOS_API_KEY` in
+the deployment's environment (never in a template or in git) and the service is
+restarted; the next page render interpolates it. The public demo key that appears
+in older Desmos documentation is deliberately **not** used here: it is a
+demonstration credential, and a paper that stopped graphing because a third party
+withdrew a shared key would be a worse trade than the keyless plot above.
+
 The local plot is deliberately smaller than Desmos: no sliders, tables,
 regressions or geometry, one curve at a time. That is what an exam graph question
 needs, and the limit is written here rather than implied by a panel that looks

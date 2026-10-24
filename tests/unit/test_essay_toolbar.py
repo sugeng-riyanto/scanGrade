@@ -226,6 +226,112 @@ needs_jsdom = pytest.mark.skipif(
     reason="needs the jsdom dev dependency (`npm install`)",
 )
 
+#: The page's own toolbar resolver, lifted out and executed.
+#:
+#: The Alpine component cannot be instantiated without the whole page, and the
+#: behaviour worth proving is the *caret* — a toolbar pressed before the pupil has
+#: clicked anything. So the two methods are cut out of the template by brace
+#: counting (the same way `test_essay_answer_integrity` reads the serialiser) and
+#: driven against a paragraph in jsdom, with `currentPara` stubbed and
+#: `execCommand` recorded rather than performed.
+TARGET_HARNESS = r"""
+const { JSDOM } = require('jsdom');
+const fs = require('fs');
+const src = fs.readFileSync(process.env.SG_TAKE_EXAM, 'utf8');
+
+function method(name) {
+    const start = src.indexOf('        ' + name + '(');
+    if (start < 0) throw new Error('no method ' + name);
+    const open = src.indexOf('{', start);
+    let depth = 0;
+    for (let i = open; i < src.length; i += 1) {
+        if (src[i] === '{') depth += 1;
+        else if (src[i] === '}') {
+            depth -= 1;
+            if (depth === 0) return src.slice(start, i + 1);
+        }
+    }
+    throw new Error('unterminated ' + name);
+}
+
+const dom = new JSDOM('<!doctype html><html><body><div class="sg-essay-para" ' +
+                      'data-para="0:p0" contenteditable="true"><p>siap</p></div></body></html>');
+global.window = dom.window;
+const doc = dom.window.document;
+global.document = doc;              // the page's methods read the bare global
+
+const el = doc.querySelector('.sg-essay-para');
+/* jsdom implements `contenteditable` as an attribute and not the property the
+   browser computes from it, so the resolver's "the caret is already here" test
+   would never be true and every call would look like a fresh sheet. */
+Object.defineProperty(el, 'isContentEditable', { get: function () { return true; } });
+const results = [];
+function record(name, got, want) { results.push([name, got, want]); }
+
+const saved = [];
+const ctx = {
+    currentPara: function () { return { el: el, pIdx: 0 }; },
+    onParagraphInput: function (qIdx, pIdx, target) {
+        saved.push([qIdx, pIdx, target === el]);
+    },
+    refreshListState: function () {}
+};
+const api = new Function('ctx', 'with (ctx) { return {' +
+    method('essayTarget') + ',' + method('execCmd') + '}; }')(ctx);
+ctx.essayTarget = api.essayTarget;
+
+let commanded = null;
+doc.execCommand = function (cmd) { commanded = cmd; return true; };
+dom.window.SGEssayEditor = { remember: function () {}, restore: function () { return true; } };
+
+doc.body.focus();
+record('nothing was focused to begin with', doc.activeElement === doc.body, true);
+
+const target = api.essayTarget.call(ctx, 0);
+record('the paragraph is the one the page named', target.el === el, true);
+record('it takes the focus', doc.activeElement === el, true);
+const sel = dom.window.getSelection();
+record('the caret is inside it', el.contains(sel.anchorNode), true);
+record('the caret is at the end of the paragraph',
+       sel.anchorNode === el && sel.anchorOffset === el.childNodes.length, true);
+
+const bold = api.execCmd.call(ctx, 0, 'bold');
+record('the command reached the browser', commanded, 'bold');
+record('the page was told to save the paragraph',
+       saved.length === 1 && saved[0][0] === 0 && saved[0][1] === 0 && saved[0][2] === true, true);
+
+/* A selection the pupil made is theirs: the resolver must not move it. */
+const range = doc.createRange();
+range.selectNodeContents(el.firstChild);
+sel.removeAllRanges();
+sel.addRange(range);
+api.essayTarget.call(ctx, 0);
+record('a selection the pupil made is kept', String(sel), 'siap');
+
+process.stdout.write(JSON.stringify(results));
+"""
+
+
+def _run_target_harness():
+    env = dict(os.environ)
+    env["SG_TAKE_EXAM"] = str(TAKE)
+    proc = subprocess.run([NODE, "-e", TARGET_HARNESS], cwd=str(ROOT), env=env,
+                          capture_output=True, text=True, timeout=120)
+    assert proc.returncode == 0, proc.stderr
+    return json.loads(proc.stdout)
+
+
+@pytest.fixture(scope="module")
+def executed():
+    """The page's toolbar resolver, run — or a skip that names what is missing."""
+    if NODE is None:
+        pytest.skip("needs node to execute the page's resolver")
+    resolved = subprocess.run([NODE, "-e", "require.resolve('jsdom')"], cwd=str(ROOT),
+                              capture_output=True).returncode == 0
+    if not resolved:
+        pytest.skip("needs the jsdom dev dependency (`npm install`)")
+    return _run_target_harness()
+
 
 @needs_node
 @needs_jsdom
@@ -349,6 +455,16 @@ class TestTheRenderedToolbar:
                      "insertSymbol(i, '×')"):
             assert page.count(f"@mousedown.prevent=\"{call}\"") == 2, call
 
+    def test_the_format_buttons_name_the_question_they_act_on(self, page):
+        """Bold, Italic and Underline have to resolve their paragraph like every
+        other tool does. They used to read a stored `_activeEditor`, which is null
+        until a paragraph has been clicked — so the first press on a fresh answer
+        ran the platform command against nothing, and the button looked dead."""
+        for cmd in ("bold", "italic", "underline"):
+            assert page.count(f"@mousedown.prevent=\"execCmd(i, '{cmd}')\"") == 2, cmd
+            bare = page.replace(f"execCmd(i, '{cmd}')", "")
+            assert f"execCmd('{cmd}')" not in bare, cmd
+
 
 class TestTheWiring:
 
@@ -360,14 +476,38 @@ class TestTheWiring:
 
     def test_every_page_method_exists(self):
         src = TAKE.read_text(encoding="utf-8")
-        for method in ("paraEl(qIdx)", "currentPara(qIdx)", "runEssayCommand(qIdx, fn)",
+        for method in ("paraEl(qIdx)", "currentPara(qIdx)", "essayTarget(qIdx)",
+                       "runEssayCommand(qIdx, fn)",
                        "essayAlign(i)", "setEssayAlign(i, value)", "applyTab(i)",
                        "insertSymbol(i, text)", "insertTable(i, rows, cols)",
-                       "applyColor(i, hex)",
+                       "applyColor(i, hex)", "execCmd(qIdx, cmd)",
                        "onParagraphTab(qIdx, pIdx, ev)"):
             assert f"        {method} {{" in src, method
 
-    def test_the_table_is_drawn_from_the_sheets_own_tokens(self):
+    def test_every_writing_tool_resolves_the_same_target(self):
+        """One resolver, so a tool cannot be the one control that still needs the
+        pupil to have clicked first."""
+        src = TAKE.read_text(encoding="utf-8")
+        for method in ("runEssayCommand", "applyList", "execCmd"):
+            start = src.index(f"        {method}(")
+            end = src.index("\n        },", start)
+            assert "this.essayTarget(qIdx)" in src[start:end], method
+
+    def test_the_target_puts_the_caret_in_the_paragraph(self, executed):
+        """Executed, not grepped: the toolbar's resolver is lifted out of the page
+        and driven against a paragraph nobody has clicked, which is the state a
+        fresh answer is in."""
+        results = {name: got for name, got, _ in executed}
+        assert results["nothing was focused to begin with"] is True
+        assert results["the paragraph is the one the page named"] is True
+        assert results["it takes the focus"] is True
+        assert results["the caret is inside it"] is True
+        assert results["the caret is at the end of the paragraph"] is True
+        assert results["a selection the pupil made is kept"] == "siap"
+        assert results["the command reached the browser"] == "bold"
+        assert results["the page was told to save the paragraph"] is True
+
+
         """The sheet follows the theme, so a border fixed to slate is a light line
         on a dark sheet."""
         css = THEME.read_text(encoding="utf-8")

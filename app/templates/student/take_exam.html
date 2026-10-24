@@ -2281,9 +2281,9 @@ body.sg-exam .sg-content { max-width: none; margin-left: 0; margin-right: 0; }
                                      buttons did. The list buttons do not call the deprecated
                                      execCommand at all; SGEssayEditor builds the <ul>/<ol>. -->
                                 <div class="flex flex-wrap items-center gap-1 px-3 py-2 bg-surface-50 border border-surface-200 rounded-t-xl relative">
-                                    <button type="button" @mousedown.prevent="execCmd('bold')" class="w-8 h-8 rounded-lg hover:bg-surface-200 text-sm font-bold text-surface-700" :title="t('Tebal','Bold')">B</button>
-                                    <button type="button" @mousedown.prevent="execCmd('italic')" class="w-8 h-8 rounded-lg hover:bg-surface-200 text-sm italic text-surface-700" :title="t('Miring','Italic')">I</button>
-                                    <button type="button" @mousedown.prevent="execCmd('underline')" class="w-8 h-8 rounded-lg hover:bg-surface-200 text-sm underline text-surface-700" :title="t('Garis bawah','Underline')">U</button>
+                                    <button type="button" @mousedown.prevent="execCmd(i, 'bold')" class="w-8 h-8 rounded-lg hover:bg-surface-200 text-sm font-bold text-surface-700" :title="t('Tebal','Bold')">B</button>
+                                    <button type="button" @mousedown.prevent="execCmd(i, 'italic')" class="w-8 h-8 rounded-lg hover:bg-surface-200 text-sm italic text-surface-700" :title="t('Miring','Italic')">I</button>
+                                    <button type="button" @mousedown.prevent="execCmd(i, 'underline')" class="w-8 h-8 rounded-lg hover:bg-surface-200 text-sm underline text-surface-700" :title="t('Garis bawah','Underline')">U</button>
                                     <span class="w-px h-5 bg-surface-300 mx-0.5"></span>
                                     <button type="button" @mousedown.prevent="applyList(i, 'ul')"
                                             :class="listState[i] === 'ul' ? 'bg-primary-100 text-primary-700' : 'text-surface-600 hover:bg-surface-200'"
@@ -2460,9 +2460,9 @@ body.sg-exam .sg-content { max-width: none; margin-left: 0; margin-right: 0; }
                                     <span class="text-xs text-slate-400" x-text="'(' + ((answersText[i] || '').length) + t(' karakter, ',' characters, ') + ((paragraphs[i]||[]).length) + t(' paragraf)',' paragraphs)')"></span>
                                 </div>
                                 <div class="flex flex-wrap items-center gap-1 px-3 py-2 bg-surface-50 border border-surface-200 rounded-t-xl relative">
-                                    <button type="button" @mousedown.prevent="execCmd('bold')" class="w-8 h-8 rounded-lg hover:bg-surface-200 text-sm font-bold text-surface-700" :title="t('Tebal','Bold')">B</button>
-                                    <button type="button" @mousedown.prevent="execCmd('italic')" class="w-8 h-8 rounded-lg hover:bg-surface-200 text-sm italic text-surface-700" :title="t('Miring','Italic')">I</button>
-                                    <button type="button" @mousedown.prevent="execCmd('underline')" class="w-8 h-8 rounded-lg hover:bg-surface-200 text-sm underline text-surface-700" :title="t('Garis bawah','Underline')">U</button>
+                                    <button type="button" @mousedown.prevent="execCmd(i, 'bold')" class="w-8 h-8 rounded-lg hover:bg-surface-200 text-sm font-bold text-surface-700" :title="t('Tebal','Bold')">B</button>
+                                    <button type="button" @mousedown.prevent="execCmd(i, 'italic')" class="w-8 h-8 rounded-lg hover:bg-surface-200 text-sm italic text-surface-700" :title="t('Miring','Italic')">I</button>
+                                    <button type="button" @mousedown.prevent="execCmd(i, 'underline')" class="w-8 h-8 rounded-lg hover:bg-surface-200 text-sm underline text-surface-700" :title="t('Garis bawah','Underline')">U</button>
                                     <span class="w-px h-5 bg-surface-300 mx-0.5"></span>
                                     <button type="button" @mousedown.prevent="applyList(i, 'ul')"
                                             :class="listState[i] === 'ul' ? 'bg-primary-100 text-primary-700' : 'text-surface-600 hover:bg-surface-200'"
@@ -6077,7 +6077,7 @@ function examApp(duration, totalQ) {
             return 'font-family:' + this.essayFont(i) + ';font-size:' + this.essaySize(i) + 'px';
         },
         applyList(qIdx, kind) {
-            const target = this.currentPara(qIdx);
+            const target = this.essayTarget(qIdx);
             if (!target.el || !window.SGEssayEditor) return;
             window.SGEssayEditor.remember(target.el);   // a no-op when the caret is elsewhere
             window.SGEssayEditor.toggleList(target.el, kind);
@@ -6104,12 +6104,43 @@ function examApp(duration, totalQ) {
             this._activeEditorQ = qIdx;
             return {el: el, pIdx: pIdx};
         },
+        // The paragraph a writing tool acts on **with the caret in it**.
+        //
+        // `currentPara` names the element; this also makes sure there is a caret to
+        // act on. A control pressed before the pupil had clicked a paragraph used to
+        // do nothing at all — `execCmd` needed `_activeEditor` (set on focus) and a
+        // selection, and a sheet nobody had clicked into has neither — so Bold,
+        // Italic, Underline and the list buttons all looked broken on first use, on
+        // an empty answer. Measured on the live preview paper: the text-answer panel
+        // opened with "(0 characters, 1 paragraph)", Bold produced no markup and no
+        // state, and the bullet button left the paragraph exactly as it was.
+        //
+        // The caret goes to the end of the paragraph, so the command applies to what
+        // the pupil types next; when the paragraph *does* already hold the caret (or
+        // a selection, which `mousedown.prevent` keeps) nothing is moved.
+        essayTarget(qIdx) {
+            const target = this.currentPara(qIdx);
+            const active = document.activeElement;
+            if (!target.el || (active && active.isContentEditable && target.el.contains(active))) {
+                return target;
+            }
+            target.el.focus();
+            const range = document.createRange();
+            range.selectNodeContents(target.el);
+            range.collapse(false);
+            const selection = window.getSelection();
+            if (selection) {
+                selection.removeAllRanges();
+                selection.addRange(range);
+            }
+            return target;
+        },
         // Every writing tool goes through one runner: keep the caret, run the
         // editor's own command, and let the page's single writer store the text
         // and markup. A control that returns false changed nothing, so nothing is
         // marked dirty for it.
         runEssayCommand(qIdx, fn) {
-            const target = this.currentPara(qIdx);
+            const target = this.essayTarget(qIdx);
             if (!target.el || !window.SGEssayEditor) return;
             window.SGEssayEditor.remember(target.el);
             if (fn(target.el, window.SGEssayEditor) === false) return;
@@ -6165,18 +6196,20 @@ function examApp(duration, totalQ) {
             this.answered[qIdx] = fullText.length > 0;
             this.dirty = true;
         },
-        execCmd(cmd) {
-            // The toolbar button kept the caret in the paragraph (`mousedown.prevent`),
-            // and the last range is restored here as well for the browsers that clear
-            // it anyway: a command with no selection is a command that does nothing.
-            const el = this._activeEditor && document.contains(this._activeEditor)
-                ? this._activeEditor : null;
-            if (el && window.SGEssayEditor) window.SGEssayEditor.restore(el);
+        // Bold / italic / underline, on the same target every other writing tool
+        // uses. It used to read `_activeEditor` alone, which is null until the pupil
+        // has clicked into a paragraph — so the first press of B on a fresh answer
+        // ran the platform command against nothing and the button was, to the pupil,
+        // dead. `essayTarget` puts the caret in the paragraph the pupil is working in
+        // (or keeps the selection they made), and the stored text is written by the
+        // page's one writer afterwards.
+        execCmd(qIdx, cmd) {
+            const target = this.essayTarget(qIdx);
+            if (!target.el || !window.SGEssayEditor) return;
+            window.SGEssayEditor.remember(target.el);
             document.execCommand(cmd);
-            if (el) {
-                const qIdx = this._activeEditorQ;
-                this.onParagraphInput(qIdx, this._activePara[qIdx], el);
-            }
+            this.onParagraphInput(qIdx, target.pIdx, target.el);
+            this.refreshListState(qIdx, target.el);
         },
         clearCanvas(i) {
             if (!this.canvasDraw[i]) return;

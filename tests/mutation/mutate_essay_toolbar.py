@@ -23,7 +23,11 @@ go red:
   or joins list items — the three shapes that arrive at the marking page as one
   run-on string;
 * the symbol that arrives padded, the Tab that types a character inside a cell
-  instead of moving on, and the font that is written into the stored text.
+  instead of moving on, and the font that is written into the stored text;
+* the format button that goes back to a target it may not have (the stored
+  `_activeEditor` is null until something has been clicked), the resolver that
+  stops putting the caret in the paragraph, and the button that forgets which
+  question it acts on — the three ways a toolbar looks dead on a fresh answer.
 
 Every anchor is translated to the target file's own line-ending style by the shared
 harness, and the baseline is checked first, so "caught" cannot mean "the guards were
@@ -113,6 +117,24 @@ MUTATIONS = [
      EDITOR,
      "        if (cell && !back) {",
      "        if (false) {"),
+
+    # ── the toolbar acts on a paragraph with a caret, even before a click ──
+    # The first press on a fresh answer used to run `document.execCommand`
+    # against a paragraph nobody had focused, and the button looked dead.
+    ('a format button goes back to a target it may not have',
+     PAGE,
+     "        execCmd(qIdx, cmd) {\n            const target = this.essayTarget(qIdx);",
+     "        execCmd(qIdx, cmd) {\n            const target = {el: this._activeEditor, pIdx: this._activePara[qIdx]};"),
+
+    ('the target stops putting the caret in the paragraph',
+     PAGE,
+     "            target.el.focus();\n            const range = document.createRange();",
+     "            if (false) target.el.focus();\n            const range = document.createRange();"),
+
+    ('the format button forgets which question it is in',
+     PAGE,
+     "@mousedown.prevent=\"execCmd(i, 'italic')\"",
+     "@mousedown.prevent=\"execCmd('italic')\""),
 
     # ── the page: a font is a style, never part of the answer ──────────────
     # Read through a guard rather than through `this.essayFont(i)` on purpose: an

@@ -586,7 +586,7 @@ class TestTheWiring:
     def test_the_editor_module_is_loaded_before_the_component(self):
         src = TAKE.read_text(encoding="utf-8")
         loaded = src.index('<script src="/static/js/essay-editor.js"></script>')
-        component = src.index("        execCmd(cmd) {")
+        component = src.index("        execCmd(qIdx, cmd) {")
         assert loaded < component, "the module must be loaded before it is read"
         assert '<script src="/static/js/essay-editor.js"></script>' in src
 
