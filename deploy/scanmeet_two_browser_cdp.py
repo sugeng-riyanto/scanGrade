@@ -96,7 +96,9 @@ def microphone_closed(sample):
 async def main_async(args):
     for url in (args.teacher_url, args.pupil1_url, args.pupil2_url):
         check_staging(url)
-    if not args.ask_selector or not args.approve_selector:\n        raise ValueError("mic gating acceptance requires --ask-selector AND --approve-selector")\n    if len({urlsplit(u).hostname for u in (args.teacher_url, args.pupil1_url, args.pupil2_url)}) != 1:
+    if not args.ask_selector or not args.approve_selector:
+        raise ValueError("mic gating acceptance requires --ask-selector AND --approve-selector")
+    if len({urlsplit(u).hostname for u in (args.teacher_url, args.pupil1_url, args.pupil2_url)}) != 1:
         raise ValueError("all actors must be on the same isolated staging host")
     for file in (args.teacher_state, args.pupil1_state, args.pupil2_state):
         if not Path(file).is_file():
