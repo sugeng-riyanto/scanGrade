@@ -50,7 +50,10 @@ try:  # pragma: no cover - both branches meet in `main()`
 except ImportError:  # pragma: no cover
     jwt = None
 
-import requests
+try:
+    import requests
+except ImportError:  # offline environments may not install HTTP extras
+    requests = None
 
 TIMEOUT = 20
 MAX_BODY = 65536
@@ -174,6 +177,10 @@ def main(argv=None) -> int:
     if jwt is None:
         print("COULD NOT PROBE: PyJWT is not installed in this interpreter.")
         print("Install the staging set: python -m pip install -r requirements-live.txt")
+        return 2
+
+    if requests is None:
+        print("COULD NOT PROBE: requests is not installed; install requirements.txt")
         return 2
 
     missing = [name for name, value in (("--url", args.url),
