@@ -50,7 +50,18 @@ try:  # pragma: no cover - both branches meet in `main()`
 except ImportError:  # pragma: no cover
     jwt = None
 
-import requests
+# Same treatment as `jwt`, and for the same reason: `requests` arrives with the
+# staging set, and a module-level import of it made this file unimportable on a
+# production venv -- so the suite that checks the missing-package sentence could
+# not even read the sentence.
+try:  # pragma: no cover - both branches meet in `main()`
+    import requests
+except ImportError:  # pragma: no cover
+    requests = None
+
+# Matched against by `post()`; an empty tuple matches nothing, which is what an
+# except clause needs when the package it names is absent.
+REQUEST_ERROR = requests.RequestException if requests is not None else ()
 
 TIMEOUT = 20
 MAX_BODY = 65536
@@ -88,10 +99,13 @@ def post(url: str, body: bytes, *, auth: str | None, session=None) -> int:
     headers = {"Content-Type": "application/webhook+json"}
     if auth is not None:
         headers["Authorization"] = auth
+    client = session or requests
+    if client is None:
+        raise ProbeError("the HTTP client is not installed in this interpreter - "
+                         "pip install -r requirements-live.txt")
     try:
-        response = (session or requests).post(url, data=body, headers=headers,
-                                              timeout=TIMEOUT)
-    except requests.RequestException as exc:
+        response = client.post(url, data=body, headers=headers, timeout=TIMEOUT)
+    except REQUEST_ERROR as exc:
         raise ProbeError(f"could not reach {url}: {exc}") from exc
     return response.status_code
 
@@ -171,8 +185,9 @@ def main(argv=None) -> int:
                              "without it 204 is the expected answer")
     args = parser.parse_args(argv)
 
-    if jwt is None:
-        print("COULD NOT PROBE: PyJWT is not installed in this interpreter.")
+    if jwt is None or requests is None:
+        absent = "PyJWT" if jwt is None else "requests"
+        print(f"COULD NOT PROBE: {absent} is not installed in this interpreter.")
         print("Install the staging set: python -m pip install -r requirements-live.txt")
         return 2
 
