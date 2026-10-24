@@ -162,6 +162,15 @@ class FakeDB:
     def check_unique(self, name, payload):
         if self.fail_insert:
             raise RuntimeError("database unreachable")
+        if name == "scan_live_events":
+            # `event_key` is UNIQUE in migration 070; the webhook leans on that
+            # for idempotent redelivery rather than reading before writing.
+            for row in self.rows.get(name, []):
+                if str(row.get("event_key")) == str(payload.get("event_key")):
+                    raise RuntimeError(
+                        'duplicate key value violates unique constraint '
+                        '"scan_live_events_event_key_key" (23505)')
+            return
         if name != "scan_live_hand_raises":
             return
         for row in self.rows.get(name, []):
