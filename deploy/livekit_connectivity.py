@@ -16,9 +16,33 @@ from app.services.live_policy import server_api_url
 from deploy.livekit_preflight import audit, parse_env
 
 
+class MissingSdk(RuntimeError):
+    """The optional staging SDK is not installed in this interpreter.
+
+    It is a runtime on purpose: a venv built from `requirements.txt` alone is a
+    perfectly good production venv, and on it `--probe-livekit` used to answer
+    "LiveKit server connectivity/authorization" — the one sentence that sends an
+    operator to debug credentials and a firewall for a package that is simply
+    absent. Exit 2 (could not measure) rather than 1 (the credentials disagreed),
+    because those are different facts.
+    """
+
+
+MISSING_SDK = ("the LiveKit SDK is not installed in this interpreter - "
+               "pip install -r requirements-live.txt")
+
+
+def _api():
+    try:
+        from livekit import api
+    except ImportError as exc:  # pragma: no cover - a venv without the extra
+        raise MissingSdk(MISSING_SDK) from exc
+    return api
+
+
 async def probe(settings: dict[str, str]) -> None:
     """List only a deliberately nonexistent room; no writes to LiveKit."""
-    from livekit import api
+    api = _api()
 
     client = api.LiveKitAPI(
         url=server_api_url(settings),
@@ -50,6 +74,9 @@ def main(argv=None) -> int:
         return 1
     try:
         asyncio.run(probe(settings))
+    except MissingSdk as exc:
+        print(f"FAIL: {exc}")
+        return 2
     except Exception:
         # Avoid accidentally logging tokens or URLs from SDK exception messages.
         print("FAIL: LiveKit server connectivity/authorization; inspect private host diagnostics")

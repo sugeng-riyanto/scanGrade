@@ -147,8 +147,14 @@ def main(argv=None) -> int:
     if args.probe_livekit:
         try:
             import asyncio
-            from deploy.livekit_connectivity import probe
+            from deploy.livekit_connectivity import MissingSdk, probe
             asyncio.run(probe(settings))
+        except MissingSdk as exc:
+            # A venv without requirements-live.txt is not a credential problem,
+            # and saying so is the difference between a one-line fix and an hour
+            # spent re-reading the LiveKit dashboard.
+            print(f"FAIL: {exc}")
+            return 2
         except Exception:
             print("FAIL: LiveKit read-only connectivity/authentication")
             return 1
