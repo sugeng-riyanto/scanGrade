@@ -183,9 +183,13 @@
           const desc = document.createElement("div");
           desc.textContent = (students[item.student_id] || item.student_id.slice(0, 8)) + " — " + item.status;
           line.append(desc);
-          const actions = item.status === "pending"
-            ? [["approve", "Izinkan"], ["reject", "Tolak"]]
-            : item.status === "approved" ? [["close", "Akhiri bicara"]] : [];
+          // A parked ``approving``/``closing`` row has no decision to offer; the
+          // only way out of it is the fail-closed reconcile action.
+          const parked = item.status === "approving" || item.status === "closing";
+          const actions = parked ? [["reconcile", "Pulihkan"]]
+            : item.status === "pending"
+              ? [["approve", "Izinkan"], ["reject", "Tolak"]]
+              : item.status === "approved" ? [["close", "Akhiri bicara"]] : [];
           for (const pair of actions) {
             const button = document.createElement("button");
             button.type = "button";

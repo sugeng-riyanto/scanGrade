@@ -272,16 +272,29 @@ done
 # .venv/Scripts/python.exe. Either is preferred over the system python because
 # the check imports pytest, which requirements.txt pins into the venv.
 PY=""
-for candidate in "$REPO/.venv/bin/python" "$REPO/.venv/Scripts/python.exe"; do
-  [ -x "$candidate" ] && PY="$candidate" && break
-done
+REFUSED=""
+for candidate in "$REPO/.venv/bin/python" "$REPO/.venv/Scripts/python.exe" python3 python; do
+  case "$candidate" in
+    */*) path="$candidate" ;;
+    *) path=$(command -v "$candidate" 2>/dev/null) || continue ;;
+  esac
+  [ -n "$path" ] && [ -x "$path" ] || continue
+  # `command -v` finds a name, not an interpreter. Windows ships an App Execution
+  # Alias for python3 that is executable, sits on PATH and prints "Python was not
+  # found" instead of running anything — so this gate picked it, every tool it ran
+  # printed that line, and the failure surfaced as "the language coverage check
+  # refused this release": a Windows box blamed for a translation regression it did
+  # not have. A candidate has to answer before it is trusted.
+  if "$path" -c 'import sys' >/dev/null 2>&1; then PY="$path"; break; fi
+  REFUSED="$REFUSED
+    $path (executable, but does not run Python)"
+ done
 if [ -z "$PY" ]; then
-  for candidate in python3 python; do
-    if command -v "$candidate" >/dev/null 2>&1; then PY="$candidate"; break; fi
-  done
-fi
-if [ -z "$PY" ]; then
-  echo "theme gate: no python interpreter found — cannot run the check" >&2
+  echo "theme gate: no working python interpreter found — cannot run the check" >&2
+  if [ -n "$REFUSED" ]; then
+    echo "            Tried, and each was refused:$REFUSED" >&2
+    echo "            Install Python 3.12 or create .venv in this checkout." >&2
+  fi
   exit 2
 fi
 
@@ -355,6 +368,15 @@ esac
 COVERAGE=$("$PY" "$REPO/deploy/i18n_coverage.py" 2>&1)
 COV_RC=$?
 echo "$COVERAGE"
+if [ "$COV_RC" -eq 2 ]; then
+  # Exit 2 is the tool saying it could not measure, which is a property of this
+  # box and not of the release: an unreadable template, a missing baseline. Said
+  # in its own words, because a refusal here names a page a release made worse.
+  echo >&2
+  echo "theme gate: COULD NOT MEASURE — deploy/i18n_coverage.py exited 2." >&2
+  echo "            Nothing is being refused; this box could not read the tree." >&2
+  exit 2
+fi
 if [ "$COV_RC" -ne 0 ]; then
   echo >&2
   echo "theme gate: FAILED — the language coverage check refused this release." >&2

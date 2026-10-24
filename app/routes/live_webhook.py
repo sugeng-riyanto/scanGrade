@@ -27,6 +27,10 @@ def receive_livekit():
         return jsonify({"error": "Live not configured"}), 503
     if request.content_length and request.content_length > MAX_BODY_BYTES:
         return jsonify({"error": "Payload too large"}), 413
+    # A chunked delivery carries no Content-Length, so the header check above
+    # cannot see it. Cap the read itself; going over raises 413 instead of
+    # buffering an unbounded body in memory.
+    request.max_content_length = MAX_BODY_BYTES
     auth_header = request.headers.get("Authorization", "")
     body_bytes = request.get_data(cache=False)
     if not auth_header or not body_bytes or len(body_bytes) > MAX_BODY_BYTES:
