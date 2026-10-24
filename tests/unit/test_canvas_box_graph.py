@@ -182,7 +182,10 @@ class TestTheGraph:
 
     def test_the_script_is_fetched_on_the_first_press_only(self):
         text = page_text()
-        assert '<script src="/static/js/exam-graph.js"></script>' in text
+        assert "asset_v('js/exam-graph.js')" in text, (
+            "served through asset_v: /static/ is cached immutable for a year, so a "
+            "fix to the module would never reach a browser that had loaded it"
+        )
         assert "await window.SGGraph.load(this.graphKey)" in text
         assert "window.SGGraph.mount(host)" in text
 

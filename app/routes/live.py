@@ -41,11 +41,11 @@ def _access(db, exam, *, staff_only=False):
     if not uid or not school or str(exam["school_id"]) != str(school):
         return None
     if role in STAFF and can_manage_exam(uid, role, school, exam):
-        return "teacher"
+        return live_policy.LIVE_TEACHER
     if not staff_only and role == "murid":
         allowed, _ = exam_sitting_allowed(db, exam, exam["id"], uid)
         if allowed:
-            return "student"
+            return live_policy.LIVE_STUDENT
     return None
 
 
@@ -60,7 +60,10 @@ def _check(db, session, staff_only=False):
     if not session or session.get("status") != "active":
         return None
     exam = _exam(db, session["exam_id"])
-    return _access(db, exam, staff_only=staff_only)
+    role = _access(db, exam, staff_only=staff_only)
+    if role == live_policy.LIVE_TEACHER and str(session.get("created_by") or "") != str(g.get("user_id") or ""):
+        return None  # A second teacher cannot see pupil tracks allowed to the room creator.
+    return role
 
 
 def _denied():
@@ -82,9 +85,11 @@ def status(exam_id):
     if not role:
         return _denied()
     session = _one(db.table("scan_live_sessions").select(
-        "id,exam_id,status,created_at"
+        "id,exam_id,status,created_at,created_by"
     ).eq("exam_id", exam_id).eq("school_id", exam["school_id"])
         .eq("status", "active"))
+    if role == live_policy.LIVE_TEACHER and session and str(session.get("created_by") or "") != str(g.user_id):
+        return jsonify({"error": "Another teacher already supervises this Live session"}), 409
     return jsonify({"session": session, "role": role,
                     "policy": live_policy.EXAM_POLICY})
 
@@ -98,12 +103,14 @@ def create_session(exam_id):
         return _unavailable()
     db = get_supabase()
     exam = _exam(db, exam_id)
-    if _access(db, exam, staff_only=True) != "teacher":
+    if _access(db, exam, staff_only=True) != live_policy.LIVE_TEACHER:
         return _denied()
     existing = _one(db.table("scan_live_sessions").select("*")
                     .eq("school_id", exam["school_id"]).eq("exam_id", exam_id)
                     .eq("status", "active"))
     if existing:
+        if str(existing.get("created_by") or "") != str(g.user_id):
+            return jsonify({"error": "Another teacher already supervises this Live session"}), 409
         return jsonify({"session_id": existing["id"], "existing": True})
     # Unique partial index prevents parallel callers creating two active rooms.
     row = {
@@ -131,7 +138,7 @@ def join_token(sid):
     if not role:
         return _denied()
     approved = False
-    if role == "student":
+    if role == live_policy.LIVE_STUDENT:
         approved = bool(_one(db.table("scan_live_hand_raises").select("id")
                              .eq("session_id", sid).eq("school_id", session["school_id"])
                              .eq("student_id", g.user_id).eq("status", "approved")))
@@ -179,13 +186,13 @@ def hand_raise_queue(sid):
     db = get_supabase()
     session = _session(db, sid)
     role = _check(db, session)
-    if role == "student":
+    if role == live_policy.LIVE_STUDENT:
         own = _one(db.table("scan_live_hand_raises").select("id,status,created_at")
                    .eq("session_id", sid).eq("school_id", session["school_id"])
                    .eq("student_id", g.user_id)
                    .order("created_at", desc=True))
         return jsonify({"request": own})
-    if role != "teacher":
+    if role != live_policy.LIVE_TEACHER:
         return _denied()
     rows = (db.table("scan_live_hand_raises").select(
         "id,student_id,status,created_at"
@@ -204,7 +211,7 @@ def moderate(sid, rid, action):
         return jsonify({"error": "Invalid action"}), 400
     db = get_supabase()
     session = _session(db, sid)
-    if _check(db, session, staff_only=True) != "teacher":
+    if _check(db, session, staff_only=True) != live_policy.LIVE_TEACHER:
         return _denied()
     raise_row = _one(db.table("scan_live_hand_raises").select("*")
                      .eq("id", rid).eq("session_id", sid)
@@ -259,7 +266,7 @@ def end_session(sid):
         return off
     db = get_supabase()
     session = _session(db, sid)
-    if _check(db, session, staff_only=True) != "teacher":
+    if _check(db, session, staff_only=True) != live_policy.LIVE_TEACHER:
         return _denied()
     rows = (db.table("scan_live_sessions").update({"status": "ended"})
             .eq("id", sid).eq("school_id", session["school_id"])
@@ -284,7 +291,7 @@ def roster(sid):
         return off
     db = get_supabase()
     session = _session(db, sid)
-    if _check(db, session, staff_only=True) != "teacher":
+    if _check(db, session, staff_only=True) != live_policy.LIVE_TEACHER:
         return _denied()
     from app.services import exam_targets
     from app.utils.exam_access import exam_class_ids
@@ -327,7 +334,7 @@ def recent_events(sid):
         return off
     db = get_supabase()
     session = _session(db, sid)
-    if _check(db, session, staff_only=True) != "teacher":
+    if _check(db, session, staff_only=True) != live_policy.LIVE_TEACHER:
         return _denied()
     rows = (db.table("scan_live_events")
             .select("event_type,participant_identity,received_at")

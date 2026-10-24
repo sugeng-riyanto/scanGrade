@@ -35,7 +35,7 @@
     item.className = "rounded-xl overflow-hidden bg-slate-900 text-white";
     item.dataset.identity = identity;
     const media = document.createElement("div");
-    media.className = "h-44 [&_video]:w-full [&_video]:h-full [&_video]:object-cover";
+    media.className = "h-40";
     media.dataset.media = "true";
     const label = document.createElement("div");
     label.className = "p-2 text-sm";
@@ -60,6 +60,7 @@
       (role(participant) === "teacher" ? "Guru" : "Peserta");
     const target = tile(participant.identity, name).querySelector("[data-media]");
     const video = track.attach();
+    video.className = "w-full h-full object-cover";
     video.autoplay = true;
     video.playsInline = true;
     video.muted = local;
@@ -188,7 +189,7 @@
           for (const pair of actions) {
             const button = document.createElement("button");
             button.type = "button";
-            button.className = "mr-2 rounded bg-indigo-700 text-white px-2 py-1";
+            button.className = "mr-2 rounded bg-primary-600 text-white px-2 py-1";
             button.textContent = pair[1];
             button.onclick = async () => {
               button.disabled = true;

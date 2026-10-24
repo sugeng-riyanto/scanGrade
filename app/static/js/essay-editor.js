@@ -449,6 +449,45 @@
         return true;
     }
 
+    /* A line break inside a paragraph — what Enter means on this sheet.
+     *
+     * It is a `<br>`, not a new block and not a new paragraph: the paragraph is
+     * the unit the toolbar acts on, the counter counts and `+ Paragraph` adds, and
+     * `textOf` already reads a `<br>` as a newline, so the line the pupil typed is
+     * the line the teacher reads. Enter used to add a *paragraph*, so two presses
+     * in the middle of one answer left three boxes and one paragraph's worth of
+     * text. Inside a list this is never reached — the browser's own Enter makes
+     * the next bullet, which is what a bulleted answer needs.
+     */
+    function lineBreak(editor) {
+        if (!editor) return false;
+        if (!restore(editor)) caretToEnd(editor);
+        var doc = docOf(editor);
+        var done = false;
+        if (doc && typeof doc.execCommand === 'function') {
+            try {
+                done = doc.execCommand('insertLineBreak');
+            } catch (err) {
+                done = false;
+            }
+        }
+        if (!done) {
+            var sel = selection();
+            if (!sel || !sel.rangeCount) return false;
+            var range = sel.getRangeAt(0);
+            range.deleteContents();
+            var br = doc.createElement('br');
+            range.insertNode(br);
+            range.setStartAfter(br);
+            range.collapse(true);
+            sel.removeAllRanges();
+            sel.addRange(range);
+        }
+        remember(editor);
+        announce(editor);
+        return true;
+    }
+
     /* Paragraph alignment. It is a property of the *block*, not of a run, which is
      * why it is written on the paragraph element the pupil is typing in rather
      * than wrapped around the selection: half a line centred is not a thing a
@@ -592,6 +631,7 @@
         pastePlain: pastePlain,
         insertText: insertText,
         insertTab: insertTab,
+        lineBreak: lineBreak,
         align: align,
         alignOf: alignOf,
         foreColor: foreColor,

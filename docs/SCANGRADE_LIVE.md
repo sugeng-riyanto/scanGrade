@@ -64,3 +64,28 @@ Implementation branch: feature/scangrade-livekit-exam-20261024.
 Set either flag OFF first. Existing examinations, autosave, scoring and submissions
 do not use this module. Revert the app branch if necessary; additive tables can
 remain, avoiding a destructive DB rollback during an examination.
+
+
+## Separate preflight workstream (staging safety)
+
+Prepare an environment file privately. Do not commit secrets or enable Live on the
+production examination host.
+
+    python deploy/livekit_preflight.py --env deploy/livekit-staging.env.example
+
+This must pass with flags OFF. On a staging-only machine, supply a real private
+env file with both flags ON, secure wss endpoint, key and secret, then run:
+
+    python deploy/livekit_preflight.py --env /path/to/private/staging.env --pilot
+
+A passing offline preflight is **not** proof that the LiveKit server is reachable
+or that SFU subscription restrictions work. Validate those separately with real
+teacher/student accounts. Changing deployment feature flags takes effect after
+the application configuration is reloaded; it does not immediately disconnect
+already-connected room participants.
+
+Pilot v1 has a **single creator invigilator** per room. This limitation ensures
+that the receiver identity allowed by a student's track subscription permissions
+is exactly the teacher who created the session. Other staff cannot take over
+an active room silently. Multi-invigilator support requires a separate reviewed
+permission design.

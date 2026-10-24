@@ -630,6 +630,7 @@ window.sgSavePrefs = function (patch) {
                     'seb-refusals': ('Tidak Bisa Masuk', 'Could Not Get In'),
                     'invigilation': ('Pengawasan Ujian', 'Invigilation'),
                     'invoices': ('Tagihan', 'Invoices'),
+                    'live': ('Pengawasan Video', 'Live Supervision'),
                     'logs': ('Log Audit', 'Audit Log'),
                     'manage': ('Kelola', 'Manage'),
                     'matrix': ('Matriks Pengawas', 'Invigilator Matrix'),
@@ -1060,7 +1061,7 @@ function linkify(text) {
 
    Placed before the footer's own `fetch` so that request is tracked too. #}
 <script src="/static/vendor/chart.umd.min.js"></script>
-<script src="/static/js/sg-ux.js"></script>
+<script src="{{ asset_v('js/sg-ux.js') }}"></script>
 <script>
 fetch('/api/public/privacy-info').then(r=>r.json()).then(d=>{
     if(d.dpo_contact){document.getElementById('dpo-name').textContent=d.dpo_contact;document.getElementById('dpo-footer').classList.remove('hidden')}

@@ -139,10 +139,10 @@
 
 {% block scripts %}
 <script src="/static/vendor/socket.io.min.js"></script>
-<script src="/static/js/tools.js"></script>
-<script src="/static/js/whiteboard-canvas.js"></script>
-<script src="/static/js/whiteboard-websocket.js"></script>
-<script src="/static/js/whiteboard-timer.js"></script>
+<script src="{{ asset_v('js/tools.js') }}"></script>
+<script src="{{ asset_v('js/whiteboard-canvas.js') }}"></script>
+<script src="{{ asset_v('js/whiteboard-websocket.js') }}"></script>
+<script src="{{ asset_v('js/whiteboard-timer.js') }}"></script>
 <style>
 .btn-ghost-icon { display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:6px;border:none;cursor:pointer;background:transparent;color:#6b7280;transition:all .15s; }
 .btn-ghost-icon:hover { background:#f3f4f6;color:#374151; }

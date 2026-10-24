@@ -10,6 +10,9 @@ import hmac
 import os
 from datetime import timedelta
 
+LIVE_TEACHER = "teacher"  # SFU participant type, never a database account role
+LIVE_STUDENT = "student"  # DB roles remain guru/murid/etc.
+
 EXAM_POLICY = {
     "mode": "exam",
     "camera": "required",
@@ -51,9 +54,9 @@ def participant_identity(config, session_id: str, user_id: str) -> str:
 
 
 def allowed_sources(role: str, microphone_approved: bool = False) -> list[str]:
-    if role == "teacher":
+    if role == LIVE_TEACHER:
         return ["camera", "microphone"]
-    if role == "student":
+    if role == LIVE_STUDENT:
         return ["camera", "microphone"] if microphone_approved else ["camera"]
     raise ValueError("Unrecognized Live participant role")
 

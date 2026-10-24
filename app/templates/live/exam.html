@@ -1,3 +1,4 @@
+{% set content_lang = 'id' %}
 {% extends "base.html" %}
 {% block title %}ScanGrade Live — Exam Mode{% endblock %}
 {% block page_title %}ScanGrade Live{% endblock %}
@@ -10,10 +11,10 @@
     <p class="text-sm text-surface-500">Kamera wajib · Mikrofon dengan izin guru · Chat dan rekaman nonaktif · Grid</p>
     <div class="flex flex-wrap gap-3">
       {% if live_role == "teacher" %}
-      <button id="live-start" type="button" class="px-4 py-2 rounded-lg bg-indigo-700 text-white">Mulai pengawasan</button>
-      <button id="live-end" type="button" hidden class="px-4 py-2 rounded-lg border border-red-500 text-red-600">Akhiri Live</button>
+      <button id="live-start" type="button" class="px-4 py-2 rounded-lg bg-primary-600 text-white">Mulai pengawasan</button>
+      <button id="live-end" type="button" hidden class="px-4 py-2 rounded-lg border border-rose-200 text-red-600">Akhiri Live</button>
       {% else %}
-      <button id="live-hand" type="button" disabled class="px-4 py-2 rounded-lg bg-indigo-700 text-white">✋ Angkat tangan</button>
+      <button id="live-hand" type="button" disabled class="px-4 py-2 rounded-lg bg-primary-600 text-white">✋ Angkat tangan</button>
       {% endif %}
       <button id="live-mic" type="button" hidden class="px-4 py-2 rounded-lg border border-indigo-300">Aktifkan mikrofon</button>
     </div>
@@ -39,6 +40,6 @@
   </div>
 </section>
 {# STAGING ONLY. Self-host the pinned SDK after browser and security review. #}
-<script defer src="https://cdn.jsdelivr.net/npm/livekit-client@2.23.0/dist/livekit-client.umd.min.js"></script>
-<script defer src="{{ url_for('static', filename='js/scan-live-exam.js') }}"></script>
+<script src="https://cdn.jsdelivr.net/npm/livekit-client@2.23.0/dist/livekit-client.umd.min.js"></script>
+<script src="{{ asset_v('js/scan-live-exam.js') }}"></script>
 {% endblock %}
