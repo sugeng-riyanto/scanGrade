@@ -183,7 +183,10 @@ ends with — the URL, the exam id, when it ran, the browser it drove and the
 verdict the run earned, ready to paste into the pilot's record. The sheet carries
 the verdict it earned rather than the one the reader hopes for: a run that could
 not take a row heads its table with `CANNOT MEASURE` and says in words that it is
-not a sign-off.
+not a sign-off. Keep the raw reading beside it with
+`--signoff --json-out reading.json`; `--json` and `--signoff` are refused
+together, because both write stdout and the run that asked for a sheet would
+otherwise get a JSON blob and no sheet at all.
 
 What the driver covers, from the table below: 01, 02, 03, 04, 05, 06, 07 and 10,
 plus the isolation reading the table asks a person to take from two console

@@ -79,7 +79,9 @@ Add ``--signoff`` to print the same twelve rows as a Markdown sheet - the URL,
 ``--exam``, when it ran, the browser it drove and the verdict the run earned -
 ready to paste into the staging ticket. The sheet carries the verdict it earned:
 a run that could not measure a row prints ``CANNOT MEASURE`` rather than a table
-that merely looks complete.
+that merely looks complete. ``--json-out <file>`` keeps the raw reading beside
+that sheet; ``--json`` and ``--signoff`` are refused together, because both write
+stdout and the first version dropped the sheet in silence.
 """
 from __future__ import annotations
 
@@ -1276,6 +1278,9 @@ def main(argv=None) -> int:
                         help="leave the room open for a human pilot afterwards")
     parser.add_argument("--json", action="store_true",
                         help="print the whole reading as JSON on stdout")
+    parser.add_argument("--json-out", default="", metavar="PATH",
+                        help="write the whole reading as JSON to this file — the "
+                             "way to keep it beside a --signoff sheet")
     parser.add_argument("--signoff", action="store_true",
                         help="print the twelve rows as a Markdown sign-off sheet "
                              "carrying the run's URL, exam and verdict")
@@ -1288,6 +1293,16 @@ def main(argv=None) -> int:
         print("COULD NOT MEASURE: " + ", ".join(missing) + " is empty.")
         print("Pass the staging URL, the exam id and the teacher and pupil "
               "accounts as email:password; nothing is printed back.")
+        return EXIT_CANNOT_MEASURE
+
+    # Two flags, one stream. The first version let `--json` win and dropped the
+    # sheet in silence — a run asked for a sign-off, printed a JSON blob and
+    # exited 0, so nothing anywhere said the sheet was never produced. Refused
+    # here, before three browsers are driven, rather than papered over later.
+    if args.json and args.signoff:
+        print("COULD NOT MEASURE: --json and --signoff both write stdout.")
+        print("Pass one of them, or add --json-out <file> to keep the reading "
+              "beside the sheet.")
         return EXIT_CANNOT_MEASURE
 
     binary = touch_gate.locate_browser()
@@ -1305,6 +1320,17 @@ def main(argv=None) -> int:
         accounts=accounts, insecure=args.insecure, binary=binary,
         fake=not args.no_fake_devices, video_file=args.video_file,
         keep_room=args.keep_room)
+
+    if args.json_out:
+        try:
+            with open(args.json_out, "w", encoding="utf-8", newline="\n") as handle:
+                json.dump(payload, handle, indent=1, ensure_ascii=True, default=str)
+                handle.write("\n")
+        except OSError as exc:
+            # The rows were measured; the record of them was not kept. That is a
+            # reading nobody can file, so it is not a pass.
+            print(f"COULD NOT MEASURE: could not write {args.json_out}: {exc}")
+            return EXIT_CANNOT_MEASURE
 
     if args.json:
         print(json.dumps(payload, indent=1, ensure_ascii=True, default=str))

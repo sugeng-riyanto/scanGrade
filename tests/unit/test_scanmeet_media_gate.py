@@ -581,3 +581,61 @@ def test_the_signoff_flag_prints_the_sheet_and_keeps_the_exit_code(monkeypatch,
     assert out.startswith("## ScanMeet media sign-off")
     assert "CANNOT MEASURE" in out and "no tile arrived" in out
     assert calls and calls[0]["accounts"]["student"] == "murid@x:pw"
+
+
+def test_json_and_signoff_together_are_refused_before_a_browser_is_driven(
+        monkeypatch, capsys):
+    """The first version let `--json` win and dropped the sheet in silence.
+
+    A run that asked for a sign-off printed a JSON blob and exited 0, so nothing
+    said the sheet was never produced. It is refused up front instead — and the
+    refusal lands before the run, because driving three real browsers to then
+    print "pick one flag" is five minutes spent to learn nothing.
+    """
+    drove = []
+
+    def fake_run(**kwargs):
+        drove.append(kwargs)
+        return GATE.EXIT_OK, _twelve(), {}
+
+    monkeypatch.setattr(GATE.touch_gate, "locate_browser", lambda: "/bin/chrome")
+    monkeypatch.setattr(GATE, "run", fake_run)
+    code = GATE.main(["--url", "https://staging.example.edu", "--exam", "exam-1",
+                      "--teacher", "guru@x:pw", "--student", "murid@x:pw",
+                      "--signoff", "--json"])
+    out = capsys.readouterr().out
+    assert code == GATE.EXIT_CANNOT_MEASURE
+    assert drove == [], "a flag conflict must be refused before the room is opened"
+    assert "--json-out" in out, (
+        "the refusal has to name the flag that does let a caller keep both")
+
+
+def test_json_out_keeps_the_reading_beside_the_sheet(monkeypatch, capsys,
+                                                     tmp_path):
+    payload = {"rows": [{"name": "sdk-loaded", "state": "pass", "detail": "ok"}]}
+    monkeypatch.setattr(GATE.touch_gate, "locate_browser", lambda: "/bin/chrome")
+    monkeypatch.setattr(
+        GATE, "run", lambda **kwargs: (GATE.EXIT_OK, _twelve(), payload))
+    out_file = tmp_path / "reading.json"
+    code = GATE.main(["--url", "https://staging.example.edu", "--exam", "exam-1",
+                      "--teacher", "guru@x:pw", "--student", "murid@x:pw",
+                      "--signoff", "--json-out", str(out_file)])
+    printed = capsys.readouterr().out
+    assert code == GATE.EXIT_OK
+    assert printed.startswith("## ScanMeet media sign-off")
+    assert json.loads(out_file.read_text(encoding="utf-8"))["rows"][0]["name"] == "sdk-loaded", (
+        "the sheet goes to stdout and the reading it was built from goes to the file")
+
+
+def test_a_reading_that_could_not_be_written_is_not_a_pass(monkeypatch, capsys,
+                                                           tmp_path):
+    monkeypatch.setattr(GATE.touch_gate, "locate_browser", lambda: "/bin/chrome")
+    monkeypatch.setattr(
+        GATE, "run", lambda **kwargs: (GATE.EXIT_OK, _twelve(), {"rows": []}))
+    code = GATE.main(["--url", "https://staging.example.edu", "--exam", "exam-1",
+                      "--teacher", "guru@x:pw", "--student", "murid@x:pw",
+                      "--signoff", "--json-out", str(tmp_path)])
+    out = capsys.readouterr().out
+    assert code == GATE.EXIT_CANNOT_MEASURE, (
+        "twelve rows nobody can file is not a sign-off, even when all twelve passed")
+    assert "could not write" in out
