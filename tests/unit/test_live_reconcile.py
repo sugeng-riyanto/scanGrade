@@ -217,6 +217,16 @@ def test_disabled_feature_answers_before_any_database_read(monkeypatch):
     assert calls == []
 
 
+def test_the_repair_route_is_not_swallowed_by_the_action_route():
+    """``/<action>`` also matches the literal ``reconcile``; the static rule has
+    to win, or this endpoint answers 400 "Invalid action" from ``moderate``."""
+    app = Flask(__name__)
+    app.register_blueprint(live.live_bp)
+    endpoint, _ = app.url_map.bind("localhost").match(
+        "/api/live/sessions/room-1/hand-raises/raise-1/reconcile", method="POST")
+    assert endpoint == "live.reconcile", endpoint
+
+
 @pytest.mark.parametrize("status", ["approving", "closing"])
 def test_only_transitional_states_are_repairable(monkeypatch, status):
     db = _DB({"scan_live_sessions": [SESSION],
