@@ -685,3 +685,18 @@ def test_the_live_hosts_are_the_ones_the_staging_gate_refuses():
     assert GATE.production_target("https://staging.scan-grade.app") is False, (
         "a subdomain is a different host, and refusing it here would refuse the "
         "staging box someone sensibly named")
+
+
+def test_the_deployed_site_is_the_one_that_is_refused():
+    """A list of hosts that does not include the live one protects nothing.
+
+    Measured on the repository: `README.md` deploys to `scangrade.web.id`, and
+    `lmsshb.scangrade.web.id` answers on the same box (both names hold a
+    certificate there). The guard held `scan-grade.app` — the demo *email*
+    domain in `manage.py` — so `--url https://scangrade.web.id` drove production.
+    """
+    for live in ("https://scangrade.web.id", "https://www.scangrade.web.id",
+                 "https://lmsshb.scangrade.web.id",
+                 "https://staging.scangrade.web.id"):
+        assert GATE.production_target(live) is True, live
+    assert GATE.production_target("https://staging.example.edu") is False

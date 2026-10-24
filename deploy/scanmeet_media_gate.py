@@ -106,16 +106,34 @@ EXIT_CANNOT_MEASURE = 2
 
 #: The live site. This driver opens a Live room and presses a real teacher's
 #: controls, so the one host it must never reach by a stale `$SCANMEET_STAGING_URL`
-#: is the one pupils are sitting exams on. The same host
+#: is the one pupils are sitting exams on. The same hosts
 #: `deploy/scanmeet_staging_gate.py` refuses as a staging target, and a test holds
 #: the two constants equal rather than trusting this copy to stay right.
-PRODUCTION_HOSTS = ("scan-grade.app", "www.scan-grade.app")
+#:
+#: This list used to hold `scan-grade.app` and nothing else, which is the demo
+#: *email* domain in `manage.py` -- the deployed site is `scangrade.web.id`
+#: (`README.md`), and `lmsshb.scangrade.web.id` answers on the same box (both
+#: names have a certificate in `/etc/letsencrypt/live`). So the guard named a host
+#: that is not production and missed the one that is: pointed at the live URL, it
+#: opened a room on a real exam. The apex and every subdomain are refused; a
+#: deliberate pilot still has `--allow-production`.
+PRODUCTION_DOMAIN = "scangrade.web.id"
+PRODUCTION_HOSTS = (PRODUCTION_DOMAIN, "www." + PRODUCTION_DOMAIN,
+                    "lmsshb." + PRODUCTION_DOMAIN,
+                    "scan-grade.app", "www.scan-grade.app")
 
 
 def production_target(url: str) -> bool:
-    """True when `url` is the live site rather than a staging host."""
+    """True when `url` is the live site rather than a staging host.
+
+    The suffix rule is what makes a new name under the live domain production
+    too: `lmsshb.` already proves those names reach this box's app, so a driver
+    cannot tell a future alias from the site itself.
+    """
     host = (urllib.parse.urlparse(url).hostname or "").lower()
-    return host in PRODUCTION_HOSTS
+    return (host in PRODUCTION_HOSTS
+            or host == PRODUCTION_DOMAIN
+            or host.endswith("." + PRODUCTION_DOMAIN))
 
 PAGE = "/live/exam/{exam_id}"
 STATUS = "/api/live/exams/{exam_id}"
