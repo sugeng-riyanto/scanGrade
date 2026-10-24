@@ -1,0 +1,88 @@
+name: skipped-path coverage
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: skipped-path-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  full-offline:
+    name: Complete test paths with isolated fixtures
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      SUPABASE_URL: https://example.invalid
+      SUPABASE_SERVICE_KEY: ci-only-placeholder-key
+      SUPABASE_ANON_KEY: ci-only-placeholder-key
+      FLASK_SECRET_KEY: ci-only-placeholder-secret
+      SCANGRADE_MUTATION: mutate_ci_workflows
+      SCANGRADE_LIVE_ENABLED: 'false'
+      SCANGRADE_LIVE_EXAM_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip check
+          npm ci --no-audit --no-fund
+      - name: Assert older Python and browser exist
+        run: |
+          python3.11 -c 'import sys; assert sys.version_info[:2] == (3, 11)'
+          for candidate in google-chrome google-chrome-stable chromium chromium-browser; do
+            found="$(command -v "$candidate" || true)"
+            if [ -n "$found" ]; then
+              echo "SG_CHROME=$found" >> "$GITHUB_ENV"
+              exit 0
+            fi
+          done
+          echo "::error::no browser for complete suite"
+          exit 1
+      - name: Prepare throwaway offline fixtures
+        run: |
+          test ! -e .env || { echo "::error::checkout includes an env file"; exit 1; }
+          touch .env
+          mkdir -p .freebuff
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          rows = [{"id": f"ci-student-{i}", "role": "murid"} for i in range(60)]
+          rows.append({"id": "ci-teacher", "role": "guru"})
+          Path(".freebuff/lt_roster.json").write_text(json.dumps(rows), encoding="utf-8")
+          PY
+      - name: Execute full offline suite and mutation harness
+        run: python -m pytest tests -q -ra --ignore=tests/test_rls_security.py --junitxml=all-paths.xml
+      - name: Audit zero-skipped evidence
+        run: python deploy/skip_coverage.py all-paths.xml --minimum 11000
+      - name: Preserve JUnit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: skipped-path-complete-report
+          path: all-paths.xml
+          if-no-files-found: warn
+      - name: Clean disposable fixtures
+        if: always()
+        run: |
+          rm -f .env .freebuff/lt_roster.json
