@@ -12,7 +12,7 @@ production is approved.
 - Production release authority: repository owner. Never merge to `main`
   or deploy production without owner authorization.
 - Staging credentials are kept outside GitHub and never pasted in comments.
-- Use `docs/SCANMEET_ACCEPTANCE_MATRIX.md` in PR #19 for acceptance criteria.
+- See [PR #19 — ScanMeet acceptance matrix](https://github.com/sugeng-riyanto/scanGrade/pull/19) for acceptance criteria; its document is merged separately.
 
 ## PR handoff template
 
