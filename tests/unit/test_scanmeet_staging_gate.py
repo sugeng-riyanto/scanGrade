@@ -1,7 +1,9 @@
 """Isolated staging gate tests using stdlib only (fast independent CI)."""
 import os
+import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 from deploy import scanmeet_staging_gate as gate
@@ -134,3 +136,97 @@ class ThePrivateFileIsNamedForWhatIsWrongWithIt(unittest.TestCase):
             problems = gate.validate_file(missing, Path(checkout))
             self.assertTrue(any("does not exist" in p for p in problems), problems)
             self.assertFalse(any("not readable" in p for p in problems), problems)
+
+
+def _without_livekit(call):
+    """Run `call` with `livekit` unimportable, capturing its stdout.
+
+    `sys.modules[name] = None` is the interpreter's own way to make an import
+    fail ("import of livekit halted; None in sys.modules"), which is closer to a
+    venv without the package than deleting a file would be.
+    """
+    import contextlib
+    import io
+
+    hidden = sys.modules.get("livekit")
+    sys.modules["livekit"] = None
+    buffer = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buffer):
+            code = call()
+    finally:
+        if hidden is None:
+            sys.modules.pop("livekit", None)
+        else:
+            sys.modules["livekit"] = hidden
+    return code, buffer.getvalue()
+
+
+class TheOptionalSdkIsNamedRatherThanBlamed(unittest.TestCase):
+    """A venv built from `requirements.txt` alone is a good production venv.
+
+    On it, `--probe-livekit` used to answer "LiveKit server connectivity/
+    authorization" — a sentence that sends an operator to the LiveKit dashboard
+    and the firewall for a Python package that is simply not installed. The
+    staging set is optional (`requirements-live.txt`), so its absence is named,
+    and it is exit 2 (could not measure) rather than 1 (the credentials
+    disagreed): those are different facts and only one of them is actionable.
+    """
+
+    def _env_file(self, root):
+        import json as _json
+
+        path = Path(root) / "staging.env"
+        path.write_text(
+            "\n".join(f"{key}={_json.dumps(value) if ' ' in value else value}"
+                      for key, value in valid().items()) + "\n",
+            encoding="utf-8")
+        return path
+
+    def test_the_staging_gate_names_a_missing_sdk(self):
+        from deploy import scanmeet_staging_gate as staging
+
+        with tempfile.TemporaryDirectory() as root:
+            env_file = self._env_file(root)
+            code, out = _without_livekit(
+                lambda: staging.main(["--env", str(env_file), "--probe-livekit"]))
+        self.assertEqual(code, 2, "a missing package is not a credential failure")
+        self.assertIn("requirements-live.txt", out, (
+            "the fix is a pip install line; the message has to be that line"))
+        self.assertNotIn("connectivity/authentication", out, (
+            "this sentence sends its reader to the LiveKit dashboard and the "
+            "firewall for a package that is not installed"))
+
+    def test_the_connectivity_probe_answers_two_for_a_missing_sdk(self):
+        from deploy import livekit_connectivity
+
+        with tempfile.TemporaryDirectory() as root:
+            env_file = self._env_file(root)
+            code, out = _without_livekit(
+                lambda: livekit_connectivity.main(["--env", str(env_file)]))
+        self.assertEqual(code, 2)
+        self.assertIn("requirements-live.txt", out)
+
+    def test_the_webhook_probe_says_which_file_installs_pyjwt(self):
+        """The exit code alone is not enough here, and the mutation proved it.
+
+        Without the guard, `main` still answers 2 — the signing call raises
+        `AttributeError`, `probes()` turns it into a `ProbeError`, and the code
+        is identical. What differs is the sentence: "'NoneType' object has no
+        attribute 'encode'" names nothing a reader can install.
+        """
+        import contextlib
+        import io
+
+        from deploy import scanmeet_webhook_probe as probe
+
+        buffer = io.StringIO()
+        with unittest.mock.patch.object(probe, "jwt", None), \
+                contextlib.redirect_stdout(buffer):
+            code = probe.main(["--url", "https://staging.school.edu",
+                               "--api-key", "synthetic", "--api-secret", "synthetic"])
+        out = buffer.getvalue()
+        self.assertEqual(code, 2)
+        self.assertIn("requirements-live.txt", out, out)
+        self.assertNotIn("has no attribute", out, (
+            "a reader sent to a NoneType traceback cannot install the package"))

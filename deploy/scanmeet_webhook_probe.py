@@ -41,7 +41,15 @@ import secrets
 import sys
 import time
 
-import jwt
+# The signing half of the optional staging set (`requirements-live.txt` pulls
+# PyJWT in with `livekit-api`). Kept optional so this module still imports on a
+# production venv: a traceback there names `jwt` and not the file that installs
+# it, which is how a missing package reads as a broken probe.
+try:  # pragma: no cover - both branches meet in `main()`
+    import jwt
+except ImportError:  # pragma: no cover
+    jwt = None
+
 import requests
 
 TIMEOUT = 20
@@ -162,6 +170,11 @@ def main(argv=None) -> int:
                         help="a room this deployment has an active session for; "
                              "without it 204 is the expected answer")
     args = parser.parse_args(argv)
+
+    if jwt is None:
+        print("COULD NOT PROBE: PyJWT is not installed in this interpreter.")
+        print("Install the staging set: python -m pip install -r requirements-live.txt")
+        return 2
 
     missing = [name for name, value in (("--url", args.url),
                                         ("--api-key", args.api_key),
