@@ -141,9 +141,7 @@ import os
 import re
 import secrets
 import shutil
-import subprocess
 import sys
-import tempfile
 import time
 import urllib.parse
 from dataclasses import dataclass
@@ -154,12 +152,18 @@ import requests
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 # The browser plumbing is the touch gate's, imported rather than copied: the locator,
-# the launcher (its `HOME` and `--no-sandbox` lessons), and the CDP client that keeps
-# the events a page emits while it loads. `locate_browser` reads `SG_CHROME`, which is
-# the conf key the two DOM gates already use, so pointing one of the three at a
-# browser points all three.
+# the launcher (its `HOME`, `--no-sandbox` and `/dev/shm` lessons), `start_browser`
+# (which waits for the debug target, retries a launch that never came up, and keeps
+# what Chrome said when it did not), and the CDP client that keeps the events a page
+# emits while it loads. `locate_browser` reads `SG_CHROME`, which is the conf key the
+# three DOM gates already use, so pointing one of them at a browser points all three.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from touch_gate import _CDP, _free_port, browser_launch, locate_browser  # noqa: E402
+from touch_gate import (  # noqa: E402
+    _CDP,
+    _stop,
+    locate_browser,
+    start_browser,
+)
 
 #: The paper's own address, and the handshake page's suffix. The door composes both
 #: from `request.url_root` + these same route paths (`seb_service.start_url`,
@@ -1246,32 +1250,19 @@ async def _drive_client(base_url, browser, cookies, claim_url, paper, insecure):
     import requests
     import websockets
 
-    port = _free_port()
-    profile = tempfile.mkdtemp(prefix="sg-seb-door-")
-    argv, env = browser_launch(browser, port, profile)
-    if insecure:
+    proc, target, profile, reason = start_browser(
+        browser,
         # The certificate the *browser* has to accept. `--insecure` is about the
         # requests session otherwise, and on a self-signed box the browser would
-        # answer "the page did not render" while the door was fine.
-        argv.insert(1, "--ignore-certificate-errors")
-    proc = subprocess.Popen(argv, stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL, env=env)
+        # answer "the page did not render" while the door was fine. Passed through
+        # the shared launcher rather than assembled here, so a launch that never
+        # came up is retried and its reason carries Chrome's own last words — the
+        # same defect `deploy/touch_gate.py` records from a red CI run.
+        extra_args=("--ignore-certificate-errors",) if insecure else (),
+    )
+    if target is None:
+        return None, reason
     try:
-        target = None
-        for _ in range(80):
-            try:
-                pages = [t for t in requests.get(
-                    f"http://127.0.0.1:{port}/json/list", timeout=2).json()
-                    if t.get("type") == "page"]
-                if pages:
-                    target = pages[0]["webSocketDebuggerUrl"]
-                    break
-            except Exception:                                   # noqa: BLE001
-                pass
-            time.sleep(0.25)
-        if not target:
-            return None, "the browser never offered a debug target"
-
         host = urllib.parse.urlparse(base_url).hostname or "127.0.0.1"
         secure = base_url.startswith("https")
         events: list = []
@@ -1417,11 +1408,7 @@ async def _drive_client(base_url, browser, cookies, claim_url, paper, insecure):
                         break
         return _client_from(value, landed, events, first_load, press), None
     finally:
-        proc.terminate()
-        try:
-            proc.wait(timeout=10)
-        except Exception:                                       # noqa: BLE001
-            proc.kill()
+        _stop(proc)
         shutil.rmtree(profile, ignore_errors=True)
 
 
