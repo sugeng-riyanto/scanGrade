@@ -1,5 +1,8 @@
 name: skipped-path coverage
 
+# The normal 11k-test jobs prove the pristine checkout; these two jobs exercise
+# precisely the 32 historically skipped cases. They are independent so long
+# mutation runs cannot hide results from short offline fixture checks.
 on:
   pull_request:
   push:
@@ -14,17 +17,17 @@ permissions:
   contents: read
 
 jobs:
-  full-offline:
-    name: Complete test paths with isolated fixtures
+  offline-31:
+    name: 31 formerly skipped environment and interpreter tests
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 25
     env:
+      # No live Supabase calls or real credentials; same SDK-valid test JWT as
+      # the already-green offline-env-regressions job in landing-quality.yml.
       SUPABASE_URL: https://example.invalid
-      # Offline, fake JWTs that pass SDK syntax validation but grant no access.
       SUPABASE_SERVICE_KEY: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJjaS10ZXN0In0.test-only-signature
       SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJjaS10ZXN0In0.test-only-signature
-      FLASK_SECRET_KEY: ci-only-placeholder-secret
-      SCANGRADE_MUTATION: mutate_ci_workflows
+      FLASK_SECRET_KEY: ci-offline-test-only
       SCANGRADE_LIVE_ENABLED: 'false'
       SCANGRADE_LIVE_EXAM_ENABLED: 'false'
     steps:
@@ -38,62 +41,82 @@ jobs:
         with:
           python-version: '3.12'
           cache: pip
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-          cache: npm
-      - name: Install dependencies
+      - name: Install Python dependencies and check old interpreter
         run: |
-          python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
           python -m pip check
-          npm ci --no-audit --no-fund
-      - name: Assert older Python and browser exist
-        run: |
           python3.11 -c 'import sys; assert sys.version_info[:2] == (3, 11)'
-          for candidate in google-chrome google-chrome-stable chromium chromium-browser; do
-            found="$(command -v "$candidate" || true)"
-            if [ -n "$found" ]; then
-              echo "SG_CHROME=$found" >> "$GITHUB_ENV"
-              exit 0
-            fi
-          done
-          echo "::error::no browser for complete suite"
-          exit 1
-      - name: Prepare throwaway offline fixtures
+      - name: Prepare safe temporary .env and claims roster
         run: |
-          test ! -e .env || { echo "::error::checkout includes an env file"; exit 1; }
-          # Keep the test's .env region claim internally consistent.
-          # The app still uses the non-routable process SUPABASE_URL above.
+          test ! -e .env || { echo "::error::checkout includes .env"; exit 1; }
           python - <<'PY'
+          import json
           from pathlib import Path
           from deploy.supabase_region import REF, REGION
+          # The region guard reads these textual claims from .env only;
+          # process SUPABASE_URL stays non-routable, never contacts this host.
           Path(".env").write_text(
               f"SUPABASE_URL=https://{REF}.supabase.co\n"
               f"DIRECT_URL=postgresql://ci:fake@aws-1-{REGION}.pooler.supabase.com:6543/postgres\n",
               encoding="utf-8",
           )
-          PY
-          mkdir -p .freebuff
-          python - <<'PY'
-          import json
-          from pathlib import Path
+          Path(".freebuff").mkdir(exist_ok=True)
           rows = [{"id": f"ci-student-{i}", "role": "murid"} for i in range(60)]
           rows.append({"id": "ci-teacher", "role": "guru"})
           Path(".freebuff/lt_roster.json").write_text(json.dumps(rows), encoding="utf-8")
           PY
-      - name: Execute full offline suite and mutation harness
-        run: python -m pytest tests -q -ra --ignore=tests/test_rls_security.py --junitxml=all-paths.xml
-      - name: Audit zero-skipped evidence
-        run: python deploy/skip_coverage.py all-paths.xml --minimum 11000
-      - name: Preserve JUnit report
+      - name: Run all 31 formerly skipped offline cases
+        run: |
+          python -m pytest -q -ra --junitxml=offline31.xml \
+            tests/unit/test_account_creation_orphans.py \
+            tests/unit/test_anticheat_seed.py \
+            tests/unit/test_demo_school_scope.py \
+            tests/unit/test_demo_subscription.py \
+            tests/unit/test_school_officials.py \
+            tests/unit/test_env_and_email.py \
+            tests/unit/test_claims_gate.py::TestCheckMode::test_it_passes_on_the_real_page_with_a_real_roster \
+            tests/unit/test_python_requirement.py \
+            tests/unit/test_supabase_region.py::TestTheRepository::test_the_configuration_half_is_measured_or_says_it_is_not
+      - name: Require all original 31 cases and zero skipped
+        run: python deploy/skip_coverage.py offline31.xml --scope offline --minimum 31
+      - name: Preserve JUnit evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: skipped-path-complete-report
-          path: all-paths.xml
+          name: formerly-skipped-offline31
+          path: offline31.xml
           if-no-files-found: warn
       - name: Clean disposable fixtures
         if: always()
+        run: rm -f .env .freebuff/lt_roster.json
+
+  mutation-1:
+    name: Real CI mutation harness (32nd formerly skipped case)
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      SCANGRADE_MUTATION: mutate_ci_workflows
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install dependencies
         run: |
-          rm -f .env .freebuff/lt_roster.json
+          python -m pip install -r requirements.txt
+          python -m pip check
+      - name: Run real mutation harness and demand every injected defect is caught
+        run: |
+          python -m pytest tests/unit/test_mutation_checks.py::test_a_named_harness_runs_green_end_to_end -q -ra --junitxml=mutation1.xml
+      - name: Require mutation case executed and not skipped
+        run: python deploy/skip_coverage.py mutation1.xml --scope mutation --minimum 1
+      - name: Preserve mutation JUnit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: formerly-skipped-mutation1
+          path: mutation1.xml
+          if-no-files-found: warn
