@@ -1664,7 +1664,7 @@ body.sg-exam .sg-content { max-width: none; margin-left: 0; margin-right: 0; }
                                              caret (the essay paragraph carries the same note). -->
                                         <div class="box-rich" contenteditable="true" role="textbox"
                                              :aria-label="t('Teks pada halaman','Text on the page')"
-                                             :ref="'box_' + i + '_' + bi"
+                                             :data-box="i + ':' + bi"
                                              x-init="$el.innerHTML = sanitizeBoxHtml(box.html || '')"
                                              @focus="activeBox[i] = bi"
                                              @input="onBoxRichInput(i, bi, $el)"
@@ -2406,15 +2406,15 @@ body.sg-exam .sg-content { max-width: none; margin-left: 0; margin-right: 0; }
                                                  nodes on every keystroke and dropped the caret.
                                                  `initialHtml` is kept in step so a re-render (adding
                                                  or deleting a paragraph) restores what is there. -->
-                                            <div :ref="'para_' + para.id"
+                                            <div :data-para="i + ':' + para.id"
                                                  x-init="$el.innerHTML = para.html || '<p><br></p>'"
                                                  contenteditable="true"
                                                  role="textbox"
                                                  :aria-label="t('Jawaban paragraf ','Answer paragraph ') + (pIdx + 1)"
-                                                 @input="onParagraphInput(i, pIdx, $refs['para_' + para.id])"
-                                                 @focus="focusPara(i, pIdx, $refs['para_' + para.id])"
-                                                 @keyup="rememberPara($refs['para_' + para.id])"
-                                                 @mouseup="rememberPara($refs['para_' + para.id])"
+                                                 @input="onParagraphInput(i, pIdx, $event.target)"
+                                                 @focus="focusPara(i, pIdx, $event.target)"
+                                                 @keyup="rememberPara($event.target)"
+                                                 @mouseup="rememberPara($event.target)"
                                                  @keydown.enter="onParagraphEnter(i, pIdx, $event)"
                                                  @keydown.tab.prevent="onParagraphTab(i, pIdx, $event)"
                                                  @paste="onParagraphPaste(i, pIdx, $event)"
@@ -2585,15 +2585,15 @@ body.sg-exam .sg-content { max-width: none; margin-left: 0; margin-right: 0; }
                                                  nodes on every keystroke and dropped the caret.
                                                  `initialHtml` is kept in step so a re-render (adding
                                                  or deleting a paragraph) restores what is there. -->
-                                            <div :ref="'para_' + para.id"
+                                            <div :data-para="i + ':' + para.id"
                                                  x-init="$el.innerHTML = para.html || '<p><br></p>'"
                                                  contenteditable="true"
                                                  role="textbox"
                                                  :aria-label="t('Jawaban paragraf ','Answer paragraph ') + (pIdx + 1)"
-                                                 @input="onParagraphInput(i, pIdx, $refs['para_' + para.id])"
-                                                 @focus="focusPara(i, pIdx, $refs['para_' + para.id])"
-                                                 @keyup="rememberPara($refs['para_' + para.id])"
-                                                 @mouseup="rememberPara($refs['para_' + para.id])"
+                                                 @input="onParagraphInput(i, pIdx, $event.target)"
+                                                 @focus="focusPara(i, pIdx, $event.target)"
+                                                 @keyup="rememberPara($event.target)"
+                                                 @mouseup="rememberPara($event.target)"
                                                  @keydown.enter="onParagraphEnter(i, pIdx, $event)"
                                                  @keydown.tab.prevent="onParagraphTab(i, pIdx, $event)"
                                                  @paste="onParagraphPaste(i, pIdx, $event)"
@@ -5393,7 +5393,7 @@ function examApp(duration, totalQ) {
             const p = this.page - 1;
             const boxes = ((this.textBoxes[i] || {})[p]) || [];
             boxes.forEach((box, bi) => {
-                const el = this.$refs['box_' + i + '_' + bi];
+                const el = this.boxEl(i, bi);
                 if (!el) return;
                 box.html = this.sanitizeBoxHtml(el.innerHTML);
                 box.text = window.SGEssayEditor ? window.SGEssayEditor.textOf(el) : (el.innerText || '');
@@ -5939,7 +5939,7 @@ function examApp(duration, totalQ) {
             this.paragraphs[qIdx].splice(insertAt, 0, newPara);
             this.paragraphs[qIdx].forEach((p, i) => p.order = i);
             this.$nextTick(() => {
-                const el = this.$refs['para_' + newPara.id];
+                const el = this.paragraphEl(qIdx, newPara);
                 if (el) el.focus();
             });
             this.onParagraphUpdate(qIdx);
@@ -5950,6 +5950,25 @@ function examApp(duration, totalQ) {
             this.paragraphs[qIdx].forEach((p, i) => p.order = i);
             this.onParagraphUpdate(qIdx);
         },
+        // A paragraph element, by the attribute it carries.
+        //
+        // The template used `:ref="'para_' + para.id"` and read it back through
+        // `$refs`. Alpine's `x-ref` takes a **literal**, so a bound ref registers
+        // nothing and every lookup answered `undefined` — and `onParagraphInput`
+        // returns early on a missing element. A pupil could type a whole essay,
+        // watch the words appear, and the page's `answersText` stayed empty while
+        // the counter said "0 characters"; the answer that would be submitted was
+        // the empty one. Measured on the live preview paper before this change:
+        // `div.sg-essay-para` held "halo dunia", `answersText[1]` was "".
+        paragraphEl(qIdx, para) {
+            if (!para) return null;
+            const wanted = qIdx + ':' + para.id;
+            const nodes = document.querySelectorAll('[data-para]');
+            for (let i = 0; i < nodes.length; i += 1) {
+                if (nodes[i].getAttribute('data-para') === wanted) return nodes[i];
+            }
+            return null;
+        },
         // The paragraph the caret is in, for a toolbar button that never took focus.
         currentParaEl(qIdx) {
             const active = document.activeElement;
@@ -5957,7 +5976,7 @@ function examApp(duration, totalQ) {
             const list = this.paragraphs[qIdx] || [];
             const idx = this.activePara[qIdx] || 0;
             const para = list[idx] || list[0];
-            return para ? this.$refs['para_' + para.id] : null;
+            return para ? this.paragraphEl(qIdx, para) : null;
         },
         // What the pupil sees, as text: list items carry their marker, because
         // `innerText` of a <ul> drops it and the teacher would read a bulleted
@@ -6073,7 +6092,7 @@ function examApp(duration, totalQ) {
             const paras = this.paragraphs[qIdx] || [];
             const pIdx = this._activePara[qIdx] !== undefined ? this._activePara[qIdx] : 0;
             const para = paras[pIdx] || paras[0];
-            return para ? (this.$refs['para_' + para.id] || null) : null;
+            return this.paragraphEl(qIdx, para);
         },
         currentPara(qIdx) {
             const paras = this.paragraphs[qIdx] || [];
@@ -6824,10 +6843,19 @@ function examApp(duration, totalQ) {
         // only ever painted back into the box the pupil is editing. It is
         // sanitised on the way in, so a paste or a crafted draft cannot carry a
         // script into a page another pupil or a teacher will open.
-        boxEl(i) {
-            const bi = this.activeBox[i];
+        // A box element, by the attribute it carries — for the same reason the
+        // paragraph lookup uses `data-para`: `:ref="'box_' + i + '_' + bi"` sets a
+        // `ref` attribute and registers nothing in `$refs`, so every lookup
+        // answered undefined and the tool row had nothing to act on.
+        boxEl(i, index) {
+            const bi = index === undefined ? this.activeBox[i] : index;
             if (bi === undefined || bi === null) return null;
-            return this.$refs['box_' + i + '_' + bi] || null;
+            const wanted = i + ':' + bi;
+            const nodes = document.querySelectorAll('[data-box]');
+            for (let n = 0; n < nodes.length; n += 1) {
+                if (nodes[n].getAttribute('data-box') === wanted) return nodes[n];
+            }
+            return null;
         },
         activeBoxData(i) {
             const bi = this.activeBox[i];

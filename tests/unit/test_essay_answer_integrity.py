@@ -676,6 +676,121 @@ class TestTheRenderedPage:
         assert "!isEssayCurrent ? 'exam-stage--left'" in page
 
 
+class TestTheEditorIsTheOneTheHandlersGet:
+    """A ref Alpine never registers is a handler that never runs.
+
+    The paragraph carried `:ref="'para_' + para.id"` and every handler read it back
+    through `$refs`. Alpine's `x-ref` takes a **literal**: a bound ref sets a `ref`
+    attribute and registers nothing, so `$refs['para_p0']` was `undefined` and
+    `onParagraphInput` — which correctly returns early on no element — never
+    captured a keystroke. Measured on the live preview paper: the paragraph held
+    "halo dunia" while `answersText` stayed empty and the counter said
+    "0 characters", and the answer that would have been submitted was the empty
+    one. The element is addressed by an attribute it carries now.
+    """
+
+    @pytest.fixture(scope="class")
+    def page(self, app):
+        return _render_exam(app)
+
+    def test_the_paragraph_hands_the_handler_an_element(self, page):
+        assert page.count(":data-para=\"i + ':' + para.id\"") == 2
+        assert page.count('@input="onParagraphInput(i, pIdx, $event.target)"') == 2
+        assert page.count('@focus="focusPara(i, pIdx, $event.target)"') == 2
+
+    def test_the_box_hands_the_handler_an_element(self, page):
+        assert page.count(":data-box=\"i + ':' + bi\"") == 1
+        assert '@input="onBoxRichInput(i, bi, $el)"' in page
+
+    def test_no_lookup_is_built_from_a_ref_alpine_cannot_register(self, page):
+        for broken in ("$refs['para_", "$refs['box_"):
+            assert broken not in page, (
+                "a ref built from a variable is not registered by Alpine, so this "
+                "lookup answers undefined at the one moment it matters"
+            )
+
+    def test_the_lookups_are_the_attribute_readers(self, page):
+        assert "        paragraphEl(qIdx, para) {" in page
+        assert "        boxEl(i, index) {" in page
+        assert "this.paragraphEl(qIdx, para)" in page
+        assert "this.boxEl(i, bi)" in page
+
+
+LOOKUP_HARNESS = r"""
+const { JSDOM } = require('jsdom');
+const fs = require('fs');
+const page = fs.readFileSync(process.env.SG_TAKE_EXAM, 'utf8');
+
+function extract(name) {
+    const start = page.indexOf('        ' + name + '(');
+    if (start < 0) throw new Error('missing ' + name);
+    let depth = 0;
+    const open = page.indexOf('{', start);
+    for (let i = open; i < page.length; i++) {
+        if (page[i] === '{') depth += 1;
+        else if (page[i] === '}') { depth -= 1; if (depth === 0) return page.slice(start, i + 1); }
+    }
+    throw new Error('unterminated ' + name);
+}
+
+const dom = new JSDOM('<!doctype html><body>'
+    + '<div data-para="0:p0">zero</div>'
+    + '<div data-para="1:p7">one</div>'
+    + '<div data-box="0:0">box</div>'
+    + '<div data-box="1:2">box</div>'
+    + '</body>');
+const document = dom.window.document;
+
+const api = new Function('document',
+    'return {' + extract('paragraphEl') + ',' + extract('boxEl') + '};')(document);
+
+const results = [];
+function record(name, got, want) { results.push([name, got, want]); }
+
+record('a paragraph is found by question and id',
+       api.paragraphEl(0, { id: 'p0' }).getAttribute('data-para'), '0:p0');
+record('another question is a different element',
+       api.paragraphEl(1, { id: 'p7' }).getAttribute('data-para'), '1:p7');
+record('a paragraph that is not there is null', api.paragraphEl(0, { id: 'p9' }), null);
+record('no paragraph is null', api.paragraphEl(0, null), null);
+record('a box is found by question and index',
+       api.boxEl(0, 0).getAttribute('data-box'), '0:0');
+record('a box falls back to the active one',
+       api.boxEl.call({ activeBox: { 1: 2 } }, 1).getAttribute('data-box'), '1:2');
+record('a box that is not there is null', api.boxEl(0, 5), null);
+record('a box with no active index is null', api.boxEl.call({ activeBox: {} }, 0), null);
+
+process.stdout.write(JSON.stringify(results));
+"""
+
+
+@needs_node
+@needs_jsdom
+class TestTheLookupItself:
+    @pytest.fixture(scope="class")
+    def results(self):
+        env = dict(os.environ)
+        env["SG_TAKE_EXAM"] = str(TAKE)
+        proc = subprocess.run([NODE, "-e", LOOKUP_HARNESS], cwd=str(ROOT), env=env,
+                              capture_output=True, text=True, timeout=120)
+        assert proc.returncode == 0, proc.stderr
+        return {name: (got, want) for name, got, want in json.loads(proc.stdout)}
+
+    @pytest.mark.parametrize("name", [
+        "a paragraph is found by question and id",
+        "another question is a different element",
+        "a paragraph that is not there is null",
+        "no paragraph is null",
+        "a box is found by question and index",
+        "a box falls back to the active one",
+        "a box that is not there is null",
+        "a box with no active index is null",
+    ])
+    def test_case(self, results, name):
+        got, want = results[name]
+        assert got == want, f"{name}: {got!r} != {want!r}"
+
+
 # ══ 7. the whole chain, in one test: typed → serialised → teacher's page ════
 
 @needs_node
