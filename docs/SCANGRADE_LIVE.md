@@ -1,6 +1,7 @@
 # ScanMeet — live exam supervision inside ScanGrade (staging pilot)
 
-Implementation branch: integration/livekit-secure-main-20261024.\nUser-facing name: **ScanMeet**. Backend module names remain `scan_live_*` for migration compatibility.
+Implementation branch: integration/livekit-secure-main-20261024.
+User-facing name: **ScanMeet**. Backend module names remain `scan_live_*` for migration compatibility.
 
 ## Safety contract
 

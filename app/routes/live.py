@@ -11,6 +11,13 @@ from app.utils.exam_access import can_manage_exam, exam_sitting_allowed
 
 live_bp = Blueprint("live", __name__, url_prefix="/api/live")
 live_ui_bp = Blueprint("live_ui", __name__, url_prefix="/live")
+
+
+@live_ui_bp.app_context_processor
+def scanmeet_template_context():
+    """Expose the same two-switch policy to links as to the API and pages."""
+    return {"scanmeet_enabled": live_policy.feature_enabled(current_app.config)}
+
 log = logging.getLogger(__name__)
 STAFF = ("guru", "principal", "vice_principal", "admin_sekolah", "super_admin")
 
