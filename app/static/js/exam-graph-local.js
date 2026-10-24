@@ -430,7 +430,24 @@
 
         var observer = null;
         function fit() {
-            try { chart.resize(); } catch (err) { /* a hidden host has no box */ }
+            /* Chart.js sizes itself from its parent, and this plot is mounted on
+             * the press that shows the panel — in the same tick the browser still
+             * has it `display:none`, so that measurement is 0 and a no-argument
+             * `resize()` is a no-op that leaves a 0×0 canvas for ever. Measured
+             * sizes are handed over explicitly; the observer then fires on the
+             * tick the panel becomes visible. Verified in a browser: without this
+             * the panel opened, said "Graph", and drew nothing. */
+            var width = host.clientWidth;
+            var height = host.clientHeight;
+            try {
+                if (width > 0 && height > 0) {
+                    if (chart.width !== width || chart.height !== height) {
+                        chart.resize(width, height);
+                    }
+                } else {
+                    chart.resize();
+                }
+            } catch (err) { /* a hidden host has no box */ }
         }
         if (typeof root.ResizeObserver === 'function') {
             observer = new root.ResizeObserver(fit);

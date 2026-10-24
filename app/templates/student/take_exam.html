@@ -1416,7 +1416,7 @@ body.sg-exam .sg-content { max-width: none; margin-left: 0; margin-right: 0; }
                             <button type="button" @click="undoCanvas(i)" :disabled="!(canvasHistory[i]?.length > 1)" class="px-2.5 py-1.5 text-[11px] font-bold text-stone-500 hover:bg-stone-100 disabled:opacity-25"><i class="fas fa-undo mr-1"></i></button>
                             <button type="button" @click="clearCanvas(i)" class="px-2.5 py-1.5 text-[11px] font-bold text-red-500 hover:bg-red-50"><i class="fas fa-trash-alt mr-1"></i></button>
                             <template x-if="antiCheat.allow_calculator">
-                                <button type="button" @click="toggleGraph()" :class="showGraph ? 'bg-emerald-100 ring-2 ring-emerald-400' : ''" class="px-2.5 py-1.5 text-[11px] font-bold" :title="t('Grafik Desmos','Desmos graph')"><i class="fas fa-chart-line mr-1"></i><span x-text="t('Grafik','Graph')"></span></button>
+                                <button type="button" @click="toggleGraph()" :class="showGraph ? 'bg-emerald-100 ring-2 ring-emerald-400' : ''" class="px-2.5 py-1.5 text-[11px] font-bold" :title="t('Buka grafik','Open the graph')"><i class="fas fa-chart-line mr-1"></i><span x-text="t('Grafik','Graph')"></span></button>
                             </template>
                             <template x-if="antiCheat.allow_calculator">
                                 <button type="button" @click="toggleCalculator" :class="showCalculator ? 'bg-orange-100 ring-2 ring-orange-400' : ''" class="px-2.5 py-1.5 text-[11px] font-bold" :title="t('Kalkulator Ilmiah','Scientific calculator')"><i class="fas fa-calculator mr-1"></i><span x-text="t('Kalk','Calc')"></span></button>

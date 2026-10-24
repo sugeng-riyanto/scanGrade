@@ -95,7 +95,11 @@ class FakeChart {
         FakeChart.last = this;
     }
     update() { this.updates += 1; }
-    resize() { return true; }
+    resize(w, h) {
+        this.resizeArgs = (w === undefined) ? null : [w, h];
+        if (w !== undefined) { this.width = w; this.height = h; }
+        return true;
+    }
     destroy() { this.destroyed = true; }
 }
 window.Chart = FakeChart;
@@ -129,6 +133,38 @@ plot.destroy();
 record('destroy takes the canvas with it', host.querySelector('canvas'), null);
 record('and stops the chart', FakeChart.last.destroyed, true);
 record('no host is no plot', api.mount(null), null);
+
+/* ── the box the chart is handed ───────────────────────────────────────────
+ * The panel is mounted on the press that shows it, so at that instant the
+ * browser still has it `display:none` and its box measures 0. Chart.js holds a
+ * 0×0 canvas until it is told a size — and a no-argument resize() in that state
+ * is what the live page proved is a no-op. */
+function sizedHost(w, h) {
+    const el = window.document.createElement('div');
+    window.document.body.appendChild(el);
+    Object.defineProperty(el, 'clientWidth', { configurable: true, get: () => w });
+    Object.defineProperty(el, 'clientHeight', { configurable: true, get: () => h });
+    return el;
+}
+
+{
+    const el = sizedHost(588, 394);
+    const measured = api.mount(el);
+    record('a measured host is handed over explicitly',
+           JSON.stringify(measured.chart.resizeArgs), JSON.stringify([588, 394]));
+    measured.destroy();
+}
+{
+    const el = sizedHost(0, 0);
+    const hiddenPlot = api.mount(el);
+    record('a panel that is still hidden is not sized', hiddenPlot.chart.resizeArgs, null);
+    Object.defineProperty(el, 'clientWidth', { configurable: true, get: () => 320 });
+    Object.defineProperty(el, 'clientHeight', { configurable: true, get: () => 240 });
+    hiddenPlot.resize();
+    record('the press that shows it hands the box over',
+           JSON.stringify(hiddenPlot.chart.resizeArgs), JSON.stringify([320, 240]));
+    hiddenPlot.destroy();
+}
 
 process.stdout.write(JSON.stringify(results));
 """
@@ -196,6 +232,9 @@ class TestTheReaderAndTheMount:
         "destroy takes the canvas with it",
         "and stops the chart",
         "no host is no plot",
+        "a measured host is handed over explicitly",
+        "a panel that is still hidden is not sized",
+        "the press that shows it hands the box over",
     ])
     def test_case(self, results, name):
         got, want = results[name]
