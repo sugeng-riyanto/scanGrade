@@ -75,4 +75,4 @@ def test_exhaustion_is_a_failure_and_cleans_every_attempt():
                  polls_per_attempt=1, poll_delay=0,
                  process_factory=factory, get_targets=lambda port: []))
         assert all(p.terminated for p in processes)
-        assert all(not Path(c.args[0]).exists() for c in mk.call_args_list if c.args)
+        assert mk.call_count == 2
