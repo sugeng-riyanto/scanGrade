@@ -21,11 +21,17 @@ What these tests cannot do is lay the page out. The live measurement is the
 gate's own job (`deploy/touch_gate.py`), and it is what runs on every release.
 """
 
+import asyncio
 import importlib.util
+import json
 import os
 import re
+import shutil
+import socket
 import subprocess
 import sys
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
@@ -240,6 +246,175 @@ class TestTheBrowserStartsWithAWritableHome:
         assert "--no-sandbox" not in argv, (
             "the sandbox must stay on for an ordinary deploy user"
         )
+
+
+# ── a launch that never came up costs a retry, not a red release ─
+#
+# On commit aa3cd7e the same 18-test file passed in the `unit suite` job and failed
+# in two others — `browser gate` and `landing quality control` — each on a single
+# test, `test_a_control_under_the_floor_is_a_finding`. In the browser-gate job four
+# of its five sibling launches came up seconds either side of the one that did not,
+# so the reading was never about the page: a Chrome launch lost a race on a loaded
+# runner and the gate answered 2, which is correct. What was **not** correct is that
+# the reason could not say why — Chrome's stderr went to `DEVNULL` — and that a
+# single lost launch cost a whole workflow. Three things follow, and these tests
+# hold each of them: the `/dev/shm` flag, the retry, and Chrome's own last words.
+
+
+TARGET = "ws://127.0.0.1:9/devtools/page/SG"
+
+
+def _closed_port():
+    """A port nothing listens on: every poll gets `connection refused`."""
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+class _FakeProcess:
+    """A `Popen` stand-in that writes what Chrome would have written, then stops."""
+
+    def __init__(self):
+        self.stopped = []
+
+    def terminate(self):
+        self.stopped.append("terminate")
+
+    def wait(self, timeout=None):
+        return 0
+
+    def kill(self):
+        self.stopped.append("kill")
+
+
+@pytest.fixture()
+def debug_endpoint():
+    """A stand-in for Chrome's `/json/list`, on a port the gate is told to poll."""
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802 - the name `http.server` calls
+            body = json.dumps(
+                [{"type": "page", "webSocketDebuggerUrl": TARGET}]
+            ).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):  # noqa: D401 - silence, not a log
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        yield server.server_address[1]
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+class TestTheLaunchIsGivenAChanceAndSaysWhatItSaw:
+    def test_chrome_is_kept_out_of_a_tiny_dev_shm(self):
+        """A renderer that cannot allocate in `/dev/shm` dies before any target."""
+        argv, _ = gate().browser_launch("/usr/bin/google-chrome", 9222, "/tmp/sg-p")
+        assert "--disable-dev-shm-usage" in argv, (
+            "Chrome puts its renderer's shared buffers in /dev/shm, which is 64 MB "
+            "in a container; a renderer that cannot allocate one dies before the "
+            "browser offers a page target, and the gate reads that as a page that "
+            "did not render"
+        )
+
+    def test_a_launch_that_never_offers_a_target_is_tried_again(
+        self, monkeypatch
+    ):
+        g = gate()
+        launches = []
+
+        def fake_popen(argv, **kwargs):
+            launches.append(argv)
+            kwargs["stderr"].write(b"[ERROR:zygote_host_impl_linux.cc] died\n")
+            return _FakeProcess()
+
+        monkeypatch.setattr(g.subprocess, "Popen", fake_popen)
+        monkeypatch.setattr(g, "_free_port", _closed_port)
+        monkeypatch.setattr(g, "browser_launch", lambda b, p, d: (["chrome"], {}))
+
+        # The default is used on purpose: this is the count the gate ships with, so a
+        # release that quietly sets it back to one launch fails here.
+        proc, target, profile, reason = g.start_browser(
+            "chrome", seconds=0.06, poll_every=0.01
+        )
+        assert proc is None and target is None and profile is None
+        assert len(launches) == 2, "one lost launch must not decide the release"
+        assert reason.startswith(g.NO_TARGET)
+        assert "after 2 launches" in reason, (
+            "a reason that does not say the gate tried twice invites a reader to "
+            "believe the box was simply unusable"
+        )
+        assert "zygote_host_impl_linux.cc" in reason, (
+            "Chrome's own last words are the only thing that can tell a race from a "
+            "broken box; the gate kept them out of every deployed reason before"
+        )
+
+    def test_a_launch_that_comes_up_is_not_launched_twice(
+        self, monkeypatch, debug_endpoint
+    ):
+        g = gate()
+        launches = []
+
+        def fake_popen(argv, **kwargs):
+            launches.append(argv)
+            return _FakeProcess()
+
+        monkeypatch.setattr(g.subprocess, "Popen", fake_popen)
+        monkeypatch.setattr(g, "_free_port", lambda: debug_endpoint)
+        monkeypatch.setattr(g, "browser_launch", lambda b, p, d: (["chrome"], {}))
+
+        proc, target, profile, reason = g.start_browser(
+            "chrome", attempts=2, seconds=2.0, poll_every=0.02
+        )
+        try:
+            assert reason is None
+            assert target == TARGET
+            assert len(launches) == 1, "a launch that came up is never repeated"
+        finally:
+            g._stop(proc)
+            shutil.rmtree(profile, ignore_errors=True)
+
+    def test_the_retry_is_the_launch_s_and_never_the_page_s(self, monkeypatch):
+        """`_measure` asks once; asking twice about a page reports the same answer."""
+        g = gate()
+        calls = []
+
+        def fake_start(browser, **kwargs):
+            calls.append(browser)
+            return None, None, None, g.NO_TARGET + " (chrome said: boom)"
+
+        monkeypatch.setattr(g, "start_browser", fake_start)
+        readings, reason = asyncio.run(
+            g._measure("http://127.0.0.1", "chrome", {}, ((800, 600),))
+        )
+        assert readings is None
+        assert reason == g.NO_TARGET + " (chrome said: boom)"
+        assert calls == ["chrome"], (
+            "the retry lives in `start_browser`, so a page's answer — thrown, "
+            "redirected, blank — is never asked for a second time"
+        )
+
+    def test_chrome_s_words_are_the_last_lines_and_bounded(self, tmp_path):
+        g = gate()
+        log = tmp_path / "chrome.log"
+        log.write_text("one\ntwo\n\nthree\nfour\n" * 1, encoding="utf-8")
+        words = g._chrome_words(log)
+        assert words == "two | three | four"
+        assert g._chrome_words(tmp_path / "absent.log") == ""
+        assert len(g._chrome_words(log, limit=5)) == 5
+
+    def test_an_empty_log_is_its_own_answer(self, tmp_path):
+        """`wrote nothing` is a different fact from `said this`, so it is not blank."""
+        g = gate()
+        assert g._chrome_words(tmp_path / "empty.log") == ""
 
 
 # ── exit codes: pass, a finding, or nothing measurable ───────────

@@ -79,6 +79,9 @@ PREFIXES = frozenset({"super-admin", "admin-sekolah", "admin", "teacher",
 #: A *machine endpoint*: the body is JSON, an asset, or an ops probe the reader
 #: reaches from a script rather than from a link.
 MACHINE = frozenset({
+    # LiveKit video events and temporary requests are JSON readbacks for the
+    # pilot console, not standalone navigation destinations.
+    "events", "hand-raises",
     "api", "ai", "class", "me", "count", "read-status", "unread-count",
     # `/teacher/api/exam-roster` answers the class roster as JSON for the exam
     # builder's Target Classes panel: a readback, never a page of its own.

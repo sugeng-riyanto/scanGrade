@@ -32,6 +32,24 @@ ROUTE_FILES = sorted((ROOT / "app" / "routes").glob("*.py"))
 #: a write route avoids the lock, so an unjustified entry is a hole. Keyed by
 #: "<blueprint> <path>".
 EXEMPT = {
+    # LiveKit only updates isolated media coordination tables, not exams,
+    # attempts, answers, scores, or an academic year's ledger. The existing
+    # tenant and exam access checks still apply to each session action.
+    "live_bp /exams/<exam_id>/sessions":
+        "creates a media-room coordination row, never writes a paper or grade",
+    "live_bp /sessions/<sid>/hand-raises":
+        "records a pupil's temporary request to speak; no exam state is changed",
+    "live_bp /sessions/<sid>/hand-raises/<rid>/<action>":
+        "authorises only a temporary LiveKit microphone; no year's records change",
+    "live_bp /sessions/<sid>/hand-raises/<rid>/reconcile":
+        "clears a microphone grant stuck mid-moderation in the isolated media "
+        "tables, muting the pupil; no year's records change",
+    "live_bp /sessions/<sid>/end":
+        "closes media supervision, not the exam sitting or any submitted answer",
+    "live_bp /sessions/<sid>/token":
+        "issues a short-lived media join credential after exam access checks; neither issues nor edits a sitting",
+    "live_webhook_bp /webhook/livekit":
+        "persists signed transport audit events to isolated LiveKit tables; it cannot change exam results",
     # ── teacher.py: routes that read or write something other than a year ──
     "teacher_bp /exams/parse-pdf": "reads an upload into a preview; writes no exam yet",
     "teacher_bp /exams/generate-key": "generates answer-key text for a form; writes nothing",
