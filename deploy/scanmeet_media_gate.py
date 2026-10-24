@@ -964,10 +964,15 @@ class Driver:
             "teacher_after": teacher_second.as_dict(),
         }
 
+        # A pass has a sentence too: `camera_finding` returns "" when it finds
+        # nothing, so this row used to reach the sign-off sheet as twelve cells of
+        # evidence and one empty cell -- which reads as a row nobody took.
         rows.append(row(
             "pupil-camera",
             camera_finding(first["student"], second["student"],
-                           self.identities["student"], "the pupil's page")))
+                           self.identities["student"], "the pupil's page"),
+            ok=f"the pupil's page is decoding its own camera, and the frames were "
+               f"still rising {FLOORS:g}s later"))
 
         pupils_seen = [self.identities.get(role) for role in pupils
                        if self.identities.get(role)]

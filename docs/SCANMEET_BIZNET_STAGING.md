@@ -188,10 +188,14 @@ not a sign-off. Keep the raw reading beside it with
 together, because both write stdout and the run that asked for a sheet would
 otherwise get a JSON blob and no sheet at all.
 
-The driver refuses the live site (`scan-grade.app`) unless `--allow-production`,
-because a stale `$SCANMEET_STAGING_URL` would otherwise open a real room and press
-a real teacher's controls on the exams pupils are sitting: the escape hatch is for
-a deliberate pilot, never a copy-paste.
+The driver refuses the live site — `scangrade.web.id`, its `www.`, the
+`lmsshb.` name and every other subdomain of that domain — unless
+`--allow-production`, because a stale `$SCANMEET_STAGING_URL` would otherwise open
+a real room and press a real teacher's controls on the exams pupils are sitting:
+the escape hatch is for a deliberate pilot, never a copy-paste. (`scan-grade.app`
+is the demo *email* domain in `manage.py`, not where the app is deployed; the
+guard lists it too, so pointing a staging run there is refused rather than
+silently measuring nothing.)
 
 What the driver covers, from the table below: 01, 02, 03, 04, 05, 06, 07 and 10,
 plus the isolation reading the table asks a person to take from two console
@@ -246,6 +250,47 @@ Paste in the **teacher's** page to see the room's actual topology:
 
 Anything above 0 means the browser really reached the LiveKit host; a page that
 only ever shows "Memeriksa sesi Live..." never did.
+
+#### The sheet `--signoff` prints
+
+This is the artefact — not a summary of it — for a run that took all twelve rows.
+It is the output of `deploy/scanmeet_media_gate.py`'s own sheet renderer, so the
+wording below is the wording a pilot's ticket will carry; the four header values
+are the run's (URL, exam id, when it ran, which browser), and every cell in the
+table comes from a reading the driver took, never from this page.
+
+```markdown
+## ScanMeet media sign-off - https://staging.your-school-domain.com
+
+- **Verdict:** `SIGNED OFF` (exit 0) - 12/12 row(s) passed
+- **Exam:** `9f4c2a10-8d3e-4b71-9c55-2e7a1b0d6f38`
+- **Run at:** 2026-10-24T09:12:44+07:00
+- **Browser:** `/usr/bin/google-chrome` (synthetic devices)
+
+| # | Row | State | What this run observed |
+| --- | --- | --- | --- |
+| 1 | `sdk-loaded` | PASS | the page reached the pinned SDK |
+| 2 | `session` | PASS | the room opened (7c1e4a92...) and the teacher joined it |
+| 3 | `pupil-camera` | PASS | the pupil's page is decoding its own camera, and the frames were still rising 3s later |
+| 4 | `teacher-receives-camera` | PASS | the teacher's grid is decoding 2 pupil camera(s) |
+| 5 | `pupil-isolation` | PASS | neither pupil's page holds any camera but their own and the supervisor's, while the other is in the room |
+| 6 | `mic-starts-closed` | PASS | a fresh pupil token grants the camera only, and the page offers no microphone control |
+| 7 | `hand-raise` | PASS | the request is pending in the API and a row the teacher can see in the queue |
+| 8 | `mic-approved` | PASS | approval grants camera + microphone and the pupil's control appears |
+| 9 | `audio-reaches-teacher` | PASS | the teacher's page holds a live audio track for the room |
+| 10 | `mic-closed` | PASS | the close takes the grant back to the camera, the control away and the teacher's live audio with it |
+| 11 | `outsider-refused` | PASS | another school's pupil is refused both the page and the token |
+| 12 | `room-ended` | PASS | *Akhiri Live* is confirmed, and the next join token is refused |
+
+Every row passed: cameras decode, the microphone is refused until a teacher approves it and revoked after, no pupil receives another's media, and the ended room admits nobody.
+```
+
+The verdict line is the one a reader checks first, and it is earned rather than
+assumed: `--signoff` on a run that skipped a row prints `CANNOT MEASURE` with the
+same table and a closing sentence saying it is **not** a sign-off. A sheet with a
+`**SKIP**` or a `**FAIL**` in it is a finding to send back, not a pilot to file —
+`test_the_runbook_shows_the_sheet_the_driver_prints` reads this block and fails
+if the twelve row names or the closing sentence stop matching the tool.
 
 ### 3. What to send back
 

@@ -700,3 +700,70 @@ def test_the_deployed_site_is_the_one_that_is_refused():
                  "https://staging.scangrade.web.id"):
         assert GATE.production_target(live) is True, live
     assert GATE.production_target("https://staging.example.edu") is False
+
+
+# ── the artefact the runbook promises ────────────────────────────────
+#
+# The runbook tells a reader that `--signoff` prints "the Markdown sheet this
+# section ends with", and a sheet nobody rendered is a paragraph again: the row
+# names, the table's shape and the closing sentence are all things the driver can
+# change without the page noticing. These read the block out of the page and hold
+# it to the tool.
+
+RUNBOOK = ROOT / "docs" / "SCANMEET_BIZNET_STAGING.md"
+
+
+def _runbook_sheet() -> str:
+    """The fenced ``markdown`` block whose heading is the sign-off sheet."""
+    text = RUNBOOK.read_text(encoding="utf-8")
+    match = re.search(r"```markdown\n(## ScanMeet media sign-off.*?)\n```", text, re.S)
+    assert match, ("docs/SCANMEET_BIZNET_STAGING.md no longer carries the example "
+                   "sign-off sheet §2 promises")
+    return match.group(1)
+
+
+def _sheet_rows(sheet: str) -> list[tuple[str, str, str]]:
+    """`(number, row name, state)` for each table line, in the page's order."""
+    rows = []
+    for line in sheet.splitlines():
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if len(cells) == 4 and cells[0].isdigit():
+            rows.append((cells[0], cells[1].strip("`"), cells[2]))
+    return rows
+
+
+def test_the_runbook_shows_the_sheet_the_driver_prints():
+    """A documented artefact has to be the one the tool produces."""
+    sheet = _runbook_sheet()
+    assert sheet.splitlines()[0] == (
+        "## ScanMeet media sign-off - https://staging.your-school-domain.com")
+    assert "- **Verdict:** `SIGNED OFF` (exit 0) - 12/12 row(s) passed" in sheet
+    assert "| # | Row | State | What this run observed |" in sheet
+
+    rows = _sheet_rows(sheet)
+    assert [name for _, name, _ in rows] == list(GATE.ROW_ORDER), (
+        "the page's twelve rows and the driver's twelve rows disagree")
+    assert [number for number, _, _ in rows] == [str(i) for i in range(1, 13)]
+    assert {state for _, _, state in rows} == {"PASS"}, (
+        "the example is the sheet of a complete run, so no row may be SKIP or FAIL")
+    assert all(detail for detail in (
+        line.split("|")[4].strip() for line in sheet.splitlines()
+        if line.startswith("| ") and line.split("|")[1].strip().isdigit())), (
+        "a row with an empty evidence cell reads as a row nobody took")
+
+    # The closing sentence is the renderer's own, not a paraphrase of it.
+    rendered = GATE.signoff_sheet(
+        "https://staging.your-school-domain.com", "exam",
+        [GATE.Row(name, "pass", "detail") for name in GATE.ROW_ORDER], GATE.EXIT_OK)
+    assert sheet.splitlines()[-1] == rendered.splitlines()[-1]
+
+
+def test_the_sheet_says_out_loud_when_it_is_not_a_signoff():
+    """The page promises an unfinished run heads its table with CANNOT MEASURE."""
+    rendered = GATE.signoff_sheet(
+        "https://staging.your-school-domain.com", "exam",
+        [GATE.Row(name, "skipped", "the browser never joined") for name in GATE.ROW_ORDER],
+        GATE.EXIT_CANNOT_MEASURE)
+    assert "`CANNOT MEASURE`" in rendered
+    assert "**not** a sign-off" in rendered
+    assert "SIGNED OFF" not in rendered
