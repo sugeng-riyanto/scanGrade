@@ -186,12 +186,18 @@ class TestTheGraph:
         assert "await window.SGGraph.load(this.graphKey)" in text
         assert "window.SGGraph.mount(host)" in text
 
-    def test_the_three_failures_are_named(self):
+    def test_the_failures_are_named(self):
         text = page_text()
         assert "graphState = 'unconfigured'" in text
         assert "graphState = 'loading'" in text
-        assert "this.graphState = (err && err.code) || 'offline'" in text
-        assert "t('Kunci API Desmos belum diatur di server ini.','The Desmos API key is not configured on this server.')" in text
+        # A key Desmos refuses, or a desmos.com this school cannot reach, is not the
+        # end of the panel: the page draws the graph itself (`exam-graph-local.js`),
+        # so the failure is handled rather than reported as a dead end.
+        start = text.index("        async openGraph(force) {")
+        end = text.index("        // ── The keyless plot", start)
+        body = text[start:end]
+        assert "this.mountGraphLocal();" in body
+        assert "t('Kalkulator grafik tidak tersedia di server ini.','The graph tool is not available on this server.')" in text
 
     def test_the_api_key_travels_on_the_request_not_in_the_url_of_the_page(self):
         js = GRAPH.read_text(encoding="utf-8")

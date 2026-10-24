@@ -987,27 +987,54 @@ body.sg-exam .sg-content { max-width: none; margin-left: 0; margin-right: 0; }
         </div>
     </div>
 
-    <!-- Desmos graphing calculator. Behind the same `allow_calculator` switch as
-         the scientific calculator: the teacher decides once per paper whether a
-         calculator is allowed, and a graph tool is one. The script is fetched on
-         the first press, never on load, so a paper opened on a dead link still
-         opens; each failure says which it was. -->
+    <!-- Graphing calculator. Behind the same `allow_calculator` switch as the
+         scientific calculator: the teacher decides once per paper whether a
+         calculator is allowed, and a graph tool is one.
+
+         Two engines, one panel. Desmos is the one a configured deployment gets,
+         and its script is fetched on the first press, never on load, so a paper
+         opened on a dead link still opens. When this deployment has no key — or
+         desmos.com cannot be reached mid-exam — the panel draws the graph itself
+         from `exam-graph-local.js`, on the Chart.js this app already vendors. A
+         pupil should not lose the tool because a subscription is missing. -->
     <div x-show="showGraph && !submitted && !showExamAgreement" x-transition x-cloak
-         class="sg-graph sg-layer-float fixed bottom-20 right-4 bg-white rounded-2xl shadow-2xl border border-surface-200 overflow-hidden"
+         class="sg-graph sg-layer-float fixed bottom-20 right-4 flex flex-col bg-white rounded-2xl shadow-2xl border border-surface-200 overflow-hidden"
          @click.outside="closeGraph()">
         <div class="flex items-center justify-between px-3 py-1.5 bg-surface-50 border-b border-surface-200">
-            <span class="text-[11px] font-extrabold text-surface-700 flex items-center gap-1.5"><i class="fas fa-chart-line text-emerald-600"></i><span x-text="t('Grafik Desmos','Desmos graph')"></span></span>
+            <span class="text-[11px] font-extrabold text-surface-700 flex items-center gap-1.5"><i class="fas fa-chart-line text-emerald-600"></i><span x-text="graphMode === 'desmos' ? t('Grafik Desmos','Desmos graph') : t('Grafik','Graph')"></span></span>
             <div class="flex items-center gap-2">
                 <button type="button" @click="openGraph(true)" class="text-[11px] font-bold text-surface-500 hover:text-surface-800" :title="t('Muat ulang grafik','Reload graph')" :aria-label="t('Muat ulang grafik','Reload graph')"><i class="fas fa-rotate-right"></i></button>
                 <button type="button" @click="closeGraph()" class="text-surface-400 hover:text-surface-800 text-sm" :aria-label="t('Tutup grafik','Close graph')">&times;</button>
             </div>
         </div>
-        <div class="relative" style="height: calc(100% - 34px)">
+        <!-- The keyless plot's controls. Desmos brings its own expression bar and
+             keypad; this one is the page's, so it is markup here: every string is a
+             `t()` pair like the rest of the paper, and the buttons are 44px because
+             a finger presses them. -->
+        <div x-show="graphMode === 'local'" class="px-2 py-2 border-b border-surface-200 bg-surface-50">
+            <div class="flex items-center gap-1.5">
+                <input type="text" x-model="graphExpr" @keydown.enter.prevent="plotGraph()"
+                       :placeholder="t('Contoh: x^2 - 4','e.g. x^2 - 4')"
+                       :aria-label="t('Rumus untuk digambar','Formula to plot')"
+                       autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false"
+                       inputmode="text"
+                       class="flex-1 min-w-0 h-11 px-3 rounded-lg border text-xs font-mono bg-white text-surface-900"
+                       :class="graphExprError ? 'border-red-400' : 'border-surface-300'">
+                <button type="button" @click="plotGraph()" class="h-11 px-3 rounded-lg bg-emerald-600 text-white text-[11px] font-bold" x-text="t('Gambar','Plot')"></button>
+            </div>
+            <div class="flex items-center gap-1.5 mt-1.5">
+                <button type="button" @click="graphZoom(1.5)" class="w-11 h-11 rounded-lg border border-surface-300 bg-white text-surface-700" :aria-label="t('Perbesar','Zoom in')" :title="t('Perbesar','Zoom in')"><i class="fas fa-plus"></i></button>
+                <button type="button" @click="graphZoom(1 / 1.5)" class="w-11 h-11 rounded-lg border border-surface-300 bg-white text-surface-700" :aria-label="t('Perkecil','Zoom out')" :title="t('Perkecil','Zoom out')"><i class="fas fa-minus"></i></button>
+                <button type="button" @click="graphReset()" class="w-11 h-11 rounded-lg border border-surface-300 bg-white text-surface-700" :aria-label="t('Kembalikan tampilan','Reset the view')" :title="t('Kembalikan tampilan','Reset the view')"><i class="fas fa-expand"></i></button>
+                <span class="ml-auto text-[11px] font-bold" :class="graphExprError ? 'text-red-600' : 'text-surface-500'" x-text="graphExprError === 'empty' ? t('Tulis rumusnya dulu','Type the formula first') : (graphExprError ? t('Rumus belum bisa dibaca','That formula could not be read') : t('Kalkulator lokal','Local calculator'))"></span>
+            </div>
+        </div>
+        <div class="relative flex-1 min-h-0">
             <div x-ref="graphHost" class="sg-graph-host"></div>
             <div x-show="graphState !== 'ready'" class="absolute inset-0 flex flex-col items-center justify-center gap-2 p-4 text-center bg-white">
                 <i class="fas text-2xl" :class="graphState === 'loading' ? 'fa-spinner fa-spin text-emerald-600' : 'fa-triangle-exclamation text-amber-500'"></i>
                 <p class="text-xs font-extrabold text-surface-700" x-text="graphMessage"></p>
-                <p x-show="graphState === 'unconfigured'" class="text-[11px] text-surface-500" x-text="t('Kunci API Desmos belum diatur di server ini.','The Desmos API key is not configured on this server.')"></p>
+                <p x-show="graphState === 'unconfigured'" class="text-[11px] text-surface-500" x-text="t('Kalkulator grafik tidak tersedia di server ini.','The graph tool is not available on this server.')"></p>
                 <p x-show="graphState !== 'unconfigured' && graphState !== 'loading'" class="text-[11px] text-surface-500" x-text="t('Periksa koneksi lalu coba lagi. Jawaban Anda tetap tersimpan.','Check the connection and try again. Your answer is still saved.')"></p>
                 <button type="button" x-show="graphState !== 'unconfigured' && graphState !== 'loading'" @click="openGraph(true)" class="mt-1 px-3 py-2 rounded-lg bg-emerald-600 text-white text-[11px] font-bold" x-text="t('Coba lagi','Try again')"></button>
             </div>
@@ -2632,6 +2659,7 @@ body.sg-exam .sg-content { max-width: none; margin-left: 0; margin-right: 0; }
 <!-- The essay surface's list/font/paste behaviour. Classic, like the two above,
      because the component reads `window.SGEssayEditor` while it is built. -->
 <script src="/static/js/exam-graph.js"></script>
+<script src="/static/js/exam-graph-local.js"></script>
 <script src="/static/js/essay-editor.js"></script>
 <script>
 // The lightbox is page furniture rather than exam state, so it is wired here and
@@ -3332,10 +3360,21 @@ function examApp(duration, totalQ) {
         calcJustEvaluated: false,
         // The graph: key from the deployment, and a state named so the panel can
         // say *which* thing failed rather than only that it did.
+        //
+        // `graphMode` is which engine is drawing — Desmos when this deployment has
+        // a key, the page's own plot when it does not (or when desmos.com cannot
+        // be reached). It starts as 'none' so the panel does not claim Desmos
+        // before anything has loaded.
         showGraph: false,
         graphKey: {{ (config.get('DESMOS_API_KEY') or '')|tojson }},
+        graphMode: 'none',
         graphState: 'idle',
         graphApi: null,
+        // The local plot's formula and why it did not draw, if it did not. The
+        // sentence under the input is a `t()` pair in the template, not a string
+        // stored here: a stored label is frozen in the language it was built in.
+        graphExpr: 'x^2',
+        graphExprError: '',
         // Two strings per key, in the same shape the sync label uses. sgT() picks
         // the language at the moment it is called, so a message that stays on the
         // panel is rebuilt by relabelLocale() rather than left in the language it
@@ -6710,8 +6749,8 @@ function examApp(duration, totalQ) {
 
         // ── The graph, behind the same switch ────────────────────────────────
         // Desmos is fetched on the first press and never on load, so a paper
-        // opened on a dead link still opens. The panel's state names which of the
-        // three outcomes happened; `graphMessage` is the sentence shown for it.
+        // opened on a dead link still opens. The panel's state names which outcome
+        // happened; `graphMessage` is the sentence shown for it.
         setGraphMessage(key) {
             this.graphMessageKey = key;
             const pair = this._graphMessages[key] || this._graphMessages.offline;
@@ -6729,9 +6768,10 @@ function examApp(duration, totalQ) {
                 return;
             }
             if (this.graphApi) { this.graphApi.destroy(); this.graphApi = null; }
+            // No key is not a failure: it is the deployment that has not signed up
+            // with Desmos, and the paper still gets a graph.
             if (!this.graphKey) {
-                this.graphState = 'unconfigured';
-                this.setGraphMessage('unconfigured');
+                this.mountGraphLocal();
                 return;
             }
             this.graphState = 'loading';
@@ -6741,13 +6781,41 @@ function examApp(duration, totalQ) {
                 const host = this.$refs.graphHost;
                 if (!host) throw new Error('no host');
                 this.graphApi = window.SGGraph.mount(host);
+                this.graphMode = 'desmos';
                 this.graphState = 'ready';
                 this.graphMessage = '';
             } catch (err) {
-                this.graphState = (err && err.code) || 'offline';
-                this.setGraphMessage('offline');
+                // A key Desmos refuses, or desmos.com unreachable on the school's
+                // link: fall back to the plot this page carries, rather than
+                // leaving an exam with no graph tool at all.
+                this.mountGraphLocal();
             }
         },
+        // ── The keyless plot ──────────────────────────────────────────────────
+        mountGraphLocal() {
+            const host = this.$refs.graphHost;
+            if (!host || !window.SGGraphLocal) {
+                // Only reachable if the module failed to load, which is a broken
+                // deployment rather than a missing subscription.
+                this.graphMode = 'none';
+                this.graphState = 'unconfigured';
+                this.setGraphMessage('unconfigured');
+                return;
+            }
+            if (this.graphApi) { this.graphApi.destroy(); this.graphApi = null; }
+            this.graphMode = 'local';
+            this.graphApi = window.SGGraphLocal.mount(host);
+            this.graphState = 'ready';
+            this.graphMessage = '';
+            this.plotGraph();
+        },
+        plotGraph() {
+            if (this.graphMode !== 'local' || !this.graphApi) return;
+            const result = this.graphApi.setExpression(this.graphExpr);
+            this.graphExprError = result.ok ? '' : (result.code || 'syntax');
+        },
+        graphZoom(factor) { if (this.graphApi) this.graphApi.zoom(factor); },
+        graphReset() { if (this.graphApi) this.graphApi.reset(); },
 
         // ── Canvas text boxes: rich text on the paper ────────────────────────
         // A box stores its plain `text` *and* the `html` it was typed as. The

@@ -118,10 +118,13 @@ MUTATIONS = [
      'SCAN_ROOTS = ("tests", "deploy")',
      'SCAN_ROOTS = ("tests",)'),
 
+    # The anchor is the name and the space before it, not the closing quote: the
+    # guard is no longer last in `TESTS=`, and an anchor that assumes a position
+    # stops matching the moment a suite is appended after it.
     ('the gate stops running the guard',
      'deploy/theme_gate.sh',
-     ' tests/unit/test_shell_path_portability.py"',
-     '"'),
+     ' tests/unit/test_shell_path_portability.py ',
+     ' '),
 ]
 
 if __name__ == "__main__":

@@ -228,7 +228,7 @@ underline and colour (the lists and tables are built by the module); the box is
 absolutely positioned, so a very wide table scrolls inside it rather than
 widening the paper; and jsdom proves the DOM operations, not the paint.
 
-## The Desmos graph
+## The graph panel
 
 `app/static/js/exam-graph.js` mounts Desmos in the exam page's graph panel,
 behind the **same `allow_calculator` switch** as the scientific calculator — the
@@ -239,22 +239,43 @@ build, and is licensed as a hosted product. What the page controls is *when* it
 is fetched: on the first press, never on page load, so a paper opened on a dead
 link still opens and its autosave is unaffected.
 
-Three outcomes are named in the panel rather than one generic failure:
+**The panel does not need Desmos to draw a graph.** Desmos issues API keys to an
+account holder, and its free tier covers school or personal projects rather than
+a commercial service, so a deployment without a key had a panel that said so and
+nothing else. `app/static/js/exam-graph-local.js` is the second engine: one
+expression in `x`, read by a small recursive-descent parser and drawn on **the
+Chart.js this app already vendors and every page already carries**, so the tool
+costs no extra download on the connection a school actually has. It is dragged
+to pan and has its own zoom and reset buttons.
 
-* **unconfigured** — `DESMOS_API_KEY` is empty. This is a supported state: the
-  panel says the key is not set instead of loading a calculator that cannot
-  start. The key is a **public client key**, interpolated into the page, and it
-  is read from configuration (`config.DESMOS_API_KEY`) rather than written into
-  the template.
-* **offline / timeout** — the script could not be fetched (offline, a captive
-  portal, or 15 s). The panel offers a retry; the answer keeps autosaving.
-* **ready** — the calculator is mounted and reused until "reload".
+Two things in that module are deliberate rather than incidental:
+
+* **No `eval`.** The formula is typed by a pupil, inside a page that holds their
+  answers; it is parsed into closures instead.
+* **A curve is never drawn through an asymptote.** A sample far outside the
+  window, or one that jumps across most of it with the sign flipped, breaks the
+  line the way `tan(x)` and `1/x` need it to be broken.
+
+Which engine runs is a state, not a guess:
+
+* **desmos** — `DESMOS_API_KEY` is set and the script loaded. The key is a
+  **public client key**, interpolated into the page, and it is read from
+  configuration (`config.DESMOS_API_KEY`) rather than written into the template.
+* **local** — there is no key, or desmos.com could not be fetched (offline, a
+  captive portal, the 15 s timeout, a key the API refuses). The panel draws the
+  curve itself, so a school whose link cannot reach Desmos still sits the paper.
+* **unconfigured** — neither engine could start, which means the page's own
+  module did not load: a broken deployment, and the panel says exactly that.
+
+The local plot is deliberately smaller than Desmos: no sliders, tables,
+regressions or geometry, one curve at a time. That is what an exam graph question
+needs, and the limit is written here rather than implied by a panel that looks
+richer than it is.
 
 Responsiveness is the panel's: `.sg-graph` is `min(92vw, 620px)` by
-`min(70vh, 540px)` (and full width under 640 px), and the module calls
-`calculator.resize()` from a `ResizeObserver` on the host plus `resize` and
-`orientationchange`, because Desmos draws to whatever box it is handed and does
-not watch that box.
+`min(70vh, 540px)` (and full width under 640 px), and each module resizes its
+calculator from a `ResizeObserver` on the host plus `resize` and
+`orientationchange`, because neither engine watches the box it was handed.
 
 ## The scientific calculator
 
