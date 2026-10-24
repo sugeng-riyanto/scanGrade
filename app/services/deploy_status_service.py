@@ -408,6 +408,25 @@ def _gate_lines(raw: list[str]) -> list[str]:
     return out
 
 
+def _quarantine_evidence(lines: list[str]) -> tuple[list[str], str | None]:
+    """Separate the gate's reasons from a bounded, labelled box_report snapshot.
+
+    Old three-line quarantine records remain readable. A corrupted or truncated
+    snapshot cannot make the page ingest the rest of an unbounded file.
+    """
+    raw = lines[3:]
+    marker = "=== box_report snapshot ==="
+    end_marker = "=== end box_report snapshot ==="
+    if marker not in raw:
+        return _gate_lines(raw), None
+    start = raw.index(marker)
+    tail = raw[start + 1:]
+    if end_marker in tail:
+        tail = tail[:tail.index(end_marker)]
+    report = "\n".join(_gate_lines(tail)[:70]) or None
+    return _gate_lines(raw[:start]), report
+
+
 def quarantine_state(path: pathlib.Path, repo: pathlib.Path, *, 
                      now: _dt.datetime) -> dict:
     """The commit the runner is holding, by which gate, since when, and why.
@@ -428,7 +447,7 @@ def quarantine_state(path: pathlib.Path, repo: pathlib.Path, *,
         "path": str(path), "held": False, "reason_key": None, "detail": None,
         "sha": None, "short": None, "subject": None, "refused_at": None,
         "age_seconds": None, "gate": None, "gate_key": None,
-        "reasons": [], "reasons_total": 0,
+        "box_report": None, "reasons": [], "reasons_total": 0,
     }
     text, detail = _read(path)
     if text is None:
@@ -457,7 +476,7 @@ def quarantine_state(path: pathlib.Path, repo: pathlib.Path, *,
     state["gate"] = reason or None
     state["gate_key"] = gate_key(reason)
     state["subject"] = _commit_subject(repo, sha)
-    quoted = _gate_lines(lines[3:])
+    quoted, state["box_report"] = _quarantine_evidence(lines)
     state["reasons_total"] = len(quoted)
     state["reasons"] = quoted[:QUARANTINE_DETAIL_SHOWN]
     return state
@@ -474,7 +493,8 @@ def _refusal_record(text: str, *, now: _dt.datetime,
     record: dict = {
         "name": name, "held": False, "sha": None, "short": None, "subject": None,
         "refused_at": None, "age_seconds": None, "gate": None, "gate_key": None,
-        "reasons": [], "reasons_total": 0, "reason_key": None, "detail": None,
+        "reasons": [], "reasons_total": 0, "box_report": None,
+        "reason_key": None, "detail": None,
     }
     lines = text.splitlines()
     sha = lines[0].strip() if lines else ""
@@ -494,7 +514,7 @@ def _refusal_record(text: str, *, now: _dt.datetime,
     record["age_seconds"] = _age_seconds(when or None, now)
     record["gate"] = reason or None
     record["gate_key"] = gate_key(reason)
-    quoted = _gate_lines(lines[3:])
+    quoted, record["box_report"] = _quarantine_evidence(lines)
     record["reasons_total"] = len(quoted)
     record["reasons"] = quoted[:QUARANTINE_DETAIL_SHOWN]
     return record

@@ -27,6 +27,8 @@ code. This file is the check on the check, and the thing it has to answer is wha
 """
 from __future__ import annotations
 
+import shutil
+
 import os
 import re
 import subprocess
@@ -373,7 +375,7 @@ class TestTheGateRunsIt:
         env = dict(os.environ)
         env["PY"] = sys.executable
         env["REPO"] = str(repo)
-        return subprocess.run(["bash", str(script)], capture_output=True,
+        return subprocess.run([shutil.which("bash") or "bash", str(script)], capture_output=True,
                               text=True, encoding="utf-8", errors="replace", env=env)
 
     def test_a_wrong_ref_stops_the_release(self, tmp_path):

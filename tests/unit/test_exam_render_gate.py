@@ -23,6 +23,8 @@ browser's: `w=118 h=40`, `font=14px/700`, `pad=8px 20px 8px 20px`,
 """
 from __future__ import annotations
 
+import shutil
+
 import importlib.util
 import os
 import re
@@ -429,7 +431,7 @@ def _run_render_arm(enforce):
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "arm.sh"
         path.write_text(script, encoding="utf-8")
-        result = subprocess.run(["bash", str(path)], capture_output=True, text=True,
+        result = subprocess.run([shutil.which("bash") or "bash", str(path)], capture_output=True, text=True,
                                 encoding="utf-8", errors="replace", timeout=60)
     return result.stdout + result.stderr
 

@@ -497,7 +497,7 @@ def _run_refusal_block(tmp_path: Path, output: str) -> subprocess.CompletedProce
         + '\necho "FELL THROUGH"\nexit 0\n', encoding="utf-8")
     captured = tmp_path / "output.txt"
     captured.write_text(output, encoding="utf-8")
-    return subprocess.run(["bash", str(harness), str(captured)], capture_output=True,
+    return subprocess.run([shutil.which("bash") or "bash", str(harness), str(captured)], capture_output=True,
                           text=True, encoding="utf-8", errors="replace")
 
 

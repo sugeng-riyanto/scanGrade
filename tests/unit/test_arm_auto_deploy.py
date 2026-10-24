@@ -46,6 +46,7 @@ next. The SEB set adds the newest gate's four: a missing gate file, a smoke conf
 no pupil, a `seb` line that stopped saying what it measures, and the gate block
 dropped from the list of things a stale copy lacks.
 """
+import shutil
 import json
 import os
 import subprocess
@@ -206,7 +207,7 @@ def scratch(tmp_path, *, runner=COPY, gates=True, snapshot=True, claims=True,
 
 
 def run(env, *args):
-    return subprocess.run(["bash", str(SCRIPT), *args], env=env, cwd=str(SCRIPT.parent),
+    return subprocess.run([shutil.which("bash") or "bash", str(SCRIPT), *args], env=env, cwd=str(SCRIPT.parent),
                           capture_output=True, text=True, stdin=subprocess.DEVNULL,
                           timeout=120)
 
@@ -489,7 +490,7 @@ class TestItRefusesRatherThanHalfDoingIt:
 
 class TestTheFileItself:
     def test_it_is_valid_bash(self):
-        r = subprocess.run(["bash", "-n", str(SCRIPT)], capture_output=True, text=True)
+        r = subprocess.run([shutil.which("bash") or "bash", "-n", str(SCRIPT)], capture_output=True, text=True)
         assert r.returncode == 0, r.stderr
 
     def test_it_has_lf_endings(self):

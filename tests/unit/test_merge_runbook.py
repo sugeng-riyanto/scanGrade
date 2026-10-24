@@ -52,6 +52,8 @@ skipping — a skip would report the record as verified by a run that never read
 """
 from __future__ import annotations
 
+import shutil
+
 import functools
 import os
 import re
@@ -662,7 +664,7 @@ class TestTheGateBlock:
         script.write_bytes(source.replace("\r\n", "\n").encode("utf-8"))
         env = dict(os.environ)
         env.update(PY=str(wrapper), FAKE_OUT=out, FAKE_RC=str(rc))
-        return subprocess.run(["bash", str(script)], capture_output=True, text=True,
+        return subprocess.run([shutil.which("bash") or "bash", str(script)], capture_output=True, text=True,
                               encoding="utf-8", errors="replace", env=env)
 
     def test_a_finding_stops_the_commit(self, tmp_path):
