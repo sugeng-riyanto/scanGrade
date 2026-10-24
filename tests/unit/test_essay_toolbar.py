@@ -205,6 +205,22 @@ function select(node, start, end) {
     record('and its text is unchanged', api.textOf(el).replace(/\n+/g, ' ').trim(), 'satu dua');
 }
 
+/* ── Enter is a line, not a paragraph ───────────────────────────────────── */
+{
+    const el = editor('satu');
+    caret(el.firstChild, 4);
+    record('a line break is made', api.lineBreak(el), true);
+    record('it is a <br>, not a new block', el.querySelectorAll('br').length, 1);
+    record('the stored text keeps the line', api.textOf(el), 'satu\n');
+    record('the answer is still one word plus a line', api.textOf(el).trim(), 'satu');
+}
+{
+    /* A caret that was never in the paragraph still gets the line at the end. */
+    const el = editor('dua');
+    api.lineBreak(el);
+    record('a line break lands at the end', el.innerHTML.indexOf('<br>') >= 0, true);
+}
+
 process.stdout.write(JSON.stringify(results));
 """
 
@@ -377,6 +393,11 @@ class TestTheToolsInARealDom:
         "and adds no tab to the answer",
         "the list still toggles",
         "and its text is unchanged",
+        "a line break is made",
+        "it is a <br>, not a new block",
+        "the stored text keeps the line",
+        "the answer is still one word plus a line",
+        "a line break lands at the end",
     ])
     def test_case(self, results, name):
         got, want = results[name]
@@ -477,8 +498,8 @@ class TestTheWiring:
 
     def test_the_module_exports_every_tool_the_page_calls(self):
         src = MODULE.read_text(encoding="utf-8")
-        for name in ("insertText", "insertTab", "align", "alignOf", "foreColor",
-                     "insertTable"):
+        for name in ("insertText", "insertTab", "lineBreak", "align", "alignOf",
+                     "foreColor", "insertTable"):
             assert f"        {name}: {name}" in src, name
 
     def test_every_page_method_exists(self):
@@ -499,6 +520,19 @@ class TestTheWiring:
             start = src.index(f"        {method}(")
             end = src.index("\n        },", start)
             assert "this.essayTarget(qIdx)" in src[start:end], method
+
+    def test_enter_is_a_line_and_the_button_adds_a_paragraph(self):
+        """The sheet offers both, and they are different things: Enter breaks the
+        line inside the paragraph the pupil is in, `+ Paragraph` adds the next one.
+        Enter used to add a paragraph, so two presses in the middle of one answer
+        left three boxes and one paragraph's worth of text."""
+        src = TAKE.read_text(encoding="utf-8")
+        start = src.index("        onParagraphEnter(qIdx, pIdx, ev) {")
+        end = src.index("\n        },", start)
+        body = src[start:end]
+        assert "window.SGEssayEditor.lineBreak(ev.target)" in body
+        assert "this.addParagraph(" not in body
+        assert '@mousedown.prevent="addParagraph(i)"' in src
 
     def test_the_target_puts_the_caret_in_the_paragraph(self, executed):
         """Executed, not grepped: the toolbar's resolver is lifted out of the page

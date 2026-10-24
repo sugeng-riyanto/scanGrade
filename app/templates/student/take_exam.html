@@ -6185,14 +6185,20 @@ function examApp(duration, totalQ) {
                 this.onParagraphInput(qIdx, pIdx, ev.target);
             }
         },
+        // Enter is a **line** break inside the paragraph; `+ Paragraph` is what
+        // adds a paragraph. It used to add a paragraph too, so two presses in the
+        // middle of one answer left three boxes and one paragraph's worth of text
+        // — the sheet, the counter and the toolbar all disagree about what the
+        // pupil had written. Inside a list the browser's own Enter makes the next
+        // bullet (and an empty item leaves the list), which is what a bulleted
+        // answer needs, so that case is left alone.
         onParagraphEnter(qIdx, pIdx, ev) {
-            if (ev.shiftKey) return;             // a soft line break inside this block
-            // Inside a list item the browser's own Enter makes the next bullet (and
-            // an empty item leaves the list), which is the behaviour a pupil expects;
-            // only outside a list does the page add a paragraph.
             if (window.SGEssayEditor && window.SGEssayEditor.inListItem(ev.target)) return;
             ev.preventDefault();
-            this.addParagraph(qIdx, pIdx + 1);
+            if (!window.SGEssayEditor) return;
+            if (window.SGEssayEditor.lineBreak(ev.target)) {
+                this.onParagraphInput(qIdx, pIdx, ev.target);
+            }
         },
         onParagraphPaste(qIdx, pIdx, ev) {
             // Plain text only: a pasted web page would otherwise bring its own fonts

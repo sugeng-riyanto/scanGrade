@@ -136,6 +136,19 @@ MUTATIONS = [
      "@mousedown.prevent=\"execCmd(i, 'italic')\"",
      "@mousedown.prevent=\"execCmd('italic')\""),
 
+    # ── Enter is a line, `+ Paragraph` is a paragraph ─────────────────────
+    ('Enter adds a paragraph again',
+     PAGE,
+     "            if (window.SGEssayEditor.lineBreak(ev.target)) {\n"
+     "                this.onParagraphInput(qIdx, pIdx, ev.target);\n"
+     "            }",
+     "            this.addParagraph(qIdx, pIdx + 1);"),
+
+    ('a line break is typed as a character',
+     EDITOR,
+     "            var br = doc.createElement('br');",
+     "            var br = doc.createTextNode('\\n');"),
+
     # ── the page: a font is a style, never part of the answer ──────────────
     # Read through a guard rather than through `this.essayFont(i)` on purpose: an
     # unguarded call also crashes the serialisation section of the integrity suite
