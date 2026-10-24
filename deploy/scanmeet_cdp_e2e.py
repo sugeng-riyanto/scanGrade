@@ -260,45 +260,17 @@ async def wait_measure(cdp, predicate, *, seconds=60, reason="expected state"):
 async def start_chrome(role: str, binary: str, origin: str, exam_id: str,
                        cookies, stack: AsyncExitStack):
     """Own Chrome process & profile for each account; reuse repository CDP."""
-    import requests
     import websockets
+    from deploy.chrome_retried_launcher import start_browser
 
-    port = touch_gate._free_port()
-    profile = tempfile.mkdtemp(prefix=f"sg-cdp-{role}-")
-    argv, env = touch_gate.browser_launch(binary, port, profile)
-    argv[-1:-1] = [
+    session = await start_browser(binary, role=role, flags=(
         "--use-fake-device-for-media-stream",
         "--use-fake-ui-for-media-stream",
         "--autoplay-policy=no-user-gesture-required",
         "--enable-features=WebRtcHideLocalIpsWithMdns",
-    ]
-    proc = subprocess.Popen(argv, stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL, env=env)
-
-    def cleanup():
-        if proc.poll() is None:
-            proc.terminate()
-            try:
-                proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                proc.wait(timeout=5)
-        shutil.rmtree(profile, ignore_errors=True)
-
-    stack.callback(cleanup)
-    target = None
-    for _ in range(90):
-        try:
-            pages = requests.get(f"http://127.0.0.1:{port}/json/list", timeout=2).json()
-            target = next((t.get("webSocketDebuggerUrl") for t in pages
-                           if t.get("type") == "page"), None)
-            if target:
-                break
-        except (requests.RequestException, ValueError):
-            pass
-        await asyncio.sleep(0.3)
-    if not target:
-        raise Unmeasured(f"{role}: Chrome CDP port did not become available")
+    ))
+    stack.callback(session.close)
+    target = session.websocket_url
     ws = await stack.enter_async_context(websockets.connect(target, max_size=8 * 1024 * 1024))
     cdp = touch_gate._CDP(ws)
     await cdp.send("Network.enable")
