@@ -639,3 +639,49 @@ def test_a_reading_that_could_not_be_written_is_not_a_pass(monkeypatch, capsys,
     assert code == GATE.EXIT_CANNOT_MEASURE, (
         "twelve rows nobody can file is not a sign-off, even when all twelve passed")
     assert "could not write" in out
+
+
+# ── the one host this driver must never reach by accident ────────────
+
+
+def test_the_live_site_is_refused_before_a_room_is_opened(monkeypatch, capsys):
+    """A stale `$SCANMEET_STAGING_URL` is the whole failure mode this guards.
+
+    The driver opens a Live room and presses a teacher's controls; pointed at the
+    live site it would do that to a real exam. Refused up front, with the override
+    named, so the deliberate pilot is a decision and not a copy-paste.
+    """
+    drove = []
+    monkeypatch.setattr(GATE.touch_gate, "locate_browser", lambda: "/bin/chrome")
+    monkeypatch.setattr(
+        GATE, "run", lambda **kwargs: drove.append(kwargs) or (0, _twelve(), {}))
+    code = GATE.main(["--url", "https://scan-grade.app", "--exam", "exam-1",
+                      "--teacher", "guru@x:pw", "--student", "murid@x:pw"])
+    out = capsys.readouterr().out
+    assert code == GATE.EXIT_CANNOT_MEASURE
+    assert drove == [], "the live site must be refused before a browser is driven"
+    assert "--allow-production" in out
+
+
+def test_allow_production_lets_a_deliberate_pilot_through(monkeypatch, capsys):
+    monkeypatch.setattr(GATE.touch_gate, "locate_browser", lambda: "/bin/chrome")
+    monkeypatch.setattr(
+        GATE, "run", lambda **kwargs: (GATE.EXIT_OK, _twelve(), {"rows": []}))
+    code = GATE.main(["--url", "https://scan-grade.app", "--exam", "exam-1",
+                      "--teacher", "guru@x:pw", "--student", "murid@x:pw",
+                      "--signoff", "--allow-production"])
+    out = capsys.readouterr().out
+    assert code == GATE.EXIT_OK
+    assert out.startswith("## ScanMeet media sign-off")
+
+
+def test_the_live_hosts_are_the_ones_the_staging_gate_refuses():
+    """One fact, two files: held equal instead of trusted to stay equal."""
+    from deploy import scanmeet_staging_gate as staging
+
+    assert staging.PRODUCTION_SITE in GATE.PRODUCTION_HOSTS
+    assert "www." + staging.PRODUCTION_SITE in GATE.PRODUCTION_HOSTS
+    assert GATE.production_target("https://SCAN-GRADE.APP/live/exam/x") is True
+    assert GATE.production_target("https://staging.scan-grade.app") is False, (
+        "a subdomain is a different host, and refusing it here would refuse the "
+        "staging box someone sensibly named")

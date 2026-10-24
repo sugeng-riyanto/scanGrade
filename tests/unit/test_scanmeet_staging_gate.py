@@ -116,3 +116,21 @@ class ScanMeetStagingBoundary(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ThePrivateFileIsNamedForWhatIsWrongWithIt(unittest.TestCase):
+    """A missing file and an unreadable one are different sentences.
+
+    On a box where staging has not been set up yet the file is absent, and the
+    old message — "not readable" — sent the reader looking for a permission
+    problem that was not there. The other half (a directory, an in-repo file, a
+    world-readable mode) is already held by `ScanMeetStagingBoundary` above.
+    """
+
+    def test_a_missing_private_env_says_it_does_not_exist(self):
+        with tempfile.TemporaryDirectory() as checkout, \
+                tempfile.TemporaryDirectory() as elsewhere:
+            missing = Path(elsewhere) / "staging.env"
+            problems = gate.validate_file(missing, Path(checkout))
+            self.assertTrue(any("does not exist" in p for p in problems), problems)
+            self.assertFalse(any("not readable" in p for p in problems), problems)
