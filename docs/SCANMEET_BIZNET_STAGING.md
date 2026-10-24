@@ -178,6 +178,13 @@ Exit codes: 0 every row passed · 1 a row disagreed (the row naming the defect) 
 run that ended early. **2 is not a pass**: an unfinished run names the rows it
 never took instead of printing a shorter list of passes.
 
+Add `--signoff` to print those twelve rows as the Markdown sheet this section
+ends with — the URL, the exam id, when it ran, the browser it drove and the
+verdict the run earned, ready to paste into the pilot's record. The sheet carries
+the verdict it earned rather than the one the reader hopes for: a run that could
+not take a row heads its table with `CANNOT MEASURE` and says in words that it is
+not a sign-off.
+
 What the driver covers, from the table below: 01, 02, 03, 04, 05, 06, 07 and 10,
 plus the isolation reading the table asks a person to take from two console
 snippets. What stays manual: **08** (a pupil trying chat, screen share or

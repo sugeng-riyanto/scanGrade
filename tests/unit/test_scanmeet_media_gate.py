@@ -485,3 +485,99 @@ def test_the_driver_can_see_a_room_when_there_is_one(harness):
     import asyncio
 
     asyncio.run(_drive(harness))
+
+
+# ── the sign-off sheet, which is the artefact a pilot files ──────────
+
+
+def _twelve(state="pass", detail="ok"):
+    return [GATE.Row(name, state, detail) for name in GATE.ROW_ORDER]
+
+
+def test_the_sheet_carries_the_url_the_exam_and_the_verdict():
+    sheet = GATE.signoff_sheet(
+        "https://staging.example.edu/", "9b17e852-565d-48de-a88c-8786d77f8014",
+        _twelve(), GATE.EXIT_OK, browser="/usr/bin/google-chrome",
+        devices="synthetic devices", run_at="2026-10-24T15:00:00+00:00")
+    assert "https://staging.example.edu" in sheet.splitlines()[0]
+    assert "/" * 2 in sheet.strip().splitlines()[0][:2] or sheet.startswith("## ")
+    assert "9b17e852-565d-48de-a88c-8786d77f8014" in sheet
+    assert "`SIGNED OFF` (exit 0) - 12/12" in sheet
+    assert "2026-10-24T15:00:00+00:00" in sheet
+    assert "/usr/bin/google-chrome" in sheet and "synthetic devices" in sheet
+    # The twelve rows, in the order the driver takes them, once each.
+    for index, name in enumerate(GATE.ROW_ORDER, start=1):
+        assert f"| {index} | `{name}` |" in sheet
+    assert sheet.count("| `") == len(GATE.ROW_ORDER)
+
+
+def test_a_sheet_that_measured_nothing_says_so_in_its_verdict_line():
+    """The whole point of the sheet: a gap cannot read as a complete table."""
+    rows = _twelve()
+    rows[8] = GATE.Row("audio-reaches-teacher", "skipped",
+                       "the teacher is not in the room")
+    sheet = GATE.signoff_sheet("https://staging.example.edu", "exam-1", rows,
+                               GATE.EXIT_CANNOT_MEASURE)
+    assert "`CANNOT MEASURE` (exit 2) - 11/12" in sheet
+    assert "not** a sign-off" in sheet
+    assert "the teacher is not in the room" in sheet
+    assert "**SKIP**" in sheet
+
+
+def test_a_finding_is_labelled_and_counted():
+    rows = _twelve()
+    rows[2] = GATE.Row("pupil-camera", "fail", "the camera produced no frames")
+    sheet = GATE.signoff_sheet("https://staging.example.edu", "exam-1", rows,
+                               GATE.EXIT_FINDING)
+    assert "`NOT SIGNED OFF` (exit 1) - 11/12" in sheet
+    assert "**FAIL**" in sheet
+    assert "1 row(s) disagreed and 0 could not be measured" in sheet
+    assert "not ready for pupils" in sheet
+
+
+def test_a_table_cell_cannot_break_the_table():
+    rows = _twelve()
+    rows[0] = GATE.Row("sdk-loaded", "pass", "a | b\nsecond line")
+    sheet = GATE.signoff_sheet("https://staging.example.edu", "exam-1", rows,
+                               GATE.EXIT_OK)
+    cell = [line for line in sheet.splitlines() if line.startswith("| 1 |")][0]
+    assert r"a \| b second line" in cell, (
+        "a pipe in a detail is GFM's cell escape or it is a fifth column")
+    assert len(cell.splitlines()) == 1
+    # Every table line has the same number of *columns* as the header. Counted
+    # without the escapes, since an escaped pipe is still a pipe character.
+    widths = {line.count("|") - line.count(r"\|")
+              for line in sheet.splitlines() if line.startswith("|")}
+    assert widths == {5}, f"a row broke the table: {widths}"
+
+
+def test_the_sheet_is_ascii_because_it_gets_pasted_into_a_console():
+    sheet = GATE.signoff_sheet("https://staging.example.edu", "exam-1",
+                               _twelve(detail="*Akhiri Live* — done → yes"),
+                               GATE.EXIT_OK)
+    assert all(ord(char) < 128 for char in sheet), (
+        "a sheet with a curly quote in it is a sheet that renders as ? on the "
+        "console that printed the gate's own lines")
+
+
+def test_the_signoff_flag_prints_the_sheet_and_keeps_the_exit_code(monkeypatch,
+                                                                  capsys):
+    calls = []
+
+    def fake_run(**kwargs):
+        calls.append(kwargs)
+        rows = _twelve()
+        rows[3] = GATE.Row("teacher-receives-camera", "skipped", "no tile arrived")
+        return GATE.verdict(rows), rows, {"rows": []}
+
+    monkeypatch.setattr(GATE.touch_gate, "locate_browser", lambda: "/bin/chrome")
+    monkeypatch.setattr(GATE, "run", fake_run)
+    code = GATE.main(["--url", "https://staging.example.edu", "--exam", "exam-1",
+                      "--teacher", "guru@x:pw", "--student", "murid@x:pw",
+                      "--signoff"])
+    out = capsys.readouterr().out
+    assert code == GATE.EXIT_CANNOT_MEASURE, (
+        "printing a sheet must not change what the run is worth")
+    assert out.startswith("## ScanMeet media sign-off")
+    assert "CANNOT MEASURE" in out and "no tile arrived" in out
+    assert calls and calls[0]["accounts"]["student"] == "murid@x:pw"

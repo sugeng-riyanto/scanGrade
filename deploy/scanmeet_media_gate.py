@@ -74,6 +74,12 @@ Usage (on the staging host, with the staging env exported):
       --url https://staging.example.edu --exam 9b17e852-... \\
       --teacher guru@example.edu:pw --student murid1@example.edu:pw \\
       --student2 murid2@example.edu:pw --outsider murid@lain.example.edu:pw
+
+Add ``--signoff`` to print the same twelve rows as a Markdown sheet - the URL,
+``--exam``, when it ran, the browser it drove and the verdict the run earned -
+ready to paste into the staging ticket. The sheet carries the verdict it earned:
+a run that could not measure a row prints ``CANNOT MEASURE`` rather than a table
+that merely looks complete.
 """
 from __future__ import annotations
 
@@ -1147,6 +1153,91 @@ ROW_ORDER = (
 )
 
 
+#: What the sheet calls each exit code. The word matters more than the number:
+#: a person pastes this into a ticket, and "CANNOT MEASURE" beside a table of
+#: twelve rows is the difference between a pilot's evidence and a table nobody
+#: filled in.
+VERDICTS = {
+    EXIT_OK: "SIGNED OFF",
+    EXIT_FINDING: "NOT SIGNED OFF",
+    EXIT_CANNOT_MEASURE: "CANNOT MEASURE",
+}
+
+
+def _cell(text) -> str:
+    """One table cell: a single line, no column break, and ASCII.
+
+    A detail here is a sentence this driver wrote (`*Akhiri Live* is confirmed, and
+    the next join token is refused`) and may carry a pipe or a newline from a page
+    error; either one would split the row into the wrong columns, which is how a
+    table starts lying without anyone editing it.
+    """
+    flat = " ".join(str(text).split())
+    return ascii_safe(flat).replace("|", "\\|")
+
+
+def signoff_sheet(base_url: str, exam_id: str, rows: list, code: int, *,
+                  browser: str = "", devices: str = "", run_at: str = "") -> str:
+    """The twelve rows as a Markdown sign-off sheet a person can paste.
+
+    `docs/SCANMEET_BIZNET_STAGING.md` §2 ends with a sheet a person fills in by
+    hand, and the gate's own console table is not that: it has no verdict line, no
+    exam, no run time, and a reader cannot tell a `SKIP` in a two-column dump from
+    one in a signed page. This prints the same twelve readings **with the verdict
+    they earned** — including the verdicts that are not a sign-off, because a run
+    that could not measure two rows must not leave a table that looks complete.
+
+    Everything is ASCII for the same reason the rest of this file is: a Windows
+    console and a cp1252 log are both places this gets copied to.
+    """
+    passed = sum(1 for item in rows if item.state == "pass")
+    failed = [item for item in rows if item.state == "fail"]
+    skipped = [item for item in rows if item.state == "skipped"]
+    host = ascii_safe(base_url.rstrip("/"))
+    lines = [
+        f"## ScanMeet media sign-off - {host}",
+        "",
+        f"- **Verdict:** `{VERDICTS.get(code, 'UNKNOWN')}` (exit {code}) - "
+        f"{passed}/{len(rows)} row(s) passed",
+        f"- **Exam:** `{_cell(exam_id)}`",
+    ]
+    if run_at:
+        lines.append(f"- **Run at:** {_cell(run_at)}")
+    if browser:
+        lines.append(f"- **Browser:** `{_cell(browser)}`"
+                     + (f" ({_cell(devices)})" if devices else ""))
+    lines += [
+        "",
+        "| # | Row | State | What this run observed |",
+        "| --- | --- | --- | --- |",
+    ]
+    for index, item in enumerate(rows, start=1):
+        # A gap is emphasised exactly as a finding is: in a sheet that is mostly
+        # PASS, the two rows that are not evidence are the two a reader must see.
+        state = {"pass": "PASS", "fail": "**FAIL**",
+                 "skipped": "**SKIP**"}.get(item.state, "**? **")
+        lines.append(
+            f"| {index} | `{_cell(item.name)}` | {state} | {_cell(item.detail)} |")
+    lines.append("")
+    if code == EXIT_OK:
+        lines.append(
+            "Every row passed: cameras decode, the microphone is refused until a "
+            "teacher approves it and revoked after, no pupil receives another's "
+            "media, and the ended room admits nobody.")
+    elif failed:
+        lines.append(
+            f"{len(failed)} row(s) disagreed and {len(skipped)} could not be "
+            "measured. A room is not ready for pupils until every row passes: "
+            "the rows above are the pilot's own evidence, not a checklist.")
+    else:
+        reasons = {ascii_safe(item.detail) for item in skipped}
+        lines.append(
+            f"{len(skipped)} of {len(rows)} row(s) were never taken, so this is "
+            "**not** a sign-off and must not be filed as one."
+            + (f" Every gap: {_cell(reasons.pop())}" if len(reasons) == 1 else ""))
+    return "\n".join(lines)
+
+
 def run(*, base_url: str, exam_id: str, accounts: dict, insecure: bool = False,
         binary: str = "", fake: bool = True, video_file: str = "",
         keep_room: bool = False):
@@ -1185,6 +1276,9 @@ def main(argv=None) -> int:
                         help="leave the room open for a human pilot afterwards")
     parser.add_argument("--json", action="store_true",
                         help="print the whole reading as JSON on stdout")
+    parser.add_argument("--signoff", action="store_true",
+                        help="print the twelve rows as a Markdown sign-off sheet "
+                             "carrying the run's URL, exam and verdict")
     args = parser.parse_args(argv)
 
     missing = [name for name, value in (
@@ -1214,6 +1308,15 @@ def main(argv=None) -> int:
 
     if args.json:
         print(json.dumps(payload, indent=1, ensure_ascii=True, default=str))
+        return code
+
+    if args.signoff:
+        from datetime import datetime, timezone
+
+        print(signoff_sheet(
+            args.url, args.exam.strip(), rows, code, browser=binary,
+            devices="synthetic devices" if not args.no_fake_devices else "real devices",
+            run_at=datetime.now(timezone.utc).isoformat(timespec="seconds")))
         return code
 
     print(ascii_safe(
