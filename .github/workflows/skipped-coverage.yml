@@ -20,8 +20,9 @@ jobs:
     timeout-minutes: 90
     env:
       SUPABASE_URL: https://example.invalid
-      SUPABASE_SERVICE_KEY: ci-only-placeholder-key
-      SUPABASE_ANON_KEY: ci-only-placeholder-key
+      # Offline, fake JWTs that pass SDK syntax validation but grant no access.
+      SUPABASE_SERVICE_KEY: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJjaS10ZXN0In0.test-only-signature
+      SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJjaS10ZXN0In0.test-only-signature
       FLASK_SECRET_KEY: ci-only-placeholder-secret
       SCANGRADE_MUTATION: mutate_ci_workflows
       SCANGRADE_LIVE_ENABLED: 'false'
@@ -62,7 +63,17 @@ jobs:
       - name: Prepare throwaway offline fixtures
         run: |
           test ! -e .env || { echo "::error::checkout includes an env file"; exit 1; }
-          touch .env
+          # Keep the test's .env region claim internally consistent.
+          # The app still uses the non-routable process SUPABASE_URL above.
+          python - <<'PY'
+          from pathlib import Path
+          from deploy.supabase_region import REF, REGION
+          Path(".env").write_text(
+              f"SUPABASE_URL=https://{REF}.supabase.co\n"
+              f"DIRECT_URL=postgresql://ci:fake@aws-1-{REGION}.pooler.supabase.com:6543/postgres\n",
+              encoding="utf-8",
+          )
+          PY
           mkdir -p .freebuff
           python - <<'PY'
           import json
