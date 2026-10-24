@@ -188,6 +188,11 @@ not a sign-off. Keep the raw reading beside it with
 together, because both write stdout and the run that asked for a sheet would
 otherwise get a JSON blob and no sheet at all.
 
+The driver refuses the live site (`scan-grade.app`) unless `--allow-production`,
+because a stale `$SCANMEET_STAGING_URL` would otherwise open a real room and press
+a real teacher's controls on the exams pupils are sitting: the escape hatch is for
+a deliberate pilot, never a copy-paste.
+
 What the driver covers, from the table below: 01, 02, 03, 04, 05, 06, 07 and 10,
 plus the isolation reading the table asks a person to take from two console
 snippets. What stays manual: **08** (a pupil trying chat, screen share or

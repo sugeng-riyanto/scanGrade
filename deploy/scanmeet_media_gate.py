@@ -104,6 +104,19 @@ EXIT_OK = 0
 EXIT_FINDING = 1
 EXIT_CANNOT_MEASURE = 2
 
+#: The live site. This driver opens a Live room and presses a real teacher's
+#: controls, so the one host it must never reach by a stale `$SCANMEET_STAGING_URL`
+#: is the one pupils are sitting exams on. The same host
+#: `deploy/scanmeet_staging_gate.py` refuses as a staging target, and a test holds
+#: the two constants equal rather than trusting this copy to stay right.
+PRODUCTION_HOSTS = ("scan-grade.app", "www.scan-grade.app")
+
+
+def production_target(url: str) -> bool:
+    """True when `url` is the live site rather than a staging host."""
+    host = (urllib.parse.urlparse(url).hostname or "").lower()
+    return host in PRODUCTION_HOSTS
+
 PAGE = "/live/exam/{exam_id}"
 STATUS = "/api/live/exams/{exam_id}"
 START = "/api/live/exams/{exam_id}/sessions"
@@ -1284,6 +1297,9 @@ def main(argv=None) -> int:
     parser.add_argument("--signoff", action="store_true",
                         help="print the twelve rows as a Markdown sign-off sheet "
                              "carrying the run's URL, exam and verdict")
+    parser.add_argument("--allow-production", action="store_true",
+                        help="let the driver run against the live site (a deliberate "
+                             "pilot, never an accident)")
     args = parser.parse_args(argv)
 
     missing = [name for name, value in (
@@ -1293,6 +1309,13 @@ def main(argv=None) -> int:
         print("COULD NOT MEASURE: " + ", ".join(missing) + " is empty.")
         print("Pass the staging URL, the exam id and the teacher and pupil "
               "accounts as email:password; nothing is printed back.")
+        return EXIT_CANNOT_MEASURE
+
+    if production_target(args.url) and not args.allow_production:
+        print(f"COULD NOT MEASURE: {ascii_safe(args.url.rstrip('/'))} is the live site.")
+        print("This driver opens a Live room and presses a teacher's controls, so it "
+              "runs against staging. Pass --allow-production for a deliberate pilot "
+              "on the live site.")
         return EXIT_CANNOT_MEASURE
 
     # Two flags, one stream. The first version let `--json` win and dropped the

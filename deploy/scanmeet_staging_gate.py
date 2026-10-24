@@ -98,6 +98,13 @@ def validate_file(path: Path, checkout: Path, measure: bool | None = None) -> li
         problems.append("Private staging env must be outside the Git checkout")
     if path.is_symlink():
         problems.append("Private staging env must not be a symlink")
+    if not path.exists():
+        # `stat()` failing covered this case as "not readable", which is the
+        # wrong sentence for the state a fresh box is in: there is nothing to
+        # read yet. Reported before the mode is measured, because there is none.
+        problems.append("Private staging env does not exist (create it with umask "
+                        "077 on the staging host)")
+        return problems
     try:
         problems.extend(mode_problem(path.stat().st_mode, measure))
     except OSError:
