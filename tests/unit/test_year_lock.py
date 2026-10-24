@@ -43,6 +43,10 @@ EXEMPT = {
         "authorises only a temporary LiveKit microphone; no year's records change",
     "live_bp /sessions/<sid>/end":
         "closes media supervision, not the exam sitting or any submitted answer",
+    "live_bp /sessions/<sid>/token":
+        "issues a short-lived media join credential after exam access checks; neither issues nor edits a sitting",
+    "live_webhook_bp /webhook/livekit":
+        "persists signed transport audit events to isolated LiveKit tables; it cannot change exam results",
     # ── teacher.py: routes that read or write something other than a year ──
     "teacher_bp /exams/parse-pdf": "reads an upload into a preview; writes no exam yet",
     "teacher_bp /exams/generate-key": "generates answer-key text for a form; writes nothing",
