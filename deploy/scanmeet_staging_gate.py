@@ -145,9 +145,18 @@ def main(argv=None) -> int:
               "on the staging host")
     print("PASS: isolated ScanMeet staging configuration (offline)")
     if args.probe_livekit:
+        # The import is separated from the call: this module is standard library
+        # only, and the staging suite runs it where `requirements.txt` is not
+        # installed, so a failed import here is about the probe -- not about the
+        # credentials it would have checked.
+        try:
+            from deploy.livekit_connectivity import MissingSdk, probe
+        except ImportError as exc:
+            print(f"FAIL: the LiveKit probe could not be loaded ({exc}) - "
+                  "pip install -r requirements-live.txt")
+            return 2
         try:
             import asyncio
-            from deploy.livekit_connectivity import MissingSdk, probe
             asyncio.run(probe(settings))
         except MissingSdk as exc:
             # A venv without requirements-live.txt is not a credential problem,
