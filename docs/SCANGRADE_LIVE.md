@@ -42,6 +42,37 @@ User-facing name: **ScanMeet**. Backend module names remain `scan_live_*` for mi
   (authorized staff; clears a grant parked in `approving`/`closing`)
 - POST /api/live/sessions/<id>/end
 
+## Microphone-approval state machine
+
+One row per pupil per room, and six statuses. Every transition is a conditional
+write (`where status = <what this request saw>`), so two requests cannot both
+win and the loser answers 409 rather than reporting a state it did not set:
+
+| from | pupil raises | approve | reject | close | reconcile |
+|---|---|---|---|---|---|
+| *(none)* | → `pending` | — | — | — | — |
+| `pending` | returns the row | → `approved` | → `rejected` | 409 | 409 |
+| `approving` | returns the row | 409 | 409 | 409 | → `pending` |
+| `approved` | returns the row | 409 | 409 | → `closed` | 409 |
+| `closing` | returns the row | 409 | 409 | 409 | → `closed` |
+| `rejected` | → new `pending` | 409 | 409 | 409 | 409 |
+| `closed` | → new `pending` | 409 | 409 | 409 | 409 |
+
+Three rules hold that table in place, and each has its own tests (the matrix,
+retries and races are in `tests/unit/test_live_mic_state_machine.py`):
+
+- **The open set is the index's, not the route's.** Migration 070's partial
+  unique index counts `pending`, `approving`, `approved` **and** `closing` as one
+  open request. Reading only the first three left a pupil whose row was `closing`
+  with a 503 they could not resolve; the list is `live_policy.OPEN_GRANTS` now and
+  the fixture raises 23505 like the database does.
+- **Failures end with the microphone off.** A LiveKit error between the
+  transitional and final write reverts the row and mutes; a bookkeeping write that
+  matches nothing (the row moved meanwhile) mutes again and answers 409 rather than
+  claiming an approval it no longer owns.
+- **A grant is only ever repaired by the supervising teacher**, and repair is
+  idempotent by refusal: a repaired row answers 409 the second time.
+
 ## Operational caveats / missing work before production
 
 - A standalone staging UI is at /live/exam/<exam_id> but intentionally not linked from active exam pages.

@@ -170,9 +170,14 @@ def hand_raise(sid):
     session = _session(db, sid)
     if _check(db, session) != "student":
         return _denied()
+    # These four are the states migration 070's unique partial index calls open.
+    # Reading the three this route used to name left ``closing`` — including a
+    # ``closing`` row parked by an interrupted close — invisible here, so the
+    # insert below hit the index and the pupil got 503 "retry" for an action
+    # that could never succeed until the teacher repaired the row.
     active = _one(db.table("scan_live_hand_raises").select("id,status")
                   .eq("session_id", sid).eq("school_id", session["school_id"])
-                  .eq("student_id", g.user_id).in_("status", ["pending", "approving", "approved"]))
+                  .eq("student_id", g.user_id).in_("status", list(live_policy.OPEN_GRANTS)))
     if active:
         return jsonify(active)
     try:
@@ -244,10 +249,20 @@ def moderate(sid, rid, action):
             current_app.config, sid, session["room_name"],
             raise_row["student_id"], enabled)
         final_state = "approved" if enabled else "closed"
-        db.table("scan_live_hand_raises").update({"status": final_state}) \
-            .eq("id", rid).eq("session_id", sid) \
-            .eq("school_id", session["school_id"]) \
-            .eq("status", transitional).execute()
+        finished = (db.table("scan_live_hand_raises").update({"status": final_state})
+                    .eq("id", rid).eq("session_id", sid)
+                    .eq("school_id", session["school_id"])
+                    .eq("status", transitional).execute().data or [])
+        if not finished:
+            # The row moved while the permission was being applied. Reporting
+            # "approved" here would be a claim about a row this request no
+            # longer owns, and for an approve it would leave a live microphone
+            # nobody voted for. Fail closed and say so.
+            if enabled:
+                livekit_gateway.set_student_mic(
+                    current_app.config, sid, session["room_name"],
+                    raise_row["student_id"], False)
+            return jsonify({"error": "Request state has changed"}), 409
     except Exception:
         # Fail CLOSED if the permission update or bookkeeping did not finish.
         # A retry is possible after resetting the transitional state.
