@@ -6128,17 +6128,43 @@ function examApp(duration, totalQ) {
         // The caret goes to the end of the paragraph, so the command applies to what
         // the pupil types next; when the paragraph *does* already hold the caret (or
         // a selection, which `mousedown.prevent` keeps) nothing is moved.
+        //
+        // Focus is not where the selection lives, and this used to confuse the two.
+        // A control that is not a button — the font, size and alignment `<select>`s,
+        // the Teks/Canvas tabs — takes the focus off the paragraph and leaves the
+        // pupil's selection exactly where they put it. The test above only asked
+        // where the *focus* was, so in that state this focused the paragraph and
+        // **replaced the selection with a caret at the end**, and the command then
+        // ran on an empty caret: Bold added no markup, the list buttons did
+        // nothing, and a pupil who had just picked Serif read the whole toolbar as
+        // dead. The selection is put back after the focus is taken, in that order,
+        // because `focus()` is what moves a caret and a command whose caret sits in
+        // a `<select>` does nothing at all.
         essayTarget(qIdx) {
             const target = this.currentPara(qIdx);
+            if (!target.el) return target;
             const active = document.activeElement;
-            if (!target.el || (active && active.isContentEditable && target.el.contains(active))) {
+            if (active && active.isContentEditable && target.el.contains(active)) {
                 return target;
             }
+            const selection = window.getSelection();
+            const live = selection && selection.rangeCount ? selection.getRangeAt(0) : null;
+            // The live selection first — Chrome keeps it when a `<select>` takes
+            // the focus — and, when the browser dropped it on the focus change,
+            // the one the paragraph's `mouseup`/`keyup` remembered. Only a sheet
+            // with neither falls back to the end of the paragraph.
+            const kept = (live && target.el.contains(live.commonAncestorContainer))
+                ? live.cloneRange()
+                : (window.SGEssayEditor ? window.SGEssayEditor.savedRange(target.el) : null);
             target.el.focus();
+            if (kept && selection) {
+                selection.removeAllRanges();
+                selection.addRange(kept);
+                return target;
+            }
             const range = document.createRange();
             range.selectNodeContents(target.el);
             range.collapse(false);
-            const selection = window.getSelection();
             if (selection) {
                 selection.removeAllRanges();
                 selection.addRange(range);

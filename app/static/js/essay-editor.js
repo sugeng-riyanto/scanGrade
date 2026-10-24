@@ -139,6 +139,18 @@
         return false;
     }
 
+    /* The last range a pupil made in `editor`, while it is still remembered.
+     *
+     * `restore()` puts it back, but it answers "the caret is in there" for a
+     * caret `focus()` has just placed as well, which is indistinguishable from a
+     * real one at the call site. This hands the caller the range instead, so the
+     * toolbar can decide between "the pupil's own selection" and "nothing was
+     * selected, so the caret goes to the end" — see `essayTarget`.
+     */
+    function savedRange(editor) {
+        return saved && saved.editor === editor ? saved.range : null;
+    }
+
     /* Whether the caret sits inside a list item — the test that decides whether
      * Enter should make a new bullet (native) or a new paragraph (the page). */
     function inListItem(editor) {
@@ -624,6 +636,7 @@
     root.SGEssayEditor = {
         remember: remember,
         restore: restore,
+        savedRange: savedRange,
         toggleList: toggleList,
         listKind: listKind,
         inListItem: inListItem,
