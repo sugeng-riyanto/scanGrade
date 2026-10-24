@@ -53,6 +53,18 @@ def participant_identity(config, session_id: str, user_id: str) -> str:
     return "p_" + digest
 
 
+def server_api_url(config) -> str:
+    """Convert secure browser signaling WSS to LiveKit's HTTPS RoomService URL.
+
+    LiveKit JS needs wss://; the Python admin API sends HTTP/Twirp requests.
+    Fail closed for insecure or unrecognized endpoints in staging/production.
+    """
+    url = setting(config, "LIVEKIT_URL")
+    if not url.startswith("wss://") or not url[6:]:
+        raise ValueError("LIVEKIT_URL must be a secure wss:// endpoint")
+    return "https://" + url[6:]
+
+
 def allowed_sources(role: str, microphone_approved: bool = False) -> list[str]:
     if role == LIVE_TEACHER:
         return ["camera", "microphone"]

@@ -1,6 +1,6 @@
-# ScanGrade Live — Exam Mode pilot (isolated integration)
+# ScanMeet — live exam supervision inside ScanGrade (staging pilot)
 
-Implementation branch: feature/scangrade-livekit-exam-20261024.
+Implementation branch: integration/livekit-secure-main-20261024.\nUser-facing name: **ScanMeet**. Backend module names remain `scan_live_*` for migration compatibility.
 
 ## Safety contract
 
@@ -89,3 +89,26 @@ that the receiver identity allowed by a student's track subscription permissions
 is exactly the teacher who created the session. Other staff cannot take over
 an active room silently. Multi-invigilator support requires a separate reviewed
 permission design.
+
+
+## Read-only LiveKit connectivity smoke test
+
+After deploying an **isolated staging** database and installing
+`pip install -r requirements-live.txt`, prepare a private env file with both
+ScanGrade Live flags true and the real LiveKit Cloud (or HTTPS-enabled
+self-hosted) WSS endpoint / API credentials. Never commit that file.
+
+Run on staging (from repository root):
+
+    python -m deploy.livekit_connectivity --env /path/to/private/staging.env
+
+This runs the existing offline preflight and requests a **read-only** room list
+from LiveKit over HTTPS. It does not create any Live rooms or affect exams.
+PASS verifies only that credentials reach the server; it does **not** validate
+video media delivery, camera permissions, privacy against altered clients,
+cross-school access, or signed-webhook behavior. Test teacher and students with
+real browser sessions before enabling the pilot. If the command reports FAIL,
+check credentials, egress to LiveKit over 443/TCP, DNS, and the endpoint.
+
+The browser SDK uses `wss://` but the administrative Python RoomService
+uses `https://`; `live_policy.server_api_url` derives it safely.

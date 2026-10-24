@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 from app.services.live_policy import (
-    TOKEN_TTL, LIVE_STUDENT, allowed_sources, client_ready, participant_identity, setting,
+    TOKEN_TTL, LIVE_STUDENT, allowed_sources, client_ready, participant_identity, server_api_url, setting,
 )
 
 
@@ -46,7 +46,7 @@ async def _set_student_mic(config, session_id, room, student_id, enabled):
     if enabled:
         sources.append(TrackSource.MICROPHONE)
     client = api.LiveKitAPI(
-        url=setting(config, "LIVEKIT_URL"),
+        url=server_api_url(config),
         api_key=setting(config, "LIVEKIT_API_KEY"),
         api_secret=setting(config, "LIVEKIT_API_SECRET"),
     )
@@ -70,7 +70,7 @@ def set_student_mic(config, session_id, room, student_id, enabled):
 async def _end_room(config, room):
     from livekit import api
     from livekit.protocol.room import DeleteRoomRequest
-    client = api.LiveKitAPI(url=setting(config, "LIVEKIT_URL"),
+    client = api.LiveKitAPI(url=server_api_url(config),
                             api_key=setting(config, "LIVEKIT_API_KEY"),
                             api_secret=setting(config, "LIVEKIT_API_SECRET"))
     try:

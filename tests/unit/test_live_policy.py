@@ -37,3 +37,16 @@ def test_identity_is_opaque_stable_and_scoped():
     assert a != live_policy.participant_identity(config, "session-b", "user-a")
     assert a != live_policy.participant_identity(config, "session-a", "user-b")
     assert "user-a" not in a
+
+
+def test_server_api_endpoint_uses_https_without_mutating_browser_wss():
+    config = {"LIVEKIT_URL": "wss://class.livekit.cloud"}
+    assert live_policy.server_api_url(config) == "https://class.livekit.cloud"
+    assert config["LIVEKIT_URL"] == "wss://class.livekit.cloud"
+
+
+def test_server_api_rejects_insecure_and_missing_signaling_urls():
+    import pytest
+    for value in ("ws://127.0.0.1:7880", "http://host", "https://host", ""):
+        with pytest.raises(ValueError, match="secure wss"):
+            live_policy.server_api_url({"LIVEKIT_URL": value})
