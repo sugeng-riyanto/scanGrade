@@ -294,6 +294,45 @@ def test_a_teacher_cannot_start_a_room_for_a_paper_that_is_off(app, monkeypatch)
     assert db.rows["scan_live_sessions"] == []
 
 
+def test_switching_back_on_starts_a_fresh_room_not_the_ended_one(app, monkeypatch):
+    """The acceptance matrix's "never revives revoked grants" row.
+
+    A re-enabled paper must reach `POST /sessions`, which inserts a new room
+    with a new `room_name`; the ended row stays ended and its tokens stay dead.
+    """
+    db, _ = _stage(monkeypatch, _rows())
+    teacher = dict(user_school_id="school-1", user_role="guru", user_id="teacher-a")
+
+    _toggle(app, {"enabled": True}, **teacher)
+    first = door(app, "create_session", "exam-1")
+    assert first.status_code == 201
+    assert first.get_json()["existing"] is False
+
+    _toggle(app, {"enabled": False}, **teacher)
+    _toggle(app, {"enabled": True}, **teacher)
+    second = door(app, "create_session", "exam-1")
+
+    assert second.status_code == 201
+    assert second.get_json()["existing"] is False
+    sessions = db.rows["scan_live_sessions"]
+    assert [row["status"] for row in sessions] == ["ended", "active"]
+    assert sessions[0]["room_name"] != sessions[1]["room_name"]
+
+
+def test_the_switch_touches_no_exam_state(app, monkeypatch):
+    """Answers, timer and submissions are not columns of this feature."""
+    db, _ = _stage(monkeypatch, _rows(sessions=[_session()]))
+    before = {key: len(value) for key, value in db.rows.items()}
+
+    _toggle(app, {"enabled": True}, user_school_id="school-1",
+            user_role="guru", user_id="teacher-a")
+    _toggle(app, {"enabled": False}, user_school_id="school-1",
+            user_role="guru", user_id="teacher-a")
+
+    assert {key: len(value) for key, value in db.rows.items()} == before
+    assert set(db.rows) == {"exams", "scan_live_sessions"}
+
+
 def test_a_box_without_the_migration_reads_the_paper_as_off(monkeypatch):
     """The fallback is the feature's default, not a silent pass.
 
