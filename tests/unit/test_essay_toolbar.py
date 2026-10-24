@@ -277,7 +277,7 @@ const ctx = {
     refreshListState: function () {}
 };
 const api = new Function('ctx', 'with (ctx) { return {' +
-    method('essayTarget') + ',' + method('execCmd') + '}; }')(ctx);
+    method('paragraphEl') + ',' + method('essayTarget') + ',' + method('execCmd') + '}; }')(ctx);
 ctx.essayTarget = api.essayTarget;
 
 let commanded = null;
@@ -299,6 +299,13 @@ const bold = api.execCmd.call(ctx, 0, 'bold');
 record('the command reached the browser', commanded, 'bold');
 record('the page was told to save the paragraph',
        saved.length === 1 && saved[0][0] === 0 && saved[0][1] === 0 && saved[0][2] === true, true);
+
+/* A question with no stored paragraph row — the sheet is on screen from the
+   `x-for` fallback — is still the one the tools act on. */
+record('the paragraph is found without a stored row',
+       api.paragraphEl.call(ctx, 0, undefined) === el, true);
+record('and a question with no sheet answers null',
+       api.paragraphEl.call(ctx, 9, null), null);
 
 /* A selection the pupil made is theirs: the resolver must not move it. */
 const range = doc.createRange();
@@ -503,6 +510,8 @@ class TestTheWiring:
         assert results["it takes the focus"] is True
         assert results["the caret is inside it"] is True
         assert results["the caret is at the end of the paragraph"] is True
+        assert results["the paragraph is found without a stored row"] is True
+        assert results["and a question with no sheet answers null"] is None
         assert results["a selection the pupil made is kept"] == "siap"
         assert results["the command reached the browser"] == "bold"
         assert results["the page was told to save the paragraph"] is True

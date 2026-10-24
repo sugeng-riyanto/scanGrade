@@ -5961,11 +5961,21 @@ function examApp(duration, totalQ) {
         // the empty one. Measured on the live preview paper before this change:
         // `div.sg-essay-para` held "halo dunia", `answersText[1]` was "".
         paragraphEl(qIdx, para) {
-            if (!para) return null;
-            const wanted = qIdx + ':' + para.id;
             const nodes = document.querySelectorAll('[data-para]');
+            const wanted = para ? qIdx + ':' + para.id : '';
             for (let i = 0; i < nodes.length; i += 1) {
                 if (nodes[i].getAttribute('data-para') === wanted) return nodes[i];
+            }
+            // No stored row for this question: the sheet on screen was drawn by the
+            // `x-for` fallback (`paragraphs[i] || [{id: 'p0', …}]`), which is what a
+            // paper whose question order was rebuilt after seeding looks like from
+            // the state's side. The paragraph the pupil is looking at is still the
+            // one to act on, so it is found by its prefix. Answering `null` here is
+            // what left every writing tool dead on a box that typing worked in —
+            // the input handler creates the row, and a toolbar never did.
+            const prefix = qIdx + ':';
+            for (let i = 0; i < nodes.length; i += 1) {
+                if ((nodes[i].getAttribute('data-para') || '').indexOf(prefix) === 0) return nodes[i];
             }
             return null;
         },
