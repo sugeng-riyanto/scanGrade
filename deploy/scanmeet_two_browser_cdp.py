@@ -172,7 +172,7 @@ async def main_async(args):
                 passed("teacher approves pupil1 microphone only")
                 passed("pupil2 microphone stays gated")
             else:
-                print("SKIP: approval transition (supply both --ask-selector and --approve-selector)")
+                raise AssertionError("microphone approval transition was not exercised")
             results["status"] = "PASS"
         finally:
             await b.close()
