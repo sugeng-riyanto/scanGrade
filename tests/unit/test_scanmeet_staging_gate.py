@@ -181,6 +181,11 @@ class TheOptionalSdkIsNamedRatherThanBlamed(unittest.TestCase):
             "\n".join(f"{key}={_json.dumps(value) if ' ' in value else value}"
                       for key, value in valid().items()) + "\n",
             encoding="utf-8")
+        # `write_text` makes the file 0644 on Linux (0666 & ~umask), which the gate
+        # refuses on purpose -- and it is the first refusal, so the SDK branch these
+        # tests are about was never reached there. The runbook creates this file
+        # with `umask 077`; this fixture is the same private file.
+        path.chmod(0o600)
         return path
 
     def test_the_staging_gate_names_a_missing_sdk(self):
