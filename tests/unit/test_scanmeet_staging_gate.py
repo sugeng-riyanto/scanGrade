@@ -44,6 +44,25 @@ class ScanMeetStagingBoundary(unittest.TestCase):
         env["SCANMEET_STAGING_URL"] = "https://scan-grade.app"
         self.assertTrue(any("separate HTTPS" in s for s in gate.validate(env, "prod-ref")))
 
+    def test_the_deployed_site_is_refused_under_every_name_it_answers_to(self):
+        """The one host a staging pilot must not point at.
+
+        This file used to refuse `scan-grade.app` alone, which is the demo email
+        domain in `manage.py`. The deployed app is `scangrade.web.id`, and
+        `lmsshb.scangrade.web.id` reaches the same box, so both were accepted as
+        "a real separate HTTPS host" — a staging run against production, with the
+        gate reporting PASS.
+        """
+        for url in ("https://scangrade.web.id", "https://www.scangrade.web.id",
+                    "https://lmsshb.scangrade.web.id",
+                    "https://staging.scangrade.web.id"):
+            env = valid()
+            env["SCANMEET_STAGING_URL"] = url
+            self.assertTrue(any("separate HTTPS" in s for s in gate.validate(env, "prod-ref")),
+                            url)
+        self.assertEqual(gate.PRODUCTION_SITE, "scangrade.web.id",
+                         "the constant has to name the site the README deploys to")
+
     def test_placeholder_supabase_key_refused(self):
         env = valid()
         env["SUPABASE_SERVICE_KEY"] = "replace-me"
