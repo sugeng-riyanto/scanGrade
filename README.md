@@ -4,6 +4,36 @@ Platform ujian digital untuk sekolah: penyusunan soal, ujian online **offline-fi
 
 Dipakai produksi di <https://scangrade.web.id> — VPS 1 vCPU, 3 worker gunicorn+gevent, ~500 murid per sekolah dengan WiFi tidak merata.
 
+## ScanMeet — pembaruan 25 Oktober 2026 / update on 25 October 2026
+
+> **Status / Availability:** ScanMeet Exam code is integrated, but **Live remains OFF in production**. The instructions below describe the planned pilot experience, **not a currently available service**. Do not turn on production feature flags until isolated staging proves media **12/12** and webhook **7/7**, plus release approval.
+
+### Perubahan hari ini / Today's changes
+
+- **PR #9 and #10** integrated the secure LiveKit-based exam supervision and two-browser CDP testing into the mainline.
+- **PR #23** pinned and self-hosted LiveKit browser SDK `2.23.0` at `app/static/vendor/livekit/2.23.0/`, loading through cache-busted `asset_v`. The public-CDN script fallback was removed for exam safety.
+- **Database migrations 070/071** add exam Live session/audit tables and the per-exam `exams.scan_live_enabled` switch. The infrastructure operator reported both applied with recovery points on 25 October; verify against the migration ledger before future deployment operations.
+- **Staging fixture helper:** `deploy/scanmeet_staging_fixture.py` prepares an isolated synthetic school/teacher/two-pupil/outsider/exam fixture, dry-run by default. `--write` changes the staging database. Never use a production Supabase project or expose credentials in logs/artifacts.
+- **CI:** Six required workflows passed for commit `fb7d18286e` (Linux and Windows units, browser, region, skipped coverage, landing QC).
+- **Production status:** the operator reported `fb7d182` served successfully, health endpoint OK, and both `SCANGRADE_LIVE_ENABLED` and `SCANGRADE_LIVE_EXAM_ENABLED` OFF. This report is not a real-media sign-off.
+- **Outstanding:** a separate HTTPS staging host (outside `*.scangrade.web.id`), separate Supabase and LiveKit staging projects, GitHub Environment `scanmeet-staging` secrets, then real camera/microphone isolation **12/12** and webhook **7/7** results. Physical Edge/Android/iPhone tests are not yet verified.
+
+### Cara memakai ScanMeet / How to use ScanMeet
+
+| Guru / Teacher | Murid / Student |
+|---|---|
+| 1. Buka dashboard guru dan pilih ujian. / Open the teacher dashboard and select an exam. | 1. Masuk dan buka ujian yang diberikan. / Sign in and open your assigned exam. |
+| 2. Jika fitur tersedia, aktifkan ScanMeet untuk ujian itu. / If available, enable ScanMeet for that exam. | 2. Izinkan kamera saat browser meminta. / Allow camera access when the browser prompts you. |
+| 3. Klik **Mulai pengawasan**. / Choose **Start supervision**. | 3. Kerjakan soal. Mikrofon tetap mati sampai disetujui guru. / Answer questions. Your mic stays off until the teacher approves. |
+| 4. Lihat kamera peserta dan setujui permintaan bicara bila perlu. / View student cameras and approve speaking requests as needed. | 4. Gunakan **Angkat tangan** untuk meminta bicara. / Use **Raise hand** to ask to speak. |
+| 5. Klik **Akhiri Live** saat selesai. / Choose **End Live** when done. | 5. Bila video putus, tetap kerjakan ujian dan laporkan kepada guru. / If video disconnects, continue the exam and notify the teacher. |
+
+**Exam-mode rules / Aturan mode ujian:** camera required, microphone by teacher approval, hand raise enabled, chat disabled, recording disabled; media failure must not interrupt exam answers, autosave or the timer.
+
+**Learn more / Panduan:** [Landing-page ScanMeet guide](https://scangrade.web.id/#scanmeet-guide) (visible after the documentation change is deployed), [technical configuration](docs/SCANGRADE_LIVE.md), [isolated staging instructions](docs/SCANMEET_BIZNET_STAGING.md), [test acceptance criteria](docs/SCANMEET_ACCEPTANCE_MATRIX.md).
+
+---
+
 ## Daftar Isi
 
 - [Fitur Utama](#fitur-utama)
