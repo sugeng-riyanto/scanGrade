@@ -67,6 +67,45 @@ The media gate itself never provisions any of them — it refuses with exit 2 an
 names what it could not measure, which is why "exit 2" is a blocker and not a
 pass.
 
+## This host already exists (provisioned 2026-10-25)
+
+Everything on the *host* side is done, so what remains is credentials, not
+installation. On the production box, beside `/opt/scangrade` and touching nothing
+in it:
+
+| Piece | Value |
+|---|---|
+| Host | **`https://scanmeet-stg.103.93.133.193.sslip.io`** — Let's Encrypt, auto-renew, **not** a subdomain of the live domain (`deploy/scanmeet_staging_gate.py` accepts it; that check is what keeps staging from being the exam site by accident) |
+| nginx | `/etc/nginx/sites-enabled/scanmeet-staging`, its own `server` block and document root; the production vhost was not edited |
+| Checkout | `/home/scangrade/scanmeet-staging` at the same SHA the release serves (`fb7d182` when this was written) |
+| Virtualenv | `.venv-scanmeet` (Python 3.12.15, `requirements.txt` + `requirements-live.txt`, `pip check` clean, `python -m deploy.livekit_sdk_contract` PASS) |
+| Env file | `/home/scangrade/.config/scanmeet/staging.env`, mode `0600`, scaffolded with the keys and their comments and **no values** |
+| Unit | `scanmeet-staging.service`, `127.0.0.1:5055`, one worker, `Restart=no`, **disabled on purpose** |
+| Today's answer | the host serves a static page naming the missing values; the gate exits **1** naming `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `SUPABASE_ANON_KEY`, `FLASK_SECRET_KEY`, `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` |
+
+The hostname embeds this box's IP because it was issued without the owner's DNS.
+If the IP changes, re-issue the certificate and update `server_name` — the rest of
+the procedure is unchanged.
+
+When the seven values arrive:
+
+```bash
+# 1. the two additive migrations, against the STAGING project only
+#    (apply_migration.py refuses a URL whose ref is production's)
+cd /home/scangrade/scanmeet-staging
+.venv-scanmeet/bin/python deploy/apply_migration.py supabase/migrations/070_scan_live_exam.sql --repo "$PWD"
+.venv-scanmeet/bin/python deploy/apply_migration.py supabase/migrations/071_scan_live_exam_toggle.sql --repo "$PWD"
+# ...then repeat both with --commit
+
+# 2. the four identities and the switch-on paper; it prints the passwords ONCE
+.venv-scanmeet/bin/python -m deploy.scanmeet_staging_fixture \
+  --env /home/scangrade/.config/scanmeet/staging.env --write
+
+# 3. the app, then the vhost switch (the proxy block is already written and
+#    commented in the site file; uncomment it and reload nginx)
+systemctl enable --now scanmeet-staging
+```
+
 ## Commands (SSH on staging server, under an ordinary user)
 
 First obtain the repository on a new, separate path:
