@@ -26,9 +26,13 @@
       method, credentials: "same-origin", cache: "no-store", headers,
       body: body ? JSON.stringify(body) : undefined,
     });
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok) throw Error(body.error || "HTTP " + response.status);
-    return body;
+    // Not `body`: that name is this function's own parameter, and redeclaring it
+    // in the same scope is a SyntaxError the browser raises while *parsing* — so
+    // the whole script never ran, `discover()` never fired, and the teacher's page
+    // sat on "Memeriksa sesi Live..." with every control still hidden.
+    const reply = await response.json().catch(() => ({}));
+    if (!response.ok) throw Error(reply.error || "HTTP " + response.status);
+    return reply;
   }
   function role(participant) {
     try { return JSON.parse(participant.metadata || "{}").role; }
