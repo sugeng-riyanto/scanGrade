@@ -171,6 +171,22 @@ class FakeDB:
                         'duplicate key value violates unique constraint '
                         '"scan_live_events_event_key_key" (23505)')
             return
+        if name == "scan_live_cleanup_jobs":
+            # Migration 073: `scan_live_one_cleanup_per_room`, WHERE status='pending'.
+            # A second enqueue for the same room is a database error, which is how
+            # `live_cleanup.enqueue` learns to annotate the open job instead of
+            # queueing a second deletion.
+            for row in self.rows.get(name, []):
+                same_room = (
+                    row.get("status") == "pending"
+                    and payload.get("status") == "pending"
+                    and str(row.get("session_id")) == str(payload.get("session_id"))
+                    and str(row.get("room_name")) == str(payload.get("room_name")))
+                if same_room:
+                    raise RuntimeError(
+                        'duplicate key value violates unique constraint '
+                        '"scan_live_one_cleanup_per_room" (23505)')
+            return
         if name != "scan_live_hand_raises":
             return
         for row in self.rows.get(name, []):
@@ -188,6 +204,9 @@ class FakeDB:
 
     def statuses(self):
         return [r["status"] for r in self.raises()]
+
+    def jobs(self):
+        return self.rows.get("scan_live_cleanup_jobs", [])
 
 
 def stage(monkeypatch, rows=None, *, mic_errors=(), live_on=True,

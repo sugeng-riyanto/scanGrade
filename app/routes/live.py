@@ -6,7 +6,7 @@ import secrets
 
 from flask import Blueprint, current_app, g, jsonify, request, render_template
 from app.decorators.year_lock import open_year_required
-from app.services import live_exam_toggle, live_policy, livekit_gateway
+from app.services import live_cleanup, live_exam_toggle, live_policy, livekit_gateway
 from app.utils.auth import get_supabase, login_required
 from app.utils.exam_access import can_manage_exam, exam_sitting_allowed
 
@@ -181,7 +181,11 @@ def set_exam_enabled(exam_id):
         result = live_exam_toggle.set_enabled(
             db, exam, value=value,
             end_room=lambda room: livekit_gateway.end_room(
-                current_app.config, room))
+                current_app.config, room),
+            # OFF revoked every new token above; a room that would not delete is
+            # recorded so the retry worker finishes the job after this response.
+            record_cleanup=lambda session, exc: live_cleanup.enqueue(
+                db, session, reason="switch_off", error=exc))
     except live_exam_toggle.Refused as exc:
         log.warning("ScanMeet switch refused for %s: %s", exam_id, exc)
         return jsonify({"error": "Could not save the ScanMeet switch; exam unaffected"}), 409
@@ -405,10 +409,17 @@ def end_session(sid):
         return jsonify({"error": "Session already closed"}), 409
     try:
         livekit_gateway.end_room(current_app.config, session["room_name"])
-    except Exception:
-        # Database is the authoritative gate for all NEW join tokens.
-        # A cleanup job should retry deleting any lingering media room.
+    except Exception as exc:
+        # The database row is the authoritative gate for all NEW join tokens, so
+        # the session is ended either way — but the room may still be publishing
+        # to everyone already inside it. That deletion is owed, and it is written
+        # down (`scan_live_cleanup_jobs`) rather than logged: a worker retries it
+        # after this request, through a restart if necessary.
         log.exception("Live room cleanup failed for %s", sid)
+        try:
+            live_cleanup.enqueue(db, session, reason="session_ended", error=exc)
+        except Exception:  # noqa: BLE001 - the session is already ended
+            log.exception("Live cleanup debt could not be recorded for %s", sid)
         return jsonify({"status": "ended", "media_cleanup": "pending"}), 202
     return jsonify({"status": "ended"})
 
