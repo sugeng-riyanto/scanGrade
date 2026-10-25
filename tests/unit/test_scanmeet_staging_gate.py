@@ -157,6 +157,117 @@ class ThePrivateFileIsNamedForWhatIsWrongWithIt(unittest.TestCase):
             self.assertFalse(any("not readable" in p for p in problems), problems)
 
 
+ROOT = Path(__file__).resolve().parents[2]
+TEMPLATE = ROOT / "deploy" / "livekit-staging.env.example"
+RUNBOOK = ROOT / "docs" / "SCANMEET_BIZNET_STAGING.md"
+
+
+def _template_keys():
+    from deploy.livekit_preflight import parse_env
+    return set(parse_env(TEMPLATE.read_text(encoding="utf-8")))
+
+
+def _documented_keys():
+    """The owner-values table, read between its own markers.
+
+    Markers rather than the whole page: the runbook names other things in
+    backticks (`umask 077`, routes, a migration), and a rule that read all of it
+    would either miss real drift or refuse a sentence.
+    """
+    import re
+
+    page = RUNBOOK.read_text(encoding="utf-8")
+    start = page.index("<!-- owner-values:start -->")
+    end = page.index("<!-- owner-values:end -->")
+    span = page[start:end]
+    # An underscore is required: every environment name here has one, and the
+    # looser pattern also caught `REF` in a sentence, which is a project id's
+    # name, not a value the owner types into this file.
+    return set(re.findall(r"`([A-Z][A-Z0-9_]*_[A-Z0-9_]+)`", span))
+
+
+class TheTemplateAndTheRunbookAgree(unittest.TestCase):
+    """A key the gate gains must arrive with a source and an isolation proof.
+
+    The template used to name six of the eleven values the gate requires, so an
+    owner who copied it was refused for keys nothing had mentioned. These tests
+    make the three lists one list: the gate's requirements, the template, and the
+    table in the runbook.
+    """
+
+    def test_the_template_names_every_value_the_gate_requires(self):
+        keys = _template_keys()
+        missing = set(gate.REQUIRED) - keys
+        self.assertEqual(missing, set(), f"the gate needs keys the template omits: {missing}")
+        self.assertIn("SCANMEET_STAGING", keys)
+
+    def test_the_template_is_refused_unchanged(self):
+        """A copied template must fail, and say why, rather than look configured."""
+        from deploy.livekit_preflight import parse_env
+
+        settings = parse_env(TEMPLATE.read_text(encoding="utf-8"))
+        problems = gate.validate(settings, "prod-ref")
+        self.assertTrue(problems, "an untouched template passed the staging gate")
+        self.assertTrue(any("placeholder" in p for p in problems), problems)
+
+    def test_the_template_ships_the_kill_switches_off(self):
+        """The template is a file someone will copy, possibly to a production box.
+
+        `deploy/scanmeet-sdk.yml` already runs the preflight on it; this is the
+        same claim where a template edit is actually made, so flipping a flag to
+        `true` "because staging needs it" fails here before it reaches a box.
+        """
+        from deploy.livekit_preflight import audit, parse_env
+
+        settings = parse_env(TEMPLATE.read_text(encoding="utf-8"))
+        for key in ("SCANGRADE_LIVE_ENABLED", "SCANGRADE_LIVE_EXAM_ENABLED"):
+            self.assertEqual(settings.get(key), "false", key)
+        self.assertEqual(audit(settings, pilot=False), [])
+
+    def test_a_placeholder_project_ref_is_not_an_isolated_database(self):
+        """The hole the template exposed: `your-project.supabase.co` has the
+        shape of a separate project and names none."""
+        env = valid()
+        env["SUPABASE_URL"] = "https://your-project.supabase.co"
+        self.assertTrue(any("placeholder" in s for s in gate.validate(env, "prod-ref")))
+
+    def test_a_placeholder_web_host_is_refused_too(self):
+        env = valid()
+        env["SCANMEET_STAGING_URL"] = "https://staging.your-school-domain.com"
+        self.assertTrue(any("placeholder" in s for s in gate.validate(env, "prod-ref")))
+
+    def test_the_runbook_documents_exactly_the_template(self):
+        self.assertEqual(_template_keys(), _documented_keys(),
+                         "the runbook's value table and the template disagree")
+
+    def test_every_documented_value_says_where_it_comes_from(self):
+        """A row with no source is a value the owner cannot supply."""
+        import re
+
+        page = RUNBOOK.read_text(encoding="utf-8")
+        span = page[page.index("<!-- owner-values:start -->"):
+                    page.index("<!-- owner-values:end -->")]
+        rows = [line for line in span.splitlines()
+                if line.startswith("| `")]
+        self.assertEqual(len(rows), len(_documented_keys()))
+        for row in rows:
+            cells = [cell.strip() for cell in row.strip("|").split("|")]
+            self.assertGreaterEqual(len(cells), 4, row)
+            self.assertTrue(all(cells), f"an empty cell in: {row}")
+
+    def test_the_runbook_names_the_migration_the_switch_needs(self):
+        page = RUNBOOK.read_text(encoding="utf-8")
+        self.assertIn("071_scan_live_exam_toggle.sql", page, (
+            "staging without 071 reads every paper as OFF and cannot toggle"))
+        self.assertIn("Aktifkan ScanMeet", page, (
+            "the switch's own readings are not in the acceptance sheet"))
+
+    def test_the_gate_and_the_template_are_the_files_this_repository_tracks(self):
+        """Both halves are read from disk; the paths are checked, not assumed."""
+        self.assertTrue(TEMPLATE.is_file(), TEMPLATE)
+        self.assertTrue(RUNBOOK.is_file(), RUNBOOK)
+
+
 def _without_livekit(call):
     """Run `call` with `livekit` unimportable, capturing its stdout.
 
