@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}ScanMeet — Lisensi Sekolah{% endblock %}
+{% block content %}
+<div class="container mx-auto max-w-3xl p-6">
+  <h1 class="text-2xl font-bold mb-3">Lisensi ScanMeet per NPSN</h1>
+  <p class="mb-4">Hanya Super Admin. Default OFF; tidak ada penagihan otomatis.</p>
+  <form method="get" class="flex gap-2 mb-6">
+    <label for="npsn">NPSN (8 digit)</label>
+    <input id="npsn" name="npsn" pattern="[0-9]{8}" maxlength="8" required value="{{ npsn|e }}" class="border rounded px-2">
+    <button class="border rounded px-3" type="submit">Cari sekolah</button>
+  </form>
+  {% if school %}
+  <section class="border rounded-lg p-4">
+    <h2 class="font-semibold">{{ school.name|e }} — {{ school.npsn|e }}</h2>
+    <p>Lisensi saat ini: {% if license and license.enabled %}{{ license.status|e }}{% else %}OFF{% endif %}</p>
+    <p class="mb-4">Berlaku sampai: {{ (license.valid_until if license else none) or '—' }}</p>
+    <form method="post" id="licenseForm">
+      <input type="hidden" name="npsn" value="{{ school.npsn|e }}">
+      <label for="enabled">Akses ScanMeet</label>
+      <select id="enabled" name="enabled" class="border rounded p-2"><option value="false">OFF — cabut akses dan akhiri room</option><option value="true">ON</option></select>
+      <label for="status" class="block mt-3">Jenis</label>
+      <select id="status" name="status" class="border rounded p-2"><option value="disabled">Tidak aktif</option><option value="trial">Trial</option><option value="paid">Berbayar (pembayaran terverifikasi)</option></select>
+      <label for="valid_until" class="block mt-3">Tanggal kedaluwarsa (ISO 8601 + zona waktu)</label>
+      <input id="valid_until" name="valid_until" type="text" placeholder="2026-12-31T23:59:59+07:00" class="border rounded p-2 w-full">
+      <label class="block mt-3"><input type="checkbox" name="payment_verified" value="true"> Saya sudah memverifikasi pembayaran (untuk status berbayar)</label>
+      <button type="submit" class="mt-4 rounded border px-4 py-2">Simpan keputusan</button>
+    </form>
+    <p id="result" role="status" class="mt-4"></p>
+  </section>
+  <script>
+  document.getElementById('licenseForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (!confirm('Konfirmasi perubahan lisensi sekolah. OFF akan mencabut akses ScanMeet dan menghentikan room aktif.')) return;
+    const form = e.currentTarget;
+    const response = await fetch(location.pathname, {
+      method: 'POST', credentials: 'same-origin',
+      headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+      body: new URLSearchParams(new FormData(form))
+    });
+    document.getElementById('result').textContent = JSON.stringify(await response.json());
+    if(response.ok) location.reload();
+  });
+  </script>
+  {% endif %}
+</div>
+{% endblock %}
