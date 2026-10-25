@@ -1,6 +1,9 @@
 # ScanMeet — safe Biznet Gio staging (no production modification)
 
-**Repository branch:** `integration/livekit-secure-main-20261024`, PR #9.
+**Repository branch:** `main` — the integration branch
+`integration/livekit-secure-main-20261024` (PR #9) and the vendored-SDK fix on it
+(PR #23) are **merged**, so a staging checkout cloned from that branch would test
+the code from *before* those fixes, including the CDN-loaded SDK PR #23 replaced.
 The VPS auto-deploy service tracks **main only** in `/opt/scangrade`; this
 staging procedure uses a **separate checkout** and does not alter its branch,
 service, systemd units, .env, nginx or exam database.
@@ -69,7 +72,7 @@ pass.
 First obtain the repository on a new, separate path:
 
 ```bash
-git clone --single-branch --branch integration/livekit-secure-main-20261024 \
+git clone --single-branch --branch main \
   https://github.com/sugeng-riyanto/scanGrade.git ~/scanmeet-staging
 cd ~/scanmeet-staging
 git status --short
@@ -115,6 +118,38 @@ python -m deploy.livekit_sdk_contract
 python -m deploy.scanmeet_staging_gate --env ~/.config/scanmeet/staging.env --probe-livekit
 ```
 
+### The four identities and the staged paper
+
+Nothing above creates an account, and the media gate takes no reading without
+one: it refuses with exit 2 and names what it could not measure. `deploy/scanmeet_staging_fixture.py`
+writes exactly what the twelve rows need into the **staging** project — two
+schools, one class in each, a teacher who owns the paper, two pupils of the first
+school in that class, one pupil of the second school, and one published paper
+with **ScanMeet on** and no window.
+
+```bash
+# a plan first: names every row it would write and touches nothing
+python -m deploy.scanmeet_staging_fixture --env ~/.config/scanmeet/staging.env
+
+# then write it; the four email:password pairs are printed ONCE
+python -m deploy.scanmeet_staging_fixture --env ~/.config/scanmeet/staging.env --write
+```
+
+It is idempotent and *repairing* — a second run finds the rows by their own
+markers (`ZZ SCANMEET STAGING …`), resets the passwords, clears
+`must_change_password` (left set, every login is bounced to
+`/auth/change-password` and twelve rows become twelve skips) and puts the switch
+back on. It refuses the production project by name, and it reads
+`scan_live_enabled` back afterwards: a FALSE there means migration 071 was never
+applied, which is the difference between "no row" and "the paper is off".
+
+What it prints goes into the run, not into the repository: the four
+`--teacher … --student2 … --outsider …` arguments, `SCANMEET_EXAM_ID`, and the
+same five values under their workflow secret names (`SCANMEET_TEACHER`,
+`SCANMEET_STUDENT`, `SCANMEET_STUDENT2`, `SCANMEET_OUTSIDER`, `SCANMEET_EXAM_ID`).
+The password is generated per run and stored nowhere — a fixture credential in
+Git is a credential in Git, whatever the accounts are for.
+
 A PASS here proves LiveKit credentials reach its **read-only RoomService API**.
 It does **not** prove actual media streams, camera permissions, RLS, webhook
 signatures, or teacher/student isolation. After applying the staging migration
@@ -131,8 +166,8 @@ no recording, room end and signed webhook audit.
 ```bash
 cd ~/scanmeet-staging
 git status --short
-git fetch origin integration/livekit-secure-main-20261024
-git merge --ff-only origin/integration/livekit-secure-main-20261024
+git fetch origin main
+git merge --ff-only origin/main
 ```
 
 Run the checks again after pulling. The real production deploy automatically
