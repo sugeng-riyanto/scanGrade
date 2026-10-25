@@ -431,3 +431,44 @@ The probe's seven lines, the two console readings from each browser, the
 `scan_live_sessions` row for the room, and the count of `scan_live_events` for
 it. No screenshots of faces, no keys, no JWTs: the participant identities in
 the audit table are pseudonyms by design.
+
+## Taking the rows from another machine
+
+The staging host is the production VPS, measured at 1 CPU and ~470 MB free while
+it serves live exams, so the twelve media rows do not belong on it: three
+browsers would compete with the exams the staging run exists to protect. Both
+gates run from a workstation, and `deploy/scanmeet_runner.py` is the one command
+that drives them.
+
+One private file holds everything the run needs — the staging URL, the exam id,
+the four identities and the LiveKit pair. Nothing is read from this repository,
+nothing is prompted for, and no value is printed: the runner reports a key and
+whether it was present.
+
+```bash
+# 1. Validate before launching anything (no browser, no request, no subprocess).
+python -m deploy.scanmeet_runner --env ~/scanmeet-staging.env --all --check
+
+# 2. The seven webhook rows and the twelve media rows, one verdict.
+python -m deploy.scanmeet_runner --env ~/scanmeet-staging.env --all --signoff
+
+# 3. Only one of them, with the reading kept beside the sheet.
+python -m deploy.scanmeet_runner --env ~/scanmeet-staging.env --media \
+    --signoff --json-out ~/scanmeet-media.json
+```
+
+What it settles for you, so a second machine needs no editing:
+
+* **the browser** — `--chrome <path>`, else `SG_CHROME`, else the platform's own
+  install paths (Windows `Program Files`, the macOS app bundle, the usual Linux
+  binaries). A machine with none exits **2** and says so rather than reporting a
+  media run that could never have measured anything.
+* **the host** — a URL under this repository's production domain is refused
+  unless `--allow-production` is passed, because a signed webhook is a write to
+  whatever host it is given. The media gate has its own refusal as well.
+* **the exit code** — each gate keeps its own (0 pass · 1 disagreed · 2 could not
+  measure) and the worst wins, so `--all` answers with a single code and one line
+  per gate. An incomplete run is **2**, never 0.
+
+The credentials never reach a command line: they are handed to each gate in its
+environment, which is why `ps` and a shell's history hold nothing useful.
