@@ -54,7 +54,9 @@
     </aside>
   </div>
 </section>
-{# STAGING ONLY. Self-host the pinned SDK after browser and security review. #}
-<script src="https://cdn.jsdelivr.net/npm/livekit-client@2.23.0/dist/livekit-client.umd.min.js"></script>
+{# The pinned SDK is served strictly from this origin. If loading fails,
+   the room reports media unavailable; the exam itself continues safely.
+   Do not load executable third-party JavaScript from a public CDN. #}
+<script src="{{ asset_v('vendor/livekit/2.23.0/livekit-client.umd.min.js') }}"></script>
 <script src="{{ asset_v('js/scan-live-exam.js') }}"></script>
 {% endblock %}
