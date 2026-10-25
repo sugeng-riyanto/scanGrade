@@ -14,7 +14,13 @@ believed something it never checked again.
 
 The database is `tests/unit/live_fixtures.py`'s in-memory stand-in, which now
 also does migration 073's `scan_live_one_cleanup_per_room` partial index, so a
-second enqueue for one room fails the way it does in Postgres.
+second enqueue for one room fails the way it does in Postgres, and `is_()` so the
+`missing_since IS NULL` condition can be expressed at all.
+
+Three groups came out of the independent review of `421d0e1` and are tested here
+rather than trusted: the pass must not consult the creation flags (the deadlock),
+the debt must survive its parent (migration 074), and a claim's lease must be
+re-asserted before the call (overlapping workers and restarts).
 """
 import pytest
 from flask import Flask, g
@@ -239,20 +245,27 @@ def test_enough_failures_mark_the_room_as_needing_a_person():
 
 
 def test_a_transition_that_lost_its_row_is_reported_not_assumed(monkeypatch):
+    """The lease renewal answers, the recording write does not."""
     db = _db(sessions=[SESSION])
     live_cleanup.enqueue(db, SESSION, now=NOW)
     job = live_cleanup.claim_next(db, owner="worker-a", now=NOW)
+    deleted = []
 
     original = FakeQuery.execute
+    seen = {"updates": 0}
 
     def execute(self):
         if self.op == "update":
-            return fx._Result([])          # another worker already closed it
+            seen["updates"] += 1
+            if seen["updates"] > 1:
+                return fx._Result([])      # another worker already closed it
         return original(self)
 
     monkeypatch.setattr(FakeQuery, "execute", execute)
-    outcome = live_cleanup.attempt(None, db, job, end_room=lambda room: None, now=NOW)
+    outcome = live_cleanup.attempt(None, db, job, end_room=deleted.append, now=NOW)
 
+    # The deletion went out (the room is gone), the bookkeeping did not land.
+    assert deleted == ["sg_room"]
     assert outcome["state"] == "lost"
 
 
@@ -298,11 +311,13 @@ def test_a_room_the_sfu_serves_is_recorded_as_live():
     result = live_reconcile.reconcile(None, db, room_names=lambda config: ["sg_room"],
                                       now=NOW)
 
-    assert result == {"measured": True, "live": 1, "stale": 0, "waiting": 0}
+    assert result == {"measured": True, "live": 1, "missing": 0,
+                      "stale": 0, "waiting": 0}
     row = db.rows["scan_live_sessions"][0]
     assert row["status"] == "active"
     assert row["media_state"] == "live"
     assert row["reconciled_at"] == NOW
+    assert row["missing_since"] is None
 
 
 def test_a_session_nobody_joined_is_not_stale():
@@ -315,9 +330,11 @@ def test_a_session_nobody_joined_is_not_stale():
     row = db.rows["scan_live_sessions"][0]
     assert row["status"] == "active"
     assert row["media_state"] == "unknown", "absence proves nothing before a sighting"
+    assert row.get("missing_since") is None
 
 
-def test_a_room_that_disappeared_parks_the_session_and_queues_the_deletion():
+def test_a_first_absence_only_starts_the_clock():
+    """One empty room list is a snapshot, not a verdict on a lesson."""
     db = _db(sessions=[_session(media_state="live")])
     queued = []
 
@@ -325,12 +342,55 @@ def test_a_room_that_disappeared_parks_the_session_and_queues_the_deletion():
         None, db, room_names=lambda config: [], now=NOW,
         enqueue=lambda database, session, **kwargs: queued.append(session["id"]))
 
-    assert result["stale"] == 1
+    assert result["missing"] == 1 and result["stale"] == 0
+    row = db.rows["scan_live_sessions"][0]
+    assert row["status"] == "active", "a candidate must not close a live session"
+    assert row["missing_since"] == NOW
+    assert queued == [], "nothing is deleted before the absence is confirmed"
+
+
+def test_the_park_needs_the_room_to_stay_gone_past_the_grace():
+    db = _db(sessions=[_session(media_state="live")])
+    queued = []
+    absent = lambda config: []
+    enqueue = lambda database, session, **kwargs: queued.append(session["id"])
+
+    live_reconcile.reconcile(None, db, room_names=absent, now=NOW, enqueue=enqueue)
+    early = "2026-10-25T09:00:30+00:00"       # 30 s < MISSING_GRACE
+    second = live_reconcile.reconcile(None, db, room_names=absent, now=early,
+                                      enqueue=enqueue)
+    assert second["stale"] == 0
+    assert db.rows["scan_live_sessions"][0]["status"] == "active"
+    assert queued == []
+
+    later = "2026-10-25T09:02:00+00:00"       # 2 min after the first sighting
+    third = live_reconcile.reconcile(None, db, room_names=absent, now=later,
+                                     enqueue=enqueue)
+    assert third["stale"] == 1
     row = db.rows["scan_live_sessions"][0]
     assert row["status"] == "stale"
     assert row["media_state"] == "missing"
     assert row["stale_reason"] == live_reconcile.STALE_REASON
     assert queued == ["room-id"]
+
+
+def test_a_room_that_comes_back_clears_the_candidate():
+    """A short list during a LiveKit restart must cost nothing."""
+    db = _db(sessions=[_session(media_state="live")])
+    absent = lambda config: []
+
+    live_reconcile.reconcile(None, db, room_names=absent, now=NOW)
+    assert db.rows["scan_live_sessions"][0]["missing_since"] == NOW
+
+    back = "2026-10-25T09:05:00+00:00"
+    result = live_reconcile.reconcile(None, db, room_names=lambda c: ["sg_room"],
+                                      now=back)
+
+    assert result["live"] == 1 and result["stale"] == 0
+    row = db.rows["scan_live_sessions"][0]
+    assert row["status"] == "active"
+    assert row["media_state"] == "live"
+    assert row["missing_since"] is None, "the clock must not survive a sighting"
 
 
 def test_a_probe_that_fails_writes_nothing():
@@ -358,14 +418,16 @@ def test_a_session_the_teacher_ended_is_not_touched_by_the_sweep():
 
 
 def test_a_session_ended_while_the_sweep_ran_is_left_ended():
-    """The park is conditional on `active`, so a person's decision wins."""
+    """Every write is conditional on `active`, so a person's decision wins."""
     db = _db(sessions=[_session(media_state="live")])
     db.race = "ended"
 
     result = live_reconcile.reconcile(None, db, room_names=lambda config: [], now=NOW)
 
-    assert result["stale"] == 0
-    assert db.rows["scan_live_sessions"][0]["status"] == "ended"
+    assert result["stale"] == 0 and result["missing"] == 0
+    row = db.rows["scan_live_sessions"][0]
+    assert row["status"] == "ended"
+    assert row.get("missing_since") is None
 
 
 # ── the routes record the debt, and a stale session is a closed door ─────────
@@ -439,6 +501,184 @@ def test_a_session_with_vanished_media_hands_out_no_token(monkeypatch):
 
     assert response.status_code == 403
     assert issued == [], "a parked session must issue nothing, not even a stale token"
+
+
+# ── maintenance is not creation (review finding 1) ──────────────────────────
+#
+# `run_once` used to return early while the two feature flags were off, and the
+# scheduler refused to start, so the debt a failed deletion recorded could never be
+# paid after a teacher revoked ScanMeet. These hold the separation: the flags gate
+# creation (routes), the pass gates itself on credentials and schema.
+
+
+def _maintenance(monkeypatch, db, *, config=None, end_room=None, room_names=None):
+    """Wire `run_once` to a fake app, fake database and fake LiveKit."""
+    from app.services import live_cleanup, livekit_gateway
+    from app.utils import auth as auth_module
+
+    calls = []
+
+    def fake_end(config, room):
+        calls.append(room)
+        if end_room is not None:
+            return end_room(room)
+        return None
+
+    monkeypatch.setattr(auth_module, "get_supabase", lambda: db)
+    monkeypatch.setattr(livekit_gateway, "end_room", fake_end)
+    monkeypatch.setattr(livekit_gateway, "room_names", room_names or (lambda config: []))
+    app = type("App", (), {"config": config or {
+        "LIVEKIT_URL": "wss://staging.livekit.invalid",
+        "LIVEKIT_API_KEY": "key", "LIVEKIT_API_SECRET": "secret"}})()
+    return live_cleanup.run_once(app, now=NOW), calls
+
+
+def test_cleanup_runs_with_the_feature_flags_off(monkeypatch):
+    """Revoking ScanMeet must not stop disposal of rooms already carrying video."""
+    from app.services import live_policy
+
+    db = _db(sessions=[SESSION])
+    live_cleanup.enqueue(db, SESSION, now=NOW)
+
+    def forbidden(*_a, **_k):
+        raise AssertionError("run_once consulted a creation flag")
+
+    monkeypatch.setattr(live_policy, "feature_enabled", forbidden)
+    monkeypatch.setattr(live_policy, "client_ready", lambda config: True)
+
+    result, calls = _maintenance(monkeypatch, db)
+
+    assert result["ran"] is True
+    assert "regardless of" in result["rules"]
+    assert result["cleanup"]["done"] == 1
+    assert calls == ["sg_room"]
+    assert db.jobs()[0]["status"] == "done"
+
+
+def test_maintenance_is_blocked_without_credentials(monkeypatch):
+    """A pass that cannot run says so; it is never a pass."""
+    from app.services import live_policy
+
+    db = _db(sessions=[SESSION])
+    live_cleanup.enqueue(db, SESSION, now=NOW)
+    monkeypatch.setattr(live_policy, "client_ready", lambda config: False)
+
+    result, calls = _maintenance(monkeypatch, db)
+
+    assert result["ran"] is False
+    assert "credentials" in result["blocked"]
+    assert calls == []
+    assert db.jobs()[0]["status"] == "pending", "nothing was drained, and it says so"
+
+
+def test_maintenance_is_blocked_without_the_ledger_table(monkeypatch):
+    """A box whose database is behind its code gets a reason, not a retry loop."""
+    from app.services import live_policy
+
+    db = _db(sessions=[SESSION])
+    monkeypatch.setattr(live_policy, "client_ready", lambda config: True)
+    original = FakeQuery.execute
+
+    def unmigrated(self):
+        if self.name == live_cleanup.TABLE and self.op == "select":
+            raise RuntimeError('relation "scan_live_cleanup_jobs" does not exist')
+        return original(self)
+
+    monkeypatch.setattr(FakeQuery, "execute", unmigrated)
+    result, calls = _maintenance(monkeypatch, db)
+
+    assert result["ran"] is False
+    assert "migration 073/074" in result["blocked"]
+    assert calls == []
+
+
+def test_schema_ready_reads_the_ledger():
+    assert live_cleanup.schema_ready(_db()) is True
+
+    class Unmigrated:
+        def table(self, name):
+            query = FakeQuery(self, name)
+            query.execute = lambda: (_ for _ in ()).throw(
+                RuntimeError("relation does not exist"))
+            return query
+
+    assert live_cleanup.schema_ready(Unmigrated()) is False
+
+
+# ── the debt outlives its parent (review finding 2, migration 074) ──────────
+def test_an_orphaned_job_is_still_deleted():
+    """Migration 074 releases the reference; the worker only needs `room_name`."""
+    db = _db()
+    db.rows["scan_live_cleanup_jobs"] = [{
+        "id": "orphan-1", "session_id": None, "school_id": None,
+        "room_name": "sg_orphan", "status": "pending", "attempts": 0,
+        "claim_token": "", "next_attempt_at": NOW, "orphaned_at": NOW,
+    }]
+    deleted = []
+
+    summary = live_cleanup.run_pending(None, db, end_room=deleted.append, now=NOW)
+
+    assert summary["done"] == 1
+    assert deleted == ["sg_orphan"]
+    row = db.jobs()[0]
+    assert row["status"] == "done"
+    assert row["orphaned_at"] == NOW, "the orphan stamp is the audit trail"
+
+
+def test_a_pending_job_never_takes_its_parent_with_it():
+    """The migration contract, read from the SQL: no CASCADE on either reference."""
+    root = live_cleanup.__file__
+    migrations = (__import__("pathlib").Path(root).parents[2] / "supabase" / "migrations")
+    text = "".join(
+        p.read_text(encoding="utf-8")
+        for p in sorted(migrations.glob("07[34]_scan_live*.sql")))
+
+    assert text, "migrations 073/074 are missing from the checkout"
+    assert "scan_live_cleanup_jobs" in text
+    for reference in ("scan_live_cleanup_jobs_session_id_fkey",
+                      "scan_live_cleanup_jobs_school_id_fkey"):
+        assert reference in text
+    # The forward-only migration must replace CASCADE with SET NULL, and nothing
+    # may put CASCADE back on this table.
+    assert "ON DELETE SET NULL" in text
+    cascade = [line for line in text.splitlines()
+               if "CASCADE" in line.upper() and "cleanup_jobs" in line]
+    assert cascade == [], f"a cleanup reference still cascades: {cascade}"
+    assert "missing_since" in text, "the reconcile grace column has no migration"
+
+
+# ── the claim under overlapping workers (review finding 3) ──────────────────
+def test_a_worker_that_lost_its_lease_does_not_touch_the_room():
+    db = _db(sessions=[SESSION])
+    live_cleanup.enqueue(db, SESSION, now=NOW)
+    first = live_cleanup.claim_next(db, owner="worker-a", now=NOW)
+    assert first is not None
+
+    # The lease runs out while worker A is still between the claim and the call;
+    # worker B takes the row and deletes the room.
+    after_lease = "2026-10-25T09:06:00+00:00"
+    second = live_cleanup.claim_next(db, owner="worker-b", now=after_lease)
+    assert second is not None
+    deleted = []
+    assert live_cleanup.attempt(None, db, second, end_room=deleted.append,
+                                now=after_lease)["state"] == "done"
+
+    outcome = live_cleanup.attempt(None, db, first, end_room=deleted.append,
+                                   now="2026-10-25T09:07:00+00:00")
+
+    assert outcome["state"] == "lost"
+    assert deleted == ["sg_room"], "the stale worker must not delete a room it lost"
+    assert db.jobs()[0]["status"] == "done", "B's outcome stands"
+
+
+def test_a_renewal_without_the_token_is_refused():
+    db = _db(sessions=[SESSION])
+    live_cleanup.enqueue(db, SESSION, now=NOW)
+    job = live_cleanup.claim_next(db, owner="worker-a", now=NOW)
+
+    stale = dict(job, claim_token="someone-elses")
+    assert live_cleanup._renew(db, stale, live_cleanup._now(NOW)) is False
+    assert live_cleanup._renew(db, job, live_cleanup._now(NOW)) is True
 
 
 def test_the_repair_does_not_revive_the_room_it_parked(monkeypatch):

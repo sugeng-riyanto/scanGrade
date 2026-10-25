@@ -30,6 +30,19 @@ is shaped the way it is:
 * **Giving up is loud and recorded.** After `MAX_ATTEMPTS` the row becomes
   `abandoned` with the last error and an `ERROR` log; it is never silently
   dropped, and an operator can see it.
+* **The debt is not a child of the row it outlives.** Migration 073 declared
+  `session_id`/`school_id` `ON DELETE CASCADE`, so deleting a session, a school,
+  or a row under a retention purge erased the only record that a room still
+  needed deleting. Migration 074 releases the reference (`ON DELETE SET NULL`)
+  and stamps `orphaned_at`; this worker reads `room_name`, never the foreign
+  keys, so an orphaned job is still deletable.
+* **Maintenance is not creation.** `run_once` never consults the two feature
+  flags. They are the *creation* switch — the routes refuse a session, a token
+  or a room without them — but a room that already exists keeps carrying pupil
+  video after a teacher revokes ScanMeet, so disposal must not be gated on the
+  switch that stops new rooms. The pass needs credentials and schema instead, and
+  names which one is missing: a maintenance path that cannot run is `BLOCKED`,
+  never `PASS`.
 """
 from __future__ import annotations
 
@@ -174,6 +187,28 @@ def claim_next(db, *, owner: str, now=None) -> dict | None:
     return None
 
 
+def _renew(db, job, moment) -> bool:
+    """Extend our lease before a slow call, conditional on still owning the row.
+
+    The compare-and-swap on `claim_token` is what makes a claim exclusive: a
+    single `UPDATE ... WHERE id = ? AND status = 'pending' AND claim_token = ?`
+    is atomic, so of two workers reading the same row exactly one write matches.
+    `claimed_at` is *not* part of that condition and does not need to be — a lease
+    is a courtesy to a crashed worker, while the token is the ownership claim.
+
+    What the token alone cannot do is keep a claim alive through a LiveKit call
+    longer than the lease. So the lease is re-asserted here, with the same
+    condition; if it no longer matches, another worker owns the room and this one
+    must not call the API or record an outcome for it.
+    """
+    rows = (db.table(TABLE)
+            .update({"claimed_at": _stamp(moment), "updated_at": _stamp(moment)})
+            .eq("id", job["id"]).eq("status", "pending")
+            .eq("claim_token", job.get("claim_token") or "")
+            .execute().data or [])
+    return bool(rows)
+
+
 def _already_gone(exc) -> bool:
     """LiveKit reports a deletion of a missing room as an error, not a success."""
     text = str(exc).lower()
@@ -231,6 +266,10 @@ def _defer(db, job, moment, exc) -> dict:
 def attempt(config, db, job, *, end_room, now=None) -> dict:
     """One deletion for one claimed job, recorded either way."""
     moment = _now(now)
+    if not _renew(db, job, moment):
+        # The lease expired and somebody else claimed the room while this worker
+        # was between the claim and the call. Not ours to delete or to report.
+        return {"state": "lost", "job": job}
     try:
         end_room(job.get("room_name"))
     except Exception as exc:  # noqa: BLE001 - the debt must survive any failure
@@ -264,13 +303,41 @@ def run_pending(config, db, *, end_room, owner=None, now=None, limit=10) -> dict
 
 
 # ── the pass, and the loop that runs it ──────────────────────────────────────
+def schema_ready(db) -> bool:
+    """Is migration 073/074 applied to this database?
+
+    A worker on a box whose database is behind its code must say so, not retry a
+    missing table every minute and not claim it drained a queue it never read.
+    """
+    try:
+        db.table(TABLE).select("id").limit(1).execute()
+    except Exception as exc:                                   # noqa: BLE001
+        log.warning("ScanMeet maintenance cannot read %s: %s", TABLE, exc)
+        return False
+    return True
+
+
+FEATURE_INDEPENDENCE = (
+    "deletion and reconciliation run regardless of SCANGRADE_LIVE_ENABLED and "
+    "SCANGRADE_LIVE_EXAM_ENABLED; those two flags gate creation, session and "
+    "token issuance, which the routes refuse on their own")
+
+
 def run_once(app=None, *, now=None) -> dict:
     """One maintenance pass: drain deletions, and reconcile rooms now and then.
 
-    Cleanup runs whether or not the two feature flags are on — deleting a room
-    the app created is the safe direction, and a debt recorded before a teacher
-    switched the paper off must still be paid. Reconciling needs credentials, so
-    a box without them reports that instead of guessing.
+    **The feature flags are deliberately not consulted.** Revoking ScanMeet stops
+    new sessions, new tokens and new rooms — the routes hold that — but a room that
+    already exists keeps publishing to everyone inside it, so disposing of it must
+    not be gated on the switch that stops creating rooms. Gating it was the
+    release-blocking deadlock the review found: turn the flags off after a failed
+    deletion and the debt could never be paid. What the pass *does* require is the
+    means to act: LiveKit credentials and the tables migration 073/074 creates. A
+    missing one of those is reported as an explicit reason (a `BLOCKED`
+    maintenance state), never as a pass.
+
+    Reconciliation here is read-only with respect to LiveKit: it lists rooms,
+    never creates or joins one, and it cannot move a session back to `active`.
     """
     from flask import current_app
 
@@ -279,18 +346,22 @@ def run_once(app=None, *, now=None) -> dict:
 
     app = app or current_app
     config = app.config
-    # The kill switch is deployment-level: with ScanMeet off there are no rooms to
-    # delete and nothing to reconcile, and a pass must not touch a table a box
-    # without migration 073 does not have.
-    if not live_policy.feature_enabled(config):
-        return {"ran": False, "reason": "ScanMeet is off"}
     if not live_policy.client_ready(config):
-        return {"ran": False, "reason": "LiveKit credentials are not configured"}
+        return {"ran": False, "blocked": "LiveKit credentials are not configured",
+                "rules": FEATURE_INDEPENDENCE}
 
     db = get_supabase()
-    result = {"ran": True, "cleanup": run_pending(
-        config, db,
-        end_room=lambda room: livekit_gateway.end_room(config, room), now=now)}
+    if not schema_ready(db):
+        return {"ran": False,
+                "blocked": "migration 073/074 is not applied (scan_live_cleanup_jobs "
+                           "is missing), so there is no ledger to drain",
+                "rules": FEATURE_INDEPENDENCE}
+
+    result = {"ran": True, "rules": FEATURE_INDEPENDENCE,
+              "cleanup": run_pending(
+                  config, db,
+                  end_room=lambda room: livekit_gateway.end_room(config, room),
+                  now=now)}
 
     global _last_reconcile
     moment = _now(now)
@@ -342,6 +413,7 @@ def stop_cleanup_scheduler() -> None:
 
 __all__ = [
     "MAX_ATTEMPTS", "BASE_SECONDS", "CAP_SECONDS", "CLAIM_LEASE", "TABLE",
-    "backoff_seconds", "enqueue", "claim_next", "attempt", "run_pending",
-    "run_once", "start_cleanup_scheduler", "stop_cleanup_scheduler",
+    "FEATURE_INDEPENDENCE", "backoff_seconds", "enqueue", "claim_next",
+    "attempt", "run_pending", "schema_ready", "run_once",
+    "start_cleanup_scheduler", "stop_cleanup_scheduler",
 ]

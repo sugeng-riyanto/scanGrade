@@ -820,12 +820,19 @@ def create_app(env=None):
         # ScanMeet's media housekeeping. Two jobs, both restart-safe because both
         # read a table rather than a variable: retry a room deletion that failed
         # (`live_cleanup`), and park a session whose room has vanished
-        # (`live_reconcile`). Neither runs unless both deployment flags are on, so
-        # a box that is not offering ScanMeet starts no thread and touches no row
-        # — and a production box with the flags OFF (today's state) is unchanged.
+        # (`live_reconcile`).
+        #
+        # Started on the *credentials*, not on the two feature flags. That was the
+        # release-blocking deadlock the review found in 421d0e1: a failed
+        # `delete_room` is recorded, then a teacher revokes ScanMeet, and the only
+        # worker that could finish the deletion is never started — so the room keeps
+        # carrying pupil video while the debt waits for a switch nobody is going to
+        # turn back on. The flags still gate creation, sessions and tokens, which
+        # every route checks by itself. A box with no LiveKit credentials (today's
+        # production) starts no thread at all.
         try:
             from app.services import live_policy
-            if live_policy.feature_enabled(app.config):
+            if live_policy.client_ready(app.config):
                 from app.services.live_cleanup import start_cleanup_scheduler
                 start_cleanup_scheduler(
                     interval=app.config.get("SCANMEET_CLEANUP_INTERVAL_SECONDS"),

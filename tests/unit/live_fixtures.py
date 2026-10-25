@@ -88,6 +88,13 @@ class FakeQuery:
         self.filters.append((key, list(values)))
         return self
 
+    def is_(self, key, value):
+        # PostgREST's `IS NULL`: the comparison the cleanup ledger and the
+        # reconcile grace both need, and `eq` cannot express ("x = null" matches
+        # nothing in SQL).
+        self.filters.append(("is", (key, value)))
+        return self
+
     def order(self, key, desc=False):
         self.order_by, self.desc = key, desc
         return self
@@ -99,7 +106,14 @@ class FakeQuery:
     # ── execution ────────────────────────────────────────────────────────────
     def _matches(self, row):
         for key, value in self.filters:
-            if isinstance(value, list):
+            if key == "is":
+                column, expected = value
+                if str(expected).lower() == "null":
+                    if row.get(column) is not None:
+                        return False
+                elif row.get(column) != expected:
+                    return False
+            elif isinstance(value, list):
                 if row.get(key) not in value:
                     return False
             elif str(row.get(key)) != str(value):
