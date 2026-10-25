@@ -210,6 +210,20 @@ class TheTemplateAndTheRunbookAgree(unittest.TestCase):
         self.assertTrue(problems, "an untouched template passed the staging gate")
         self.assertTrue(any("placeholder" in p for p in problems), problems)
 
+    def test_the_template_ships_the_kill_switches_off(self):
+        """The template is a file someone will copy, possibly to a production box.
+
+        `deploy/scanmeet-sdk.yml` already runs the preflight on it; this is the
+        same claim where a template edit is actually made, so flipping a flag to
+        `true` "because staging needs it" fails here before it reaches a box.
+        """
+        from deploy.livekit_preflight import audit, parse_env
+
+        settings = parse_env(TEMPLATE.read_text(encoding="utf-8"))
+        for key in ("SCANGRADE_LIVE_ENABLED", "SCANGRADE_LIVE_EXAM_ENABLED"):
+            self.assertEqual(settings.get(key), "false", key)
+        self.assertEqual(audit(settings, pilot=False), [])
+
     def test_a_placeholder_project_ref_is_not_an_isolated_database(self):
         """The hole the template exposed: `your-project.supabase.co` has the
         shape of a separate project and names none."""

@@ -40,8 +40,8 @@ prints one.
 |---|---|---|---|
 | `SCANMEET_STAGING` | the literal `true` | it is the declaration itself | any other value: "SCANMEET_STAGING=true is required" |
 | `SCANMEET_STAGING_URL` | the staging host's own DNS/TLS entry | it must not be `scangrade.web.id`, its `www.`/`lmsshb.` names, or any subdomain of that domain | gate refuses; the media driver also refuses the live site unless `--allow-production` |
-| `SCANGRADE_LIVE_ENABLED` | you set it on the staging host | production keeps it `false` | pilot refused: "both Live feature flags" |
-| `SCANGRADE_LIVE_EXAM_ENABLED` | you set it on the staging host | production keeps it `false` | as above; also the reason a webhook probe answers 404 |
+| `SCANGRADE_LIVE_ENABLED` | you set it on the staging host; the template ships `false` | it is `true` only there — the template's `false` is what CI checks, so a copy that lands in a production `.env` cannot switch Live on | pilot refused: "both Live feature flags" |
+| `SCANGRADE_LIVE_EXAM_ENABLED` | you set it on the staging host; the template ships `false` | as above | as above; also the reason a webhook probe answers 404 |
 | `LIVEKIT_URL` | LiveKit Cloud → the staging project → Settings → URL (`wss://<project>.livekit.cloud`) | the project name differs from production's LiveKit project | `--probe-livekit` fails; browsers cannot signal |
 | `LIVEKIT_API_KEY` | same project → Keys | belongs to the staging project | RoomService probe 401s and microphone approval cannot be applied |
 | `LIVEKIT_API_SECRET` | same key, shown once at creation | same project | 401 on the probe and on every `UpdateParticipant` |
