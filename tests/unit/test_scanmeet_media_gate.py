@@ -767,3 +767,27 @@ def test_the_sheet_says_out_loud_when_it_is_not_a_signoff():
     assert "`CANNOT MEASURE`" in rendered
     assert "**not** a sign-off" in rendered
     assert "SIGNED OFF" not in rendered
+
+
+# ── waiting for a control a page reveals on its own ──────────────────────────
+
+def test_the_start_control_is_waited_for_before_it_is_pressed():
+    """`#live-start` starts `hidden`; a press before the reveal reads as none."""
+    source = GATE.START_READY
+    assert "live-start" in source
+    assert "hidden" in source and "getBoundingClientRect" in source
+    # The driver must use it, and use it *before* the press: a wait that lives
+    # beside the click but after it would still press into an empty box.
+    text = open(GATE.__file__, encoding="utf-8").read()
+    wait_at = text.index("teacher.wait(START_READY")
+    press_at = text.index('teacher.click("#live-start")')
+    assert wait_at < press_at
+
+
+def test_the_teacher_grid_is_waited_for_by_identity():
+    """A tile arrives on TrackSubscribed, after the pupil's first frame."""
+    expression = GATE.tiles_expression(["p_aaa", "p_bbb"])
+    assert "p_aaa" in expression and "p_bbb" in expression
+    assert "data-identity" in expression
+    assert "every" in expression, "one pupil's tile is not the other's"
+    assert GATE.tiles_expression([]) .count("[]") >= 1
