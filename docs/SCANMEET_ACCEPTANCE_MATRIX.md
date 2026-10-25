@@ -8,7 +8,7 @@ their own acceptance gates pass.
 
 | Track | Target | Gate | Owner |
 | --- | --- | --- | --- |
-| Exam | PR #9 integration | 7/7 latest-commit CI, staging media 12/12, webhook 7/7, continuity and authorization | Exam engineer + QA |
+| Exam | PR #9 integration | 7/7 latest-commit CI, staging media 13/13, webhook 7/7, continuity and authorization | Exam engineer + QA |
 | Meeting | separate feature branch | role/school membership, room lifecycle, invitation expiry/revocation, capacity | Meeting engineer |
 | Background | separate feature branch | image validation, UI preview/fallback, device budget, exam default OFF | UI/media engineer |
 | Recorder | separate feature branch | receive-only grants, local-only recording, visible notices and consent | Privacy/media engineer |

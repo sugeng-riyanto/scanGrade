@@ -281,10 +281,10 @@ python -m deploy.scanmeet_media_gate \
   --student2 murid2@school:pw --outsider murid@other-school:pw
 ```
 
-Expected: twelve `PASS` rows — `sdk-loaded`, `session`, `pupil-camera`,
+Expected: thirteen `PASS` rows — `sdk-loaded`, `session`, `pupil-camera`,
 `teacher-receives-camera`, `pupil-isolation`, `mic-starts-closed`, `hand-raise`,
 `mic-approved`, `audio-reaches-teacher`, `mic-closed`, `outsider-refused`,
-`room-ended` — and a closing `PASS: 12/12 rows`. The driver reads each page
+`token-expiry`, `room-ended` — and a closing `PASS: 13/13 rows`. The driver reads each page
 **and** the join token the server issues, because the token's
 `canPublishSources` is what LiveKit enforces while the DOM is only what the page
 drew: `mic-starts-closed` is a camera-only grant, `mic-approved` is
@@ -295,7 +295,7 @@ Exit codes: 0 every row passed · 1 a row disagreed (the row naming the defect) 
 run that ended early. **2 is not a pass**: an unfinished run names the rows it
 never took instead of printing a shorter list of passes.
 
-Add `--signoff` to print those twelve rows as the Markdown sheet this section
+Add `--signoff` to print those thirteen rows as the Markdown sheet this section
 ends with — the URL, the exam id, when it ran, the browser it drove and the
 verdict the run earned, ready to paste into the pilot's record. The sheet carries
 the verdict it earned rather than the one the reader hopes for: a run that could

@@ -38,7 +38,7 @@ permissions:
 
 jobs:
   measure:
-    name: webhook 7/7 and media 12/12 on the staging host
+    name: webhook 7/7 and media 13/13 on the staging host
     runs-on: ubuntu-latest
     environment: scanmeet-staging
     timeout-minutes: 30
@@ -206,4 +206,4 @@ jobs:
             echo "::error::not a sign-off: webhook exit ${webhook:-none}, media exit ${media:-none} (0 and 0 are required)"
             exit 1
           fi
-          echo "webhook 7/7 and media 12/12 passed on this commit"
+          echo "webhook 7/7 and media 13/13 passed on this commit"
