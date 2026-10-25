@@ -17,6 +17,31 @@ EVENTS = {
 }
 MAX_BODY_BYTES = 65536
 
+#: How much of an oversized delivery is drained before answering 413. The reverse
+#: proxy has already buffered it (`client_max_body_size 1m` on the vhost), so this
+#: costs no extra memory; it only lets the client *hear* the answer. Measured on
+#: staging: without it gunicorn resets a connection that still has unread bytes and
+#: nginx reports **502** for a route that correctly refused the body, which the
+#: signed-webhook probe reads as a failure of the cap.
+MAX_DRAIN_BYTES = 4 * 1024 * 1024
+DRAIN_CHUNK = 64 * 1024
+
+
+def _discard(stream, limit):
+    """Read and drop at most `limit` bytes. Returns how many were dropped.
+
+    Bounded on purpose: the whole point of the cap above is that a body is never
+    buffered past it, so this discards rather than collects, and stops at the
+    ceiling even if the client keeps sending.
+    """
+    dropped = 0
+    while dropped < limit:
+        chunk = stream.read(min(DRAIN_CHUNK, limit - dropped))
+        if not chunk:
+            break
+        dropped += len(chunk)
+    return dropped
+
 
 @live_webhook_bp.route("/webhook/livekit", methods=["POST"])
 def receive_livekit():
@@ -26,6 +51,7 @@ def receive_livekit():
     if not client_ready(current_app.config):
         return jsonify({"error": "Live not configured"}), 503
     if request.content_length and request.content_length > MAX_BODY_BYTES:
+        _discard(request.stream, min(request.content_length, MAX_DRAIN_BYTES))
         return jsonify({"error": "Payload too large"}), 413
     # A chunked delivery carries no Content-Length, so the header check above
     # cannot see it. Cap the read itself: one byte past the limit is enough to

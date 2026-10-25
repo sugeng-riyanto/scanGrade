@@ -99,6 +99,52 @@ def test_webhook_rejects_large_request(monkeypatch):
     assert response.status_code == 413
 
 
+def test_the_cap_drains_what_the_proxy_buffered_before_answering(monkeypatch):
+    """413 must survive the hop through the proxy, so the body is drained.
+
+    Live on staging the oversized probe answered **502**: the route refused the
+    body without reading it, gunicorn reset the connection with unread bytes
+    still in it, and nginx reported the upstream reset instead of the 413. The
+    cap was working — the client just never heard it. `_discard` is the fix, and
+    this holds that the refusing branch calls it with the delivery's own length.
+    """
+    monkeypatch.setattr(hook, "feature_enabled", lambda *_: True)
+    monkeypatch.setattr(hook, "client_ready", lambda *_: True)
+    drained = []
+    monkeypatch.setattr(hook, "_discard",
+                        lambda stream, limit: drained.append(limit) or limit)
+
+    response = _app().test_client().post("/webhook/livekit", data=b'x' * 65537,
+                                         headers={"Authorization": "signed"})
+
+    assert response.status_code == 413
+    assert drained == [65537]
+
+
+def test_discard_stops_at_the_ceiling_and_at_the_end_of_the_body():
+    """`_discard` drops in bounded chunks and never buffers what it drops."""
+    class Stream:
+        def __init__(self, total):
+            self.left, self.reads = total, []
+
+        def read(self, size):
+            self.reads.append(size)
+            take = min(size, self.left)
+            self.left -= take
+            return b"x" * take
+
+    exact = Stream(hook.MAX_BODY_BYTES + 1)
+    assert hook._discard(exact, hook.MAX_BODY_BYTES + 1) == hook.MAX_BODY_BYTES + 1
+    assert exact.left == 0
+    assert all(size <= hook.DRAIN_CHUNK for size in exact.reads)
+
+    # A body shorter than the ceiling (a lying Content-Length) ends on the empty
+    # read rather than spinning to the ceiling.
+    short = Stream(10)
+    assert hook._discard(short, hook.MAX_DRAIN_BYTES) == 10
+    assert short.left == 0
+
+
 def test_webhook_rejects_a_wrong_signature(monkeypatch):
     _signed(monkeypatch)
     response = _app().test_client().post("/webhook/livekit", data=b'{}',
