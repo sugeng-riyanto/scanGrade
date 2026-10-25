@@ -145,6 +145,15 @@ staging E2E evidence and GitHub CI succeed. Production Live flags stay OFF.
 Everything in this section needs the staging deployment from the steps above.
 Run them in this order; each one produces a line that goes into the sign-off.
 
+**Two ways to run this section.** On the staging host, with the exported env
+file (below). Or from GitHub without any credential leaving the owner's
+settings: store the eight values as secrets on the `scanmeet-staging`
+environment and run **Actions → ScanMeet staging media (manual, real
+environment)** (`.github/workflows/scanmeet-staging-media.yml`). That job runs
+the same two tools on a runner with Chrome, writes the sheet and both exit
+codes into its summary, keeps `reading.json` as an artefact, and fails by name
+when a secret is missing — it is `workflow_dispatch` only and never deploys.
+
 ### 1. The webhook, with real signatures
 
 ```bash
