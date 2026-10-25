@@ -120,7 +120,11 @@ retries and races are in `tests/unit/test_live_mic_state_machine.py`):
 - After \`end\`, database rejects new token minting; a room deletion failure
   requires cleanup. Already-issued tokens are short-lived.
 - Rate limits, load test, cross-tenant integration tests and secret management are
-  required prior to enabling production. Vendor the JS SDK instead of CDN.
+  required prior to enabling production. The browser SDK is vendored at
+  `app/static/vendor/livekit/2.23.0/livekit-client.umd.min.js` and loaded from
+  this origin, like every other third-party script in the app; the CDN URL
+  survives only as that tag's `onerror` fallback, so the page no longer needs the
+  public internet to open a room.
 - Pilot student publisher sets SFU track subscription permissions BEFORE publishing
   so only the room creator can subscribe to that pupil. Needs independent security
   verification and malicious-client testing before rollout; an altered publisher

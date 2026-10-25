@@ -54,7 +54,13 @@
     </aside>
   </div>
 </section>
-{# STAGING ONLY. Self-host the pinned SDK after browser and security review. #}
-<script src="https://cdn.jsdelivr.net/npm/livekit-client@2.23.0/dist/livekit-client.umd.min.js"></script>
+{# The pinned SDK is served from this origin, like every other third-party script
+   here: this page is opened by a pupil on an exam room's network, where the one
+   host a browser is certain to reach is the one that served the page. The CDN
+   stays as a load-failure fallback only (the same arrangement Snap.js uses), so
+   a box that shipped without the vendored file still opens the room rather than
+   rendering a page whose script never arrives. #}
+<script src="{{ asset_v('vendor/livekit/2.23.0/livekit-client.umd.min.js') }}"
+        onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/livekit-client@2.23.0/dist/livekit-client.umd.min.js'"></script>
 <script src="{{ asset_v('js/scan-live-exam.js') }}"></script>
 {% endblock %}
