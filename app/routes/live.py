@@ -6,7 +6,7 @@ import secrets
 
 from flask import Blueprint, current_app, g, jsonify, request, render_template
 from app.decorators.year_lock import open_year_required
-from app.services import live_cleanup, live_exam_toggle, live_policy, livekit_gateway
+from app.services import live_cleanup, live_exam_toggle, live_policy, livekit_gateway, live_school_entitlement
 from app.utils.auth import get_supabase, login_required
 from app.utils.exam_access import can_manage_exam, exam_sitting_allowed
 
@@ -133,6 +133,8 @@ def create_session(exam_id):
     exam = _exam(db, exam_id)
     if _access(db, exam, staff_only=True) != live_policy.LIVE_TEACHER:
         return _denied()
+    if not live_school_entitlement.active(db, exam["school_id"]):
+        return jsonify({"error": "ScanMeet school add-on unavailable"}), 403
     if not live_exam_toggle.enabled(exam):
         return _switch_off()
     existing = _one(db.table("scan_live_sessions").select("*")
@@ -177,6 +179,8 @@ def set_exam_enabled(exam_id):
     value = body.get("enabled")
     if not isinstance(value, bool):
         return jsonify({"error": "enabled must be true or false"}), 400
+    if value and not live_school_entitlement.active(db, exam["school_id"]):
+        return jsonify({"error": "ScanMeet school add-on unavailable"}), 403
     try:
         result = live_exam_toggle.set_enabled(
             db, exam, value=value,
@@ -205,6 +209,8 @@ def join_token(sid):
     role = _check(db, session)
     if not role:
         return _denied()
+    if not live_school_entitlement.active(db, session["school_id"]):
+        return jsonify({"error": "ScanMeet school add-on unavailable"}), 403
     # A session that exists is not permission to join it: the teacher may have
     # switched the paper off after the room was created, and the row's cleanup
     # is the only thing between that decision and a pupil's camera.
