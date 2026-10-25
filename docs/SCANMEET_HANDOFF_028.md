@@ -1,15 +1,18 @@
 # ScanMeet handoff — PR #28 hardening (candidate `3d1e780`)
 
-**Verdict: HOLD** for production activation. The code-level P0 findings are fixed
-and measured on isolated staging; the media matrix could **not** be measured on
-the host available, and one operator action is still outstanding.
+**Verdict: HOLD** for production activation. Every code-level P0 is fixed, and both
+of the pilot's measurement gates are now closed on isolated staging: the signed
+webhook at 7/7 and the media matrix at **13/13** (`SIGNED OFF`, exit 0). What is
+still open is not code — the device matrix has no hardware, the migration ledger
+needs the account that owns the backups, and activation needs the owner's
+approval.
 
 | | |
 |---|---|
 | Branch | `scanmeet/integration-final` (head of it — the commit this page is on) |
 | History it replaces | `scanmeet/cleanup-debt-stale-repair` at `9505793`, kept for audit |
 | Base | `origin/main` at `4e455df1` |
-| Measurements were taken at | `3d1e780` — `app/`, `supabase/`, `tests/` and `deploy/` are byte-identical to this branch's (`git diff --stat 3d1e780 HEAD -- app/ supabase/ tests/ deploy/` is empty; only this page, two other pages and two label lines in the media workflow differ) |
+| Measurements were taken at | `3d1e780` for the gates of section 4 (its `app/`, `supabase/`, `tests/` and `deploy/` are byte-identical to this branch's: `git diff --stat 3d1e780 HEAD -- app/ supabase/ tests/ deploy/` is empty) and at **`77abe6f`** for the media sheet — the commit the staging host serves |
 | Built on | `421d0e1` (the SHA PR #28 merged) + `7574fa2` + `3d1e780` |
 | Staging host | `https://scanmeet-stg.103.93.133.193.sslip.io` (isolated vhost, own database, own LiveKit project) |
 | Production | untouched, ScanMeet **OFF** (measured below) |
@@ -156,7 +159,7 @@ and deploy gates (`-k "live or scanmeet or webhook or gate_armament"`) is
 | RBAC end to end | **15/15 PASS** (exit 0) | `deploy.scanmeet_rbac_gate`, four synthetic identities + the no-school one |
 | Debt survives session/school deletion | **PASS** | live delete + read back, above |
 | Disposal with both flags off | **PASS** | one maintenance pass, its own counters |
-| Media (13 rows, real browsers) | **CANNOT MEASURE** (exit 2), 2/13 rows taken | see below |
+| Media (13 rows, real browsers) | **13/13 PASS, `SIGNED OFF` (exit 0)** | `deploy.scanmeet_media_gate --signoff`, three real Chrome instances from a second host against this tree — sheet below |
 | Device matrix (Chrome, Edge, Android, iOS) | **NOT TESTED** | no devices on this host |
 | Production flags | **OFF, measured** | `POST https://scangrade.web.id/webhook/livekit` → `404 {"error":"Live disabled"}` |
 
@@ -173,29 +176,93 @@ rls-cross-school-invisible (1 and 1 rows, 0 in common),
 rls-live-tables-invisible (403, 403)
 ```
 
-## Why the media matrix is `CANNOT MEASURE`
+## The media matrix: 13/13, from a second host
 
-The only host available is the 1-CPU production box that also serves staging. The
-run took `sdk-loaded` and `session` (the room opened and the teacher joined), then
-the second Chrome launch never exposed a debug target: 21 browser processes
-remained after the attempt, load average reached **20.5** with **72 MB** free of
-957 MB. The gate refused to file a sign-off, which is the behaviour the review
-asked for — it reports `CANNOT MEASURE` with the reason rather than a green tick.
+It was **not** run on the 1-vCPU box. That attempt is recorded below because it is
+the reason this one exists, and because a host that cannot measure must say so
+instead of filing a short table of passes.
 
-That run also slowed production (`https://scangrade.web.id/` took 51 s during it,
-200 again after the browsers were cleared). The lesson is the one the mission
-states: the media matrix belongs on a runner, not on this box. The browser
-workflow in `.github/workflows/scanmeet-staging-media.yml` is the venue, and its
-evidence needs the eight secrets in the `scanmeet-staging` environment.
+### Where it ran, and why here
+
+| | |
+|---|---|
+| Host | a Windows workstation — the "suitably sized independent test runner" the mission allows as the alternative to a GitHub-hosted one |
+| Browser | `C:\Program Files\Google\Chrome\Application\chrome.exe`, three instances, synthetic camera/microphone |
+| Target | `https://scanmeet-stg.103.93.133.193.sslip.io` — the isolated staging vhost, serving `77abe6f` |
+| Run at | `2026-10-25T11:49:15+00:00` |
+| Exam | `be8a29e4-970f-4987-9e98-a6dc552050b5` |
+| Verdict | **`SIGNED OFF` (exit 0) — 13/13 rows passed** |
+
+`.github/workflows/scanmeet-staging-media.yml` is still the reproducible venue for
+the owner, and it writes this same sheet into the run summary and uploads
+`reading.json`, `webhook.txt` and `media.txt` as an artefact. It is
+`workflow_dispatch` only, so dispatching it needs a token this checkout does not
+have; it also needs the eight secrets in the `scanmeet-staging` environment.
+
+### The sheet
+
+```markdown
+## ScanMeet media sign-off - https://scanmeet-stg.103.93.133.193.sslip.io
+
+- **Verdict:** `SIGNED OFF` (exit 0) - 13/13 row(s) passed
+- **Exam:** `be8a29e4-970f-4987-9e98-a6dc552050b5`
+- **Run at:** 2026-10-25T11:49:15+00:00
+- **Browser:** `C:\Program Files\Google\Chrome\Application\chrome.exe` (synthetic devices)
+
+| # | Row | State | What this run observed |
+| --- | --- | --- | --- |
+| 1 | `sdk-loaded` | PASS | the page reached the pinned SDK |
+| 2 | `session` | PASS | the room opened (8e1dfb3d...) and the teacher joined it |
+| 3 | `pupil-camera` | PASS | the pupil's page is decoding its own camera, and the frames were still rising 3s later |
+| 4 | `teacher-receives-camera` | PASS | the teacher's grid is decoding 2 pupil camera(s) |
+| 5 | `pupil-isolation` | PASS | neither pupil's page holds any camera but their own and the supervisor's, while the other is in the room |
+| 6 | `mic-starts-closed` | PASS | a fresh pupil token grants the camera only, and the page offers no microphone control |
+| 7 | `hand-raise` | PASS | the request is pending in the API and a row the teacher can see in the queue |
+| 8 | `mic-approved` | PASS | approval grants camera + microphone and the pupil's control appears |
+| 9 | `audio-reaches-teacher` | PASS | the teacher's page holds a live audio track for the room |
+| 10 | `mic-closed` | PASS | the close takes the grant back to the camera, the control away and the teacher's live audio with it |
+| 11 | `outsider-refused` | PASS | another school's pupil is refused both the page and the token |
+| 12 | `token-expiry` | PASS | a token with a 300s life was refused 75s after it expired while a fresh token connected from the same room, and the pupil already in it was not disturbed (`ConnectionError: could not establish signal connection: invalid token`) |
+| 13 | `room-ended` | PASS | *Akhiri Live* is confirmed, and the next join token is refused |
+
+Every row passed: cameras decode, the microphone is refused until a teacher approves it and revoked after, no pupil receives another's media, a token the app issued stops working when its five minutes run out, and the ended room admits nobody.
+```
+
+The machine-readable half of the same run, quoted from `reading.json` (identities
+are LiveKit participant ids, not accounts):
+
+```
+sources: before ['camera'] → approved ['camera', 'microphone'] → closed ['camera']
+outsider: page 403, token 403
+expiry:   life 300.0s, control token connected, attempt refused `invalid token`,
+          already-connected pupil undisturbed
+after_end: token 403, end confirmed on screen
+```
+
+The evidence above is the second row of the table in the previous section: it
+closed the pilot's media gate. It does not close the device matrix — real phones
+are still unmeasured — and it does not authorise production.
+
+### The host that could not measure (kept as the reason)
+
+On the 1-CPU production box, the run took `sdk-loaded` and `session` (the room
+opened and the teacher joined), then the second Chrome launch never exposed a
+debug target: 21 browser processes remained, load average reached **20.5** with
+**72 MB** free of 957 MB, and the gate answered `CANNOT MEASURE` with `2/13`
+rather than a green tick. That run also slowed production (`https://scangrade.web.id/`
+took 51 s; 200 again once the browsers were cleared). No browser test has been run
+on that host since, and none should be.
 
 ## Owner actions outstanding
 
 1. **Open the PR** from this branch (compare link above) — posting to GitHub from
    this checkout needs a token with `repo` scope, which is not available here.
-2. **Run the media matrix** in `.github/workflows/scanmeet-staging-media.yml`
-   against this SHA, on a runner — 13/13 PASS is the gate for pilot. It must not
-   be run on the 1-vCPU host that serves production: a previous attempt there left
-   21 browser processes, took load to 20.5 and slowed the live site to 51 s.
+2. **Re-run the media matrix through GitHub** when a fresh reading is wanted:
+   dispatch `.github/workflows/scanmeet-staging-media.yml` after filling the eight
+   secrets in the `scanmeet-staging` environment — it writes the same sheet into
+   the run summary and keeps `reading.json` as an artefact. The 13/13 above is
+   already a reading of this SHA's own tree; this step is for a later commit, not
+   for a missing one. Never on the 1-vCPU host that serves production.
 3. **`apply_migration.py --status` is unreadable** on the box:
    `PermissionError: /var/backups/scangrade/scangrade-db-….tar.gz`. That is a
    root-owned recovery-point directory, so the ledger cannot answer for itself
