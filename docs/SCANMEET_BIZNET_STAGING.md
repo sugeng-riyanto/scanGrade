@@ -13,10 +13,56 @@ service, systemd units, .env, nginx or exam database.
   test if needed. Never run a second worker during an active exam.
 - A separate HTTPS staging domain, with DNS/TLS configured on the hosting side.
 - A separate staging Supabase project. Apply
-  `supabase/migrations/070_scan_live_exam.sql` **only to staging** after validating
-  referenced `schools`, `exams`, `profiles` table schema.
+  `supabase/migrations/070_scan_live_exam.sql` **and**
+  `supabase/migrations/071_scan_live_exam_toggle.sql` **only to staging** after
+  validating referenced `schools`, `exams`, `profiles` table schema. Without 071
+  every paper reads as ScanMeet OFF — the feature's default, not a fault — and
+  the per-exam switch answers 409 with "Could not save the ScanMeet switch".
 - A LiveKit Cloud project (server URL, API key and secret); the video SFU is
   hosted by LiveKit Cloud, not on the 1 GB VPS.
+- Four synthetic identities in the staging database — teacher, two pupils in one
+  school, one pupil of another school — and one staged exam. They are passed to
+  the media gate on the command line as `email:password`, never stored in the
+  env file.
+
+## Values the owner must supply
+
+This is the whole list. The template `deploy/livekit-staging.env.example`
+carries every key and no value; the gate refuses it unchanged, so a copied
+template cannot read as a configured pilot. Fill it at
+`~/.config/scanmeet/staging.env` on the staging host (outside the checkout,
+mode `0600`), then run the gate — it names every value still missing, and never
+prints one.
+
+<!-- owner-values:start -->
+
+| Key | Where the value comes from | How to prove it is not production's | What a wrong value does |
+|---|---|---|---|
+| `SCANMEET_STAGING` | the literal `true` | it is the declaration itself | any other value: "SCANMEET_STAGING=true is required" |
+| `SCANMEET_STAGING_URL` | the staging host's own DNS/TLS entry | it must not be `scangrade.web.id`, its `www.`/`lmsshb.` names, or any subdomain of that domain | gate refuses; the media driver also refuses the live site unless `--allow-production` |
+| `SCANGRADE_LIVE_ENABLED` | you set it on the staging host | production keeps it `false` | pilot refused: "both Live feature flags" |
+| `SCANGRADE_LIVE_EXAM_ENABLED` | you set it on the staging host | production keeps it `false` | as above; also the reason a webhook probe answers 404 |
+| `LIVEKIT_URL` | LiveKit Cloud → the staging project → Settings → URL (`wss://<project>.livekit.cloud`) | the project name differs from production's LiveKit project | `--probe-livekit` fails; browsers cannot signal |
+| `LIVEKIT_API_KEY` | same project → Keys | belongs to the staging project | RoomService probe 401s and microphone approval cannot be applied |
+| `LIVEKIT_API_SECRET` | same key, shown once at creation | same project | 401 on the probe and on every `UpdateParticipant` |
+| `SUPABASE_URL` | Supabase → the staging project → Settings → API → Project URL | the ref must differ from `deploy/supabase_region.py`'s `REF`, and the value must not still say `your-project` | gate refuses "isolated staging Supabase project" or "still a placeholder" |
+| `SUPABASE_SERVICE_KEY` | same page → `service_role` | that staging project only | 401s on every query; RLS bypasses are per project |
+| `SUPABASE_ANON_KEY` | same page → `anon` | same project | login and CSRF flows fail for every account |
+| `FLASK_SECRET_KEY` | generate it **on the staging host**: `python3 -c "import secrets; print(secrets.token_urlsafe(48))"` | never reuse production's | every staging session (and its CSRF token) is invalidated on restart |
+
+<!-- owner-values:end -->
+
+Two values are **not** in the env file, because they are chosen when the run
+starts rather than configured once:
+
+| Argument | Where it comes from |
+|---|---|
+| `--exam <uuid>` | a staged exam in the staging database, with at least two assigned pupils in one class |
+| `--teacher`, `--student`, `--student2`, `--outsider` | the four synthetic identities, as `email:password`; `--outsider` must belong to a **different** school |
+
+The media gate itself never provisions any of them — it refuses with exit 2 and
+names what it could not measure, which is why "exit 2" is a blocker and not a
+pass.
 
 ## Commands (SSH on staging server, under an ordinary user)
 
@@ -42,22 +88,10 @@ nano ~/.config/scanmeet/staging.env
 chmod 600 ~/.config/scanmeet/staging.env
 ```
 
-Set the following in that file (values are **examples**, not usable secrets).
-Use the actual *staging* Supabase URL and correct LiveKit credentials.
-
-```dotenv
-SCANMEET_STAGING=true
-SCANMEET_STAGING_URL=https://staging.your-school-domain.com
-SCANGRADE_LIVE_ENABLED=true
-SCANGRADE_LIVE_EXAM_ENABLED=true
-LIVEKIT_URL=wss://your-project.livekit.cloud
-LIVEKIT_API_KEY=replace-me
-LIVEKIT_API_SECRET=replace-me
-SUPABASE_URL=https://independent-staging.supabase.co
-SUPABASE_SERVICE_KEY=replace-me
-SUPABASE_ANON_KEY=replace-me
-FLASK_SECRET_KEY=replace-me
-```
+Fill in every value the table above names. The template is
+`deploy/livekit-staging.env.example`; do not retype the list from memory, because
+a key that is missing there is a key the gate will refuse and the run will
+never take.
 
 Run the **offline safety guard before installing or starting anything**:
 
@@ -291,6 +325,22 @@ same table and a closing sentence saying it is **not** a sign-off. A sheet with 
 `**SKIP**` or a `**FAIL**` in it is a finding to send back, not a pilot to file —
 `test_the_runbook_shows_the_sheet_the_driver_prints` reads this block and fails
 if the twelve row names or the closing sentence stop matching the tool.
+
+#### The per-exam switch — four readings the twelve rows do not take
+
+The driver opens the room the teacher started; it does not turn the paper's
+switch off and on. These are the acceptance-matrix rows for it, and each one is
+taken from the server's answer rather than from the button's label:
+
+| Reading | How | What counts |
+|---|---|---|
+| OFF is stored | open `/live/exam/<exam_id>` as the teacher with the switch already off | the page says `NONAKTIF`, **Mulai pengawasan** is not offered, and a second device says the same after reload |
+| OFF refuses a room | `POST /api/live/exams/<exam_id>/sessions` (or the page's button if it were offered) | `409 {"error": "ScanMeet is off for this exam"}`; no `scan_live_sessions` row is created |
+| ON permits, never starts | press **Aktifkan ScanMeet**, then reload | `AKTIF`, and **no** session row until **Mulai pengawasan** is pressed — two ON requests leave one paper with no room |
+| OFF mid-session revokes | with a room open, press **Nonaktifkan ScanMeet** | the session row turns `ended`, the tiles drop, the next join token is refused, and if LiveKit cleanup failed the page says *"Pembersihan media tertunda"* — the exam, its timer and autosave are untouched |
+
+Record the `scan_live_sessions` row's `status` and the HTTP code each time; a
+row that is still `active` after OFF is the finding, whatever the page shows.
 
 ### 3. What to send back
 

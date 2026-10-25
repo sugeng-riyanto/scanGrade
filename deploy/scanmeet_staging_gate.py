@@ -16,7 +16,7 @@ import stat
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from deploy.livekit_preflight import audit, parse_env
+from deploy.livekit_preflight import PLACEHOLDERS, audit, parse_env
 
 #: POSIX mode bits exist only where the platform implements them. On Windows
 #: `stat().st_mode` reports 0o666 for a file that `chmod(0o600)` was applied to,
@@ -57,6 +57,13 @@ def validate(settings: dict[str, str], production_ref: str) -> list[str]:
                 problems.append(f"{key} is a placeholder")
     raw_db = settings.get("SUPABASE_URL", "").strip()
     raw_web = settings.get("SCANMEET_STAGING_URL", "").strip()
+    # A URL is not exempt from the placeholder rule the three secret keys already
+    # follow: `https://your-project.supabase.co` has the shape of an isolated
+    # project and names none, so a copied template would pass the isolation check
+    # on a database that does not exist -- the one claim this gate exists to make.
+    for key, raw in (("SUPABASE_URL", raw_db), ("SCANMEET_STAGING_URL", raw_web)):
+        if any(word in raw.lower() for word in PLACEHOLDERS):
+            problems.append(f"{key} is still a placeholder")
     try:
         db = urlsplit(raw_db)
         host = (db.hostname or "").lower()
