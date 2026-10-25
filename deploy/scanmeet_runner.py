@@ -30,11 +30,13 @@ This tool is that script, with the parts a script cannot do for you:
 
 Usage, from the repository root on any machine::
 
-    python -m deploy.scanmeet_runner --env ~/scanmeet-staging.env --check
+    python -m deploy.scanmeet_runner --env ~/scanmeet-staging.env --all --check
     python -m deploy.scanmeet_runner --env ~/scanmeet-staging.env --webhook --media --signoff
 
 `--check` validates the environment and prints the plan: no browser, no request,
-no subprocess. That is the mode a second machine should run first, because every
+no subprocess. It is a modifier, not a gate, so it is written beside the gates the
+run would take (`--all --check`), never on its own — a bare `--check` has nothing
+to validate against and answers `nothing to run`. That is the mode a second machine should run first, because every
 refusal below is cheaper to read than a three-browser run that was never going to
 start.
 
