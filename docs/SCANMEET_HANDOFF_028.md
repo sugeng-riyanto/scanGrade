@@ -9,7 +9,7 @@ the host available, and one operator action is still outstanding.
 | Branch | `scanmeet/integration-final` (head of it — the commit this page is on) |
 | History it replaces | `scanmeet/cleanup-debt-stale-repair` at `9505793`, kept for audit |
 | Base | `origin/main` at `4e455df1` |
-| Measurements were taken at | `3d1e780`, whose tree is byte-identical to this branch's |
+| Measurements were taken at | `3d1e780` — `app/`, `supabase/`, `tests/` and `deploy/` are byte-identical to this branch's (`git diff --stat 3d1e780 HEAD -- app/ supabase/ tests/ deploy/` is empty; only this page, two other pages and two label lines in the media workflow differ) |
 | Built on | `421d0e1` (the SHA PR #28 merged) + `7574fa2` + `3d1e780` |
 | Staging host | `https://scanmeet-stg.103.93.133.193.sslip.io` (isolated vhost, own database, own LiveKit project) |
 | Production | untouched, ScanMeet **OFF** (measured below) |
@@ -109,6 +109,43 @@ still has unread bytes, and nginx passes that reset on as an upstream failure. A
 delivery that was correctly refused looked like a delivery the deployment could
 not handle. The refusing branch now drains what the proxy already buffered
 (bounded, never parsed) and answers 413.
+
+## Regression tests, by name
+
+Ninety tests across the four suites hold the fixes above, and they run with no
+network, no browser and no LiveKit project:
+
+| File | Tests |
+|---|---|
+| `tests/unit/test_live_cleanup.py` | 36 |
+| `tests/unit/test_live_reconcile.py` | 13 |
+| `tests/unit/test_live_webhook.py` | 13 |
+| `tests/unit/test_live_exam_toggle.py` | 28 |
+
+The ones that would have to be deleted for a regression to pass:
+
+```
+test_cleanup_runs_with_the_feature_flags_off
+test_maintenance_is_blocked_without_credentials
+test_maintenance_is_blocked_without_the_ledger_table
+test_schema_ready_reads_the_ledger
+test_an_orphaned_job_is_still_deleted
+test_two_workers_cannot_claim_the_same_room
+test_a_crashed_claim_is_recovered_after_its_lease_without_burning_an_attempt
+test_a_worker_that_lost_its_lease_does_not_touch_the_room
+test_a_renewal_without_the_token_is_refused
+test_a_backed_off_job_is_not_claimed_early
+test_the_park_needs_the_room_to_stay_gone_past_the_grace
+test_a_concurrent_decision_wins_over_the_repair
+test_a_transition_that_lost_its_row_is_reported_not_assumed
+the_cap_drains_what_the_proxy_buffered_before_answering
+discard_stops_at_the_ceiling_and_at_the_end_of_the_body
+```
+
+Run at this branch: `90 passed`. The wider set that touches ScanMeet, the browser
+and deploy gates (`-k "live or scanmeet or webhook or gate_armament"`) is
+`515 passed`; the media-gate, staging-gate and staging-workflow suites are
+`92 passed`.
 
 ## Evidence measured on staging at `3d1e780`
 
