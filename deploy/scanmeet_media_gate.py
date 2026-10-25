@@ -626,7 +626,17 @@ class Browser:
         self.proc, self.profile = proc, profile
         if target is None:
             raise CannotMeasure(reason)
-        self.ws = await websockets.connect(target, max_size=64 * 1024 * 1024)
+        # `ping_interval`/`ping_timeout` are the *library's* liveness check, and its
+        # 20 s default is a deadline three starved Chrome processes on a two-core
+        # runner can miss: the hosted run of this gate lost the second pupil's
+        # socket 46 s into the expiry wait with `sent 1011 (internal error)
+        # keepalive ping timeout; no close frame received` — a pong that arrived
+        # more than 20 s late, not a browser that had gone. The connection was
+        # still writable (a crashed process gives 1006, not 1011), so the reading
+        # was refused for the runner's clock rather than for anything about the
+        # token. Two minutes keeps the check — a peer that never answers is still
+        # closed and still surfaces — without charging a busy renderer for it.
+        self.ws = await websockets.connect(target, **DEVTOOLS_SOCKET)
         self.cdp = touch_gate._CDP(self.ws)
         await self.cdp.send("Network.enable")
         await self.cdp.send("Page.enable")
@@ -819,6 +829,29 @@ EXPIRY_MARGIN = 75.0
 #: two rows as SKIP — a measurement that did not happen, for a reason that had
 #: nothing to do with the token.
 EXPIRY_PING_SECONDS = 20.0
+
+#: How this driver opens the DevTools socket. A 64 MB frame limit because a
+#: `Runtime.evaluate` reply can carry a page's whole state, and a pong deadline of
+#: two minutes because Chrome on a two-core runner with three instances publishing
+#: video answers late often enough that the library's 20 s default closed a live
+#: socket (see `Browser.open`). Not a "disable the keepalive": a peer that never
+#: answers is still closed, in 120 s rather than in 20.
+DEVTOOLS_SOCKET = {
+    "max_size": 64 * 1024 * 1024,
+    "ping_interval": 20,
+    "ping_timeout": 120,
+}
+
+#: How long one of those liveness calls may go unanswered before the wait is
+#: declared unmeasurable rather than merely slow. Longer than the socket's own
+#: `ping_timeout` (120 s), so it is the outer guard for a connection that is open
+#: and writable but has stopped replying: without it the reply is awaited with no
+#: deadline at all and the run ends on its whole budget, naming no cause.
+PING_ANSWER_SECONDS = 150.0
+
+assert PING_ANSWER_SECONDS > DEVTOOLS_SOCKET["ping_timeout"], (
+    "the outer deadline must sit past the socket's own, or the run ends on its "
+    "budget instead of naming the browser that stopped answering")
 
 #: The whole room, from sign-in to the last token probe. Generous enough for a
 #: slow staging box and short enough that a stalled page is reported by name.
@@ -1311,16 +1344,26 @@ class Driver:
             if announced:
                 for page in open_pages:
                     try:
-                        await page.ping()
+                        # Bounded, because `send` awaits the reply with no deadline
+                        # of its own: an unanswered call would otherwise sit there
+                        # until the run's whole budget expired.
+                        await asyncio.wait_for(page.ping(), PING_ANSWER_SECONDS)
                     except Exception as exc:  # noqa: BLE001 - see below
                         # The socket, not the token. Could-not-measure, said out
                         # loud: a wait that lost its connection measured nothing,
                         # and the one thing it must never do is leave a green row.
+                        # Whether the browser is still running separates a starved
+                        # renderer from one that had gone — the two failures look
+                        # identical from the exception alone, and only one of them
+                        # is about this host's size.
+                        proc = getattr(page, "proc", None)
+                        alive = proc is not None and proc.poll() is None
                         raise CannotMeasure(
                             f"the DevTools connection for {page.name} closed while "
                             f"waiting for the token to expire "
-                            f"({type(exc).__name__}: {exc}) — the expiry was not "
-                            f"measured") from exc
+                            f"({type(exc).__name__}: {exc}; the browser process "
+                            f"{'was still running' if alive else 'had exited'}) "
+                            f"— the expiry was not measured") from exc
             announced = True
             await asyncio.sleep(min(EXPIRY_PING_SECONDS, left))
 
