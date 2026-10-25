@@ -2,17 +2,18 @@
 
 **Verdict: HOLD** for production activation. Every code-level P0 is fixed, and both
 of the pilot's measurement gates are now closed on isolated staging: the signed
-webhook at 7/7 and the media matrix at **13/13** (`SIGNED OFF`, exit 0). What is
-still open is not code — the device matrix has no hardware, the migration ledger
-needs the account that owns the backups, and activation needs the owner's
-approval.
+webhook at 7/7 and the media matrix at **13/13** (`SIGNED OFF`, exit 0). Both were
+measured twice — once from a workstation and once by a **GitHub-hosted runner**,
+which is the venue the owner can re-run without a box of their own. What is still
+open is not code — the device matrix has no hardware, the migration ledger needs
+the account that owns the backups, and activation needs the owner's approval.
 
 | | |
 |---|---|
 | Branch | `scanmeet/integration-final` (head of it — the commit this page is on) |
 | History it replaces | `scanmeet/cleanup-debt-stale-repair` at `9505793`, kept for audit |
 | Base | `origin/main` at `4e455df1` |
-| Measurements were taken at | `3d1e780` for the gates of section 4 (its `app/`, `supabase/`, `tests/` and `deploy/` are byte-identical to this branch's: `git diff --stat 3d1e780 HEAD -- app/ supabase/ tests/ deploy/` is empty) and at **`77abe6f`** for the media sheet — the commit the staging host serves |
+| Measurements were taken at | `3d1e780` for the gates of section 4 (its `app/`, `supabase/`, `tests/` and `deploy/` are byte-identical to this branch's: `git diff --stat 3d1e780 HEAD -- app/ supabase/ tests/ deploy/` is empty) and at **`77abe6f`** for the media sheet — the commit the staging host serves. The same matrix was then re-measured by a GitHub-hosted runner at **`32e5fba99772`** (this branch's head, pushed): the runner's `app/` and `supabase/` are byte-identical to `77abe6f` (`git diff --stat 77abe6f 32e5fba -- app/ supabase/` is empty), so both readings are of the same application |
 | Built on | `421d0e1` (the SHA PR #28 merged) + `7574fa2` + `3d1e780` |
 | Staging host | `https://scanmeet-stg.103.93.133.193.sslip.io` (isolated vhost, own database, own LiveKit project) |
 | Production | untouched, ScanMeet **OFF** (measured below) |
@@ -159,7 +160,7 @@ and deploy gates (`-k "live or scanmeet or webhook or gate_armament"`) is
 | RBAC end to end | **15/15 PASS** (exit 0) | `deploy.scanmeet_rbac_gate`, four synthetic identities + the no-school one |
 | Debt survives session/school deletion | **PASS** | live delete + read back, above |
 | Disposal with both flags off | **PASS** | one maintenance pass, its own counters |
-| Media (13 rows, real browsers) | **13/13 PASS, `SIGNED OFF` (exit 0)** | `deploy.scanmeet_media_gate --signoff`, three real Chrome instances from a second host against this tree — sheet below |
+| Media (13 rows, real browsers) | **13/13 PASS, `SIGNED OFF` (exit 0)** | `deploy.scanmeet_media_gate --signoff`, three real Chrome instances — measured from a second host and again by a GitHub-hosted runner at `32e5fba`; sheet below |
 | Device matrix (Chrome, Edge, Android, iOS) | **NOT TESTED** | no devices on this host |
 | Production flags | **OFF, measured** | `POST https://scangrade.web.id/webhook/livekit` → `404 {"error":"Live disabled"}` |
 
@@ -193,11 +194,13 @@ instead of filing a short table of passes.
 | Exam | `be8a29e4-970f-4987-9e98-a6dc552050b5` |
 | Verdict | **`SIGNED OFF` (exit 0) — 13/13 rows passed** |
 
-`.github/workflows/scanmeet-staging-media.yml` is still the reproducible venue for
-the owner, and it writes this same sheet into the run summary and uploads
+`.github/workflows/scanmeet-staging-media.yml` is the reproducible venue for the
+owner, and it writes this same sheet into the run summary and uploads
 `reading.json`, `webhook.txt` and `media.txt` as an artefact. It is
-`workflow_dispatch` only, so dispatching it needs a token this checkout does not
-have; it also needs the eight secrets in the `scanmeet-staging` environment.
+`workflow_dispatch` only, and it has now been dispatched: the `scanmeet-staging`
+environment exists with its eight secrets, installed from the box's private
+`staging.env` through the API without the values being printed, and the run below
+is what it measured. Re-running it for a later commit is a button, not a setup.
 
 ### The sheet
 
@@ -243,6 +246,44 @@ The evidence above is the second row of the table in the previous section: it
 closed the pilot's media gate. It does not close the device matrix — real phones
 are still unmeasured — and it does not authorise production.
 
+### The same sheet from a GitHub-hosted runner
+
+| | |
+|---|---|
+| Run | `actions/runs/40207324741` — "ScanMeet staging media (manual, real environment)", `workflow_dispatch`, attempt 1 |
+| Runner | `ubuntu-latest`, `python 3.12`, `requirements.txt` only, `google-chrome` from the image |
+| Checkout | **`32e5fba99772`** — the commit under test is the one the run printed, not `main` |
+| Environment | `scanmeet-staging`, its eight secrets populated |
+| Target | `https://scanmeet-stg.103.93.133.193.sslip.io` (hosts `77abe6f`; `app/` and `supabase/` identical to the checkout) |
+| Webhook | **7/7 PASS**, step exit 0 — `oversized` answered **413**, `valid` and `replay` **204** |
+| Media | **13/13 PASS, `SIGNED OFF` (exit 0)**, run at `2026-10-25T15:47:32+00:00`, exam `be8a29e4-…` |
+| Artefact | `scanmeet-staging-reading` (30 days): `reading.json`, `webhook.txt`, `media.txt` |
+
+The sheet is row-for-row the one quoted above. The only line that differs is the
+browser — `/usr/bin/google-chrome` on the runner rather than a Windows install —
+and the room name row 2 reports, which is minted per session.
+
+#### The row a host can lose without saying so
+
+This run is the second dispatch. The first lost rows 12 and 13, and the reason was
+the driver rather than the deployment: the expiry row waits out a 300 s token plus
+a 75 s margin, and Chrome closes a DevTools socket nobody speaks on with
+`sent 1011 keepalive ping timeout; no close frame received`. Three Chrome
+instances publishing video on a two-core runner answer a ping slowly enough to
+miss the library's 20 s default, so the wait ended with the connection gone and
+two rows `SKIP` — a measurement that did not happen, filed for a reason that had
+nothing to do with the token.
+
+`32e5fba` fixes it in the driver and nowhere else: the wait counts its elapsed
+time on `time.monotonic()` and sends one cheap command over every open page every
+20 s, so the socket is spoken on for the whole five minutes; a wait that still
+loses its connection raises `CannotMeasure` naming the page and whether its
+process was alive, which is exit 2 rather than a green row; and the socket's pong
+deadline is 120 s instead of 20 while the liveness check stays enabled. The three
+regression tests are `test_the_wait_answers_the_browser_so_the_socket_survives`,
+`test_a_dead_devtools_socket_is_could_not_measure_not_a_pass` and
+`test_the_expiry_row_never_turns_a_failed_wait_into_a_row`.
+
 ### The host that could not measure (kept as the reason)
 
 On the 1-CPU production box, the run took `sdk-loaded` and `session` (the room
@@ -258,11 +299,11 @@ on that host since, and none should be.
 1. **Open the PR** from this branch (compare link above) — posting to GitHub from
    this checkout needs a token with `repo` scope, which is not available here.
 2. **Re-run the media matrix through GitHub** when a fresh reading is wanted:
-   dispatch `.github/workflows/scanmeet-staging-media.yml` after filling the eight
-   secrets in the `scanmeet-staging` environment — it writes the same sheet into
-   the run summary and keeps `reading.json` as an artefact. The 13/13 above is
-   already a reading of this SHA's own tree; this step is for a later commit, not
-   for a missing one. Never on the 1-vCPU host that serves production.
+   dispatch `.github/workflows/scanmeet-staging-media.yml`. Its environment
+   (`scanmeet-staging`) and its eight secrets are in place, and it has already
+   produced the 13/13 recorded above at `32e5fba`, so this is a re-run for a later
+   commit rather than a setup step. Never on the 1-vCPU host that serves
+   production.
 3. **`apply_migration.py --status` is unreadable** on the box:
    `PermissionError: /var/backups/scangrade/scangrade-db-….tar.gz`. That is a
    root-owned recovery-point directory, so the ledger cannot answer for itself
