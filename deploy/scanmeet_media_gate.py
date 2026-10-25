@@ -729,6 +729,40 @@ HAND_READY = ("(() => { const h = document.getElementById('live-hand');"
               " return !!h && !h.disabled; })()")
 TEACHER_READY = ("(() => { const e = document.getElementById('live-end');"
                  " return !!e && !e.hidden; })()")
+#: `#live-start` starts `hidden` and is revealed by the page's own `discover()`
+#: request — so a press issued the moment the document loads reads as "the page
+#: offers no control", which is a reading the driver cannot take yet rather than a
+#: finding about the product. Measured on staging from a remote runner: the control
+#: appears within about a second of load.
+START_READY = ("(() => { const b = document.getElementById('live-start');"
+               " return !!b && !b.hidden && b.getBoundingClientRect().width > 0; })()")
+
+
+def tiles_expression(identities: list[str]) -> str:
+    """True once every wanted identity's tile holds a *decoded* frame.
+
+    The teacher's grid fills from `TrackSubscribed`, which lands after the pupil's
+    first published frame. Measured on staging, twice:
+
+    * a reading taken the instant both pupils were publishing found two videos —
+      the teacher's own and the first pupil's — and judged the second as "no
+      camera tile for that participant";
+    * after waiting for the *element*, a second run found the tile with
+      `videoWidth 0`, because the element is appended before its first frame
+      arrives. Both were statements about the snapshot, not about the room.
+
+    So the wait is for a tile whose video has decoded something, which is the
+    claim row 4 makes.
+    """
+    wanted = json.dumps(list(identities))
+    return ("(() => { const want = " + wanted + ";"
+            " const grid = document.getElementById('live-grid');"
+            " if (!grid) return false;"
+            " const have = new Set([...grid.querySelectorAll('video')]"
+            "   .filter(v => v.videoWidth > 0).map(v => {"
+            "     const tile = v.closest('[data-identity]');"
+            "     return tile ? (tile.dataset.identity || '') : ''; }));"
+            " return want.every(x => have.has(x)); })()")
 QUEUE_PENDING = ("[...document.querySelectorAll('#live-queue > div')]"
                  ".some(d => /pending/.test(d.textContent))")
 QUEUE_HAS_APPROVED = ("[...document.querySelectorAll('#live-queue > div')]"
@@ -832,10 +866,13 @@ class Driver:
 
         if session is None:
             self.step = "opening the room"
-            if not await teacher.click("#live-start"):
+            offered = await teacher.wait(START_READY, STEP_TIMEOUT)
+            if not offered or not await teacher.click("#live-start"):
+                said = (await teacher.read()).status
                 self.rows.append(Row("session", "fail",
-                                     "the teacher's page offers no *Mulai pengawasan* "
-                                     "control to press"))
+                                     "the teacher's page offered no pressable "
+                                     "*Mulai pengawasan* control "
+                                     f"(`{said}` after {STEP_TIMEOUT:.0f}s)"))
                 self.rows.extend(self._unmeasured("no room was opened"))
                 return
             session = await self._wait_session(teacher)
@@ -950,6 +987,11 @@ class Driver:
         if "student" not in pupils:
             return rows or [Row("pupil-camera", "skipped",
                                 "no pupil browser joined the room")]
+
+        expected = [self.identities.get(role) for role in pupils
+                    if self.identities.get(role)]
+        if expected:
+            await teacher.wait(tiles_expression(expected), CONNECT_TIMEOUT)
 
         first = {role: await browser.read() for role, browser in pupils.items()}
         teacher_first = await teacher.read()

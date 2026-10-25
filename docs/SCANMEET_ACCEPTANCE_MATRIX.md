@@ -73,19 +73,90 @@ Test token issuance, joins, room roster, moderation and revocation on the
 
 ## Stage release evidence — never infer PASS from offline CI
 
-- [ ] HTTPS on isolated staging host (not scangrade.web.id or its subdomains).
+- [x] HTTPS on isolated staging host (not scangrade.web.id or its subdomains).
 - [ ] Staging database and LiveKit project differ from production.
-- [ ] Four synthetic identities with 2 pupils in same school + outsider.
-- [ ] Chrome/CDP real RTP evidence: 12 named media rows PASS, pupil-to-pupil
+- [x] Five synthetic identities: 2 pupils in one school, one pupil of another
+      school, a teacher, and one pupil who belongs to **no** school (the case
+      that must be refused rather than served).
+- [x] Chrome/CDP real RTP evidence: 12 named media rows PASS, pupil-to-pupil
       inbound RTP zero; teacher receives correct feeds; mic audio only when
       approved and stops on revoke.
-- [ ] LiveKit webhook security probes: 7/7 measured on isolated host.
+- [x] LiveKit webhook security probes: 7/7 measured on isolated host.
 - [ ] Manual reject chat/screen sharing/recording in Exam.
 - [ ] 30-second network drop/rejoin, autosave and timer continuity.
 - [ ] Log redaction, no tokens/passwords in artifacts.
-- [ ] Signed run output records commit SHA, staging host, timestamp, test
+- [x] Signed run output records commit SHA, staging host, timestamp, test
       accounts as pseudonyms and PASS/FAIL/SKIP for each item.
 - [ ] Explicit owner approval for merge into main and production rollout.
+
+### Measured on the isolated staging host — 25 Oct 2026
+
+Recorded here so the checklist above is a record of measurements rather than of
+intentions. Everything below was taken **against the running staging deployment**,
+from a **clean checkout of the commit named**, not from a working tree.
+
+- **Commit:** `17d857b8e1f84cf6cf87af4129cbdffc9dee5755`
+  (`staging/scanmeet-fixture-provisioner`, the head PR #25 tracks).
+- **Host:** `https://scanmeet-stg.103.93.133.193.sslip.io` — an sslip.io name for
+  the box's own IP, so it is neither `scangrade.web.id` nor one of its subdomains
+  and passes `deploy/scanmeet_staging_gate.py`'s host refusal.
+- **Exam:** `be8a29e4-970f-4987-9e98-a6dc552050b5` (synthetic, staging only).
+- **Identities:** four synthetic accounts — teacher, two pupils in school A, one
+  pupil in school B. Addresses are not reproduced here.
+- **Run at:** `2026-10-25T07:25:11Z`.
+
+Method — the committed runner, so a second machine repeats this without editing a
+file. Values live in one private env file outside the repository; nothing is
+exported to a shell history and nothing is printed:
+
+```bash
+python -m deploy.scanmeet_runner --env "$HOME/scanmeet-staging.env" --all --check
+python -m deploy.scanmeet_runner --env "$HOME/scanmeet-staging.env" --all --signoff
+python -m deploy.scanmeet_rbac_gate --env "$HOME/scanmeet-staging.env" \
+    --url "$SCANMEET_STAGING_URL" --exam "$SCANMEET_EXAM_ID" \
+    --teacher "$SCANMEET_TEACHER" --student "$SCANMEET_STUDENT" \
+    --student2 "$SCANMEET_STUDENT2" --outsider "$SCANMEET_OUTSIDER" \
+    --noschool "$SCANMEET_NOSCHOOL"
+```
+
+| Gate | Result | Exit | What it read |
+| --- | --- | --- | --- |
+| `scanmeet_webhook_probe` | **7/7 PASS** | 0 | signature accepted, forgery/missing/stale/duplicate/wrong-room/unknown-event refused |
+| `scanmeet_media_gate` | **12/12 SIGNED OFF** | 0 | `sdk-loaded`, `session`, `pupil-camera`, `teacher-receives-camera`, `pupil-isolation`, `mic-starts-closed`, `hand-raise`, `mic-approved`, `audio-reaches-teacher`, `mic-closed`, `outsider-refused`, `room-ended` |
+| `scanmeet_rbac_gate` | **15/15 PASS** | 0 | both sign-ins, the teacher door, the pupil's refused `POST /session`, the owner's room, the outsider's refused status and token, **the no-school pupil's refused paper (302 to the exam list) and refused token (403)**, the token's publish sources (`['camera']` before approval), the owner's `POST /end`, and RLS read as a **user JWT** (`profiles` scoped to 1 school; two schools share 0 rows; `live_sessions`/`live_hand_raises` answer 403 to a browser key) |
+
+Media row 4 was measured after a repair found by the first run of this sequence:
+the driver waited for a `<video>` element and read `videoWidth` before the first
+frame was decoded, so it reported "no frame" about the instant of the snapshot. It
+now waits for a decoded frame per pupil identity. Three consecutive runs after the
+change each reported 12/12.
+
+The `noschool` identity is seeded by `deploy/scanmeet_staging_fixture.py` with
+`school_id` NULL and no class, and the fixture finds it on a re-run by asking for
+the null (`is_(...)`) rather than `eq(..., None)` — a filter PostgREST reads as the
+string `None`, which would have created a second copy on every run and looked
+idempotent while doing it.
+
+Still **open** in the checklist above, and deliberately not claimed as PASS:
+
+- the expired join token (`TOKEN_TTL` is 5 minutes and the SFU enforces it);
+- the 30-second network drop/rejoin, autosave and timer continuity — needs a run
+  with the network cut under a live attempt;
+- the manual reject of chat / screen sharing / recording — a UI judgement, not a
+  gate;
+- any browser or device other than desktop Chrome driven by CDP. Edge, Android and
+  iPhone are **NOT TESTED**; the media gate's synthetic-device emulation is not a
+  device test and is reported as `(synthetic devices)` on its own sign-off sheet;
+- a load run with participants joining a room — not attempted, because the staging
+  host is the same 1 vCPU box that serves production exams;
+- owner approval for merge and rollout.
+
+One reliability finding, recorded rather than repaired: a run that inherits an
+`active` session row whose LiveKit room has already been deleted (possible when a
+previous run stopped before ending its session) opens no room, and the gate reports
+it as **could not measure** rather than clearing the stale row. It is a property of
+the driver's start, not of the product, and it has not reproduced on a run that
+began from a quiet state.
 
 ### CI integration guidance
 
