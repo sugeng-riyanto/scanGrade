@@ -9,16 +9,22 @@
   const csrf = root.dataset.csrf;
   const grid = $("live-grid"), start = $("live-start"), end = $("live-end");
   const hand = $("live-hand"), mic = $("live-mic"), queue = $("live-queue");
+  const switchButton = $("live-switch"), switchState = $("live-switch-state");
+  const switchOffNote = $("live-switch-off");
   let room = null, sid = null, connecting = false, names = {}, students = {}, micAllowed = false;
+  // The paper's own switch, only ever written by the server response.
+  let paperOn = false;
 
   function message(msg, failed = false) {
     $("live-status").textContent = msg;
     $("live-warning").hidden = !failed;
   }
-  async function call(path, method = "GET") {
+  async function call(path, method = "GET", body = null) {
+    const headers = {"Accept": "application/json", "X-CSRF-Token": csrf};
+    if (body) headers["Content-Type"] = "application/json";
     const response = await fetch(path, {
-      method, credentials: "same-origin", cache: "no-store",
-      headers: {"Accept": "application/json", "X-CSRF-Token": csrf},
+      method, credentials: "same-origin", cache: "no-store", headers,
+      body: body ? JSON.stringify(body) : undefined,
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw Error(body.error || "HTTP " + response.status);
@@ -139,15 +145,30 @@
       connecting = false;
     }
   }
+  function paintSwitch(on) {
+    paperOn = !!on;
+    if (switchState) switchState.textContent = on ? "AKTIF" : "NONAKTIF";
+    if (switchButton) switchButton.textContent = on ? "Nonaktifkan ScanMeet" : "Aktifkan ScanMeet";
+    if (start) start.hidden = !on || !!sid;
+    if (switchOffNote) switchOffNote.hidden = on;
+  }
   async function discover() {
     try {
       const data = await call("/api/live/exams/" + encodeURIComponent(examId));
+      paintSwitch(data.enabled);
+      if (!data.enabled) {
+        // The switch is authoritative: a room left over from before this
+        // decision is not an invitation, and a pupil is told why.
+        message(staff ? "ScanMeet nonaktif. Aktifkan untuk memulai pengawasan."
+                      : "ScanMeet belum diaktifkan guru untuk ujian ini.");
+        return;
+      }
       sid = data.session && data.session.id;
       if (sid) {
         if (staff) await roster();
         await connect();
       } else {
-        message(staff ? "Klik Mulai pengawasan." : "Menunggu guru membuka Live.");
+        message(staff ? "ScanMeet aktif. Klik Mulai pengawasan." : "Menunggu guru membuka Live.");
       }
     } catch (_) {
       message("Live tidak tersedia; ujian tetap berjalan.", true);
@@ -223,6 +244,36 @@
       message("Status pengawasan tidak dapat diperbarui; ujian tetap berjalan.", true);
     }
   }
+  if (switchButton) switchButton.onclick = async () => {
+    switchButton.disabled = true;
+    const wanted = !paperOn;
+    try {
+      const data = await call("/api/live/exams/" + encodeURIComponent(examId) +
+                              "/enabled", "POST", {enabled: wanted});
+      paintSwitch(data.enabled);
+      if (!data.enabled) {
+        // OFF is a revocation: drop this device's own media immediately rather
+        // than waiting for the next poll to notice the room is gone.
+        if (room) await room.disconnect().catch(() => {});
+        room = null; sid = null;
+        grid.replaceChildren();
+        if (end) end.hidden = true;
+        if (hand) hand.disabled = true;
+        if (mic) mic.hidden = true;
+        message(data.media_cleanup === "pending"
+          ? "ScanMeet nonaktif. Pembersihan media tertunda; semua token join baru ditolak."
+          : "ScanMeet nonaktif untuk ujian ini. Ujian tetap berjalan.");
+      } else {
+        message("ScanMeet aktif. Klik Mulai pengawasan.");
+      }
+    } catch (e) {
+      // Re-read rather than assume: the button reflects what was stored.
+      message("Gagal mengubah ScanMeet: " + e.message, true);
+      await discover();
+    } finally {
+      switchButton.disabled = false;
+    }
+  };
   if (start) start.onclick = async () => {
     start.disabled = true;
     try {
