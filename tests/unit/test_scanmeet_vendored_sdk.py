@@ -14,10 +14,7 @@ What is asserted, in the order a reader would check it:
 * the page asks for it through `asset_v`, so a browser holding a year-old cached
   copy is not handed a URL that never changes (nginx serves `/static/` with
   `immutable, max-age=31536000`);
-* the CDN URL appears **only** as the fallback on a tag that already points at
-  this origin — a CDN `<script src>` with no `onerror` is the defect this file
-  exists to catch, and so is a fallback that would never fire because the local
-  tag has no `onerror`;
+* the room never falls back to executable JavaScript hosted by a third party;
 * no other template loads a cross-origin script as its primary source.
 
 The negative half is tested as hard as the positive one, because a rule that
@@ -37,7 +34,7 @@ SDK_VERSION = "2.23.0"
 SDK_PATH = VENDOR / SDK_VERSION / "livekit-client.umd.min.js"
 PAGE = TEMPLATES / "live" / "exam.html"
 
-#: The origin the fallback names. It is allowed to appear; nothing may *prefer* it.
+#: No third-party scripts may be loaded on the exam page.
 CDN_HOST = "cdn.jsdelivr.net"
 
 _SCRIPT = re.compile(r"<script\b[^>]*>", re.I | re.S)
@@ -114,25 +111,16 @@ def test_the_page_loads_the_sdk_from_this_origin_through_asset_v():
         f"the page does not name the vendored path for {SDK_VERSION}")
 
 
-def test_the_cdn_is_a_fallback_on_a_tag_that_already_has_a_local_source():
+def test_the_exam_room_never_falls_back_to_an_external_sdk():
     tag = _sdk_tag(_page())
-    assert CDN_HOST in tag, "the load-failure fallback was dropped without a word"
-    assert "onerror" in tag, (
-        "the CDN URL is on the tag but nothing fires if the local file is "
-        "missing, so a box that shipped without it renders a page whose SDK "
-        "never arrives")
-    src = _src(tag)
-    assert CDN_HOST not in src, (
-        "the CDN is still the primary source — this is the defect, not the "
-        "fallback: the browser would fetch it before trying this origin")
-    # The fallback must point at the same pinned build, not at `latest`.
-    assert f"livekit-client@{SDK_VERSION}" in tag, (
-        "the fallback does not pin the version, so it could serve a build this "
-        "release was never tested against")
+    assert tag, "missing vendored SDK script tag"
+    assert CDN_HOST not in tag, "an external SDK fallback can execute on exam pages"
+    assert "onerror" not in tag, "SDK failure must not inject executable scripts"
+    assert _src(tag).startswith("{{ asset_v(")
 
 
 def test_the_page_still_guards_a_missing_global():
-    """The fallback can fail too — on a room's LAN with no route out at all."""
+    """A local SDK may fail to load; the exam must continue without media."""
     js = (ROOT / "app" / "static" / "js" / "scan-live-exam.js").read_text(
         encoding="utf-8")
     assert "if (!window.LivekitClient)" in js, (
@@ -150,8 +138,6 @@ def test_no_template_prefers_a_cross_origin_script():
             src = _src(tag)
             if not src.startswith(("http://", "https://", "//")):
                 continue
-            if "onerror" in tag:
-                continue  # a documented load-failure fallback, not a preference
             offenders.append(f"{path.relative_to(ROOT)}: {src}")
     assert not offenders, (
         "these templates load a third-party script from another origin, so a "
@@ -161,25 +147,16 @@ def test_no_template_prefers_a_cross_origin_script():
 
 # ----------------------------------------------------------------- the control
 
-def test_the_rule_rejects_the_shape_it_was_written_for():
-    """A control on the classifier itself, so a green run means something.
-
-    Each sample is the defect or the near-miss, and the assertion is what a
-    reader would want: the CDN-only tag, a fallback-less local tag, and a tag
-    that names `latest` instead of the pin are all refused.
-    """
+def test_the_rule_rejects_external_and_unpinned_shapes():
     cdn_only = ('<script src="https://cdn.jsdelivr.net/npm/livekit-client@'
                 f'{SDK_VERSION}/dist/livekit-client.umd.min.js"></script>')
-    tag = _sdk_tag(cdn_only)
-    assert _src(tag).startswith("https://") and "onerror" not in tag, (
-        "the CDN-only shape must be readable as the defect")
+    assert _src(_sdk_tag(cdn_only)).startswith("https://")
+    assert CDN_HOST in _sdk_tag(cdn_only)
 
-    no_fallback = ("<script src=\"{{ asset_v('vendor/livekit/"
-                   f"{SDK_VERSION}/livekit-client.umd.min.js') }}\"></script>")
-    assert "onerror" not in _sdk_tag(no_fallback)
+    fallback = ('<script src="{{ asset_v(\'vendor/livekit/'
+                f'{SDK_VERSION}/livekit-client.umd.min.js\') }}" '
+                'onerror="this.src=\'https://cdn.jsdelivr.net/latest.js\'"></script>')
+    assert "onerror" in _sdk_tag(fallback)
+    assert CDN_HOST in _sdk_tag(fallback)
 
-    latest = ('<script src="{{ asset_v(\'vendor/livekit/x/y.js\') }}" '
-              'onerror="this.src=\'https://cdn.jsdelivr.net/npm/'
-              'livekit-client@latest/dist/livekit-client.umd.min.js\'"></script>')
-    assert f"livekit-client@{SDK_VERSION}" not in _sdk_tag(latest), (
-        "an unpinned fallback has to be refused by the pin assertion")
+    assert CDN_HOST not in _sdk_tag(_page())
