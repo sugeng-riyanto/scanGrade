@@ -1,4 +1,4 @@
-"""The four identities and the one paper a ScanMeet staging run is measured on.
+"""The synthetic identities and the one paper a ScanMeet staging run is measured on.
 
 Why this tool exists
 --------------------
@@ -19,6 +19,10 @@ What it writes, and nothing else
 * two pupils of school A in that class, and one pupil of school B. The pupils
   are in the *same* class on purpose: the paper has to be sittable by both, and
   the isolation row is about two accounts in one room, not two schools;
+* a pupil of **no** school (`school_id` NULL). It is not there to sit anything:
+  the RBAC gate reads the paper and a join token through it, and both must be
+  refused — an account with no tenant is the case where a door reading the
+  session's school could accidentally fall back to the default one;
 * one published exam with no window (open on every reading), assigned to that
   class, `scan_live_enabled` **on**.
 
@@ -84,8 +88,9 @@ CLASS_NAME = "STG-1"
 SUBJECT = "Matematika"
 EXAM_TITLE = "[scanmeet-staging] Ujian Live"
 
-#: The five rows the twelve readings need. `key` is the gate's argument name, so
-#: the printed lines can be pasted straight into the command.
+#: The six rows the acceptance readings need. `key` is the gate's argument name,
+#: so the printed lines can be pasted straight into the command. Five of them sit
+#: the papers; the sixth (`noschool`) exists to be refused.
 IDENTITIES = (
     ("teacher", "guru@scanmeet.invalid", "guru",
      f"{MARK} Guru", "a", ""),
@@ -95,6 +100,13 @@ IDENTITIES = (
      f"{MARK} Murid 2", "a", "9999002102"),
     ("outsider", "murid-lain@scanmeet.invalid", "murid",
      f"{MARK} Murid Sekolah Lain", "b", "9999002201"),
+    # A pupil of **no** school. It exists to be refused, not to sit a paper: the
+    # door reads the school off the profile, and an account without one must get
+    # neither the paper nor a join token rather than a room whose rows have no
+    # tenant to scope them to. `school` is empty for it, which is the one value
+    # that means "write `school_id` NULL" rather than "use school a".
+    ("noschool", "murid-tanpa-sekolah@scanmeet.invalid", "murid",
+     f"{MARK} Murid Tanpa Sekolah", "", "9999002103"),
 )
 
 
@@ -104,7 +116,7 @@ class Identity:
     email: str
     role: str
     full_name: str
-    school: str          # "a" or "b"
+    school: str          # "a", "b", or "" for an account in no school at all
     nisn: str = ""
 
     def as_gate_argument(self, password: str) -> str:
@@ -219,10 +231,20 @@ def _subject(db, school_id: str, write: bool, say) -> str | None:
     return created[0]["id"] if created else None
 
 
-def _profile(db, school_id: str, identity: Identity):
-    return _one(db.table("profiles").select("id,full_name,role")
-                .eq("school_id", school_id).eq("role", identity.role)
-                .eq("full_name", identity.full_name).limit(1))
+def _profile(db, school_id: str | None, identity: Identity):
+    """The row this identity already owns, if the last run made one.
+
+    `.eq("school_id", None)` is not a null test — PostgREST reads it as the string
+    `None` and answers nothing — so an account of no school is found with
+    `.is_(...)` instead. That distinction is the whole point of the identity: a
+    seeder that silently created a second copy on every run would look idempotent
+    and not be.
+    """
+    query = (db.table("profiles").select("id,full_name,role")
+             .eq("role", identity.role).eq("full_name", identity.full_name))
+    query = (query.is_("school_id", "null") if school_id is None
+             else query.eq("school_id", school_id))
+    return _one(query.limit(1))
 
 
 def _account(db, identity: Identity, school_id: str, class_id: str | None,
@@ -335,12 +357,17 @@ def ensure(db, *, write: bool, say=print, create=None,
     subject_id = _subject(db, school_a, write, say)
 
     ids = {}
+    # `""` is not a typo for a missing school: it is the identity whose profile
+    # must carry `school_id` NULL, so it is resolved to None deliberately rather
+    # than falling through to school A and becoming a pupil who can sit the paper.
+    schools = {"a": school_a, "b": school_b, "": None}
+    classes = {"a": class_a, "b": class_b, "": None}
     for identity in IDENTITY_ROWS:
-        school_id = school_b if identity.school == "b" else school_a
-        if not school_id:
+        school_id = schools.get(identity.school, school_a)
+        if identity.school and not school_id:
             say(f"   ! {identity.key}: school {identity.school} does not exist")
             continue
-        class_id = class_b if identity.school == "b" else class_a
+        class_id = classes.get(identity.school)
         uid = _account(db, identity, school_id, class_id, password, write, say, create)
         ids[identity.key] = uid
         report["identities"].append({"key": identity.key, "email": identity.email,
@@ -393,15 +420,20 @@ def _print_report(report: dict, say=print) -> None:
         say("  passwords are chosen by the writing run and printed only by it")
         return
     say("")
-    say("  These four arguments, exactly as the media gate wants them:")
+    say("  The arguments these gates ask for, exactly as they are written:")
     for identity in IDENTITY_ROWS:
         say(f"    --{identity.key:<9} {identity.as_gate_argument(report['password'])}")
     say("")
-    say("  The same four, as the workflow's environment secrets:")
+    say("  (the media gate takes the first four; the RBAC gate also takes --noschool)")
+    say("  The same rows, as environment variables for a workflow:")
     for identity in IDENTITY_ROWS:
         name = {"teacher": "SCANMEET_TEACHER", "student": "SCANMEET_STUDENT",
                 "student2": "SCANMEET_STUDENT2",
-                "outsider": "SCANMEET_OUTSIDER"}[identity.key]
+                "outsider": "SCANMEET_OUTSIDER",
+                # Only the RBAC gate reads this one; naming it keeps every
+                # printed row pasteable rather than leaving one identity out of
+                # the half of the report that says how to feed a runner.
+                "noschool": "SCANMEET_NOSCHOOL"}[identity.key]
         say(f"    {name:<20} {identity.as_gate_argument(report['password'])}")
     say(f"    {'SCANMEET_EXAM_ID':<20} {report.get('exam_id')}")
     say("")

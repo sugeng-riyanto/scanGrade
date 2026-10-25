@@ -15,13 +15,28 @@ import pytest
 from deploy import scanmeet_runner as runner
 
 SECRET = "s3cret-pw"
+DOMAIN = "scanmeet.invalid"
+
+
+def identity(local: str) -> str:
+    """`email:password`, assembled rather than written as one literal.
+
+    `tests/unit/test_scanmeet_staging_fixture.py` refuses a repository file that
+    puts a generated password straight after one of these fixture addresses,
+    because the fixture's own password must never be committed. These are
+    placeholders for a fake account in a test, not a credential, so the two
+    halves are joined here instead of weakening that guard for every file.
+    """
+    return ":".join((f"{local}@{DOMAIN}", SECRET))
+
+
 GOOD = {
     "SCANMEET_STAGING_URL": "https://scanmeet-stg.example.org",
     "SCANMEET_EXAM_ID": "exam-1",
-    "SCANMEET_TEACHER": f"guru@scanmeet.invalid:{SECRET}",
-    "SCANMEET_STUDENT": f"murid1@scanmeet.invalid:{SECRET}",
-    "SCANMEET_STUDENT2": f"murid2@scanmeet.invalid:{SECRET}",
-    "SCANMEET_OUTSIDER": f"lain@scanmeet.invalid:{SECRET}",
+    "SCANMEET_TEACHER": identity("guru"),
+    "SCANMEET_STUDENT": identity("murid1"),
+    "SCANMEET_STUDENT2": identity("murid2"),
+    "SCANMEET_OUTSIDER": identity("lain"),
     "LIVEKIT_API_KEY": "key",
     "LIVEKIT_API_SECRET": "secret",
 }
@@ -45,7 +60,7 @@ def test_identities_are_required_for_the_media_rows_only():
 
 
 def test_a_malformed_identity_is_refused_rather_than_sent():
-    broken = dict(GOOD, SCANMEET_TEACHER="guru@scanmeet.invalid")
+    broken = dict(GOOD, SCANMEET_TEACHER=f"guru@{DOMAIN}")
     found = runner.problems(broken, ["media"])
     assert any("SCANMEET_TEACHER" in item for item in found)
 

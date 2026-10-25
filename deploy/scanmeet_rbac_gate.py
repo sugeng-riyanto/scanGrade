@@ -20,8 +20,8 @@ So each row is taken at the level the rule is enforced at:
 * **PostgREST with the anon key and a real user JWT**, because that is the only
   context in which a row-level policy can be observed at all.
 
-The twelve rows
----------------
+The fifteen rows
+----------------
 ``teacher-sign-in``            the teacher's own credentials reach the teacher dashboard
 ``student-sign-in``            a pupil's credentials reach the pupil dashboard
 ``teacher-door-refuses-pupil`` a pupil GETting /teacher/dashboard never gets 200
@@ -30,6 +30,8 @@ The twelve rows
 ``outsider-refused-status``    another school's pupil cannot read the exam's Live state
 ``pupil-cannot-end-room``      a pupil cannot end a room that exists
 ``outsider-refused-token``     another school's pupil cannot obtain a join token
+``noschool-refused-paper``     a pupil who belongs to no school is not given the paper
+``noschool-refused-token``     …and cannot obtain a join token either
 ``pupil-gets-token``           the enrolled pupil can, and the token publishes camera only
 ``teacher-ends-room``          the owner ends the room it opened
 ``rls-profiles-scoped``        anon key + pupil JWT reads only its own school's profiles
@@ -57,7 +59,13 @@ Usage (on the staging host, against the staging app's loopback port)::
     python -m deploy.scanmeet_rbac_gate --env ~/.config/scanmeet/staging.env \
         --url http://127.0.0.1:5055 --exam <exam uuid> \
         --teacher <email>:<password> --student <email>:<password> \
-        --student2 <email>:<password> --outsider <email>:<password>
+        --student2 <email>:<password> --outsider <email>:<password> \
+        --noschool <email>:<password>
+
+`--noschool` is required for the same reason `--outsider` is: an account with no
+school is the one identity whose *absence* from the tenant is the rule under test,
+and a gate that leaves it out silently is a gate that reports a full pass about
+a boundary nobody probed.
 
 No password, token or cookie is ever printed; the report names the row, the
 verdict and the HTTP status it was taken from.
@@ -187,6 +195,24 @@ def sign_in_row(report: Report, name: str, browser: Browser, email: str,
     return True
 
 
+def paper_refusal(status: int, location: str) -> tuple[str, str]:
+    """The no-school pupil's answer from the sitting door, as a row.
+
+    A refusal there is a **redirect to the exam list**, and that landing is part
+    of the claim: a 302 to anywhere else is a different door (a sign-in page, a
+    SEB guide), and reading every redirect as a refusal would pass on a session
+    that had simply expired. 200 is the failure this row exists for — the paper
+    was served to an account with no tenant.
+    """
+    landed = (location or "").rstrip("/")
+    if status in (302, 303) and landed.endswith("/student/exams"):
+        return PASS, f"the no-school pupil was sent to the exam list ({status})"
+    if status == 200:
+        return FAIL, "the paper was served to an account that belongs to no school"
+    return FAIL, (f"the no-school pupil got {status}"
+                  + (f" landing {landed}" if landed else "") + ", not the exam list")
+
+
 def supabase_login(settings: dict, email: str, password: str, requests_mod):
     """A real user JWT, from the same auth service the app signs in against."""
     url = settings["SUPABASE_URL"].rstrip("/") + "/auth/v1/token?grant_type=password"
@@ -223,11 +249,12 @@ def run(args, report: Report) -> int:
     teacher = identity(args.teacher)
     student = identity(args.student)
     outsider = identity(args.outsider)
+    noschool = identity(args.noschool)
 
     live = args.url.rstrip("/") + f"/api/live/exams/{args.exam}"
-    teacher_browser, student_browser, outsider_browser = (
+    teacher_browser, student_browser, outsider_browser, noschool_browser = (
         Browser(args.url, requests), Browser(args.url, requests),
-        Browser(args.url, requests))
+        Browser(args.url, requests), Browser(args.url, requests))
 
     # ── 1-3: the doors ───────────────────────────────────────────────────────
     if not sign_in_row(report, "teacher-sign-in", teacher_browser, *teacher,
@@ -272,6 +299,24 @@ def run(args, report: Report) -> int:
                PASS if outs_status.status_code in (401, 403) else FAIL,
                f"outsider GET exam live state answered {outs_status.status_code} (want 401/403)")
 
+    # ── 8b: an account that belongs to no school at all ──────────────────────
+    # The sitting door reads the pupil's school and class from the profile; this
+    # account has neither, which makes it the one identity whose *absence* is the
+    # rule. It is measured at the door rather than at the API because that is
+    # where a pupil would land: a redirect to the exam list is the refusal, and a
+    # 200 would mean the paper was served to somebody with no tenant.
+    noschool_browser.warm()
+    ns_sign_in = noschool_browser.sign_in(*noschool)
+    if ns_sign_in.status_code not in (302, 303):
+        report.add("noschool-refused-paper", SKIP,
+                   f"the no-school account could not sign in ({ns_sign_in.status_code})")
+    else:
+        paper = noschool_browser.get(f"/student/exams/{args.exam}",
+                                     allow_redirects=False)
+        verdict, detail = paper_refusal(paper.status_code,
+                                        paper.headers.get("Location") or "")
+        report.add("noschool-refused-paper", verdict, detail)
+
     if session_id:
         pupil_end = student_browser.post_api(f"/api/live/sessions/{session_id}/end")
         report.add("pupil-cannot-end-room",
@@ -282,6 +327,14 @@ def run(args, report: Report) -> int:
         report.add("outsider-refused-token",
                    PASS if outs_token.status_code == 403 else FAIL,
                    f"outsider POST /token answered {outs_token.status_code} (want 403)")
+
+        ns_token = noschool_browser.post_api(f"/api/live/sessions/{session_id}/token") \
+            if ns_sign_in.status_code in (302, 303) else None
+        report.add("noschool-refused-token",
+                   SKIP if ns_token is None else
+                   (PASS if ns_token.status_code == 403 else FAIL),
+                   "the no-school account never signed in" if ns_token is None else
+                   f"no-school POST /token answered {ns_token.status_code} (want 403)")
 
         pupil_token = student_browser.post_api(f"/api/live/sessions/{session_id}/token")
         sources = []
@@ -299,7 +352,8 @@ def run(args, report: Report) -> int:
                    f"owner POST /end answered {ended.status_code}")
     else:
         for name in ("pupil-cannot-end-room", "outsider-refused-token",
-                     "pupil-gets-token", "teacher-ends-room"):
+                     "noschool-refused-token", "pupil-gets-token",
+                     "teacher-ends-room"):
             report.add(name, SKIP, "no room to act on — the owner could not open one")
 
     # ── 9-10: row-level security, in a user's own context ────────────────────
@@ -364,6 +418,8 @@ def main(argv=None) -> int:
     parser.add_argument("--student2", required=False,
                         help="second pupil, used by the media gate")
     parser.add_argument("--outsider", required=True)
+    parser.add_argument("--noschool", required=True,
+                        help="a synthetic account that belongs to no school")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
 

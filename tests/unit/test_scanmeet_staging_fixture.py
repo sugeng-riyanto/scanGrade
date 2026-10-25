@@ -28,6 +28,11 @@ class Query:
         self.db, self.name = db, name
         self.op = "select"
         self.filters = []
+        # `is_(col, "null")` is how the fixture finds the one account that belongs
+        # to no school. It is deliberately not `eq(col, None)`: PostgREST reads
+        # that as the string `None` and answers no rows, which would make a
+        # re-run create a second copy of the account every time.
+        self.nulls = []
         self.payload = None
         self.limit_n = None
 
@@ -47,12 +52,18 @@ class Query:
         self.filters.append((key, value))
         return self
 
+    def is_(self, key, value):
+        assert str(value).lower() == "null", value
+        self.nulls.append(key)
+        return self
+
     def limit(self, n):
         self.limit_n = n
         return self
 
     def _matches(self, row):
-        return all(str(row.get(k)) == str(v) for k, v in self.filters)
+        return (all(str(row.get(k)) == str(v) for k, v in self.filters)
+                and all(row.get(k) is None for k in self.nulls))
 
     def execute(self):
         rows = self.db.data.setdefault(self.name, [])
@@ -233,10 +244,10 @@ def test_two_schools_two_classes_and_one_subject():
     assert db.data["subjects"][0]["name"] == fixture.SUBJECT
 
 
-def test_four_identities_with_the_schools_the_gate_expects():
+def test_the_identities_sit_the_schools_the_gates_expect():
     db, report = provision()
     profiles = db.data["profiles"]
-    assert len(profiles) == 4
+    assert len(profiles) == 5
     school_a = report["school_a"]
     school_b = report["school_b"]
     by_name = {p["full_name"]: p for p in profiles}
@@ -249,6 +260,28 @@ def test_four_identities_with_the_schools_the_gate_expects():
     outsider = by_name[fixture.IDENTITY_ROWS[3].full_name]
     assert outsider["school_id"] == school_b
     assert {p["role"] for p in profiles} == {"guru", "murid"}
+
+
+def test_the_account_of_no_school_has_no_school_and_no_class():
+    """The fifth identity is the rule, not a pupil: NULL school, no class."""
+    db, report = provision()
+    noschool = [p for p in db.data["profiles"]
+                if p["full_name"] == fixture.IDENTITY_ROWS[4].full_name][0]
+    assert fixture.IDENTITY_ROWS[4].key == "noschool"
+    assert fixture.IDENTITY_ROWS[4].school == ""
+    assert noschool["school_id"] is None
+    assert "class_id" not in noschool, (
+        "a class would put the account in a school by the back door")
+    # It is a real account, not a marker: the gate has to be able to sign in as it.
+    assert noschool["id"] in {row["id"] for row in report["identities"]}
+
+
+def test_a_second_run_finds_the_account_of_no_school_instead_of_copying_it():
+    db, _first = provision()
+    fixture.ensure(db, write=True, say=quiet, create=fake_create, password="pw2")
+    noschool = [p for p in db.data["profiles"]
+                if p["full_name"] == fixture.IDENTITY_ROWS[4].full_name]
+    assert len(noschool) == 1, "the null-school lookup is what keeps this idempotent"
 
 
 def test_the_first_sign_in_flag_is_cleared_for_every_account():
@@ -277,11 +310,11 @@ def test_a_second_run_repairs_rather_than_duplicates():
     assert report["exam_id"] == first["exam_id"]
     assert len(db.data["schools"]) == 2
     assert len(db.data["classes"]) == 2
-    assert len(db.data["profiles"]) == 4
+    assert len(db.data["profiles"]) == 5
     assert len(db.data["exams"]) == 1
     # The password is reset to this run's value, and the switch is put back on —
     # "the rows exist" and "the paper can be sat" are different claims.
-    assert len(db.passwords_changed) == 4
+    assert len(db.passwords_changed) == 5
     assert {pw for _uid, pw in db.passwords_changed} == {"second-pw"}
     assert db.data["exams"][0]["scan_live_enabled"] is True
 
@@ -321,7 +354,7 @@ def test_a_plan_verifies_nothing_because_it_wrote_nothing():
 
 # ── what it prints ───────────────────────────────────────────────────────────
 
-def test_the_four_gate_arguments_are_printed_once_with_the_run_password():
+def test_the_gate_arguments_are_printed_once_with_the_run_password():
     _db, report = provision(password="one-time-pw")
     lines = []
     fixture._print_report(report, say=lines.append)
