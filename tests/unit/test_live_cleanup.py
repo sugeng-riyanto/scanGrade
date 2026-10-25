@@ -441,6 +441,10 @@ def _stage(monkeypatch, rows, *, end_error=None):
             raise end_error
 
     monkeypatch.setattr(live, "get_supabase", lambda: db)
+    # This suite exercises exam switch/cleanup with an explicitly entitled school.
+    # Dedicated entitlement tests separately assert missing/expired schools fail closed.
+    monkeypatch.setattr(live.live_school_entitlement, "active",
+                        lambda _db, school_id: school_id == "school-1")
     monkeypatch.setattr(live, "_exam", lambda *_: db.rows["exams"][0])
     monkeypatch.setattr(live, "exam_sitting_allowed", lambda *_: (True, ""))
     monkeypatch.setattr(live.live_policy, "feature_enabled", lambda *_: True)
