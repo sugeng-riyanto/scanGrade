@@ -281,10 +281,10 @@ python -m deploy.scanmeet_media_gate \
   --student2 murid2@school:pw --outsider murid@other-school:pw
 ```
 
-Expected: twelve `PASS` rows — `sdk-loaded`, `session`, `pupil-camera`,
+Expected: thirteen `PASS` rows — `sdk-loaded`, `session`, `pupil-camera`,
 `teacher-receives-camera`, `pupil-isolation`, `mic-starts-closed`, `hand-raise`,
 `mic-approved`, `audio-reaches-teacher`, `mic-closed`, `outsider-refused`,
-`room-ended` — and a closing `PASS: 12/12 rows`. The driver reads each page
+`token-expiry`, `room-ended` — and a closing `PASS: 13/13 rows`. The driver reads each page
 **and** the join token the server issues, because the token's
 `canPublishSources` is what LiveKit enforces while the DOM is only what the page
 drew: `mic-starts-closed` is a camera-only grant, `mic-approved` is
@@ -295,7 +295,7 @@ Exit codes: 0 every row passed · 1 a row disagreed (the row naming the defect) 
 run that ended early. **2 is not a pass**: an unfinished run names the rows it
 never took instead of printing a shorter list of passes.
 
-Add `--signoff` to print those twelve rows as the Markdown sheet this section
+Add `--signoff` to print those thirteen rows as the Markdown sheet this section
 ends with — the URL, the exam id, when it ran, the browser it drove and the
 verdict the run earned, ready to paste into the pilot's record. The sheet carries
 the verdict it earned rather than the one the reader hopes for: a run that could
@@ -397,7 +397,7 @@ table comes from a reading the driver took, never from this page.
 | 9 | `audio-reaches-teacher` | PASS | the teacher's page holds a live audio track for the room |
 | 10 | `mic-closed` | PASS | the close takes the grant back to the camera, the control away and the teacher's live audio with it |
 | 11 | `outsider-refused` | PASS | another school's pupil is refused both the page and the token |
-| 12 | `token-expiry` | PASS | a token with a 300s life was refused 10s after it expired, while a fresh token connected from the same room, and the pupil already in it was not disturbed (`<the SFU's own auth error>`) |
+| 12 | `token-expiry` | PASS | a token with a 300s life was refused 75s after it expired, while a fresh token connected from the same room, and the pupil already in it was not disturbed (`<the SFU's own auth error>`) |
 | 13 | `room-ended` | PASS | *Akhiri Live* is confirmed, and the next join token is refused |
 
 Every row passed: cameras decode, the microphone is refused until a teacher approves it and revoked after, no pupil receives another's media, a token the app issued stops working when its five minutes run out, and the ended room admits nobody.

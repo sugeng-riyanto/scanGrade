@@ -17,6 +17,31 @@ EVENTS = {
 }
 MAX_BODY_BYTES = 65536
 
+#: How much of an oversized delivery is drained before answering 413. The reverse
+#: proxy has already buffered it (`client_max_body_size 1m` on the vhost), so this
+#: costs no extra memory; it only lets the client *hear* the answer. Measured on
+#: staging: without it gunicorn resets a connection that still has unread bytes and
+#: nginx reports **502** for a route that correctly refused the body, which the
+#: signed-webhook probe reads as a failure of the cap.
+MAX_DRAIN_BYTES = 4 * 1024 * 1024
+DRAIN_CHUNK = 64 * 1024
+
+
+def _discard(stream, limit):
+    """Read and drop at most `limit` bytes. Returns how many were dropped.
+
+    Bounded on purpose: the whole point of the cap above is that a body is never
+    buffered past it, so this discards rather than collects, and stops at the
+    ceiling even if the client keeps sending.
+    """
+    dropped = 0
+    while dropped < limit:
+        chunk = stream.read(min(DRAIN_CHUNK, limit - dropped))
+        if not chunk:
+            break
+        dropped += len(chunk)
+    return dropped
+
 
 @live_webhook_bp.route("/webhook/livekit", methods=["POST"])
 def receive_livekit():
@@ -26,14 +51,21 @@ def receive_livekit():
     if not client_ready(current_app.config):
         return jsonify({"error": "Live not configured"}), 503
     if request.content_length and request.content_length > MAX_BODY_BYTES:
+        _discard(request.stream, min(request.content_length, MAX_DRAIN_BYTES))
         return jsonify({"error": "Payload too large"}), 413
     # A chunked delivery carries no Content-Length, so the header check above
-    # cannot see it. Cap the read itself; going over raises 413 instead of
-    # buffering an unbounded body in memory.
-    request.max_content_length = MAX_BODY_BYTES
+    # cannot see it. Cap the read itself: one byte past the limit is enough to
+    # know it was exceeded, and it is never buffered beyond that.
+    #
+    # Not by assigning `request.max_content_length`: on Werkzeug 3 that property
+    # has no setter, so the assignment raised `AttributeError` and *every*
+    # delivery — signed or not — answered 500. The bounded read is what actually
+    # caps memory here.
+    body_bytes = request.stream.read(MAX_BODY_BYTES + 1)
+    if len(body_bytes) > MAX_BODY_BYTES:
+        return jsonify({"error": "Payload too large"}), 413
     auth_header = request.headers.get("Authorization", "")
-    body_bytes = request.get_data(cache=False)
-    if not auth_header or not body_bytes or len(body_bytes) > MAX_BODY_BYTES:
+    if not auth_header or not body_bytes:
         return jsonify({"error": "Missing or oversized signed payload"}), 401
     try:
         from livekit import api

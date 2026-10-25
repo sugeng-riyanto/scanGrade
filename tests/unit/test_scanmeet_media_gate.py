@@ -820,7 +820,9 @@ def test_the_wait_answers_the_browser_so_the_socket_survives(monkeypatch):
     """
     page = _Page()
     clock, deadline = _drive_wait(monkeypatch, page, 305)
-    assert page.pings >= 5, f"only {page.pings} ping(s) in a {305 + GATE.EXPIRY_MARGIN}s wait"
+    total = 305 + GATE.EXPIRY_MARGIN
+    assert page.pings >= int(total // GATE.EXPIRY_PING_SECONDS) - 1, (
+        f"only {page.pings} ping(s) in a {total:g}s wait")
     assert max(clock.slept) <= GATE.EXPIRY_PING_SECONDS, (
         "a single long sleep is the idle socket nobody answers")
     assert clock.wall >= deadline + GATE.EXPIRY_MARGIN, (
@@ -835,6 +837,58 @@ def test_a_dead_devtools_socket_is_could_not_measure_not_a_pass(monkeypatch):
         _drive_wait(monkeypatch, page, 305)
     assert "closed while waiting" in str(caught.value)
     assert "not measured" in str(caught.value)
+
+
+def test_the_socket_tolerates_a_pong_that_arrives_late():
+    """The library's 20 s pong deadline closed a live socket on the runner.
+
+    The hosted run lost the second pupil 46 s into the wait with `1011 keepalive
+    ping timeout` — three Chrome instances doing software video on two cores, not
+    a browser that had gone (a process that has gone gives 1006). The keepalive
+    stays; its patience is what changed: a peer that never answers is still
+    closed, two minutes later.
+    """
+    options = GATE.DEVTOOLS_SOCKET
+    assert options["ping_timeout"] >= 120, (
+        "a 20 s pong deadline is what refused the hosted reading")
+    assert 0 < options["ping_interval"] < options["ping_timeout"], (
+        "the interval must be the shorter of the two, as the library reads them")
+    source = open(GATE.__file__, encoding="utf-8").read()
+    opened = source[source.index("async def open("):source.index("async def _grant_media")]
+    assert "websockets.connect(target, **DEVTOOLS_SOCKET)" in opened, (
+        "the socket is opened with one set of options, not a second copy")
+
+
+def test_the_wait_s_liveness_call_is_bounded_and_names_the_browser(monkeypatch):
+    """`send` awaits a reply with no deadline, so the wait must bring its own.
+
+    And when the call does fail, the message has to separate a starved renderer
+    from a browser that had gone: only one of those is a finding about the
+    deployment, and the exception alone reads the same for both.
+    """
+    assert GATE.PING_ANSWER_SECONDS > GATE.DEVTOOLS_SOCKET["ping_timeout"]
+    source = open(GATE.__file__, encoding="utf-8").read()
+    wait = source[source.index("async def _wait_past_expiry"):
+                  source.index("async def _expiry_row")]
+    assert "asyncio.wait_for(page.ping(), PING_ANSWER_SECONDS)" in wait, (
+        "an unbounded liveness call ends the run on its whole budget")
+
+    closed = type("Closed", (Exception,), {})
+    with pytest.raises(GATE.CannotMeasure) as caught:
+        _drive_wait(monkeypatch, _Page(failure=closed("1011 keepalive")), 305)
+    assert "had exited" in str(caught.value), (
+        "a page with no process to ask is named as gone")
+
+    class _Proc:
+        def poll(self):
+            return None
+
+    busy = _Page(failure=closed("1011 keepalive"))
+    busy.proc = _Proc()
+    with pytest.raises(GATE.CannotMeasure) as caught:
+        _drive_wait(monkeypatch, busy, 305)
+    assert "still running" in str(caught.value), (
+        "a starved renderer and a crashed one are not the same finding")
 
 
 def test_the_expiry_row_never_turns_a_failed_wait_into_a_row(monkeypatch):
@@ -870,6 +924,20 @@ def test_an_ended_session_issues_no_token_which_is_the_app_half(monkeypatch):
     assert "code != 403" in ended, "the ended session must be judged by the next token"
     assert "token-expiry" not in ended, (
         "the two readings must not be merged into one row")
+
+
+def test_the_margin_clears_the_sfu_tolerance_it_was_measured_against():
+    """A margin inside the server's leeway asks a question the server is
+    still entitled to answer "yes" to.
+
+    Forged tokens put the boundary between 40 s and 60 s past `exp`: accepted
+    at -40 s, refused at -60 s. A margin of 10 s reported a "FAIL" on a token
+    the SFU was allowed to accept, which is a defect in the row.
+    """
+    assert GATE.EXPIRY_MARGIN > 60.0, (
+        "<= 60 s sits inside the measured tolerance window (40-60 s)")
+    assert GATE.EXPIRY_MARGIN <= 120.0, (
+        "a margin far beyond the tolerance just makes the run slower")
 
 
 def test_the_run_budget_carries_the_wait_the_row_asks_for():

@@ -117,8 +117,61 @@ retries and races are in `tests/unit/test_live_mic_state_machine.py`):
   *detection*: nothing polls for a parked row, so a teacher has to notice it in
   the queue before pushing it. Wire that timer before unattended production exam
   monitoring.
-- After \`end\`, database rejects new token minting; a room deletion failure
-  requires cleanup. Already-issued tokens are short-lived.
+- After `end`, the database rejects new token minting (every route reads
+  `status = 'active'`). Already-issued tokens are short-lived — five minutes, and
+  the SFU refuses one after roughly 40–60 s of clock tolerance past `exp`, which
+  is why the media gate's expiry row waits 75 s before offering a stale token.
+- **A room deletion that fails is debt, not a log line** (migration 073,
+  `app/services/live_cleanup.py`). `end` writes the session `ended` first — that
+  row is what refuses new tokens — then asks LiveKit to delete the room. If the
+  call fails, the deletion goes into `scan_live_cleanup_jobs` and a worker claims
+  it with a five-minute lease and a compare-and-swap `claim_token`, so two
+  workers cannot delete one room and a crashed claim is recoverable after the
+  lease **without spending an attempt** (`attempts` counts failures, not claims).
+  Retries back off 30 s → 1 m → 2 m → … → 1 h; an already-absent room counts as
+  cleaned (LiveKit answers that error for a room that is gone, and retrying it
+  would report a success as a failure); after eight failures the row becomes
+  `abandoned` with its last error and an `ERROR` log line, for a person.
+- **A session whose room vanished is parked, not revived** (migration 073,
+  `app/services/live_reconcile.py`). `status = 'active'` plus no LiveKit room is
+  the mismatch nothing detected: `end` then deletes nothing and reports success,
+  and a pupil who reloads could even recreate the room by joining it. The sweep
+  reads the SFU's room list and only parks a session whose room it **saw**
+  earlier (`media_state = 'live'`); a session nobody has joined has no room yet and
+  is left alone, and a probe that fails writes nothing at all. A parked row is
+  `stale` — not `ended`, because one is a person's decision and the other is the
+  system's — refuses tokens like any other non-`active` row, and frees the
+  one-active-session index so the teacher can start a **fresh** room (a new name)
+  while the old row stays parked.
+- **Maintenance is not creation.** Both run from one loop, and it starts on the
+  LiveKit *credentials*, not on the two feature flags. Gating the loop on the flags
+  was a deadlock: a failed `delete_room` is recorded, a teacher then revokes
+  ScanMeet, and the only worker that could finish the deletion never starts — so the
+  room keeps carrying pupil video while the debt waits for a switch nobody will turn
+  back on. The flags still gate creation, sessions and tokens, which every route
+  checks by itself; a box without credentials (today's production) starts no thread.
+  The pass reports `BLOCKED` with the reason when credentials or the 073/074 tables
+  are missing, never `PASS`; `flask scanmeet-maintenance` runs the same pass by hand.
+- **The debt outlives the row it names** (migration 074). 073 declared the cleanup
+  job's `session_id`/`school_id` `ON DELETE CASCADE`, so deleting a session, a school,
+  or a row swept by the retention purge erased the only record that a room needed
+  deleting. The reference is now `ON DELETE SET NULL` and the trigger stamps
+  `orphaned_at`: the job stays, its `room_name` is still what `delete_room` takes, and
+  an orphaned row is exactly the list an operator has to read. `RESTRICT` was
+  rejected on purpose — it would turn a media problem into a database problem, where
+  a school could not be closed and a purge would stop on an unrelated row.
+- **One empty room list is a candidate, not a verdict.** The sweep records
+  `missing_since` on the first confirmed absence and parks nothing; only an absence
+  that persists for `MISSING_GRACE` (60 s) and is seen again parks the session. A
+  room that reappears clears the candidate, so a LiveKit restart or a list taken
+  mid-move costs nothing.
+- **A claim's lease is re-asserted before the deletion.** The compare-and-swap on
+  `claim_token` is what makes a claim exclusive (one `UPDATE ... WHERE` is atomic, so
+  of two racing workers exactly one matches); `claimed_at` is a courtesy to a crashed
+  worker, not the exclusivity claim. Because the token alone cannot keep a claim
+  alive through a slow API call, the lease is renewed with the same condition first,
+  and a worker that no longer owns the row neither deletes the room nor records an
+  outcome for it.
 - Rate limits, load test, cross-tenant integration tests and secret management are
   required prior to enabling production. The browser SDK is vendored at
   `app/static/vendor/livekit/2.23.0/livekit-client.umd.min.js` and loaded from
