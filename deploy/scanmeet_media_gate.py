@@ -739,21 +739,29 @@ START_READY = ("(() => { const b = document.getElementById('live-start');"
 
 
 def tiles_expression(identities: list[str]) -> str:
-    """True once `#live-grid` holds a video tile for every wanted identity.
+    """True once every wanted identity's tile holds a *decoded* frame.
 
     The teacher's grid fills from `TrackSubscribed`, which lands after the pupil's
-    first published frame. Measured on staging: a reading taken the instant both
-    pupils were publishing found two videos — the teacher's own and the first
-    pupil's — and judged the second as "no camera tile for that participant",
-    which is a statement about the snapshot rather than about the room.
+    first published frame. Measured on staging, twice:
+
+    * a reading taken the instant both pupils were publishing found two videos —
+      the teacher's own and the first pupil's — and judged the second as "no
+      camera tile for that participant";
+    * after waiting for the *element*, a second run found the tile with
+      `videoWidth 0`, because the element is appended before its first frame
+      arrives. Both were statements about the snapshot, not about the room.
+
+    So the wait is for a tile whose video has decoded something, which is the
+    claim row 4 makes.
     """
     wanted = json.dumps(list(identities))
     return ("(() => { const want = " + wanted + ";"
             " const grid = document.getElementById('live-grid');"
             " if (!grid) return false;"
-            " const have = new Set([...grid.querySelectorAll('video')].map(v => {"
-            "   const tile = v.closest('[data-identity]');"
-            "   return tile ? (tile.dataset.identity || '') : ''; }));"
+            " const have = new Set([...grid.querySelectorAll('video')]"
+            "   .filter(v => v.videoWidth > 0).map(v => {"
+            "     const tile = v.closest('[data-identity]');"
+            "     return tile ? (tile.dataset.identity || '') : ''; }));"
             " return want.every(x => have.has(x)); })()")
 QUEUE_PENDING = ("[...document.querySelectorAll('#live-queue > div')]"
                  ".some(d => /pending/.test(d.textContent))")

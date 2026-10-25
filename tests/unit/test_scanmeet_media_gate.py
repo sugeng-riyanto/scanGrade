@@ -791,3 +791,11 @@ def test_the_teacher_grid_is_waited_for_by_identity():
     assert "data-identity" in expression
     assert "every" in expression, "one pupil's tile is not the other's"
     assert GATE.tiles_expression([]) .count("[]") >= 1
+
+
+def test_the_teacher_grid_wait_is_for_a_decoded_frame_not_an_element():
+    """An appended `<video>` with videoWidth 0 is an element, not a camera."""
+    expression = GATE.tiles_expression(["p_aaa"])
+    assert "videoWidth > 0" in expression, (
+        "waiting for the element alone read as 'no frame of any size' on the next "
+        "run — the element is appended before its first frame arrives")
