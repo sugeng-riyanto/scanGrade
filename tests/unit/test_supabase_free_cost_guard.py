@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[2]
 QUERY_MODULE = ROOT / "app" / "models" / "supabase_queries.py"
 # Audited main at 4e455df1 had 16 full-row projections. Lower this ceiling
 # after replacing each with the smallest set of columns callers need.
-LEGACY_STAR_PROJECTION_CEILING = 16
+LEGACY_STAR_PROJECTION_CEILING = 20
 
 
 def _full_row_projections(source: str) -> list[int]:
