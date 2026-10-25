@@ -28,12 +28,18 @@ def receive_livekit():
     if request.content_length and request.content_length > MAX_BODY_BYTES:
         return jsonify({"error": "Payload too large"}), 413
     # A chunked delivery carries no Content-Length, so the header check above
-    # cannot see it. Cap the read itself; going over raises 413 instead of
-    # buffering an unbounded body in memory.
-    request.max_content_length = MAX_BODY_BYTES
+    # cannot see it. Cap the read itself: one byte past the limit is enough to
+    # know it was exceeded, and it is never buffered beyond that.
+    #
+    # Not by assigning `request.max_content_length`: on Werkzeug 3 that property
+    # has no setter, so the assignment raised `AttributeError` and *every*
+    # delivery — signed or not — answered 500. The bounded read is what actually
+    # caps memory here.
+    body_bytes = request.stream.read(MAX_BODY_BYTES + 1)
+    if len(body_bytes) > MAX_BODY_BYTES:
+        return jsonify({"error": "Payload too large"}), 413
     auth_header = request.headers.get("Authorization", "")
-    body_bytes = request.get_data(cache=False)
-    if not auth_header or not body_bytes or len(body_bytes) > MAX_BODY_BYTES:
+    if not auth_header or not body_bytes:
         return jsonify({"error": "Missing or oversized signed payload"}), 401
     try:
         from livekit import api
