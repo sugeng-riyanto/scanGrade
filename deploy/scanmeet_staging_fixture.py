@@ -159,6 +159,18 @@ def _planned(kind: str, name: str) -> str:
     return f"planned:{kind}:{name}"
 
 
+def _is_planned(value) -> bool:
+    """Whether this is a stand-in a dry run made, not an id the database has.
+
+    It matters because a stand-in is not a uuid, and a query filtered on one is
+    refused outright: `school_id=eq.planned:school:99990021` comes back from
+    Postgres as `22P02 invalid input syntax for type uuid`, which aborted the
+    whole plan on its second line. The plan must not ask the database about a
+    row the plan itself invented.
+    """
+    return isinstance(value, str) and value.startswith("planned:")
+
+
 def _school(db, spec: dict, write: bool, say) -> str | None:
     row = _one(db.table("schools").select("id").eq("npsn", spec["npsn"]).limit(1))
     if row:
@@ -174,6 +186,9 @@ def _school(db, spec: dict, write: bool, say) -> str | None:
 
 
 def _class(db, school_id: str, name: str, write: bool, say) -> str | None:
+    if _is_planned(school_id):
+        say(f"   would create class {name}")
+        return _planned("class", name)
     row = _one(db.table("classes").select("id").eq("school_id", school_id)
                .eq("name", name).limit(1))
     if row:
@@ -188,6 +203,9 @@ def _class(db, school_id: str, name: str, write: bool, say) -> str | None:
 
 
 def _subject(db, school_id: str, write: bool, say) -> str | None:
+    if _is_planned(school_id):
+        say(f"   would create subject {SUBJECT}")
+        return _planned("subject", SUBJECT)
     row = _one(db.table("subjects").select("id").eq("school_id", school_id)
                .eq("name", SUBJECT).limit(1))
     if row:
@@ -216,9 +234,11 @@ def _account(db, identity: Identity, school_id: str, class_id: str | None,
     as a missing account rather than as a flag nobody cleared.
     """
     profile_fields = {"nisn": identity.nisn} if identity.nisn else {}
-    if identity.role == "murid" and class_id:
+    if identity.role == "murid" and class_id and not _is_planned(class_id):
+        # A planned class id is not a row; writing it into `class_id` would be a
+        # promise the plan cannot keep even if the account were created.
         profile_fields["class_id"] = class_id
-    existing = _profile(db, school_id, identity)
+    existing = None if _is_planned(school_id) else _profile(db, school_id, identity)
     if existing:
         if not write:
             say(f"   would reset the password of {identity.email}")
@@ -270,6 +290,9 @@ def _exam_payload(teacher_id: str, school_id: str, class_id: str,
 def _exam(db, school_id: str, teacher_id: str, class_id: str,
           subject_id: str | None, write: bool, say) -> str | None:
     payload = _exam_payload(teacher_id, school_id, class_id, subject_id)
+    if _is_planned(school_id):
+        say("   would create the staged exam")
+        return None
     row = _one(db.table("exams").select("id,title").eq("school_id", school_id)
                .eq("title", EXAM_TITLE).limit(1))
     if row:

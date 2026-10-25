@@ -183,6 +183,48 @@ def test_the_plan_writes_nothing_but_names_the_paper_too():
     assert "would create" in text and fixture.SCHOOL_A["name"] in text
 
 
+class UuidQuery(Query):
+    """A Query that refuses a filter value Postgres would refuse.
+
+    `schools.id` is a uuid, so `school_id=eq.planned:school:99990021` is not an
+    empty result — it is `22P02 invalid input syntax for type uuid`, which
+    aborted the plan on its second line against the real project while the dict
+    fake above answered "no rows" and the plan looked fine.
+    """
+
+    def eq(self, key, value):
+        if isinstance(value, str) and value.startswith("planned:"):
+            raise RuntimeError(f"22P02 invalid input syntax for type uuid: {value}")
+        return super().eq(key, value)
+
+
+class UuidDb(FakeDb):
+    def table(self, name):
+        return UuidQuery(self, name)
+
+
+def test_the_plan_never_queries_the_database_with_an_id_it_invented():
+    said = []
+    db = UuidDb()
+    report = fixture.ensure(db, write=False, say=said.append, create=fake_create)
+    text = "\n".join(said)
+    assert db.writes == []
+    assert "would create the staged exam" in text
+    assert report["exam_id"] is None
+    # The outlets a planned school reaches are all still described.
+    assert f"would create class {fixture.CLASS_NAME}" in text
+    assert any("would create murid" in line for line in said)
+
+
+def test_a_planned_class_id_never_becomes_a_pupil_s_class_id():
+    said = []
+    db = FakeDb()
+    fixture.ensure(db, write=False, say=said.append, create=fake_create)
+    assert db.writes == []
+    assert fixture._is_planned(fixture._planned("class", "7A")) is True
+    assert fixture._is_planned("3f8b0e4a-1c2d-4e5f-8a9b-0c1d2e3f4a5b") is False
+
+
 def test_two_schools_two_classes_and_one_subject():
     db, _report = provision()
     assert [s["npsn"] for s in db.data["schools"]] == [
