@@ -75,7 +75,7 @@ Usage (on the staging host, with the staging env exported):
       --teacher guru@example.edu:pw --student murid1@example.edu:pw \\
       --student2 murid2@example.edu:pw --outsider murid@lain.example.edu:pw
 
-Add ``--signoff`` to print the same twelve rows as a Markdown sheet - the URL,
+Add ``--signoff`` to print the same thirteen rows as a Markdown sheet - the URL,
 ``--exam``, when it ran, the browser it drove and the verdict the run earned -
 ready to paste into the staging ticket. The sheet carries the verdict it earned:
 a run that could not measure a row prints ``CANNOT MEASURE`` rather than a table
@@ -320,6 +320,79 @@ def publish_sources(token: str) -> list[str]:
 
 def may_publish_data(token: str) -> bool:
     return bool(grant(token).get("canPublishData"))
+
+
+def token_claims(token: str) -> dict:
+    """A join token's payload, unverified for the same reason `grant` is."""
+    import jwt
+
+    try:
+        return jwt.decode(token, options={"verify_signature": False})
+    except Exception as exc:  # noqa: BLE001 - unreadable is a finding, not a crash
+        raise CannotMeasure(f"the join token is not a JWT ({type(exc).__name__})") from exc
+
+
+def token_life(token: str) -> float | None:
+    """`exp - iat`: how long the app decided this token is good for.
+
+    Measured from `nbf` when there is no `iat`, which is the case here: LiveKit's
+    own SDK stamps `exp`, `nbf`, `iss` and `sub` and **no** `iat`, so a reader that
+    insisted on `iat` reported the issued token as carrying "no expiry pair" — the
+    first run of this row did exactly that, as a SKIP rather than as a guess.
+
+    `None` when the token carries neither, which is a token whose expiry cannot be
+    reasoned about at all.
+    """
+    claims = token_claims(token)
+    exp = claims.get("exp")
+    issued = claims.get("iat", claims.get("nbf"))
+    if not isinstance(exp, (int, float)) or not isinstance(issued, (int, float)):
+        return None
+    return float(exp) - float(issued)
+
+
+def token_deadline(token: str) -> float | None:
+    """The token's own `exp`, as a Unix second, or `None` when it has none."""
+    exp = token_claims(token).get("exp")
+    return float(exp) if isinstance(exp, (int, float)) else None
+
+
+def url_host(url: str) -> str:
+    """`scheme://host` only — the signalling URL with any path or userinfo gone.
+
+    The room URL is what a page connects to, and it is written into the run's
+    JSON so a reader can tell which SFU the refusal came from. It is not a
+    credential, but a URL that carries one would be, so it is cut here rather
+    than trusted to be clean.
+    """
+    parsed = urllib.parse.urlsplit(url or "")
+    return f"{parsed.scheme}://{parsed.hostname}" if parsed.scheme and parsed.hostname else ""
+
+
+#: One connection attempt, made from a page where this app already loaded the SDK.
+#: `%s` twice: the room URL, then the token, both JSON-encoded so a value cannot
+#: end the expression. The shape is the page's own (`new lib.Room(...)` then
+#: `room.connect(url, token)`, as `app/static/js/scan-live-exam.js` writes it) — a
+#: first version called `LivekitClient.connect`, which is not a function, and the
+#: resulting `TypeError` was read as a refusal. That is the failure this row has
+#: to be incapable of: an error is only evidence once the *same* page, at the same
+#: moment, has been shown to connect with a token that should work.
+#: The promise is answered rather than thrown, because `Runtime.evaluate` turns a
+#: rejected promise into a driver error and this row needs the *reason* instead.
+CONNECT_WITH = """(async () => {
+  const lib = window.LivekitClient;
+  if (!lib || typeof lib.Room !== 'function') return {missing: true};
+  let room = null;
+  try {
+    room = new lib.Room({adaptiveStream: true, dynacast: true});
+    await room.connect(%s, %s);
+    return {connected: true};
+  } catch (e) {
+    return {connected: false, why: String((e && (e.name + ': ' + e.message)) || e)};
+  } finally {
+    try { if (room) await room.disconnect(); } catch (e) {}
+  }
+})()"""
 
 
 # --------------------------------------------------------------------------- #
@@ -598,6 +671,16 @@ class Browser:
         await self.cdp.send("Page.navigate", url=self.base_url + path)
         await self.cdp.wait_event("Page.loadEventFired", timeout=timeout)
 
+    async def ping(self) -> None:
+        """One round trip on the same DevTools socket, to keep it open.
+
+        Not a no-op: the answer is read and discarded, but the *command* is what
+        resets Chrome's idle timer on that connection. Any failure propagates, and
+        the caller turns it into could-not-measure — a wait whose socket died
+        measured nothing, and must never read as a pass.
+        """
+        await self.cdp.send("Runtime.evaluate", expression="1", returnByValue=True)
+
     async def evaluate(self, expression: str):
         out = await self.cdp.send("Runtime.evaluate", expression=expression,
                                   returnByValue=True, awaitPromise=True,
@@ -709,9 +792,28 @@ class Browser:
 STEP_TIMEOUT = 30.0
 CONNECT_TIMEOUT = 90.0
 
+#: The life the app stamps on a join token (`live_policy.TOKEN_TTL`, five
+#: minutes). The expiry row waits this out for real, so it is a wall-clock
+#: constant here rather than a value the driver can substitute for waiting.
+TOKEN_TTL_SECONDS = 300.0
+
+#: How far past `exp` the attempt is made. A token is refused at its own second;
+#: the margin covers the clock this driver reads versus the one the SFU does.
+EXPIRY_MARGIN = 10.0
+
+#: How often the driver answers Chrome while it waits. Chrome closes an idle
+#: DevTools socket after about a minute of silence (`1011 keepalive ping
+#: timeout`), which is exactly what a five-minute wait for a token looks like from
+#: the driver's side: the first run of the expiry row lost the socket and reported
+#: two rows as SKIP — a measurement that did not happen, for a reason that had
+#: nothing to do with the token.
+EXPIRY_PING_SECONDS = 20.0
+
 #: The whole room, from sign-in to the last token probe. Generous enough for a
 #: slow staging box and short enough that a stalled page is reported by name.
-TOTAL_TIMEOUT = 300.0
+#: The whole run, and it carries the expiry row's real wait: a budget sized
+#: without it would turn a measured refusal into "the run exceeded 300s".
+TOTAL_TIMEOUT = 300.0 + TOKEN_TTL_SECONDS + 60.0
 
 MIC_VISIBLE = ("(() => { const m = document.getElementById('live-mic');"
                " return !!m && !m.hidden && m.getBoundingClientRect().width > 0; })()")
@@ -906,6 +1008,8 @@ class Driver:
         self.rows.extend(await self._microphone_rows(teacher))
         self.step = "the other school's door"
         self.rows.extend(self._outsider_rows())
+        self.step = "waiting out a join token"
+        self.rows.append(await self._expiry_row())
         self.step = "ending the room"
         self.rows.append(await self._end_row(teacher))
 
@@ -960,7 +1064,7 @@ class Driver:
         names = ("pupil-camera", "teacher-receives-camera", "pupil-isolation",
                  "mic-starts-closed", "hand-raise", "mic-approved",
                  "audio-reaches-teacher", "mic-closed", "outsider-refused",
-                 "room-ended")
+                 "token-expiry", "room-ended")
         return [Row(name, "skipped", why) for name in names]
 
     # -- the rows ---------------------------------------------------------- #
@@ -1007,8 +1111,9 @@ class Driver:
         }
 
         # A pass has a sentence too: `camera_finding` returns "" when it finds
-        # nothing, so this row used to reach the sign-off sheet as twelve cells of
-        # evidence and one empty cell -- which reads as a row nobody took.
+        # nothing, so this row used to reach the sign-off sheet as a cell of
+        # evidence for every row and one empty cell -- which reads as a row
+        # nobody took.
         rows.append(row(
             "pupil-camera",
             camera_finding(first["student"], second["student"],
@@ -1161,6 +1266,143 @@ class Driver:
         return [row("outsider-refused", problem,
                     ok="another school's pupil is refused both the page and the token")]
 
+    async def _wait_past_expiry(self, browsers, deadline: float) -> None:
+        """Sleep past a token's own `exp`, answering the browser on the way.
+
+        Two clocks, for two different jobs. The distance to wait is measured from
+        the token's `exp` — a wall-clock instant minted by the deployment under
+        test — while the *elapsed* time is counted on `time.monotonic()`, which
+        an NTP step or a daylight change cannot move. A loop that trusted the wall
+        clock alone would either wake early (and connect with a live token) or
+        sleep far too long after a backwards step.
+
+        The interval is the other half: every `EXPIRY_PING_SECONDS` the driver
+        sends one cheap command over the same DevTools socket, because Chrome
+        closes a socket nobody speaks on after about a minute. The first run of
+        this row died that way — `keepalive ping timeout`, and rows 12 and 13
+        skipped for a reason that had nothing to do with the token.
+        """
+        target = deadline + EXPIRY_MARGIN
+        remaining = target - time.time()
+        self.step = f"waiting {max(0.0, remaining):.0f}s for a join token to expire"
+        # Every browser still open, not just the pupil's: the rows after the wait
+        # need the teacher's page too, and the first repaired run lost *that*
+        # socket instead — `room-ended` skipped seconds after the expiry row
+        # passed, for the same silence.
+        open_pages = [page for page in browsers if page is not None]
+        started = time.monotonic()
+        announced = False
+        while True:
+            spent = time.monotonic() - started
+            left = remaining - spent
+            if left <= 0:
+                return
+            if announced:
+                for page in open_pages:
+                    try:
+                        await page.ping()
+                    except Exception as exc:  # noqa: BLE001 - see below
+                        # The socket, not the token. Could-not-measure, said out
+                        # loud: a wait that lost its connection measured nothing,
+                        # and the one thing it must never do is leave a green row.
+                        raise CannotMeasure(
+                            f"the DevTools connection for {page.name} closed while "
+                            f"waiting for the token to expire "
+                            f"({type(exc).__name__}: {exc}) — the expiry was not "
+                            f"measured") from exc
+            announced = True
+            await asyncio.sleep(min(EXPIRY_PING_SECONDS, left))
+
+    async def _expiry_row(self) -> Row:
+        """A token the app issued, refused by the SFU once its five minutes pass.
+
+        Two authorities, so two readings. **The app's** is the life it stamps on
+        the token: `exp - iat` must be the policy's five minutes, and a token is
+        only obtainable by a fresh issue — no route in this app extends one, so a
+        page left open past expiry cannot silently renew what it holds. **The
+        SFU's** is the one that needs the clock: the same token, offered by the
+        same page through `LivekitClient.connect`, is refused after `exp`.
+
+        Waiting is the measurement. A token minted to look expired would prove
+        that LiveKit checks a signature, not that the token this app handed to a
+        browser dies when the app said it would.
+        """
+        minted = self._token("student")
+        token, url = minted.get("token") or "", minted.get("url") or ""
+        life = token_life(token)
+        deadline = token_deadline(token)
+        self.payload["expiry"] = {"life": life, "deadline": deadline,
+                                  "url": url_host(url)}
+        if life is None or deadline is None:
+            return Row("token-expiry", "skipped",
+                       "the issued token carries no `iat`/`exp` pair to wait out")
+        if abs(life - TOKEN_TTL_SECONDS) > 1.0:
+            return Row("token-expiry", "fail",
+                       f"the app stamped a {life:.0f}s life on the token; the policy "
+                       f"is {TOKEN_TTL_SECONDS:.0f}s")
+
+        pupil = self.browsers.get("student")
+        if pupil is None:
+            return Row("token-expiry", "skipped", "the pupil is not in the room")
+        control_page = self.browsers.get("student2")
+        if control_page is None:
+            return Row("token-expiry", "skipped",
+                       "needs a second pupil to show the room is reachable at the "
+                       "moment the stale token is offered (--student2)")
+
+        await self._wait_past_expiry(list(self.browsers.values()), deadline)
+        before = await pupil.read()
+
+        # The control first: a *fresh* token, from a page in the same room, right
+        # now. Without it a rejection is an observation about the network or a
+        # broken SDK call rather than about the token — and the first version of
+        # this row reported PASS on `TypeError: … is not a function`.
+        fresh = self._token("student2")
+        self.step = "proving the room is reachable with a fresh token"
+        control = await control_page.evaluate(CONNECT_WITH % (
+            json.dumps(fresh.get("url") or url), json.dumps(fresh.get("token") or "")))
+        self.payload["expiry"]["control"] = control
+        if not isinstance(control, dict) or control.get("missing"):
+            return Row("token-expiry", "skipped",
+                       "the page has no usable LiveKit SDK, so a rejection could "
+                       "not be attributed to the token")
+        if not control.get("connected"):
+            return Row("token-expiry", "skipped",
+                       "the room could not be reached even with a fresh token "
+                       f"(`{_cell(control.get('why') or '')}`), so the stale "
+                       "token's refusal proves nothing")
+
+        self.step = "offering the expired token"
+        attempt = await pupil.evaluate(CONNECT_WITH % (json.dumps(url),
+                                                       json.dumps(token)))
+        # A moment after the attempt: an admitted token would have replaced this
+        # pupil's own connection, and their frames would stop rising.
+        await asyncio.sleep(FLOORS)
+        after = await pupil.read()
+        self.payload["expiry"].update({"attempt": attempt, "undisturbed":
+                                       camera_finding(before, after,
+                                                      self.identities.get("student", ""),
+                                                      "the pupil's page")})
+        if not isinstance(attempt, dict):
+            return Row("token-expiry", "fail",
+                       f"the page answered {attempt!r}, not a connection result")
+        if attempt.get("missing"):
+            return Row("token-expiry", "skipped",
+                       "the pupil's page has no LiveKit SDK to attempt a connection with")
+        if attempt.get("connected"):
+            return Row("token-expiry", "fail",
+                       f"the SFU admitted a token {EXPIRY_MARGIN:.0f}s past its "
+                       f"expiry — the five-minute life is not a life")
+        disturbed = self.payload["expiry"]["undisturbed"]
+        if disturbed:
+            return Row("token-expiry", "fail",
+                       f"the refusal disturbed the pupil already in the room: {disturbed}")
+        return row("token-expiry", "",
+                   ok=f"a token with a {life:.0f}s life was refused "
+                      f"{EXPIRY_MARGIN:.0f}s after it expired while a fresh token "
+                      f"connected from the same room, and the pupil already in "
+                      f"it was not disturbed (`{_cell(attempt.get('why') or '')}`)")
+
     async def _end_row(self, teacher: Browser) -> Row:
         """Ending the room, judged by whether a *new* join is still possible."""
         if self.keep_room:
@@ -1229,13 +1471,14 @@ class Driver:
 ROW_ORDER = (
     "sdk-loaded", "session", "pupil-camera", "teacher-receives-camera",
     "pupil-isolation", "mic-starts-closed", "hand-raise", "mic-approved",
-    "audio-reaches-teacher", "mic-closed", "outsider-refused", "room-ended",
+    "audio-reaches-teacher", "mic-closed", "outsider-refused", "token-expiry",
+    "room-ended",
 )
 
 
 #: What the sheet calls each exit code. The word matters more than the number:
 #: a person pastes this into a ticket, and "CANNOT MEASURE" beside a table of
-#: twelve rows is the difference between a pilot's evidence and a table nobody
+#: thirteen rows is the difference between a pilot's evidence and a table nobody
 #: filled in.
 VERDICTS = {
     EXIT_OK: "SIGNED OFF",
@@ -1258,12 +1501,12 @@ def _cell(text) -> str:
 
 def signoff_sheet(base_url: str, exam_id: str, rows: list, code: int, *,
                   browser: str = "", devices: str = "", run_at: str = "") -> str:
-    """The twelve rows as a Markdown sign-off sheet a person can paste.
+    """The thirteen rows as a Markdown sign-off sheet a person can paste.
 
     `docs/SCANMEET_BIZNET_STAGING.md` §2 ends with a sheet a person fills in by
     hand, and the gate's own console table is not that: it has no verdict line, no
     exam, no run time, and a reader cannot tell a `SKIP` in a two-column dump from
-    one in a signed page. This prints the same twelve readings **with the verdict
+    one in a signed page. This prints the same thirteen readings **with the verdict
     they earned** — including the verdicts that are not a sign-off, because a run
     that could not measure two rows must not leave a table that looks complete.
 
@@ -1308,7 +1551,8 @@ def signoff_sheet(base_url: str, exam_id: str, rows: list, code: int, *,
         lines.append(
             "Every row passed: cameras decode, the microphone is refused until a "
             "teacher approves it and revoked after, no pupil receives another's "
-            "media, and the ended room admits nobody.")
+            "media, a token the app issued stops working when its five minutes "
+            "run out, and the ended room admits nobody.")
     elif failed:
         lines.append(
             f"{len(failed)} row(s) disagreed and {len(skipped)} could not be "
@@ -1365,7 +1609,7 @@ def main(argv=None) -> int:
                         help="write the whole reading as JSON to this file — the "
                              "way to keep it beside a --signoff sheet")
     parser.add_argument("--signoff", action="store_true",
-                        help="print the twelve rows as a Markdown sign-off sheet "
+                        help="print the thirteen rows as a Markdown sign-off sheet "
                              "carrying the run's URL, exam and verdict")
     parser.add_argument("--allow-production", action="store_true",
                         help="let the driver run against the live site (a deliberate "
@@ -1458,7 +1702,7 @@ def main(argv=None) -> int:
         reasons = {ascii_safe(item.detail) for item in skipped}
         if len(reasons) == 1:
             # One reason for every gap is the common case (no room, no account, a
-            # driver that stopped): said once, because twelve identical lines is
+            # driver that stopped): said once, because a page of identical lines is
             # how a reader stops reading them.
             print(f"    every gap: {reasons.pop()}")
         else:

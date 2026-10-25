@@ -78,7 +78,7 @@ Test token issuance, joins, room roster, moderation and revocation on the
 - [x] Five synthetic identities: 2 pupils in one school, one pupil of another
       school, a teacher, and one pupil who belongs to **no** school (the case
       that must be refused rather than served).
-- [x] Chrome/CDP real RTP evidence: 12 named media rows PASS, pupil-to-pupil
+- [x] Chrome/CDP real RTP evidence: 13 named media rows PASS, pupil-to-pupil
       inbound RTP zero; teacher receives correct feeds; mic audio only when
       approved and stops on revoke.
 - [x] LiveKit webhook security probes: 7/7 measured on isolated host.
@@ -122,7 +122,8 @@ python -m deploy.scanmeet_rbac_gate --env "$HOME/scanmeet-staging.env" \
 | Gate | Result | Exit | What it read |
 | --- | --- | --- | --- |
 | `scanmeet_webhook_probe` | **7/7 PASS** | 0 | signature accepted, forgery/missing/stale/duplicate/wrong-room/unknown-event refused |
-| `scanmeet_media_gate` | **12/12 SIGNED OFF** | 0 | `sdk-loaded`, `session`, `pupil-camera`, `teacher-receives-camera`, `pupil-isolation`, `mic-starts-closed`, `hand-raise`, `mic-approved`, `audio-reaches-teacher`, `mic-closed`, `outsider-refused`, `room-ended` |
+| `scanmeet_media_gate` | **12/12 SIGNED OFF** (the twelve rows that existed then) | 0 | `sdk-loaded`, `session`, `pupil-camera`, `teacher-receives-camera`, `pupil-isolation`, `mic-starts-closed`, `hand-raise`, `mic-approved`, `audio-reaches-teacher`, `mic-closed`, `outsider-refused`, `room-ended` |
+| `scanmeet_media_gate` — `token-expiry` (added later) | **FAIL** | 1 | the SFU **admitted** a token 80 s past its own `exp`, while a fresh token connected from the same room in the same moment. The app's half passed: `exp - nbf` is exactly 300 s, and an ended session issues no new token (`room-ended` PASS). Whether LiveKit applies a grace window wider than the 10 s margin, or does not enforce `exp` at all, is not yet measured — see the note below. |
 | `scanmeet_rbac_gate` | **15/15 PASS** | 0 | both sign-ins, the teacher door, the pupil's refused `POST /session`, the owner's room, the outsider's refused status and token, **the no-school pupil's refused paper (302 to the exam list) and refused token (403)**, the token's publish sources (`['camera']` before approval), the owner's `POST /end`, and RLS read as a **user JWT** (`profiles` scoped to 1 school; two schools share 0 rows; `live_sessions`/`live_hand_raises` answer 403 to a browser key) |
 
 Media row 4 was measured after a repair found by the first run of this sequence:
@@ -137,9 +138,34 @@ the null (`is_(...)`) rather than `eq(..., None)` — a filter PostgREST reads a
 string `None`, which would have created a second copy on every run and looked
 idempotent while doing it.
 
+`token-expiry` is the one row whose measurement is a clock: it waits out a token
+minted with a 300-second life (`exp - nbf`, read from the token the app issued,
+which must be the policy's five minutes) and then offers that same token from the
+page that holds it, which must be refused. It is taken **before** `room-ended`,
+because after the room is gone the SFU would refuse for the wrong reason, and the
+run's budget carries the wait (`300 + TTL + 60`) so the row cannot turn into "the
+run exceeded 300s".
+
+Two repairs came out of taking it for real, and both were failures of the row
+rather than of the product: the five-minute wait lost Chrome's DevTools socket
+(`1011 keepalive ping timeout`, so the row and `room-ended` both skipped), and the
+first "refusal" it reported was `TypeError: window.LivekitClient.connect is not a
+function` — a broken call scored as evidence. The wait now answers every browser
+it left open, and a rejection only counts after the **same room has accepted a
+freshly minted token from a second pupil in the same moment**. A CDP socket that
+dies is could-not-measure, never a pass.
+
+What it measured on staging, with the control in place: `connected: true` for a
+token whose `exp` had passed **80 seconds earlier**, and `connected: true` for the
+fresh control token in the same run — so the room was reachable and the stale
+token was accepted. That is reported as FAIL. The next reading is a token minted
+with `exp` far in the past (ten minutes, using the staging project's own API
+secret) to separate "LiveKit has a grace window wider than the margin" from
+"LiveKit does not enforce `exp` at all"; until that is measured, no claim is made
+either way.
+
 Still **open** in the checklist above, and deliberately not claimed as PASS:
 
-- the expired join token (`TOKEN_TTL` is 5 minutes and the SFU enforces it);
 - the 30-second network drop/rejoin, autosave and timer continuity — needs a run
   with the network cut under a live attempt;
 - the manual reject of chat / screen sharing / recording — a UI judgement, not a
