@@ -154,6 +154,15 @@ def browser_launch(browser, port, profile):
       to run it (`Running as root without --no-sandbox is not supported`) and
       never reaches its debug port. It is turned off only when the gate is root,
       so an ordinary deploy user keeps the sandbox.
+    * **`/dev/shm` need not be big enough for a renderer.** A container's is 64 MB
+      and a CI runner's is whatever the guest gives it; Chrome puts its renderer's
+      shared buffers there, and a renderer that cannot allocate one dies *before*
+      the browser offers a page target — which reads downstream as "the browser
+      never offered a debug target", with nothing on the page having been wrong.
+      The flag moves those buffers to `/tmp` and costs nothing where `/dev/shm` is
+      generous. It is one of three known ways a launch can fail silently; the
+      other two are above. `start_browser()` is what handles the rest by trying
+      again and keeping what Chrome said.
 
     Returns `(argv, env)`; `profile` is used for both the data dir and `HOME`.
     """
@@ -165,6 +174,7 @@ def browser_launch(browser, port, profile):
         "--no-first-run",
         "--no-default-browser-check",
         "--disable-gpu",
+        "--disable-dev-shm-usage",
         "--hide-scrollbars",
         "--force-device-scale-factor=1",
         "--disable-features=Translate",
@@ -347,23 +357,93 @@ def _free_port():
         return s.getsockname()[1]
 
 
-async def _measure(base_url, browser, cookies, widths):
-    """Drive one browser through every width and return the per-width readings."""
-    import requests
-    import websockets
+#: What a launch that never came up answers. One string, because the retry below
+#: asks whether the failure was the launch's or the page's by matching it, and the
+#: deployed log, the suite and `deploy/browser_gate.py` all quote it.
+NO_TARGET = "the browser never offered a debug target"
 
-    port = _free_port()
-    profile = tempfile.mkdtemp(prefix="sg-touch-")
-    argv, env = browser_launch(browser, port, profile)
-    proc = subprocess.Popen(
-        argv,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        env=env,
-    )
+#: How many times a browser is started before the gate reports that it could not
+#: look. Two, because the failure this exists for is a *launch* that lost a race on
+#: a loaded runner: in CI the same test passed in one job and failed in two others
+#: on one commit (`test_browser_gates_can_fail`, aa3cd7e), with 4 of its 5 sibling
+#: launches succeeding in the same job seconds either side. A retry is honest here
+#: and a relaxation would not be: nothing about the page is retried, and two failed
+#: launches are still exit 2 — loudly, because a box where Chrome cannot start must
+#: never report green about a page it did not see.
+LAUNCH_ATTEMPTS = 2
+
+
+def _chrome_words(log_path, keep=3, limit=600):
+    """The last words Chrome wrote, for a reason its reader can act on.
+
+    The gates used to send the browser's stderr to `DEVNULL`, so every launch
+    failure arrived as "never offered a debug target" — the one thing the message
+    could not tell you was *why*, and the CI log above carried no more than that.
+    The lines are joined rather than indented because they go into a `(chrome
+    said: ...)` parenthetical on one line of a two-line reason.
+    """
     try:
+        with open(log_path, encoding="utf-8", errors="replace") as handle:
+            text = handle.read()
+    except OSError:
+        return ""
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if not lines:
+        return ""
+    return " | ".join(lines[-keep:])[:limit]
+
+
+def _stop(proc):
+    """End the browser process, politely and then not. Idempotent by nature."""
+    try:
+        proc.terminate()
+        try:
+            proc.wait(timeout=10)
+        except Exception:  # noqa: BLE001
+            proc.kill()
+    except Exception:  # noqa: BLE001 - a browser that died on its own is not an error
+        pass
+
+
+def start_browser(browser, attempts=LAUNCH_ATTEMPTS, seconds=20.0, poll_every=0.25,
+                  extra_args=()):
+    """Start a headless browser and wait for the page target it offers.
+
+    Returns ``(proc, target, profile, reason)``: the running browser, the WebSocket
+    URL of its first page and the profile directory it owns — or
+    ``(None, None, None, reason)`` when no launch came up, the reason carrying
+    Chrome's own last words and how many launches it took. The caller owns both the
+    process and the directory and must end them (`_stop`, `shutil.rmtree`).
+
+    `extra_args` is for a flag one gate needs on top of the shared launch — the SEB
+    door accepts a self-signed certificate — and is inserted after the binary so it
+    cannot displace the debugging port the wait below polls.
+
+    This is the one place a gate starts a browser: `deploy/exam_render_gate.py` and
+    `deploy/seb_door_gate.py` import it for the same reason they import
+    `browser_launch` — there is one copy of how this box starts Chrome, so a fix
+    reaches every gate that drives one.
+    """
+    import requests
+
+    attempted = max(1, int(attempts))
+    polls = max(1, int(seconds / poll_every))
+    reason = ""
+    for _launch in range(attempted):
+        port = _free_port()
+        profile = tempfile.mkdtemp(prefix="sg-browser-")
+        argv, env = browser_launch(browser, port, profile)
+        if extra_args:
+            argv = [argv[0], *extra_args, *argv[1:]]
+        log_path = os.path.join(profile, "chrome.log")
+        # The child inherits the descriptor, so the parent's copy closes at the end
+        # of this block and the file is complete by the time the browser is stopped.
+        with open(log_path, "wb") as log:
+            proc = subprocess.Popen(
+                argv, stdout=subprocess.DEVNULL, stderr=log, env=env
+            )
         target = None
-        for _ in range(80):
+        for _ in range(polls):
             try:
                 pages = [
                     t
@@ -377,10 +457,35 @@ async def _measure(base_url, browser, cookies, widths):
                     break
             except Exception:  # noqa: BLE001 - the browser is still starting
                 pass
-            time.sleep(0.25)
-        if not target:
-            return None, "the browser never offered a debug target"
+            time.sleep(poll_every)
+        if target:
+            return proc, target, profile, None
+        _stop(proc)
+        words = _chrome_words(log_path)
+        shutil.rmtree(profile, ignore_errors=True)
+        reason = NO_TARGET + (
+            f" (chrome said: {words})"
+            if words
+            else " (chrome wrote nothing before it exited)"
+        )
+    if attempted > 1:
+        reason = f"{reason} — after {attempted} launches"
+    return None, None, None, reason
 
+
+async def _measure(base_url, browser, cookies, widths):
+    """Drive one browser through every width and return the per-width readings.
+
+    A launch that never came up is tried again inside `start_browser`; a page that
+    threw, redirected or did not render is **not** retried, because that is the
+    page's answer and asking twice would only take longer to report the same thing.
+    """
+    import websockets
+
+    proc, target, profile, reason = start_browser(browser)
+    if target is None:
+        return None, reason
+    try:
         host = urllib.parse.urlparse(base_url).hostname or "127.0.0.1"
         readings = []
         async with websockets.connect(target, max_size=64 * 1024 * 1024) as ws:
@@ -440,11 +545,7 @@ async def _measure(base_url, browser, cookies, widths):
                 )
         return readings, None
     finally:
-        proc.terminate()
-        try:
-            proc.wait(timeout=10)
-        except Exception:  # noqa: BLE001
-            proc.kill()
+        _stop(proc)
         shutil.rmtree(profile, ignore_errors=True)
 
 

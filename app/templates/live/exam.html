@@ -1,0 +1,60 @@
+{% set content_lang = 'id' %}
+{% extends "base.html" %}
+{% block title %}ScanMeet — Exam Mode{% endblock %}
+{% block page_title %}ScanMeet{% endblock %}
+{% block content %}
+<section id="scan-live" data-exam-id="{{ live_exam_id | e }}"
+         data-role="{{ live_role | e }}" data-csrf="{{ csrf_token() }}"
+         class="space-y-5">
+  <header class="card p-5 space-y-3">
+    <h1 class="font-extrabold text-xl">ScanMeet — Exam Mode</h1>
+    <p class="text-sm text-surface-500">Kamera wajib · Mikrofon dengan izin guru · Chat dan rekaman nonaktif · Grid</p>
+    <div class="flex flex-wrap gap-3">
+      {% if live_role == "teacher" %}
+      <button id="live-start" type="button" hidden class="px-4 py-2 rounded-lg bg-primary-600 text-white">Mulai pengawasan</button>
+      <button id="live-end" type="button" hidden class="px-4 py-2 rounded-lg border border-rose-200 text-red-600">Akhiri Live</button>
+      {% else %}
+      <button id="live-hand" type="button" disabled class="px-4 py-2 rounded-lg bg-primary-600 text-white">✋ Angkat tangan</button>
+      {% endif %}
+      <button id="live-mic" type="button" hidden class="px-4 py-2 rounded-lg border border-indigo-300">Aktifkan mikrofon</button>
+    </div>
+    {% if live_role == "teacher" %}
+    {# The paper's own switch (migration 071). It is read from the server on
+       every load; the button never guesses, so a second device toggling the
+       same paper is reflected instead of silently overwritten. It sits below
+       the start/end buttons on purpose: the first `teacher` branch of this
+       page is the one `test_scanmeet_teacher_controls_contract.py` reads. #}
+    <div class="rounded-xl border border-surface-200 p-3 flex flex-wrap items-center gap-3">
+      <span class="text-sm font-semibold">ScanMeet untuk ujian ini:</span>
+      <span id="live-switch-state" class="text-sm font-bold" role="status" aria-live="polite">Memeriksa...</span>
+      <button id="live-switch" type="button" class="px-3 py-1.5 rounded-lg border border-surface-300 text-sm font-bold">Aktifkan ScanMeet</button>
+      <span class="text-xs text-surface-500">Menonaktifkan akan mengakhiri sesi Live yang sedang berjalan. Ujian, jawaban, dan waktu tidak berubah.</span>
+    </div>
+    {% else %}
+    <p id="live-switch-off" class="text-sm text-amber-700" role="status" hidden>ScanMeet dinonaktifkan guru untuk ujian ini.</p>
+    {% endif %}
+    <p id="live-status" class="text-sm font-semibold" role="status" aria-live="polite">Memeriksa sesi Live...</p>
+    <p id="live-warning" class="text-sm text-amber-700" role="alert" hidden>Pengawasan terputus. Ujian dan autosave tetap berjalan.</p>
+  </header>
+  <div class="grid grid-cols-1 lg:grid-cols-4 gap-4">
+    <main class="lg:col-span-3 card p-4">
+      <h2 class="font-bold mb-3">Kamera peserta</h2>
+      <div id="live-grid" aria-label="Tampilan kamera" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3"></div>
+    </main>
+    <aside class="card p-4 space-y-3">
+      <h2 class="font-bold">Pengawasan</h2>
+      {% if live_role == "teacher" %}
+      <p class="text-sm">Permintaan berbicara:</p>
+      <div id="live-queue" class="space-y-2 text-sm" aria-live="polite"></div>
+      <h3 class="font-bold mt-4">Koneksi peserta (audit LiveKit)</h3>
+      <div id="live-events" class="space-y-1 text-xs" aria-live="polite"></div>
+      {% else %}
+      <p id="live-raise-status" class="text-sm">Mikrofon menunggu persetujuan guru.</p>
+      {% endif %}
+    </aside>
+  </div>
+</section>
+{# STAGING ONLY. Self-host the pinned SDK after browser and security review. #}
+<script src="https://cdn.jsdelivr.net/npm/livekit-client@2.23.0/dist/livekit-client.umd.min.js"></script>
+<script src="{{ asset_v('js/scan-live-exam.js') }}"></script>
+{% endblock %}

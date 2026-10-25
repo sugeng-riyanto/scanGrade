@@ -1,0 +1,25 @@
+name: ScanMeet staging isolation gate
+on:
+  pull_request:
+    paths:
+      - 'deploy/scanmeet_staging_gate.py'
+      - 'tests/unit/test_scanmeet_staging_gate.py'
+      - 'docs/SCANMEET_BIZNET_STAGING.md'
+      - '.github/workflows/scanmeet-staging-isolation.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  isolate:
+    name: Prevent staging on production resources
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Test private isolated staging guard
+        run: |
+          python -m unittest tests.unit.test_scanmeet_staging_gate -v
+          python -m compileall -q deploy/scanmeet_staging_gate.py

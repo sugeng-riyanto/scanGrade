@@ -449,7 +449,10 @@ class TestTheOperatorSeesIt:
         assert "data-mail-alert" not in body, (
             "a healthy mail path takes up dashboard space, so the banner stops being "
             "a signal")
-        assert "535" not in body and "budi@school.id" not in body
+        # A bare "535" can occur inside an unrelated content-hashed asset URL.
+        # Check the exact SMTP failure instead; the banner marker above proves
+        # the alert component itself is absent when delivery is healthy.
+        assert "535 BadCredentials" not in body and "budi@school.id" not in body
 
     def test_both_pages_are_handed_the_ledger(self):
         source = _text(ROUTES)

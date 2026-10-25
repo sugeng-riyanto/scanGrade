@@ -1,0 +1,411 @@
+"""Isolated staging gate tests using stdlib only (fast independent CI)."""
+import os
+import sys
+import tempfile
+import unittest
+import unittest.mock
+from pathlib import Path
+
+from deploy import scanmeet_staging_gate as gate
+
+
+def valid():
+    return {
+        "SCANMEET_STAGING": "true",
+        "SCANMEET_STAGING_URL": "https://staging.school.edu",
+        "SCANGRADE_LIVE_ENABLED": "true",
+        "SCANGRADE_LIVE_EXAM_ENABLED": "true",
+        "LIVEKIT_URL": "wss://school.livekit.cloud",
+        "LIVEKIT_API_KEY": "synthetic-fixture-key",
+        "LIVEKIT_API_SECRET": "synthetic-fixture-secret",
+        "SUPABASE_URL": "https://independent-staging.supabase.co",
+        "SUPABASE_SERVICE_KEY": "synthetic-stage-service-key",
+        "SUPABASE_ANON_KEY": "synthetic-stage-anon-key",
+        "FLASK_SECRET_KEY": "synthetic-stage-session-key",
+    }
+
+
+class ScanMeetStagingBoundary(unittest.TestCase):
+    def test_isolated_private_stage_is_accepted(self):
+        self.assertEqual(gate.validate(valid(), "prod-ref"), [])
+
+    def test_real_production_project_is_blocked(self):
+        env = valid()
+        env["SUPABASE_URL"] = "https://prod-ref.supabase.co"
+        self.assertTrue(any("isolated" in issue for issue in gate.validate(env, "prod-ref")))
+
+    def test_flags_off_cannot_pretend_to_be_a_pilot(self):
+        env = valid()
+        env["SCANGRADE_LIVE_EXAM_ENABLED"] = "false"
+        self.assertTrue(any("both Live" in issue for issue in gate.validate(env, "prod-ref")))
+
+    def test_production_domain_refused(self):
+        env = valid()
+        env["SCANMEET_STAGING_URL"] = "https://scan-grade.app"
+        self.assertTrue(any("separate HTTPS" in s for s in gate.validate(env, "prod-ref")))
+
+    def test_the_deployed_site_is_refused_under_every_name_it_answers_to(self):
+        """The one host a staging pilot must not point at.
+
+        This file used to refuse `scan-grade.app` alone, which is the demo email
+        domain in `manage.py`. The deployed app is `scangrade.web.id`, and
+        `lmsshb.scangrade.web.id` reaches the same box, so both were accepted as
+        "a real separate HTTPS host" — a staging run against production, with the
+        gate reporting PASS.
+        """
+        for url in ("https://scangrade.web.id", "https://www.scangrade.web.id",
+                    "https://lmsshb.scangrade.web.id",
+                    "https://staging.scangrade.web.id"):
+            env = valid()
+            env["SCANMEET_STAGING_URL"] = url
+            self.assertTrue(any("separate HTTPS" in s for s in gate.validate(env, "prod-ref")),
+                            url)
+        self.assertEqual(gate.PRODUCTION_SITE, "scangrade.web.id",
+                         "the constant has to name the site the README deploys to")
+
+    def test_placeholder_supabase_key_refused(self):
+        env = valid()
+        env["SUPABASE_SERVICE_KEY"] = "replace-me"
+        self.assertTrue(any("placeholder" in s for s in gate.validate(env, "prod-ref")))
+
+    def test_check_file_refuses_in_repo_secret(self):
+        with tempfile.TemporaryDirectory() as root:
+            tmp_path = Path(root)
+            secret = tmp_path / "staging.env"
+            secret.write_text("example=not-a-secret")
+            secret.chmod(0o600)
+            self.assertTrue(any("outside" in s for s in gate.validate_file(secret, tmp_path)))
+
+    def test_check_file_refuses_world_readable_secret(self):
+        with tempfile.TemporaryDirectory() as root:
+            tmp_path = Path(root)
+            checkout = tmp_path / "checkout"
+            checkout.mkdir()
+            secret = tmp_path / "outside.env"
+            secret.write_text("example=not-a-secret")
+            secret.chmod(0o644)
+            self.assertTrue(any("0600" in s
+                                for s in gate.validate_file(secret, checkout, measure=True)))
+
+    def test_check_file_accepts_external_private_secret(self):
+        """No rule but the mode refuses this file, on every platform.
+
+        The mode half is asked separately below with a synthetic integer: Windows
+        cannot produce a 0600 file, so a test that asserted `[]` here would fail on
+        the developer checkout for a reason that is not a defect — and a test that
+        patched the flag would be asserting its own patch.
+        """
+        with tempfile.TemporaryDirectory() as root:
+            tmp_path = Path(root)
+            checkout = tmp_path / "checkout"
+            checkout.mkdir()
+            secret = tmp_path / "outside.env"
+            secret.write_text("example=not-a-secret")
+            self.assertEqual(gate.validate_file(secret, checkout, measure=False), [])
+
+    def test_private_mode_is_accepted(self):
+        self.assertEqual(gate.mode_problem(0o100600, measure=True), [])
+
+    def test_world_readable_mode_is_refused(self):
+        self.assertTrue(any("0600" in s for s in gate.mode_problem(0o100644, measure=True)))
+
+    def test_group_or_other_write_is_refused(self):
+        self.assertTrue(any("0600" in s for s in gate.mode_problem(0o100620, measure=True)))
+
+    def test_a_directory_is_not_an_env_file(self):
+        self.assertTrue(gate.mode_problem(0o040700, measure=True))
+
+    def test_a_platform_without_posix_bits_does_not_pretend_to_have_measured(self):
+        """Windows reports 0o666 for a chmod-0600 file; claiming 0600 was checked
+        there would refuse every valid env and pass the world-readable test while
+        reading nothing."""
+        self.assertEqual(gate.mode_problem(0o100644, measure=False), [])
+        self.assertEqual(gate.MEASURE_MODES, os.name == "posix")
+
+    def test_check_file_refuses_symlink(self):
+        with tempfile.TemporaryDirectory() as root:
+            tmp_path = Path(root)
+            checkout = tmp_path / "checkout"
+            checkout.mkdir()
+            private = tmp_path / "outside.env"
+            private.write_text("example")
+            private.chmod(0o600)
+            symlink = tmp_path / "linked.env"
+            symlink.symlink_to(private)
+            self.assertTrue(any("symlink" in s for s in gate.validate_file(symlink, checkout)))
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+class ThePrivateFileIsNamedForWhatIsWrongWithIt(unittest.TestCase):
+    """A missing file and an unreadable one are different sentences.
+
+    On a box where staging has not been set up yet the file is absent, and the
+    old message — "not readable" — sent the reader looking for a permission
+    problem that was not there. The other half (a directory, an in-repo file, a
+    world-readable mode) is already held by `ScanMeetStagingBoundary` above.
+    """
+
+    def test_a_missing_private_env_says_it_does_not_exist(self):
+        with tempfile.TemporaryDirectory() as checkout, \
+                tempfile.TemporaryDirectory() as elsewhere:
+            missing = Path(elsewhere) / "staging.env"
+            problems = gate.validate_file(missing, Path(checkout))
+            self.assertTrue(any("does not exist" in p for p in problems), problems)
+            self.assertFalse(any("not readable" in p for p in problems), problems)
+
+
+ROOT = Path(__file__).resolve().parents[2]
+TEMPLATE = ROOT / "deploy" / "livekit-staging.env.example"
+RUNBOOK = ROOT / "docs" / "SCANMEET_BIZNET_STAGING.md"
+
+
+def _template_keys():
+    from deploy.livekit_preflight import parse_env
+    return set(parse_env(TEMPLATE.read_text(encoding="utf-8")))
+
+
+def _documented_keys():
+    """The owner-values table, read between its own markers.
+
+    Markers rather than the whole page: the runbook names other things in
+    backticks (`umask 077`, routes, a migration), and a rule that read all of it
+    would either miss real drift or refuse a sentence.
+    """
+    import re
+
+    page = RUNBOOK.read_text(encoding="utf-8")
+    start = page.index("<!-- owner-values:start -->")
+    end = page.index("<!-- owner-values:end -->")
+    span = page[start:end]
+    # An underscore is required: every environment name here has one, and the
+    # looser pattern also caught `REF` in a sentence, which is a project id's
+    # name, not a value the owner types into this file.
+    return set(re.findall(r"`([A-Z][A-Z0-9_]*_[A-Z0-9_]+)`", span))
+
+
+class TheTemplateAndTheRunbookAgree(unittest.TestCase):
+    """A key the gate gains must arrive with a source and an isolation proof.
+
+    The template used to name six of the eleven values the gate requires, so an
+    owner who copied it was refused for keys nothing had mentioned. These tests
+    make the three lists one list: the gate's requirements, the template, and the
+    table in the runbook.
+    """
+
+    def test_the_template_names_every_value_the_gate_requires(self):
+        keys = _template_keys()
+        missing = set(gate.REQUIRED) - keys
+        self.assertEqual(missing, set(), f"the gate needs keys the template omits: {missing}")
+        self.assertIn("SCANMEET_STAGING", keys)
+
+    def test_the_template_is_refused_unchanged(self):
+        """A copied template must fail, and say why, rather than look configured."""
+        from deploy.livekit_preflight import parse_env
+
+        settings = parse_env(TEMPLATE.read_text(encoding="utf-8"))
+        problems = gate.validate(settings, "prod-ref")
+        self.assertTrue(problems, "an untouched template passed the staging gate")
+        self.assertTrue(any("placeholder" in p for p in problems), problems)
+
+    def test_the_template_ships_the_kill_switches_off(self):
+        """The template is a file someone will copy, possibly to a production box.
+
+        `deploy/scanmeet-sdk.yml` already runs the preflight on it; this is the
+        same claim where a template edit is actually made, so flipping a flag to
+        `true` "because staging needs it" fails here before it reaches a box.
+        """
+        from deploy.livekit_preflight import audit, parse_env
+
+        settings = parse_env(TEMPLATE.read_text(encoding="utf-8"))
+        for key in ("SCANGRADE_LIVE_ENABLED", "SCANGRADE_LIVE_EXAM_ENABLED"):
+            self.assertEqual(settings.get(key), "false", key)
+        self.assertEqual(audit(settings, pilot=False), [])
+
+    def test_a_placeholder_project_ref_is_not_an_isolated_database(self):
+        """The hole the template exposed: `your-project.supabase.co` has the
+        shape of a separate project and names none."""
+        env = valid()
+        env["SUPABASE_URL"] = "https://your-project.supabase.co"
+        self.assertTrue(any("placeholder" in s for s in gate.validate(env, "prod-ref")))
+
+    def test_a_placeholder_web_host_is_refused_too(self):
+        env = valid()
+        env["SCANMEET_STAGING_URL"] = "https://staging.your-school-domain.com"
+        self.assertTrue(any("placeholder" in s for s in gate.validate(env, "prod-ref")))
+
+    def test_the_runbook_documents_exactly_the_template(self):
+        self.assertEqual(_template_keys(), _documented_keys(),
+                         "the runbook's value table and the template disagree")
+
+    def test_every_documented_value_says_where_it_comes_from(self):
+        """A row with no source is a value the owner cannot supply."""
+        import re
+
+        page = RUNBOOK.read_text(encoding="utf-8")
+        span = page[page.index("<!-- owner-values:start -->"):
+                    page.index("<!-- owner-values:end -->")]
+        rows = [line for line in span.splitlines()
+                if line.startswith("| `")]
+        self.assertEqual(len(rows), len(_documented_keys()))
+        for row in rows:
+            cells = [cell.strip() for cell in row.strip("|").split("|")]
+            self.assertGreaterEqual(len(cells), 4, row)
+            self.assertTrue(all(cells), f"an empty cell in: {row}")
+
+    def test_the_runbook_names_the_migration_the_switch_needs(self):
+        page = RUNBOOK.read_text(encoding="utf-8")
+        self.assertIn("071_scan_live_exam_toggle.sql", page, (
+            "staging without 071 reads every paper as OFF and cannot toggle"))
+        self.assertIn("Aktifkan ScanMeet", page, (
+            "the switch's own readings are not in the acceptance sheet"))
+
+    def test_the_gate_and_the_template_are_the_files_this_repository_tracks(self):
+        """Both halves are read from disk; the paths are checked, not assumed."""
+        self.assertTrue(TEMPLATE.is_file(), TEMPLATE)
+        self.assertTrue(RUNBOOK.is_file(), RUNBOOK)
+
+
+SDK_WORKFLOW = ROOT / ".github" / "workflows" / "scanmeet-sdk.yml"
+
+
+def _sdk_template_audit():
+    """The inline assertion block the SDK workflow runs against the template.
+
+    Extracted rather than re-implemented: the workflow and the template drifted
+    once already — the workflow asserted the flags were `true` while the file
+    shipped `false`, and the job only failed after the merge. Running the block
+    itself is what makes the two the same claim.
+    """
+    import re
+    import textwrap
+
+    text = SDK_WORKFLOW.read_text(encoding="utf-8")
+    match = re.search(r"python - <<'PY'\n(.*?)\n\s*PY\n", text, re.S)
+    assert match, "the workflow no longer audits the template inline"
+    return textwrap.dedent(match.group(1))
+
+
+class TheSdkWorkflowAsksTheTemplateTheRightQuestions(unittest.TestCase):
+    """A green workflow is only a signal if it asserts the committed file."""
+
+    def test_the_block_it_runs_passes_against_this_checkout(self):
+        import subprocess
+        import sys
+
+        code = _sdk_template_audit()
+        result = subprocess.run([sys.executable, "-c", code], cwd=ROOT,
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("fail closed", result.stdout)
+
+    def test_it_asserts_the_template_ships_the_switches_off(self):
+        from deploy.livekit_preflight import parse_env
+
+        code = _sdk_template_audit()
+        self.assertIn('== "false"', code, (
+            "the workflow has to assert the template's committed defaults; "
+            "asserting `true` is the drift that turned this job red after merge"))
+        settings = parse_env(TEMPLATE.read_text(encoding="utf-8"))
+        self.assertEqual(settings["SCANGRADE_LIVE_ENABLED"], "false")
+
+
+def _without_livekit(call):
+    """Run `call` with `livekit` unimportable, capturing its stdout.
+
+    `sys.modules[name] = None` is the interpreter's own way to make an import
+    fail ("import of livekit halted; None in sys.modules"), which is closer to a
+    venv without the package than deleting a file would be.
+    """
+    import contextlib
+    import io
+
+    hidden = sys.modules.get("livekit")
+    sys.modules["livekit"] = None
+    buffer = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buffer):
+            code = call()
+    finally:
+        if hidden is None:
+            sys.modules.pop("livekit", None)
+        else:
+            sys.modules["livekit"] = hidden
+    return code, buffer.getvalue()
+
+
+class TheOptionalSdkIsNamedRatherThanBlamed(unittest.TestCase):
+    """A venv built from `requirements.txt` alone is a good production venv.
+
+    On it, `--probe-livekit` used to answer "LiveKit server connectivity/
+    authorization" — a sentence that sends an operator to the LiveKit dashboard
+    and the firewall for a Python package that is simply not installed. The
+    staging set is optional (`requirements-live.txt`), so its absence is named,
+    and it is exit 2 (could not measure) rather than 1 (the credentials
+    disagreed): those are different facts and only one of them is actionable.
+    """
+
+    def _env_file(self, root):
+        import json as _json
+
+        path = Path(root) / "staging.env"
+        path.write_text(
+            "\n".join(f"{key}={_json.dumps(value) if ' ' in value else value}"
+                      for key, value in valid().items()) + "\n",
+            encoding="utf-8")
+        # `write_text` makes the file 0644 on Linux (0666 & ~umask), which the gate
+        # refuses on purpose -- and it is the first refusal, so the SDK branch these
+        # tests are about was never reached there. The runbook creates this file
+        # with `umask 077`; this fixture is the same private file.
+        path.chmod(0o600)
+        return path
+
+    def test_the_staging_gate_names_a_missing_sdk(self):
+        from deploy import scanmeet_staging_gate as staging
+
+        with tempfile.TemporaryDirectory() as root:
+            env_file = self._env_file(root)
+            code, out = _without_livekit(
+                lambda: staging.main(["--env", str(env_file), "--probe-livekit"]))
+        self.assertEqual(code, 2, "a missing package is not a credential failure")
+        self.assertIn("requirements-live.txt", out, (
+            "the fix is a pip install line; the message has to be that line"))
+        self.assertNotIn("connectivity/authentication", out, (
+            "this sentence sends its reader to the LiveKit dashboard and the "
+            "firewall for a package that is not installed"))
+
+    def test_the_connectivity_probe_answers_two_for_a_missing_sdk(self):
+        from deploy import livekit_connectivity
+
+        with tempfile.TemporaryDirectory() as root:
+            env_file = self._env_file(root)
+            code, out = _without_livekit(
+                lambda: livekit_connectivity.main(["--env", str(env_file)]))
+        self.assertEqual(code, 2)
+        self.assertIn("requirements-live.txt", out)
+
+    def test_the_webhook_probe_says_which_file_installs_pyjwt(self):
+        """The exit code alone is not enough here, and the mutation proved it.
+
+        Without the guard, `main` still answers 2 — the signing call raises
+        `AttributeError`, `probes()` turns it into a `ProbeError`, and the code
+        is identical. What differs is the sentence: "'NoneType' object has no
+        attribute 'encode'" names nothing a reader can install.
+        """
+        import contextlib
+        import io
+
+        from deploy import scanmeet_webhook_probe as probe
+
+        buffer = io.StringIO()
+        with unittest.mock.patch.object(probe, "jwt", None), \
+                contextlib.redirect_stdout(buffer):
+            code = probe.main(["--url", "https://staging.school.edu",
+                               "--api-key", "synthetic", "--api-secret", "synthetic"])
+        out = buffer.getvalue()
+        self.assertEqual(code, 2)
+        self.assertIn("requirements-live.txt", out, out)
+        self.assertNotIn("has no attribute", out, (
+            "a reader sent to a NoneType traceback cannot install the package"))
