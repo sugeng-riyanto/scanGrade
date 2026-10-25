@@ -2628,3 +2628,112 @@ def email_settings_test():
     flash(f"smtp_test_{result['outcome']}",
           "success" if result["outcome"] == "sent" else "error")
     return redirect("/super-admin/email-settings")
+
+
+@super_bp.route("/scanmeet-schools", methods=["GET", "POST"])
+@_sa_required
+def scanmeet_school_licenses():
+    """Super Admin licensing by a uniquely resolved NPSN. No automated charge."""
+    from datetime import datetime as _datetime, timezone as _timezone
+    from app.services import live_school_entitlement as entitlement
+    from app.services import livekit_gateway, live_cleanup
+
+    db = get_supabase()
+    npsn = (request.values.get("npsn") or "").strip()
+    if not re.fullmatch(r"\\d{8}", npsn):
+        if request.method == "POST":
+            return jsonify({"error": "NPSN must contain exactly eight digits"}), 400
+        return render_template("super_admin/scanmeet_schools.html", npsn=npsn, school=None, license=None)
+    try:
+        schools = (db.table("schools").select("id,npsn,name")
+                   .eq("npsn", npsn).limit(2).execute().data or [])
+        if len(schools) != 1:
+            return jsonify({"error": "NPSN not found or not unique"}), 404
+        school = schools[0]
+        school_id = school["id"]
+        rows = (db.table("scanmeet_school_entitlements")
+                .select("school_id,enabled,status,valid_until,approved_at")
+                .eq("school_id", school_id).limit(1).execute().data or [])
+        license_row = rows[0] if rows else None
+    except Exception:
+        current_app.logger.exception("ScanMeet school license lookup unavailable")
+        return jsonify({"error": "License database unavailable (migration 075 required)"}), 503
+
+    if request.method == "GET":
+        return render_template("super_admin/scanmeet_schools.html",
+                               npsn=npsn, school=school, license=license_row)
+    payload = request.get_json(silent=True) if request.is_json else request.form
+    payload = payload or {}
+    enabled = payload.get("enabled")
+    if enabled in (True, "true", "on", "1"):
+        enabled = True
+    elif enabled in (False, "false", "off", "0"):
+        enabled = False
+    else:
+        return jsonify({"error": "enabled must be boolean"}), 400
+    status = str(payload.get("status") or "disabled").strip()
+    valid_until = payload.get("valid_until") or None
+    if status not in ("disabled", "trial", "paid", "expired"):
+        return jsonify({"error": "Invalid license status"}), 400
+    if enabled:
+        if status not in ("trial", "paid") or not valid_until:
+            return jsonify({"error": "Active license needs trial/paid and expiry"}), 400
+        if status == "paid" and str(payload.get("payment_verified") or "").lower() not in ("true", "on", "1"):
+            return jsonify({"error": "Paid activation requires payment confirmation"}), 400
+        try:
+            expiry = _datetime.fromisoformat(str(valid_until).replace("Z", "+00:00"))
+            if expiry.tzinfo is None or expiry <= _datetime.now(_timezone.utc):
+                raise ValueError("Invalid expiry")
+        except (ValueError, TypeError):
+            return jsonify({"error": "Expiry must be a future timezone-aware ISO timestamp"}), 400
+    else:
+        status = "disabled"
+        valid_until = None
+
+    entry = {"school_id": school_id, "enabled": enabled, "status": status,
+             "valid_until": valid_until, "approved_by": g.user_id,
+             "approved_at": _datetime.now(_timezone.utc).isoformat(),
+             "updated_at": _datetime.now(_timezone.utc).isoformat()}
+    try:
+        db.table("scanmeet_school_entitlements").upsert(entry, on_conflict="school_id").execute()
+    except Exception:
+        current_app.logger.exception("Cannot save ScanMeet license")
+        return jsonify({"error": "License could not be saved"}), 503
+    try:
+        log_activity("update", "scanmeet_school_entitlements", str(school_id),
+                     new_data={"npsn": npsn, "enabled": enabled, "status": status,
+                               "valid_until": valid_until},
+                     user_id=g.user_id)
+    except Exception:
+        current_app.logger.exception("ScanMeet entitlement audit log failed")
+        # Revocation is already stored; do not pretend the change failed.
+    revoked = []
+    pending = []
+    if not enabled:
+        try:
+            sessions = (db.table("scan_live_sessions")
+                        .select("id,room_name,school_id,status")
+                        .eq("school_id", school_id).eq("status", "active")
+                        .execute().data or [])
+            for session in sessions:
+                ended = (db.table("scan_live_sessions").update({"status": "ended"})
+                         .eq("id", session["id"]).eq("school_id", school_id)
+                         .eq("status", "active").execute().data or [])
+                if not ended:
+                    continue
+                revoked.append(session["id"])
+                try:
+                    livekit_gateway.end_room(current_app.config, session["room_name"])
+                except Exception as exc:
+                    pending.append(session["id"])
+                    try:
+                        live_cleanup.enqueue(db, ended[0], reason="school_license_off", error=exc)
+                    except Exception:
+                        current_app.logger.exception("Live room cleanup debt could not be stored")
+        except Exception:
+            current_app.logger.exception("ScanMeet school room revocation needs reconciliation")
+            return jsonify({"enabled": False, "status": "revoked",
+                            "error": "License is OFF; room cleanup requires operator reconciliation",
+                            "revoked": revoked, "cleanup_pending": pending}), 202
+    return jsonify({"enabled": enabled, "status": status, "npsn": npsn,
+                    "revoked": revoked, "cleanup_pending": pending})

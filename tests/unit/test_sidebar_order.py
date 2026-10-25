@@ -88,6 +88,7 @@ EXPECTED: dict[str, list[tuple[str, list[str]]]] = {
         ("Panduan", ["/guide/skor"]),
         ("Sistem", ["/super-admin/privacy-settings", "/super-admin/file-management",
                     "/super-admin/omr-test", "/super-admin/deploy-status",
+                    "/super-admin/scanmeet-schools",
                     "/super-admin/reset-school-data"]),
     ],
     "murid": [

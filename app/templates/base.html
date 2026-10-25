@@ -340,6 +340,7 @@ window.sgSavePrefs = function (patch) {
             <a href="/super-admin/file-management" class="nav-item {% if request.path == '/super-admin/file-management' %}active{% endif %}"><i class="fas fa-folder-open"></i><span x-text="t('Manajemen File','File Management')"></span></a>
             <a href="/super-admin/omr-test" class="nav-item {% if request.path == '/super-admin/omr-test' %}active{% endif %}"><i class="fas fa-microscope"></i><span x-text="t('Uji OMR','OMR Test')"></span></a>
             <a href="/super-admin/deploy-status" class="nav-item {% if request.path == '/super-admin/deploy-status' %}active{% endif %}"><i class="fas fa-rocket"></i><span x-text="t('Kesiapan Runner','Runner Health')"></span></a>
+            <a href="/super-admin/scanmeet-schools" class="nav-item {% if request.path == '/super-admin/scanmeet-schools' %}active{% endif %}"><i class="fas fa-video"></i><span x-text="t('Lisensi ScanMeet','ScanMeet Licenses')"></span></a>
             <a href="/super-admin/reset-school-data" class="nav-item {% if request.path == '/super-admin/reset-school-data' %}active{% endif %}"><i class="fas fa-skull-crossbones text-red-400"></i><span class="text-red-400" x-text="t('Reset Sekolah','Reset School')"></span></a>
 {% elif g.user_role == 'admin_sekolah' %}
             <div class="nav-section-title"><span x-text="t('Utama','Main')"></span></div>
@@ -625,6 +626,7 @@ window.sgSavePrefs = function (patch) {
                     'grading-queue': ('Antrean Koreksi', 'Grading Queue'),
                     'guide': ('Panduan', 'Guide'),
                     'import': ('Impor', 'Import'),
+                    'scanmeet-schools': ('Lisensi ScanMeet', 'ScanMeet Licenses'),
                     'seb': ('Safe Exam Browser', 'Safe Exam Browser'),
                     'seb-claim': ('Buka dengan SEB', 'Open with SEB'),
                     'seb-refusals': ('Tidak Bisa Masuk', 'Could Not Get In'),

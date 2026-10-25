@@ -37,6 +37,14 @@ EXEMPT = {
     # tenant and exam access checks still apply to each session action.
     "live_bp /exams/<exam_id>/sessions":
         "creates a media-room coordination row, never writes a paper or grade",
+    # A tenant licence is not a year's record: it decides whether a school may use
+    # ScanMeet at all, and switching it off ends that school's live rooms. It cannot
+    # write a paper, a sitting, an answer or a mark, so a closed year has nothing to
+    # lose — and refusing the Super Admin here would leave a licence on a school that
+    # no longer pays for it.
+    "super_bp /scanmeet-schools":
+        "grants or revokes a school's ScanMeet add-on and ends its live rooms; no "
+        "paper, sitting, answer, mark or year record is written",
     "live_bp /sessions/<sid>/hand-raises":
         "records a pupil's temporary request to speak; no exam state is changed",
     "live_bp /sessions/<sid>/hand-raises/<rid>/<action>":

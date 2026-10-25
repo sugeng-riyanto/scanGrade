@@ -456,6 +456,10 @@ TRANSLATED = [
     # screen reader read English words in an Indonesian voice. The pin is gone;
     # the page switches.
     "super_admin/trial_settings.html",
+    # The per-NPSN ScanMeet licence page. Its copy arrived in Indonesian only, and
+    # a page that answers the toggle has to say so here as well as bind the pairs:
+    # the guard below reads this list, and the coverage floor reads the template.
+    "super_admin/scanmeet_schools.html",
     # The filed report: every word on it is a pair, including the band names, the
     # descriptors and the findings, which arrive from the service as `(id, en)`.
     # It belongs here for the same reason the dashboard does — a school that reads
@@ -1037,7 +1041,10 @@ def test_the_translated_list_only_grows_with_intent():
     # with nine strings untranslated; the pin came off with the CRUD work, since
     # a page an admin manages a school's years on cannot answer only in
     # Indonesian while the count above it is already a pair.
-    assert len(TRANSLATED) == 62, (
+    # 63: `super_admin/scanmeet_schools.html`, the per-NPSN ScanMeet licence page.
+    # It arrived in Indonesian only; its copy is pairs now (18 of them, 0
+    # leftovers), which is what this bump turns the sweep on for.
+    assert len(TRANSLATED) == 63, (
         f"{len(TRANSLATED)} pages are on the translated list. Bump this number when "
         f"you translate another one — and if you *removed* a page, put it back, "
         f"because dropping it turns the sweep off for that page: {TRANSLATED}")
