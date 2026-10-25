@@ -379,7 +379,7 @@ table comes from a reading the driver took, never from this page.
 ```markdown
 ## ScanMeet media sign-off - https://staging.your-school-domain.com
 
-- **Verdict:** `SIGNED OFF` (exit 0) - 12/12 row(s) passed
+- **Verdict:** `SIGNED OFF` (exit 0) - 13/13 row(s) passed
 - **Exam:** `9f4c2a10-8d3e-4b71-9c55-2e7a1b0d6f38`
 - **Run at:** 2026-10-24T09:12:44+07:00
 - **Browser:** `/usr/bin/google-chrome` (synthetic devices)
@@ -397,9 +397,10 @@ table comes from a reading the driver took, never from this page.
 | 9 | `audio-reaches-teacher` | PASS | the teacher's page holds a live audio track for the room |
 | 10 | `mic-closed` | PASS | the close takes the grant back to the camera, the control away and the teacher's live audio with it |
 | 11 | `outsider-refused` | PASS | another school's pupil is refused both the page and the token |
-| 12 | `room-ended` | PASS | *Akhiri Live* is confirmed, and the next join token is refused |
+| 12 | `token-expiry` | PASS | a token with a 300s life was refused 10s after it expired, while a fresh token connected from the same room, and the pupil already in it was not disturbed (`<the SFU's own auth error>`) |
+| 13 | `room-ended` | PASS | *Akhiri Live* is confirmed, and the next join token is refused |
 
-Every row passed: cameras decode, the microphone is refused until a teacher approves it and revoked after, no pupil receives another's media, and the ended room admits nobody.
+Every row passed: cameras decode, the microphone is refused until a teacher approves it and revoked after, no pupil receives another's media, a token the app issued stops working when its five minutes run out, and the ended room admits nobody.
 ```
 
 The verdict line is the one a reader checks first, and it is earned rather than

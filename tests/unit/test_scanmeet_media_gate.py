@@ -129,10 +129,9 @@ def test_an_unmeasured_run_names_every_row_it_never_took():
     driver = GATE.Driver("https://staging.example.edu", "exam-1",
                          {"teacher": "t@example.edu:pw", "student": "s@example.edu:pw"})
     skipped = driver._unmeasured("the SDK did not load")
-    assert [item.name for item in skipped] == [
-        "pupil-camera", "teacher-receives-camera", "pupil-isolation",
-        "mic-starts-closed", "hand-raise", "mic-approved",
-        "audio-reaches-teacher", "mic-closed", "outsider-refused", "room-ended"]
+    # Every row after the two opening ones. Written as the tail of the order so a
+    # row added to `ROW_ORDER` cannot be left out of an early stop's list.
+    assert [item.name for item in skipped] == list(GATE.ROW_ORDER[2:])
     assert all(item.state == "skipped" for item in skipped)
 
 
@@ -491,6 +490,7 @@ def test_the_driver_can_see_a_room_when_there_is_one(harness):
 
 
 def _twelve(state="pass", detail="ok"):
+    """Every row, all in one state. Named for history; the count is the driver's."""
     return [GATE.Row(name, state, detail) for name in GATE.ROW_ORDER]
 
 
@@ -502,7 +502,8 @@ def test_the_sheet_carries_the_url_the_exam_and_the_verdict():
     assert "https://staging.example.edu" in sheet.splitlines()[0]
     assert "/" * 2 in sheet.strip().splitlines()[0][:2] or sheet.startswith("## ")
     assert "9b17e852-565d-48de-a88c-8786d77f8014" in sheet
-    assert "`SIGNED OFF` (exit 0) - 12/12" in sheet
+    whole = len(GATE.ROW_ORDER)
+    assert f"`SIGNED OFF` (exit 0) - {whole}/{whole}" in sheet
     assert "2026-10-24T15:00:00+00:00" in sheet
     assert "/usr/bin/google-chrome" in sheet and "synthetic devices" in sheet
     # The twelve rows, in the order the driver takes them, once each.
@@ -518,7 +519,8 @@ def test_a_sheet_that_measured_nothing_says_so_in_its_verdict_line():
                        "the teacher is not in the room")
     sheet = GATE.signoff_sheet("https://staging.example.edu", "exam-1", rows,
                                GATE.EXIT_CANNOT_MEASURE)
-    assert "`CANNOT MEASURE` (exit 2) - 11/12" in sheet
+    whole = len(GATE.ROW_ORDER)
+    assert f"`CANNOT MEASURE` (exit 2) - {whole - 1}/{whole}" in sheet
     assert "not** a sign-off" in sheet
     assert "the teacher is not in the room" in sheet
     assert "**SKIP**" in sheet
@@ -529,7 +531,8 @@ def test_a_finding_is_labelled_and_counted():
     rows[2] = GATE.Row("pupil-camera", "fail", "the camera produced no frames")
     sheet = GATE.signoff_sheet("https://staging.example.edu", "exam-1", rows,
                                GATE.EXIT_FINDING)
-    assert "`NOT SIGNED OFF` (exit 1) - 11/12" in sheet
+    whole = len(GATE.ROW_ORDER)
+    assert f"`NOT SIGNED OFF` (exit 1) - {whole - 1}/{whole}" in sheet
     assert "**FAIL**" in sheet
     assert "1 row(s) disagreed and 0 could not be measured" in sheet
     assert "not ready for pupils" in sheet
@@ -702,6 +705,240 @@ def test_the_deployed_site_is_the_one_that_is_refused():
     assert GATE.production_target("https://staging.example.edu") is False
 
 
+# ── the token's life, and waiting it out ─────────────────────────────
+#
+# The expiry row is the only one whose measurement is a clock: a token the app
+# handed to a page has to be refused by the SFU once its five minutes pass, and
+# no amount of driver logic can stand in for the wait. These hold the three
+# things that could quietly turn it into a row that never measured anything: a
+# fabricated wait, a budget too short for the wait it asks for, and a row taken
+# against a room that has already been ended.
+
+import jwt as _jwt  # noqa: E402  (used only by the token-shape tests below)
+
+
+def _token(exp_offset: float = 300.0, **claims) -> str:
+    import time as _time
+
+    now = _time.time()
+    payload = {"sub": "p_abc", "iat": now, "exp": now + exp_offset}
+    payload.update(claims)
+    return _jwt.encode(payload, "secret", algorithm="HS256")
+
+
+def test_a_token_s_life_is_read_from_its_own_claims():
+    assert GATE.token_life(_token(300)) == pytest.approx(300, abs=1)
+    assert GATE.token_life(_token(60)) == pytest.approx(60, abs=1)
+
+
+def test_a_token_that_says_nbf_instead_of_iat_is_still_readable():
+    """LiveKit's SDK stamps `nbf` and no `iat`.
+
+    The first run of this row reported the issued token as carrying "no expiry
+    pair" for exactly this reason, as a SKIP. The reader falls back rather than
+    asking the deployment to change what it mints.
+    """
+    import time as _time
+
+    now = _time.time()
+    stamped = _jwt.encode({"sub": "p_abc", "nbf": now, "exp": now + 300},
+                          "secret", algorithm="HS256")
+    assert GATE.token_life(stamped) == pytest.approx(300, abs=1)
+
+
+def test_a_token_without_an_expiry_pair_is_a_gap_not_a_guess():
+    """Neither `iat` nor `nbf` means the wait cannot be reasoned about."""
+    assert GATE.token_life(_token(300, iat=None)) is None
+    assert GATE.token_life(_token(300, exp=None)) is None
+    assert GATE.token_deadline(_token(300, exp=None)) is None
+
+
+def test_the_wait_is_measured_from_the_token_not_from_a_constant():
+    """The row sleeps until the token's own `exp` plus the margin."""
+    source = open(GATE.__file__, encoding="utf-8").read()
+    assert "target = deadline + EXPIRY_MARGIN" in source, (
+        "waiting a fixed number of seconds would pass on a token minted a "
+        "minute before the row started")
+    assert "time.monotonic()" in source, (
+        "the elapsed time must be counted on a clock an NTP step cannot move")
+
+
+class _Clock:
+    """Wall clock and monotonic clock that only move when the driver sleeps."""
+
+    def __init__(self, wall=1_000_000.0):
+        self.wall, self.mono, self.slept = wall, 0.0, []
+
+    def time(self):
+        return self.wall
+
+    def monotonic(self):
+        return self.mono
+
+    async def sleep(self, seconds):
+        self.slept.append(seconds)
+        self.wall += seconds
+        self.mono += seconds
+
+
+class _Page:
+    """The pupil's page, reduced to the one command a wait needs."""
+
+    name = "student"
+
+    def __init__(self, failure=None):
+        self.failure, self.pings = failure, 0
+
+    async def ping(self):
+        self.pings += 1
+        if self.failure:
+            raise self.failure
+
+
+def _drive_wait(monkeypatch, page, seconds, extra=()):
+    clock = _Clock()
+    monkeypatch.setattr(GATE.time, "time", clock.time)
+    monkeypatch.setattr(GATE.time, "monotonic", clock.monotonic)
+    monkeypatch.setattr(GATE.asyncio, "sleep", clock.sleep)
+    driver = GATE.Driver("https://staging.example.edu", "exam-1", {})
+    deadline = clock.wall + seconds
+    asyncio_run(driver._wait_past_expiry([page, *extra], deadline))
+    return clock, deadline
+
+
+def asyncio_run(coro):
+    import asyncio
+    return asyncio.new_event_loop().run_until_complete(coro)
+
+
+def test_the_wait_answers_the_browser_so_the_socket_survives(monkeypatch):
+    """Chrome closes an idle DevTools socket after ~60s; a 310s wait must talk.
+
+    The first run of this row lost the socket to `keepalive ping timeout` and
+    reported two rows as SKIP — a measurement that did not happen, for a reason
+    that had nothing to do with the token.
+    """
+    page = _Page()
+    clock, deadline = _drive_wait(monkeypatch, page, 305)
+    assert page.pings >= 5, f"only {page.pings} ping(s) in a {305 + GATE.EXPIRY_MARGIN}s wait"
+    assert max(clock.slept) <= GATE.EXPIRY_PING_SECONDS, (
+        "a single long sleep is the idle socket nobody answers")
+    assert clock.wall >= deadline + GATE.EXPIRY_MARGIN, (
+        "the attempt must happen after `exp`, not at it")
+
+
+def test_a_dead_devtools_socket_is_could_not_measure_not_a_pass(monkeypatch):
+    """A wait whose connection died measured nothing, and says so."""
+    di = type("Closed", (Exception,), {})
+    page = _Page(failure=di("sent 1011 keepalive ping timeout"))
+    with pytest.raises(GATE.CannotMeasure) as caught:
+        _drive_wait(monkeypatch, page, 305)
+    assert "closed while waiting" in str(caught.value)
+    assert "not measured" in str(caught.value)
+
+
+def test_the_expiry_row_never_turns_a_failed_wait_into_a_row(monkeypatch):
+    """The row propagates the gap; `execute()` turns it into exit 2."""
+    driver = GATE.Driver("https://staging.example.edu", "exam-1", {})
+    driver.browsers["student"] = _Page()
+    # The control page too: the row checks for it before it waits, and a row that
+    # stopped there would be testing the order rather than the failure.
+    control = _Page()
+    control.name = "student2"
+    driver.browsers["student2"] = control
+    driver._token = lambda role: {"token": _token(300), "url": "wss://sfu.example"}
+
+    async def boom(*_a, **_k):
+        raise GATE.CannotMeasure("the DevTools connection closed while waiting")
+
+    monkeypatch.setattr(driver, "_wait_past_expiry", boom)
+    with pytest.raises(GATE.CannotMeasure):
+        asyncio_run(driver._expiry_row())
+
+
+def test_an_ended_session_issues_no_token_which_is_the_app_half(monkeypatch):
+    """The app's own refusal is a separate reading from the SFU's.
+
+    `room-ended` already takes it — after *Akhiri Live* a new `POST /token` must
+    answer 403 — and the expiry row must not stand in for it: a token that dies of
+    old age says nothing about a session that was ended early.
+    """
+    source = open(GATE.__file__, encoding="utf-8").read()
+    ended = source[source.index("async def _end_row"):source.index("async def execute")]
+    assert "a new join token was still issued" in ended, (
+        "the ended session is judged by the next token, not by the page's banner")
+    assert "code != 403" in ended, "the ended session must be judged by the next token"
+    assert "token-expiry" not in ended, (
+        "the two readings must not be merged into one row")
+
+
+def test_the_run_budget_carries_the_wait_the_row_asks_for():
+    """A budget sized without the TTL turns a measured refusal into a timeout."""
+    assert GATE.TOTAL_TIMEOUT >= 300.0 + GATE.TOKEN_TTL_SECONDS, (
+        "the expiry row waits a real token out; the budget has to include it")
+
+
+def test_the_expiry_row_is_taken_while_the_room_is_still_open():
+    """After `room-ended` the SFU would refuse the token for the wrong reason."""
+    text = open(GATE.__file__, encoding="utf-8").read()
+    expiry = text.index("await self._expiry_row()")
+    end = text.index("await self._end_row(teacher)")
+    assert expiry < end
+    assert GATE.ROW_ORDER.index("token-expiry") < GATE.ROW_ORDER.index("room-ended")
+
+
+def test_the_attempt_uses_the_sdk_shape_the_page_itself_uses():
+    """`new lib.Room(...)` then `room.connect(url, token)` — the page's own calls.
+
+    The first version called `LivekitClient.connect`, which does not exist on this
+    vendored UMD build; the `TypeError` was then read as a refusal and the row
+    reported PASS on a call that never reached the SFU.
+    """
+    source = GATE.CONNECT_WITH
+    page = (ROOT / "app" / "static" / "js" / "scan-live-exam.js").read_text(
+        encoding="utf-8")
+    assert "new lib.Room(" in page and "room.connect(grant.url, grant.token)" in page
+    assert "new lib.Room(" in source and "room.connect(" in source, (
+        "the driver must speak the API the page speaks")
+    assert "typeof lib.Room !== 'function'" in source, (
+        "a page without the SDK has to be a gap the row names, not an error it scores")
+    assert "catch" in source and "why" in source, (
+        "a rejected promise would reach the driver as an error, not as a finding")
+    rendered = source % ('"wss://sfu.example"', '"tok"')
+    assert '"wss://sfu.example"' in rendered and "'tok'" not in rendered
+
+
+def test_a_rejection_only_counts_once_a_fresh_token_has_connected():
+    """The control is the difference between evidence and an accident.
+
+    Without it, a dead network, a closed SFU or a wrong SDK call all look exactly
+    like an expired token being refused — which is how the row passed on a
+    `TypeError` before this.
+    """
+    body = open(GATE.__file__, encoding="utf-8").read()
+    row_body = body[body.index("async def _expiry_row"):body.index("async def _end_row")]
+    control = row_body.index("control = await control_page.evaluate")
+    attempt = row_body.index("attempt = await pupil.evaluate")
+    assert control < attempt, "the fresh token must be tried first, or the attempt means nothing"
+    assert 'self._token("student2")' in row_body
+    # A control that fails is a gap, and the row says so instead of scoring it.
+    failed_control = row_body[row_body.index("if not control.get(\"connected\")"):]
+    assert '"skipped"' in failed_control.split("self.step")[0]
+    assert "proves nothing" in failed_control
+
+
+def test_the_expiry_row_is_counted_and_named_like_the_others():
+    assert len(GATE.ROW_ORDER) == 13, (
+        "a new row is a deliberate change to the sheet, not a side effect")
+    assert "token-expiry" in GATE.ROW_ORDER
+
+
+def test_the_payload_carries_the_sfu_host_and_never_the_token():
+    assert GATE.url_host("wss://sfu.example/rtc?access_token=abc") == "wss://sfu.example"
+    assert GATE.url_host("wss://user:pw@sfu.example") == "wss://sfu.example"
+    assert GATE.url_host("") == ""
+
+
 # ── the artefact the runbook promises ────────────────────────────────
 #
 # The runbook tells a reader that `--signoff` prints "the Markdown sheet this
@@ -737,13 +974,14 @@ def test_the_runbook_shows_the_sheet_the_driver_prints():
     sheet = _runbook_sheet()
     assert sheet.splitlines()[0] == (
         "## ScanMeet media sign-off - https://staging.your-school-domain.com")
-    assert "- **Verdict:** `SIGNED OFF` (exit 0) - 12/12 row(s) passed" in sheet
+    whole = len(GATE.ROW_ORDER)
+    assert f"- **Verdict:** `SIGNED OFF` (exit 0) - {whole}/{whole} row(s) passed" in sheet
     assert "| # | Row | State | What this run observed |" in sheet
 
     rows = _sheet_rows(sheet)
     assert [name for _, name, _ in rows] == list(GATE.ROW_ORDER), (
-        "the page's twelve rows and the driver's twelve rows disagree")
-    assert [number for number, _, _ in rows] == [str(i) for i in range(1, 13)]
+        "the page's rows and the driver's rows disagree")
+    assert [number for number, _, _ in rows] == [str(i) for i in range(1, whole + 1)]
     assert {state for _, _, state in rows} == {"PASS"}, (
         "the example is the sheet of a complete run, so no row may be SKIP or FAIL")
     assert all(detail for detail in (

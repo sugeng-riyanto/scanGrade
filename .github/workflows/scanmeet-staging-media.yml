@@ -1,6 +1,6 @@
 name: ScanMeet staging media (manual, real environment)
 
-# The twelve media rows and the seven webhook probes need three things no CI job
+# The thirteen media rows and the seven webhook probes need three things no CI job
 # can invent: a deployed staging host, a staging database with four synthetic
 # identities and an exam, and a staging LiveKit project. This workflow is how
 # those are exercised **from GitHub**, on a runner with Chrome, so the owner
@@ -141,7 +141,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           # 0 = 7/7 as expected, 1 = a probe disagreed, 2 = could not probe.
 
-      - name: twelve media rows
+      - name: thirteen media rows
         id: media
         env:
           SG_CHROME: ${{ steps.browser.outputs.path }}

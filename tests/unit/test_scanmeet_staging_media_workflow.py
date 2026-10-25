@@ -1,6 +1,6 @@
-"""The manual staging run is the only place the twelve rows can be measured.
+"""The manual staging run is the only place the media rows can be measured.
 
-The twelve media rows and seven webhook probes need a deployed host, a staging
+The media rows and seven webhook probes need a deployed host, a staging
 database with four synthetic identities and a staging LiveKit project — none of
 which a CI job can invent. `.github/workflows/scanmeet-staging-media.yml` is how
 they are exercised from GitHub: the owner stores the eight values as environment
@@ -104,7 +104,7 @@ def test_a_missing_value_fails_by_name_instead_of_skipping(doc, text):
 def test_the_driver_cannot_be_pointed_at_production(doc, text):
     assert "--allow-production" not in text, (
         "the escape hatch measures the live site; a staging run must not carry it")
-    media = _step(doc, "twelve media rows")["run"]
+    media = _step(doc, "thirteen media rows")["run"]
     assert "--signoff" in media and "--json-out reading.json" in media
     for flag in ("--url", "--exam", "--teacher", "--student", "--student2",
                  "--outsider"):
@@ -115,7 +115,7 @@ def test_both_halves_are_measured_on_the_same_commit(doc):
     text = WORKFLOW.read_text(encoding="utf-8")
     webhook = _step(doc, "seven webhook probes")["run"]
     assert "deploy.scanmeet_webhook_probe" in webhook
-    assert "deploy.scanmeet_media_gate" in _step(doc, "twelve media rows")["run"]
+    assert "deploy.scanmeet_media_gate" in _step(doc, "thirteen media rows")["run"]
     assert "git rev-parse HEAD" in text, (
         "the evidence has to name the commit it measured")
 
