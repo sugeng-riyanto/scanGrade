@@ -11,13 +11,28 @@
     <p class="text-sm text-surface-500">Kamera wajib · Mikrofon dengan izin guru · Chat dan rekaman nonaktif · Grid</p>
     <div class="flex flex-wrap gap-3">
       {% if live_role == "teacher" %}
-      <button id="live-start" type="button" class="px-4 py-2 rounded-lg bg-primary-600 text-white">Mulai pengawasan</button>
+      <button id="live-start" type="button" hidden class="px-4 py-2 rounded-lg bg-primary-600 text-white">Mulai pengawasan</button>
       <button id="live-end" type="button" hidden class="px-4 py-2 rounded-lg border border-rose-200 text-red-600">Akhiri Live</button>
       {% else %}
       <button id="live-hand" type="button" disabled class="px-4 py-2 rounded-lg bg-primary-600 text-white">✋ Angkat tangan</button>
       {% endif %}
       <button id="live-mic" type="button" hidden class="px-4 py-2 rounded-lg border border-indigo-300">Aktifkan mikrofon</button>
     </div>
+    {% if live_role == "teacher" %}
+    {# The paper's own switch (migration 071). It is read from the server on
+       every load; the button never guesses, so a second device toggling the
+       same paper is reflected instead of silently overwritten. It sits below
+       the start/end buttons on purpose: the first `teacher` branch of this
+       page is the one `test_scanmeet_teacher_controls_contract.py` reads. #}
+    <div class="rounded-xl border border-surface-200 p-3 flex flex-wrap items-center gap-3">
+      <span class="text-sm font-semibold">ScanMeet untuk ujian ini:</span>
+      <span id="live-switch-state" class="text-sm font-bold" role="status" aria-live="polite">Memeriksa...</span>
+      <button id="live-switch" type="button" class="px-3 py-1.5 rounded-lg border border-surface-300 text-sm font-bold">Aktifkan ScanMeet</button>
+      <span class="text-xs text-surface-500">Menonaktifkan akan mengakhiri sesi Live yang sedang berjalan. Ujian, jawaban, dan waktu tidak berubah.</span>
+    </div>
+    {% else %}
+    <p id="live-switch-off" class="text-sm text-amber-700" role="status" hidden>ScanMeet dinonaktifkan guru untuk ujian ini.</p>
+    {% endif %}
     <p id="live-status" class="text-sm font-semibold" role="status" aria-live="polite">Memeriksa sesi Live...</p>
     <p id="live-warning" class="text-sm text-amber-700" role="alert" hidden>Pengawasan terputus. Ujian dan autosave tetap berjalan.</p>
   </header>
