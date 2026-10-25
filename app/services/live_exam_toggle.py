@@ -22,10 +22,6 @@ Two rules shape it:
 """
 from __future__ import annotations
 
-import logging
-
-log = logging.getLogger(__name__)
-
 #: The column migration 071 adds. Read through `enabled()` so the "absent column"
 #: case (a box that has not applied the migration yet) is OFF rather than a crash.
 ENABLED_COLUMN = "scan_live_enabled"
@@ -48,14 +44,12 @@ def _active(db, exam):
     return rows[0] if rows else None
 
 
-def set_enabled(db, exam, *, value: bool, end_room, record_cleanup=None) -> dict:
+def set_enabled(db, exam, *, value: bool, end_room) -> dict:
     """Persist the switch and reconcile any active room with it.
 
     `end_room` is the LiveKit boundary, injected so this can be exercised
-    without a socket. `record_cleanup(session, error)` is the durable ledger
-    (`live_cleanup.enqueue`): a deletion that failed is debt the box must retry
-    after this request is over, not a line in a log. Returns the state the caller
-    may report: ``{"enabled", "ended_session", "media_cleanup"}``.
+    without a socket. Returns the state the caller may report:
+    ``{"enabled", "ended_session", "media_cleanup"}``.
     """
     value = bool(value)
     try:
@@ -84,15 +78,8 @@ def set_enabled(db, exam, *, value: bool, end_room, record_cleanup=None) -> dict
     result["ended_session"] = ended[0].get("id")
     try:
         end_room(active.get("room_name"))
-    except Exception as exc:
+    except Exception:
         # The database row is the gate for new tokens, so this is clean-up debt,
-        # not a failed revocation. Never fail the teacher's toggle over it — but
-        # do record it, or "pending" is a word with nothing behind it.
+        # not a failed revocation. Never fail the teacher's toggle over it.
         result["media_cleanup"] = "pending"
-        if record_cleanup is not None:
-            try:
-                record_cleanup(ended[0], exc)
-            except Exception:  # noqa: BLE001 - the revocation already happened
-                log.warning("ScanMeet cleanup debt not recorded for %s",
-                            ended[0].get("id"), exc_info=True)
     return result

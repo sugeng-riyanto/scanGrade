@@ -797,20 +797,9 @@ CONNECT_TIMEOUT = 90.0
 #: constant here rather than a value the driver can substitute for waiting.
 TOKEN_TTL_SECONDS = 300.0
 
-#: How far past `exp` the attempt is made. **Measured, not guessed.** Forging
-#: tokens with a chosen `exp` against the staging project (the same key that mints
-#: the app's own) put the SFU's tolerance between 40 and 60 seconds: `exp - 20s` and
-#: `exp - 40s` were admitted, `exp - 60s` was refused with `invalid token`, as were
-#: every larger offset up to 30 minutes. A margin of 10 s sat *inside* that window,
-#: so the row reported "the SFU admitted a token 10 s past its expiry" about a
-#: token the server was still entitled to accept.
-#:
-#: 75 s clears the observed tolerance with room for the clock this driver reads
-#: versus the one the SFU does (measured server offset: 0.2-0.7 s). The row still
-#: fails if the SFU admits a token older than this — which is the claim worth
-#: making: the five-minute life holds to within a minute of clock tolerance, and
-#: no further.
-EXPIRY_MARGIN = 75.0
+#: How far past `exp` the attempt is made. A token is refused at its own second;
+#: the margin covers the clock this driver reads versus the one the SFU does.
+EXPIRY_MARGIN = 10.0
 
 #: How often the driver answers Chrome while it waits. Chrome closes an idle
 #: DevTools socket after about a minute of silence (`1011 keepalive ping
@@ -1403,8 +1392,7 @@ class Driver:
         if attempt.get("connected"):
             return Row("token-expiry", "fail",
                        f"the SFU admitted a token {EXPIRY_MARGIN:.0f}s past its "
-                       f"expiry, beyond its own measured tolerance (40-60s) — the "
-                       f"five-minute life is not a life")
+                       f"expiry — the five-minute life is not a life")
         disturbed = self.payload["expiry"]["undisturbed"]
         if disturbed:
             return Row("token-expiry", "fail",
