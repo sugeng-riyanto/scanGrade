@@ -50,6 +50,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from deploy.livekit_preflight import parse_env
 
@@ -88,13 +89,21 @@ CHROME_NAMES = ("google-chrome", "google-chrome-stable", "chromium",
 
 
 def host_of(url: str) -> str:
-    """The host of a URL, lower-cased, without a scheme or a path."""
+    """Return a normalized HTTPS hostname, or empty for unsafe/invalid URLs."""
     text = (url or "").strip()
-    for scheme in ("https://", "http://"):
-        if text.lower().startswith(scheme):
-            text = text[len(scheme):]
-            break
-    return text.split("/")[0].split("?")[0].split(":")[0].lower()
+    try:
+        parts = urlsplit(text)
+        if (parts.scheme.lower() != "https" or not parts.netloc
+                or parts.username is not None or parts.password is not None
+                or any(char.isspace() for char in text)):
+            return ""
+        # urlsplit.hostname handles ports, IPv6 and trailing DNS dots correctly.
+        host = (parts.hostname or "").rstrip(".").lower()
+        if not host or parts.port is None and parts.netloc.endswith(":"):
+            return ""
+        return host
+    except ValueError:
+        return ""
 
 
 def production_url(url: str) -> bool:
@@ -130,7 +139,7 @@ def problems(settings: dict[str, str], gates: list[str],
             found.append(f"{key} is missing")
     url = settings.get("SCANMEET_STAGING_URL", "")
     if url and not host_of(url):
-        found.append("SCANMEET_STAGING_URL is not a URL")
+        found.append("SCANMEET_STAGING_URL must be a valid HTTPS URL without userinfo")
     if url and production_url(url) and not allow_production:
         found.append("SCANMEET_STAGING_URL names production — add --allow-production "
                      "only if you mean to write to it")
