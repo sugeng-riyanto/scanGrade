@@ -219,8 +219,16 @@ def stage(monkeypatch, rows=None, *, mic_errors=(), live_on=True,
 
 
 def door(app, endpoint, *args, role="guru", user="teacher-a", school="school-1"):
-    """Call an undecorated view in a request context, as a real response."""
-    view = getattr(live, endpoint).__wrapped__
+    """Call an undecorated view in a request context, as a real response.
+
+    Unwrapped in a loop rather than once: a route may sit under more than the
+    login gate (the year lock is one), and a fixture that stopped at the first
+    wrapper would silently start calling the database the moment a decorator
+    was added to a route it already exercised.
+    """
+    view = getattr(live, endpoint)
+    while getattr(view, "__wrapped__", None) is not None:
+        view = view.__wrapped__
     with app.test_request_context():
         g.user_school_id = school
         g.user_role = role

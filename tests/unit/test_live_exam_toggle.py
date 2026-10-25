@@ -169,14 +169,51 @@ def _stage(monkeypatch, rows):
     return db, ended
 
 
+def _raw(view):
+    while getattr(view, "__wrapped__", None) is not None:
+        view = view.__wrapped__
+    return view
+
+
 def _toggle(app, payload, **who):
-    view = live.set_exam_enabled.__wrapped__
+    view = _raw(live.set_exam_enabled)
     from flask import g
 
     with app.test_request_context(json=payload):
         for key, value in who.items():
             setattr(g, key, value)
         return app.make_response(view("exam-1"))
+
+
+def test_a_closed_year_refuses_to_switch_the_paper_on(app, monkeypatch):
+    """The switch is a write to a paper, so an archived year refuses it.
+
+    This calls the year-lock wrapper itself (one layer inside the login gate)
+    rather than the raw view, because the point is that the decorator is on the
+    route: `test_year_lock.py` only proves *some* guard or exemption exists.
+    """
+    from app.services import academic_year
+    from app.utils import auth as auth_module
+
+    db, _ = _stage(monkeypatch, _rows())
+    monkeypatch.setattr(auth_module, "get_supabase", lambda: db)
+    monkeypatch.setattr(academic_year, "year_of_exam", lambda *_: "year-2025")
+    monkeypatch.setattr(academic_year, "write_refusal",
+                        lambda *_: "closed for writing")
+
+    view = live.set_exam_enabled.__wrapped__  # the year lock
+    from flask import g
+
+    with app.test_request_context(json={"enabled": True}):
+        g.user_school_id = "school-1"
+        g.user_role = "guru"
+        g.user_id = "teacher-a"
+        # Keyword, as Flask calls it: the lock resolves the id from kwargs (or
+        # the view args/form/body), not from a positional argument.
+        response = app.make_response(view(exam_id="exam-1"))
+
+    assert response.status_code == 403
+    assert db.rows["exams"][0]["scan_live_enabled"] is False
 
 
 def test_a_student_cannot_toggle_the_paper(app, monkeypatch):

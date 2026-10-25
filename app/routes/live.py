@@ -5,6 +5,7 @@ import logging
 import secrets
 
 from flask import Blueprint, current_app, g, jsonify, request, render_template
+from app.decorators.year_lock import open_year_required
 from app.services import live_exam_toggle, live_policy, livekit_gateway
 from app.utils.auth import get_supabase, login_required
 from app.utils.exam_access import can_manage_exam, exam_sitting_allowed
@@ -122,6 +123,7 @@ def status(exam_id):
 
 @live_bp.route("/exams/<exam_id>/sessions", methods=["POST"])
 @login_required
+@open_year_required("exam_id")
 def create_session(exam_id):
     if (off := _off()) is not None:
         return off
@@ -157,6 +159,7 @@ def create_session(exam_id):
 
 @live_bp.route("/exams/<exam_id>/enabled", methods=["POST"])
 @login_required
+@open_year_required("exam_id")
 def set_exam_enabled(exam_id):
     """The per-examination ScanMeet switch. Server-side authorization only.
 
