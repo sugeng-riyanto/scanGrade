@@ -1,0 +1,209 @@
+name: ScanMeet staging media (manual, real environment)
+
+# The twelve media rows and the seven webhook probes need three things no CI job
+# can invent: a deployed staging host, a staging database with four synthetic
+# identities and an exam, and a staging LiveKit project. This workflow is how
+# those are exercised **from GitHub**, on a runner with Chrome, so the owner
+# never has to hand credentials to an agent and the evidence lands in one place:
+#
+#   Actions → "ScanMeet staging media (manual, real environment)" → Run workflow
+#
+# It is deliberately `workflow_dispatch` only. It cannot run on a push, it cannot
+# run without the environment's secrets, and it never deploys anything. The
+# `scanmeet-staging` environment is where those values live (Settings →
+# Environments → scanmeet-staging → Environment secrets), so they are protected
+# and reviewable rather than pasted into a chat:
+#
+#   SCANMEET_STAGING_URL   https://<independent staging host>   (not scangrade.web.id)
+#   SCANMEET_EXAM_ID       the staged exam's id
+#   SCANMEET_TEACHER       teacher@school.example:password
+#   SCANMEET_STUDENT       pupil1@school.example:password
+#   SCANMEET_STUDENT2      pupil2@school.example:password
+#   SCANMEET_OUTSIDER      pupil@other-school.example:password
+#   LIVEKIT_API_KEY        the staging LiveKit project's key   (webhook signing)
+#   LIVEKIT_API_SECRET     the staging LiveKit project's secret (never printed)
+#
+# A run with any of them missing fails by name instead of skipping: a skipped
+# job would look like a green tick over an examination nobody measured.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: scanmeet-staging-media-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  measure:
+    name: webhook 7/7 and media 12/12 on the staging host
+    runs-on: ubuntu-latest
+    environment: scanmeet-staging
+    timeout-minutes: 30
+    env:
+      SCANMEET_STAGING_URL: ${{ secrets.SCANMEET_STAGING_URL }}
+      SCANMEET_EXAM_ID: ${{ secrets.SCANMEET_EXAM_ID }}
+      SCANMEET_TEACHER: ${{ secrets.SCANMEET_TEACHER }}
+      SCANMEET_STUDENT: ${{ secrets.SCANMEET_STUDENT }}
+      SCANMEET_STUDENT2: ${{ secrets.SCANMEET_STUDENT2 }}
+      SCANMEET_OUTSIDER: ${{ secrets.SCANMEET_OUTSIDER }}
+      LIVEKIT_API_KEY: ${{ secrets.LIVEKIT_API_KEY }}
+      LIVEKIT_API_SECRET: ${{ secrets.LIVEKIT_API_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      # `requirements.txt` alone: the media driver speaks CDP and HTTP, and the
+      # webhook probe signs with the PyJWT that `supabase` already pulls in.
+      # `requirements-live.txt` is the server's own LiveKit SDK and pins a PyJWT
+      # that conflicts with `redis` here, so installing it would fail the run for
+      # a package neither tool uses.
+      - name: install the checkout's dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          python -m pip check
+
+      # Fail closed and by name. An empty secret is the difference between "the
+      # staging host is broken" and "nobody configured it", and only one of those
+      # is actionable; a `continue-on-error` or a skipped job would hide both.
+      - name: refuse to measure with a missing value
+        run: |
+          missing=0
+          for name in SCANMEET_STAGING_URL SCANMEET_EXAM_ID SCANMEET_TEACHER \
+                      SCANMEET_STUDENT SCANMEET_STUDENT2 SCANMEET_OUTSIDER \
+                      LIVEKIT_API_KEY LIVEKIT_API_SECRET; do
+            if [ -z "${!name}" ]; then
+              echo "::error::environment secret ${name} is empty; this run cannot measure anything"
+              missing=1
+            fi
+          done
+          [ "$missing" = "0" ] || {
+            echo "Add the eight values under Settings -> Environments -> scanmeet-staging."
+            exit 1
+          }
+          python - <<'PY'
+          import os, urllib.parse
+          url = os.environ["SCANMEET_STAGING_URL"]
+          host = urllib.parse.urlsplit(url)
+          # Never print the full URL with a query or credentials; the host is the
+          # record a sign-off needs.
+          print(f"target host: {host.scheme}://{host.netloc}")
+          print(f"exam: {os.environ['SCANMEET_EXAM_ID']}")
+          PY
+
+      - name: the tested commit
+        run: |
+          echo "commit: $(git rev-parse HEAD)"
+          echo "#### tested commit \`$(git rev-parse --short=12 HEAD)\`" >> "$GITHUB_STEP_SUMMARY"
+
+      # Same discovery the other browser gates use: the image ships Chrome, and a
+      # runner that has none must fail rather than let the driver answer "no
+      # browser" and exit 2.
+      - name: find a browser
+        id: browser
+        run: |
+          for candidate in google-chrome google-chrome-stable chromium chromium-browser; do
+            found="$(command -v "$candidate" || true)"
+            if [ -n "$found" ]; then
+              echo "path=$found" >> "$GITHUB_OUTPUT"
+              echo "using $found"
+              exit 0
+            fi
+          done
+          echo "::error::no Chrome/Chromium on this runner; the exam room cannot be measured"
+          exit 1
+
+      # Both halves run even if the first disagrees, because a media run without
+      # a webhook reading is half an acceptance; the job still ends non-zero.
+      - name: seven webhook probes
+        id: webhook
+        env:
+          SG_CHROME: ${{ steps.browser.outputs.path }}
+        run: |
+          set +e
+          python -m deploy.scanmeet_webhook_probe --url "$SCANMEET_STAGING_URL" \
+            | tee webhook.txt
+          code=${PIPESTATUS[0]}
+          set -e
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          {
+            echo "### webhook probes — exit \`${code}\`"
+            echo '```'
+            cat webhook.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          # 0 = 7/7 as expected, 1 = a probe disagreed, 2 = could not probe.
+
+      - name: twelve media rows
+        id: media
+        env:
+          SG_CHROME: ${{ steps.browser.outputs.path }}
+        run: |
+          set +e
+          python -m deploy.scanmeet_media_gate \
+            --url "$SCANMEET_STAGING_URL" \
+            --exam "$SCANMEET_EXAM_ID" \
+            --teacher "$SCANMEET_TEACHER" \
+            --student "$SCANMEET_STUDENT" \
+            --student2 "$SCANMEET_STUDENT2" \
+            --outsider "$SCANMEET_OUTSIDER" \
+            --signoff --json-out reading.json | tee media.txt
+          code=${PIPESTATUS[0]}
+          set -e
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          # `--signoff` writes the sheet to stdout; the run's verdict is the exit
+          # code, and 2 means rows were not taken (never a pass).
+          echo "media exit: ${code}"
+
+      # Deliberately no `--allow-production`: the driver refuses the live site, and
+      # a staging run that needed the escape hatch would be measuring production.
+      - name: record the sheet and the readings
+        if: always()
+        run: |
+          {
+            echo "### media rows — exit \`${{ steps.media.outputs.code }}\`"
+            echo
+            echo "- host: \`$(python -c 'import os,urllib.parse;u=urllib.parse.urlsplit(os.environ["SCANMEET_STAGING_URL"]);print(u.scheme+"://"+u.netloc)')\`"
+            echo "- commit: \`$(git rev-parse HEAD)\`"
+            echo
+            if [ -s media.txt ]; then
+              echo '```markdown'
+              cat media.txt
+              echo '```'
+            else
+              echo "_the driver wrote no sheet: this run is not a sign-off_"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: keep the machine-readable reading
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scanmeet-staging-reading
+          path: |
+            reading.json
+            webhook.txt
+            media.txt
+          if-no-files-found: warn
+          retention-days: 30
+
+      # The verdict the job reports is the pair of exit codes, not the fact that
+      # the steps ran: 0/0 is the only green.
+      - name: fail unless both halves were measured
+        if: always()
+        run: |
+          webhook="${{ steps.webhook.outputs.code }}"
+          media="${{ steps.media.outputs.code }}"
+          echo "webhook=${webhook:-none} media=${media:-none}"
+          if [ "${webhook:-}" != "0" ] || [ "${media:-}" != "0" ]; then
+            echo "::error::not a sign-off: webhook exit ${webhook:-none}, media exit ${media:-none} (0 and 0 are required)"
+            exit 1
+          fi
+          echo "webhook 7/7 and media 12/12 passed on this commit"
