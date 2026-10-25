@@ -36,18 +36,26 @@ jobs:
           # The glob, not a file list: a new tests/unit/test_live_*.py has to run
           # here without anyone remembering to add it to this workflow.
           python -m pytest tests/unit/test_live_*.py -q -ra
-          # The committed example is deliberately an unconfigured PILOT.
-          # Never audit it as a production (non-pilot) env: its flags must be ON.
-          # Instead prove both environments fail closed without any secrets.
+          # The committed example is the file people *copy*, sometimes onto a
+          # production box, so it ships both kill switches OFF — a copy cannot
+          # switch Live on. A pilot flips them on the staging host, and the
+          # staging gate refuses a pilot with either still off.
+          #
+          # So the template is asked the two questions that match that file:
+          # as committed it must pass the production audit, and the same file
+          # with the flags flipped must fail it (that is the pilot shape).
           python - <<'PY'
           from pathlib import Path
           from deploy.livekit_preflight import FLAGS, audit, parse_env
           template = parse_env(Path("deploy/livekit-staging.env.example").read_text(encoding="utf-8"))
           assert template.get("SCANMEET_STAGING", "").lower() == "true"
-          assert all(template.get(flag, "").lower() == "true" for flag in FLAGS)
-          assert audit({flag: "false" for flag in FLAGS}) == []
-          assert audit(template) == ["Non-pilot configuration must leave Live flags OFF"]
-          pilot_findings = audit(template, pilot=True)
+          assert all(template.get(flag, "").lower() == "false" for flag in FLAGS), (
+            "the template must ship both Live flags OFF: a copy that lands in a "
+            "production .env cannot be allowed to switch Live on")
+          assert audit(template) == [], audit(template)
+          pilot = dict(template) | {flag: "true" for flag in FLAGS}
+          assert audit(pilot) == ["Non-pilot configuration must leave Live flags OFF"]
+          pilot_findings = audit(pilot, pilot=True)
           assert any("placeholder" in finding for finding in pilot_findings), pilot_findings
-          print("PASS: production OFF and staging example fail-closed contract")
+          print("PASS: production-safe template and pilot copy fail closed")
           PY

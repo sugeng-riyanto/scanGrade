@@ -268,6 +268,50 @@ class TheTemplateAndTheRunbookAgree(unittest.TestCase):
         self.assertTrue(RUNBOOK.is_file(), RUNBOOK)
 
 
+SDK_WORKFLOW = ROOT / ".github" / "workflows" / "scanmeet-sdk.yml"
+
+
+def _sdk_template_audit():
+    """The inline assertion block the SDK workflow runs against the template.
+
+    Extracted rather than re-implemented: the workflow and the template drifted
+    once already — the workflow asserted the flags were `true` while the file
+    shipped `false`, and the job only failed after the merge. Running the block
+    itself is what makes the two the same claim.
+    """
+    import re
+    import textwrap
+
+    text = SDK_WORKFLOW.read_text(encoding="utf-8")
+    match = re.search(r"python - <<'PY'\n(.*?)\n\s*PY\n", text, re.S)
+    assert match, "the workflow no longer audits the template inline"
+    return textwrap.dedent(match.group(1))
+
+
+class TheSdkWorkflowAsksTheTemplateTheRightQuestions(unittest.TestCase):
+    """A green workflow is only a signal if it asserts the committed file."""
+
+    def test_the_block_it_runs_passes_against_this_checkout(self):
+        import subprocess
+        import sys
+
+        code = _sdk_template_audit()
+        result = subprocess.run([sys.executable, "-c", code], cwd=ROOT,
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("fail closed", result.stdout)
+
+    def test_it_asserts_the_template_ships_the_switches_off(self):
+        from deploy.livekit_preflight import parse_env
+
+        code = _sdk_template_audit()
+        self.assertIn('== "false"', code, (
+            "the workflow has to assert the template's committed defaults; "
+            "asserting `true` is the drift that turned this job red after merge"))
+        settings = parse_env(TEMPLATE.read_text(encoding="utf-8"))
+        self.assertEqual(settings["SCANGRADE_LIVE_ENABLED"], "false")
+
+
 def _without_livekit(call):
     """Run `call` with `livekit` unimportable, capturing its stdout.
 
