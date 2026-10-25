@@ -66,6 +66,29 @@ def test_a_lookalike_host_is_not_production():
     assert runner.production_url("https://scanmeet-stg.1.2.3.4.sslip.io") is False
 
 
+def test_production_hostname_cannot_hide_in_url_userinfo_or_dns_dot():
+    for url in ("https://user@scangrade.web.id/",
+                "https://scangrade.web.id./",
+                "https://user:password@scangrade.web.id:443/"):
+        assert runner.problems(dict(GOOD, SCANMEET_STAGING_URL=url),
+                               ["webhook"]), url
+
+
+def test_ambiguous_or_non_https_urls_are_refused_before_probe():
+    for url in ("scangrade.web.id", "http://scanmeet-stg.example.org",
+                "https://user@scanmeet-stg.example.org",
+                "https://scanmeet-stg.example.org:",
+                "https://[::1"):
+        assert not runner.host_of(url), url
+        assert runner.problems(dict(GOOD, SCANMEET_STAGING_URL=url),
+                               ["webhook"]), url
+
+
+def test_valid_ipv6_and_trailing_dot_normalization():
+    assert runner.host_of("https://[::1]:8443/room") == "::1"
+    assert runner.host_of("https://scangrade.web.id./") == "scangrade.web.id"
+
+
 def test_host_of_strips_scheme_port_and_path():
     assert runner.host_of("https://A.example.org:8443/x?y=1") == "a.example.org"
     assert runner.host_of("") == ""
