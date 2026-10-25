@@ -817,22 +817,6 @@ def create_app(env=None):
         except Exception as e:
             app.logger.warning("Failed to start deploy alert scheduler: %s", e)
 
-        # ScanMeet's media housekeeping. Two jobs, both restart-safe because both
-        # read a table rather than a variable: retry a room deletion that failed
-        # (`live_cleanup`), and park a session whose room has vanished
-        # (`live_reconcile`). Neither runs unless both deployment flags are on, so
-        # a box that is not offering ScanMeet starts no thread and touches no row
-        # — and a production box with the flags OFF (today's state) is unchanged.
-        try:
-            from app.services import live_policy
-            if live_policy.feature_enabled(app.config):
-                from app.services.live_cleanup import start_cleanup_scheduler
-                start_cleanup_scheduler(
-                    interval=app.config.get("SCANMEET_CLEANUP_INTERVAL_SECONDS"),
-                    app=app)
-        except Exception as e:
-            app.logger.warning("Failed to start ScanMeet cleanup: %s", e)
-
     # CLI commands
     @app.cli.command("purge-data")
     def purge_data_command():
@@ -849,18 +833,6 @@ def create_app(env=None):
         import json
         data = export_user_data(user_id)
         click.echo(json.dumps(data, indent=2, default=str))
-
-    @app.cli.command("scanmeet-maintenance")
-    def scanmeet_maintenance_command():
-        """One ScanMeet housekeeping pass: drain cleanup debt, reconcile rooms.
-
-        The same pass the scheduler runs on its own loop, for an operator at a
-        console — and the only way to drain the queue on a box whose feature
-        flags have since been switched off.
-        """
-        import json
-        from app.services.live_cleanup import run_once
-        click.echo(json.dumps(run_once(app), indent=2, default=str))
 
     return app
 

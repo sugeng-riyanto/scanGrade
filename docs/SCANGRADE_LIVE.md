@@ -117,36 +117,8 @@ retries and races are in `tests/unit/test_live_mic_state_machine.py`):
   *detection*: nothing polls for a parked row, so a teacher has to notice it in
   the queue before pushing it. Wire that timer before unattended production exam
   monitoring.
-- After `end`, the database rejects new token minting (every route reads
-  `status = 'active'`). Already-issued tokens are short-lived — five minutes, and
-  the SFU refuses one after roughly 40–60 s of clock tolerance past `exp`, which
-  is why the media gate's expiry row waits 75 s before offering a stale token.
-- **A room deletion that fails is debt, not a log line** (migration 073,
-  `app/services/live_cleanup.py`). `end` writes the session `ended` first — that
-  row is what refuses new tokens — then asks LiveKit to delete the room. If the
-  call fails, the deletion goes into `scan_live_cleanup_jobs` and a worker claims
-  it with a five-minute lease and a compare-and-swap `claim_token`, so two
-  workers cannot delete one room and a crashed claim is recoverable after the
-  lease **without spending an attempt** (`attempts` counts failures, not claims).
-  Retries back off 30 s → 1 m → 2 m → … → 1 h; an already-absent room counts as
-  cleaned (LiveKit answers that error for a room that is gone, and retrying it
-  would report a success as a failure); after eight failures the row becomes
-  `abandoned` with its last error and an `ERROR` log line, for a person.
-- **A session whose room vanished is parked, not revived** (migration 073,
-  `app/services/live_reconcile.py`). `status = 'active'` plus no LiveKit room is
-  the mismatch nothing detected: `end` then deletes nothing and reports success,
-  and a pupil who reloads could even recreate the room by joining it. The sweep
-  reads the SFU's room list and only parks a session whose room it **saw**
-  earlier (`media_state = 'live'`); a session nobody has joined has no room yet and
-  is left alone, and a probe that fails writes nothing at all. A parked row is
-  `stale` — not `ended`, because one is a person's decision and the other is the
-  system's — refuses tokens like any other non-`active` row, and frees the
-  one-active-session index so the teacher can start a **fresh** room (a new name)
-  while the old row stays parked.
-- Both run from one loop, started only when both deployment flags are on, so a
-  box with ScanMeet off starts no thread; `flask scanmeet-maintenance` runs the
-  same pass by hand (the way to drain a queue after the flags have been switched
-  off).
+- After \`end\`, database rejects new token minting; a room deletion failure
+  requires cleanup. Already-issued tokens are short-lived.
 - Rate limits, load test, cross-tenant integration tests and secret management are
   required prior to enabling production. The browser SDK is vendored at
   `app/static/vendor/livekit/2.23.0/livekit-client.umd.min.js` and loaded from

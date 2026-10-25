@@ -397,7 +397,7 @@ table comes from a reading the driver took, never from this page.
 | 9 | `audio-reaches-teacher` | PASS | the teacher's page holds a live audio track for the room |
 | 10 | `mic-closed` | PASS | the close takes the grant back to the camera, the control away and the teacher's live audio with it |
 | 11 | `outsider-refused` | PASS | another school's pupil is refused both the page and the token |
-| 12 | `token-expiry` | PASS | a token with a 300s life was refused 75s after it expired, while a fresh token connected from the same room, and the pupil already in it was not disturbed (`<the SFU's own auth error>`) |
+| 12 | `token-expiry` | PASS | a token with a 300s life was refused 10s after it expired, while a fresh token connected from the same room, and the pupil already in it was not disturbed (`<the SFU's own auth error>`) |
 | 13 | `room-ended` | PASS | *Akhiri Live* is confirmed, and the next join token is refused |
 
 Every row passed: cameras decode, the microphone is refused until a teacher approves it and revoked after, no pupil receives another's media, a token the app issued stops working when its five minutes run out, and the ended room admits nobody.

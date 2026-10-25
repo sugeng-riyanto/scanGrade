@@ -22,42 +22,12 @@ their own acceptance gates pass.
 - [ ] Student / cross-school teacher / link-holder cannot toggle; expect denial.
 - [ ] Two concurrent starts cannot produce two active sessions.
 - [ ] Teacher ends/disables an active room; future token issuance is refused;
-      media is disconnected, and a failed deletion is written to the retry queue
-      (see below) rather than only logged.
+      media is disconnected and clean-up exceptions are reported.
 - [ ] Turn ON again creates a fresh room, never revives revoked token grants.
 - [ ] Attempt answers, timer and autosave remain unaffected during enable,
       disable, reconnect, LiveKit unavailable and browser permission denial.
 - [ ] Browser UI clearly labels OFF/ON after server confirmation, not optimistic
       local state. CSRF and school-scope checks apply to write routes.
-
-## Media cleanup and stale-session repair (migration 073)
-
-Two release blockers, and for both the question is *what happens after the first
-failure*, so both are offline-tested against the real query shapes rather than by
-inspecting the code.
-
-- [x] A failed `delete_room` becomes a row in `scan_live_cleanup_jobs`; the
-      session is already `ended`, so no new token is issued while the debt waits.
-- [x] One open job per room: a second Stop annotates the open row instead of
-      queueing a second deletion (migration 073's partial unique index is
-      reproduced by the test fake, so the duplicate really raises).
-- [x] Claim = lease + compare-and-swap: two workers cannot take one room, and a
-      worker that dies mid-call is recovered after its lease with `attempts`
-      untouched (a crash is a box problem, not a failed deletion).
-- [x] Retry backoff 30 s → 1 h, capped; eight failures mark the row `abandoned`
-      with its last error and an `ERROR` line — never a silent drop.
-- [x] A room that is already absent counts as cleaned (LiveKit reports that as an
-      error, and retrying it would call a success a failure).
-- [x] A session whose room vanished is parked `stale` **only** if the sweep had
-      seen that room (`media_state = 'live'`); a session nobody joined is left
-      active, and a failed probe writes nothing at all.
-- [x] A parked session issues no token and does not revive the old room: the next
-      start is a new row with a new room name.
-- [x] A teacher's `ended` is never overwritten by the sweep (the park is
-      conditional on `active`).
-- [ ] Fault injection against the staging LiveKit project (stop the API, kill the
-      worker mid-retry) — the offline suite proves the state machine, not the
-      network.
 
 ## General meeting access matrix
 
@@ -152,7 +122,8 @@ python -m deploy.scanmeet_rbac_gate --env "$HOME/scanmeet-staging.env" \
 | Gate | Result | Exit | What it read |
 | --- | --- | --- | --- |
 | `scanmeet_webhook_probe` | **7/7 PASS** | 0 | signature accepted, forgery/missing/stale/duplicate/wrong-room/unknown-event refused |
-| `scanmeet_media_gate` | **13/13 SIGNED OFF** | 0 | `sdk-loaded`, `session`, `pupil-camera`, `teacher-receives-camera`, `pupil-isolation`, `mic-starts-closed`, `hand-raise`, `mic-approved`, `audio-reaches-teacher`, `mic-closed`, `outsider-refused`, `token-expiry`, `room-ended` |
+| `scanmeet_media_gate` | **12/12 SIGNED OFF** (the twelve rows that existed then) | 0 | `sdk-loaded`, `session`, `pupil-camera`, `teacher-receives-camera`, `pupil-isolation`, `mic-starts-closed`, `hand-raise`, `mic-approved`, `audio-reaches-teacher`, `mic-closed`, `outsider-refused`, `room-ended` |
+| `scanmeet_media_gate` — `token-expiry` (added later) | **FAIL** | 1 | the SFU **admitted** a token 80 s past its own `exp`, while a fresh token connected from the same room in the same moment. The app's half passed: `exp - nbf` is exactly 300 s, and an ended session issues no new token (`room-ended` PASS). Whether LiveKit applies a grace window wider than the 10 s margin, or does not enforce `exp` at all, is not yet measured — see the note below. |
 | `scanmeet_rbac_gate` | **15/15 PASS** | 0 | both sign-ins, the teacher door, the pupil's refused `POST /session`, the owner's room, the outsider's refused status and token, **the no-school pupil's refused paper (302 to the exam list) and refused token (403)**, the token's publish sources (`['camera']` before approval), the owner's `POST /end`, and RLS read as a **user JWT** (`profiles` scoped to 1 school; two schools share 0 rows; `live_sessions`/`live_hand_raises` answer 403 to a browser key) |
 
 Media row 4 was measured after a repair found by the first run of this sequence:
@@ -184,30 +155,14 @@ it left open, and a rejection only counts after the **same room has accepted a
 freshly minted token from a second pupil in the same moment**. A CDP socket that
 dies is could-not-measure, never a pass.
 
-### What the SFU actually does with an old token (measured, 25 Oct 2026)
-
-The row's first `FAIL` was a defect in the row, and settling it took a probe rather
-than a guess. Using the **staging** project's own key, tokens were minted with a
-chosen `exp` and offered to a **new** `Room` on the same page and room as a fresh
-control, one attempt per token — no connection, handler or token refresh reused:
-
-| `exp` relative to now | SFU | SDK's answer |
-| --- | --- | --- |
-| `+120 s` | admits | connected |
-| `-20 s` | admits | connected |
-| `-40 s` | admits | connected |
-| `-60 s` | **refuses** | `ConnectionError: … invalid token` |
-| `-80 s`, `-100 s`, `-10 min`, `-30 min` | refuses | same |
-
-Server clock offset during the probe: **0.2–0.7 s**. So LiveKit **does** enforce
-`exp`, with a clock-tolerance window between 40 and 60 seconds — and a row margin of
-10 s asked the server a question it was still entitled to answer "yes" to. The
-margin is now **75 s** (`EXPIRY_MARGIN`, with a test that refuses a value ≤ 60 s),
-and the row still fails if a token older than that is admitted.
-
-Result at the same SHA: **13/13 SIGNED OFF**, row 12 reading *a token with a 300 s
-life was refused 75 s after it expired while a fresh token connected from the same
-room, and the pupil already in it was not disturbed (`… invalid token`)*.
+What it measured on staging, with the control in place: `connected: true` for a
+token whose `exp` had passed **80 seconds earlier**, and `connected: true` for the
+fresh control token in the same run — so the room was reachable and the stale
+token was accepted. That is reported as FAIL. The next reading is a token minted
+with `exp` far in the past (ten minutes, using the staging project's own API
+secret) to separate "LiveKit has a grace window wider than the margin" from
+"LiveKit does not enforce `exp` at all"; until that is measured, no claim is made
+either way.
 
 Still **open** in the checklist above, and deliberately not claimed as PASS:
 
