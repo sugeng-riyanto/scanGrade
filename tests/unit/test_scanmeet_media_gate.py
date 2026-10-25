@@ -820,7 +820,9 @@ def test_the_wait_answers_the_browser_so_the_socket_survives(monkeypatch):
     """
     page = _Page()
     clock, deadline = _drive_wait(monkeypatch, page, 305)
-    assert page.pings >= 5, f"only {page.pings} ping(s) in a {305 + GATE.EXPIRY_MARGIN}s wait"
+    total = 305 + GATE.EXPIRY_MARGIN
+    assert page.pings >= int(total // GATE.EXPIRY_PING_SECONDS) - 1, (
+        f"only {page.pings} ping(s) in a {total:g}s wait")
     assert max(clock.slept) <= GATE.EXPIRY_PING_SECONDS, (
         "a single long sleep is the idle socket nobody answers")
     assert clock.wall >= deadline + GATE.EXPIRY_MARGIN, (
@@ -870,6 +872,20 @@ def test_an_ended_session_issues_no_token_which_is_the_app_half(monkeypatch):
     assert "code != 403" in ended, "the ended session must be judged by the next token"
     assert "token-expiry" not in ended, (
         "the two readings must not be merged into one row")
+
+
+def test_the_margin_clears_the_sfu_tolerance_it_was_measured_against():
+    """A margin inside the server's leeway asks a question the server is
+    still entitled to answer "yes" to.
+
+    Forged tokens put the boundary between 40 s and 60 s past `exp`: accepted
+    at -40 s, refused at -60 s. A margin of 10 s reported a "FAIL" on a token
+    the SFU was allowed to accept, which is a defect in the row.
+    """
+    assert GATE.EXPIRY_MARGIN > 60.0, (
+        "<= 60 s sits inside the measured tolerance window (40-60 s)")
+    assert GATE.EXPIRY_MARGIN <= 120.0, (
+        "a margin far beyond the tolerance just makes the run slower")
 
 
 def test_the_run_budget_carries_the_wait_the_row_asks_for():
