@@ -6,17 +6,29 @@ the host available, and one operator action is still outstanding.
 
 | | |
 |---|---|
-| Branch | `scanmeet/cleanup-debt-stale-repair` |
-| Candidate SHA | `3d1e78091ba0fbdb0cf4c82942b4a3f7316f46f1` |
+| Branch | `scanmeet/integration-final` (head of it — the commit this page is on) |
+| History it replaces | `scanmeet/cleanup-debt-stale-repair` at `9505793`, kept for audit |
+| Base | `origin/main` at `4e455df1` |
+| Measurements were taken at | `3d1e780`, whose tree is byte-identical to this branch's |
 | Built on | `421d0e1` (the SHA PR #28 merged) + `7574fa2` + `3d1e780` |
 | Staging host | `https://scanmeet-stg.103.93.133.193.sslip.io` (isolated vhost, own database, own LiveKit project) |
 | Production | untouched, ScanMeet **OFF** (measured below) |
 
+### Why this branch exists, rather than a merge of the old one
+
 `main` merged PR #28 at `a462183` and then reverted it at `ee5c914` / `4e455df`
-("restore pre-PR28 code pending safety review"). This branch is therefore ahead
-of the code `main` currently runs; opening a PR from it is the review step, and
-the compare view is
-`https://github.com/sugeng-riyanto/scanGrade/compare/main...scanmeet/cleanup-debt-stale-repair?expand=1`.
+("restore pre-PR28 code pending safety review"). A branch that descends from the
+pre-revert history cannot restore that code by merging — the merge has nothing to
+add — so the integration branch is built **from `origin/main`** and says what it
+is: `cd8cba7` reverts the revert, and `fb707af`, `c4960ce` and the two documentation
+commits are the follow-up fixes replayed on top. `git diff` against the measured
+branch is empty, which is the check that this is the same code and not a retyping
+of it.
+
+The compare view for the review is
+`https://github.com/sugeng-riyanto/scanGrade/compare/main...scanmeet/integration-final?expand=1`.
+PR #30 (revert-of-revert) must not be merged in parallel — it re-adds `421d0e1`
+without any of the fixes below.
 
 ## What was fixed, and why each one was a real defect
 
@@ -144,12 +156,28 @@ evidence needs the eight secrets in the `scanmeet-staging` environment.
 1. **Open the PR** from this branch (compare link above) — posting to GitHub from
    this checkout needs a token with `repo` scope, which is not available here.
 2. **Run the media matrix** in `.github/workflows/scanmeet-staging-media.yml`
-   against this SHA; 13/13 PASS is the gate for pilot.
+   against this SHA, on a runner — 13/13 PASS is the gate for pilot. It must not
+   be run on the 1-vCPU host that serves production: a previous attempt there left
+   21 browser processes, took load to 20.5 and slowed the live site to 51 s.
 3. **`apply_migration.py --status` is unreadable** on the box:
    `PermissionError: /var/backups/scangrade/scangrade-db-….tar.gz`. That is a
    root-owned recovery-point directory, so the ledger cannot answer for itself
-   without an administrator. Do not loosen the directory's mode to make it pass —
-   `--status` should be run with the privilege that owns the backups.
+   without an administrator. Do not loosen the directory's mode to make it pass.
+   The minimal verification, run **as the account that owns that directory** (it
+   is root's; `scangrade` cannot read it), and without `--commit` — a dry run reads
+   the ledger and the schema and changes nothing:
+
+   ```bash
+   cd /home/scangrade/scanmeet-staging
+   set -a; . /home/scangrade/.config/scanmeet/staging.env; set +a
+   .venv-scanmeet/bin/python deploy/apply_migration.py \
+     supabase/migrations/073_scan_live_cleanup_reconcile.sql
+   .venv-scanmeet/bin/python deploy/apply_migration.py \
+     supabase/migrations/074_scan_live_cleanup_debt_survives.sql
+   ```
+
+   Without `--commit` each of those is a dry run that only reads the ledger and
+the schema, which is what the exit gate asks for.
 4. **Decide the device matrix**: Chrome and Edge desktop can be run on a runner;
    Android and iOS need real hardware, and until then they are `NOT TESTED`, not
    `PASS`.
