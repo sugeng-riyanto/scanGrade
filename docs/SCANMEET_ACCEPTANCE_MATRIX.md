@@ -30,7 +30,7 @@ their own acceptance gates pass.
 - [ ] Browser UI clearly labels OFF/ON after server confirmation, not optimistic
       local state. CSRF and school-scope checks apply to write routes.
 
-## Media cleanup and stale-session repair (migration 073)
+## Media cleanup and stale-session repair (migrations 073 + 074)
 
 Two release blockers, and for both the question is *what happens after the first
 failure*, so both are offline-tested against the real query shapes rather than by
@@ -55,9 +55,24 @@ inspecting the code.
       start is a new row with a new room name.
 - [x] A teacher's `ended` is never overwritten by the sweep (the park is
       conditional on `active`).
+- [x] **Revoking ScanMeet does not stop disposal.** The pass consults neither
+      feature flag: a deletion recorded before a teacher switched the paper off is
+      still drained (that was the release-blocking deadlock in `421d0e1`, where the
+      route queued the debt and the worker refused to start). It reports `BLOCKED`
+      when LiveKit credentials or the 073/074 tables are missing.
+- [x] **The debt survives its parent** (migration 074): a pending job whose session
+      or school is deleted is kept — the reference becomes NULL and `orphaned_at`
+      records when — and the worker still deletes the room from `room_name` alone.
+- [x] **A claim is re-asserted before the call**: a worker whose lease lapsed neither
+      deletes the room nor records an outcome for it; the worker that owns the row
+      finishes.
+- [x] **A missing room is a candidate first**: `missing_since` is recorded on the
+      first confirmed absence and the session is parked only after `MISSING_GRACE`
+      (60 s) of continued absence, so one short room list cannot end a lesson.
 - [ ] Fault injection against the staging LiveKit project (stop the API, kill the
-      worker mid-retry) — the offline suite proves the state machine, not the
-      network.
+      worker mid-retry) — the offline suite proves the state machine, and the
+      queue/debt paths were exercised live, but a killed process mid-retry is
+      still NOT TESTED.
 
 ## General meeting access matrix
 
