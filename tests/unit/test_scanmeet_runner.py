@@ -92,7 +92,7 @@ def test_valid_ipv6_and_trailing_dot_normalization():
 def test_host_of_strips_scheme_port_and_path():
     assert runner.host_of("https://A.example.org:8443/x?y=1") == "a.example.org"
     assert runner.host_of("") == ""
-    assert runner.host_of("not a url") == "not a url".split(":")[0]
+    assert runner.host_of("not a url") == ""
 
 
 # ── what it hands the gates ─────────────────────────────────────────────────
