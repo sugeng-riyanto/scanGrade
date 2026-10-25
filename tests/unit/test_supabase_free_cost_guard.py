@@ -9,9 +9,9 @@ import ast
 
 ROOT = Path(__file__).resolve().parents[2]
 QUERY_MODULE = ROOT / "app" / "models" / "supabase_queries.py"
-# Audited main at 4e455df1 had 16 full-row projections. Lower this ceiling
-# after replacing each with the smallest set of columns callers need.
-LEGACY_STAR_PROJECTION_CEILING = 22
+# Audited main at 4e455df1: 16 direct and 5 joined wildcard reads.
+# Lower this ceiling after replacing each with the smallest safe projection.
+LEGACY_STAR_PROJECTION_CEILING = 21
 
 
 def _full_row_projections(source: str) -> list[int]:
@@ -25,8 +25,9 @@ def _full_row_projections(source: str) -> list[int]:
         first = node.args[0]
         if isinstance(first, ast.Constant) and isinstance(first.value, str):
             # Includes embedded relations and the wildcard inside the projection.
-            projections = [part.strip() for part in first.value.split(",")]
-            if "*" in projections or first.value.strip() == "*":
+            projection = first.value
+            # A comma-split alone misses relation wildcards like profiles(*).
+            if "*" in projection:
                 lines.append(node.lineno)
     return sorted(lines)
 
@@ -39,6 +40,11 @@ def test_shared_supabase_queries_must_not_increase_full_row_reads():
         f"{LEGACY_STAR_PROJECTION_CEILING}); lines: {lines}. "
         "Use explicit columns or reduce an existing wildcard before adding one."
     )
+
+
+def test_joined_wildcards_cannot_bypass_budget():
+    sample = 'def f(db):\n    return db.table("students").select("id, profiles(*)").execute()\n'
+    assert _full_row_projections(sample) == [2]
 
 
 def test_egress_sensitive_autosave_and_exam_card_regressions_remain_tested():
