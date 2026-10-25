@@ -81,3 +81,26 @@ async def _end_room(config, room):
 
 def end_room(config, room):
     asyncio.run(_end_room(config, room))
+
+
+async def _room_names(config):
+    from livekit import api
+    from livekit.protocol.room import ListRoomsRequest
+    client = api.LiveKitAPI(url=server_api_url(config),
+                            api_key=setting(config, "LIVEKIT_API_KEY"),
+                            api_secret=setting(config, "LIVEKIT_API_SECRET"))
+    try:
+        response = await client.room.list_rooms(ListRoomsRequest())
+    finally:
+        await client.aclose()
+    return [room.name for room in response.rooms]
+
+
+def room_names(config) -> list[str]:
+    """The rooms the SFU currently serves, for `live_reconcile`.
+
+    Raises rather than answering `[]` when the call fails: an empty list means
+    "no rooms exist", and a sweep told that would park every live session because
+    LiveKit was briefly unreachable.
+    """
+    return asyncio.run(_room_names(config))

@@ -22,12 +22,42 @@ their own acceptance gates pass.
 - [ ] Student / cross-school teacher / link-holder cannot toggle; expect denial.
 - [ ] Two concurrent starts cannot produce two active sessions.
 - [ ] Teacher ends/disables an active room; future token issuance is refused;
-      media is disconnected and clean-up exceptions are reported.
+      media is disconnected, and a failed deletion is written to the retry queue
+      (see below) rather than only logged.
 - [ ] Turn ON again creates a fresh room, never revives revoked token grants.
 - [ ] Attempt answers, timer and autosave remain unaffected during enable,
       disable, reconnect, LiveKit unavailable and browser permission denial.
 - [ ] Browser UI clearly labels OFF/ON after server confirmation, not optimistic
       local state. CSRF and school-scope checks apply to write routes.
+
+## Media cleanup and stale-session repair (migration 073)
+
+Two release blockers, and for both the question is *what happens after the first
+failure*, so both are offline-tested against the real query shapes rather than by
+inspecting the code.
+
+- [x] A failed `delete_room` becomes a row in `scan_live_cleanup_jobs`; the
+      session is already `ended`, so no new token is issued while the debt waits.
+- [x] One open job per room: a second Stop annotates the open row instead of
+      queueing a second deletion (migration 073's partial unique index is
+      reproduced by the test fake, so the duplicate really raises).
+- [x] Claim = lease + compare-and-swap: two workers cannot take one room, and a
+      worker that dies mid-call is recovered after its lease with `attempts`
+      untouched (a crash is a box problem, not a failed deletion).
+- [x] Retry backoff 30 s → 1 h, capped; eight failures mark the row `abandoned`
+      with its last error and an `ERROR` line — never a silent drop.
+- [x] A room that is already absent counts as cleaned (LiveKit reports that as an
+      error, and retrying it would call a success a failure).
+- [x] A session whose room vanished is parked `stale` **only** if the sweep had
+      seen that room (`media_state = 'live'`); a session nobody joined is left
+      active, and a failed probe writes nothing at all.
+- [x] A parked session issues no token and does not revive the old room: the next
+      start is a new row with a new room name.
+- [x] A teacher's `ended` is never overwritten by the sweep (the park is
+      conditional on `active`).
+- [ ] Fault injection against the staging LiveKit project (stop the API, kill the
+      worker mid-retry) — the offline suite proves the state machine, not the
+      network.
 
 ## General meeting access matrix
 
