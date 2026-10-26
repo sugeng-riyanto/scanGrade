@@ -48,9 +48,11 @@ Facts read out of those files, each of which changes how a step must be run:
   `deferred_columns`, and per table `rows`, `sha256`, `order_by`.
 * A table's `sha256` is the digest **of its `tables/<name>.ndjson` bytes** - the same
   bytes written to the archive - which is what makes tier 1 possible offline.
-* **The restore writes into whatever `SUPABASE_URL` names and does not print that
-  name.** It announces the archive, its label and its row count, not the target.
-  Step 1 exists because of that gap.
+* **The restore writes into whatever `SUPABASE_URL` names, and now prints that
+  host as its first line after the archive's name** - before the pre-restore
+  snapshot and before any write. Only the host and port are printed, never a
+  `user:password@` a URL might carry. On a checkout older than that change, the
+  manual command in step 1 is the only way to see it.
 * `--restore` captures the current state first and **refuses to run** if it cannot.
   `--no-pre-snapshot` exists and means giving that up.
 * Credentials come from the environment first, then `<repo>/.env`. That is how a
@@ -75,8 +77,19 @@ Every line is PASS or FAIL with a timestamp and a name. One FAIL stops here.
 
 ## Step 1 - Say which database this shell is pointed at
 
-The restore does not print it, so print it yourself and paste the host into the
-record. The key is never echoed:
+The restore names it itself now, on the line after `restoring <archive>`:
+
+```text
+restoring scangrade-db-20261026T093000Z-pre-073-075.tar.gz
+   target your-production-ref.supabase.co
+```
+
+Copy that `target` line into the record for every restore in step 5. It is printed
+before the pre-restore snapshot and before any write, so a restore aimed at the
+wrong project is visible on the first line rather than after the fact. Two things it
+cannot tell you: whether `SUPABASE_URL` and `DIRECT_URL` agree (step 4 sets both), and
+anything at all on a checkout older than the change that added the line - there, run
+the fallback by hand:
 
 ```bash
 . /opt/scangrade/.env
