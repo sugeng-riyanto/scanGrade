@@ -59,13 +59,32 @@ many rows the tables it would alter already hold. A relation that exists with
 *more* columns than declared is not a finding: the migrations add columns with
 `IF NOT EXISTS`, so that is the normal case.
 
+## A repair migration is why the sweep exists
+
+A statement can be correct and still fail because of the *shape* at the moment it
+runs. `007`'s `UPDATE classes SET school_id = '<uuid>'` fails while
+`classes.school_id` is `integer` — a type `003_submission_hidden_retracted.sql`
+sets on a file about submission visibility, with `IF NOT EXISTS`, so `007`'s
+`uuid` request is a silent no-op. The migration that repairs it
+(`076_classes_school_id_uuid.sql`) sorts later, so it cannot have run yet.
+
+Refusing those statements as final would leave eight RLS policies out of a schema
+that reports itself complete; retrying for ever would hide a statement that can
+never apply. So after the plan has run end to end, each refused statement gets
+**one** more attempt, and what is still refused after that is the finding. The
+run says how many it repaired that way, so the sweep is visible rather than an
+undocumented second chance.
+
 ## What it refuses to do
 
-Production is refused by project ref (`deploy/supabase_region.py`'s ``REF``), not
-by hostname: this tool is for an empty staging or scratch database, and running it
-against the exam site is the one mistake there is no second chance at. It prints
-the target **ref** and never the URL, so neither a password in a pooler URL nor
-one in a `postgresql://` DSN reaches a log.
+Production is refused by default, three ways: by project ref
+(`deploy/supabase_region.py`'s ``REF``), by the live domain, and — the one that
+matters when parsing fails — **when no ref can be read at all and the host is not
+this machine**, because silence is not evidence of safety. This tool is for an
+empty staging or scratch database, and running it against the exam site is the one
+mistake there is no second chance at. It prints the target **ref** and never the
+URL, so neither a password in a pooler URL nor one in a `postgresql://` DSN
+reaches a log.
 
 Exit codes follow the rest of `deploy/`: 0 the schema converged and every table the
 code names exists · 1 a finding (a statement was refused, or a table is still
@@ -230,8 +249,9 @@ def plan(repo: pathlib.Path = ROOT) -> list[Step]:
 class Report:
     applied: int = 0
     tolerated: dict[str, int] = field(default_factory=dict)
-    hard: list[tuple[str, str, str, str]] = field(default_factory=list)   # source, code, message, head
+    hard: list[tuple[Step, str, str]] = field(default_factory=list)   # step, code, message
     pending: list[Step] = field(default_factory=list)
+    repaired: int = 0          # applied on the sweep that follows a repair migration
     passes: int = 0
 
     def tolerate(self, code: str) -> None:
@@ -246,8 +266,63 @@ class Report:
         return not self.pending and not self.hard
 
 
+def _is_view_replace(sql: str) -> bool:
+    head = " ".join(sql.split())[:40].upper()
+    return head.startswith("CREATE OR REPLACE VIEW") or head.startswith("CREATE OR REPLACE MATERIALIZED VIEW")
+
+
+def _run(conn, step: Step, report: Report) -> str:
+    """One statement, one verdict: ``applied``, ``deferred``, ``tolerated`` or ``hard``."""
+    cur = conn.cursor()
+    try:
+        cur.execute(step.sql)
+        conn.commit()
+        return "applied"
+    except Exception as exc:                              # psycopg2.Error, and stubs
+        conn.rollback()
+        code = getattr(exc, "pgcode", None)
+        message = str(exc).strip().splitlines()[0] if str(exc).strip() else ""
+        if code in DEFERRED:
+            return "deferred"
+        if code in TOLERATED:
+            report.tolerate(code)
+            return "tolerated"
+        if code == "42P16" and _is_view_replace(step.sql):
+            # `CREATE OR REPLACE VIEW` may add a column and may not remove one
+            # (`cannot drop columns from view`). On a re-run the view is already
+            # the *wider* definition a later file installed, which is the state
+            # the release wants; refusing here would mean a bootstrap that can
+            # only be run once, and dropping the view to replay a narrower
+            # definition would take the later file's columns away until it ran.
+            # Counted, so the re-run says what it skipped rather than implying
+            # the statement changed nothing.
+            report.tolerate(code)
+            return "tolerated"
+        if code == "23505" and step.sql.lstrip().upper().startswith("INSERT"):
+            # A seed that inserts a fixed id the base file already inserted. The
+            # row the statement wanted is there; failing the run would refuse a
+            # schema whose only complaint is that it was built twice.
+            report.tolerate(code)
+            return "tolerated"
+        report.hard.append((step, code or "-", message))
+        return "hard"
+    finally:
+        cur.close()
+
+
 def apply(conn, steps: list[Step], max_passes: int = MAX_PASSES) -> Report:
-    """Run every step, deferring the ones whose dependency is not there yet."""
+    """Run every step, deferring what is not there yet, then sweep what was refused.
+
+    The sweep is what a repair migration is for. A statement can be correct and
+    still fail because the column it reads is the wrong type *at the moment it
+    runs* — `007`'s `UPDATE classes SET school_id = '<uuid>'` fails while
+    `classes.school_id` is `integer`, and the migration that retypes it (`076`)
+    has not run yet because it sorts later. Classifying that as final would leave
+    eight RLS policies missing from a database nobody could tell was incomplete;
+    retrying it forever would hide a statement that can never apply. So each
+    refused statement gets **one** more attempt after the whole plan has run, and
+    what is still refused after that is the finding.
+    """
     report = Report()
     remaining = list(steps)
     while remaining and report.passes < max_passes:
@@ -255,29 +330,27 @@ def apply(conn, steps: list[Step], max_passes: int = MAX_PASSES) -> Report:
         deferred: list[Step] = []
         progressed = 0
         for step in remaining:
-            cur = conn.cursor()
-            try:
-                cur.execute(step.sql)
-                conn.commit()
-                report.applied += 1
+            verdict = _run(conn, step, report)
+            if verdict == "deferred":
+                deferred.append(step)
+            elif verdict in ("applied", "tolerated"):
+                if verdict == "applied":
+                    report.applied += 1
                 progressed += 1
-            except Exception as exc:                      # psycopg2.Error, and stubs
-                conn.rollback()
-                code = getattr(exc, "pgcode", None)
-                message = str(exc).strip().splitlines()[0] if str(exc).strip() else ""
-                if code in DEFERRED:
-                    deferred.append(step)
-                elif code in TOLERATED:
-                    report.tolerate(code)
-                    progressed += 1
-                else:
-                    report.hard.append((step.source, code or "-", message, step.head()))
-            finally:
-                cur.close()
         remaining = deferred
         if not progressed:
             break
     report.pending = remaining
+
+    if report.hard and report.passes < max_passes:
+        retry = [step for step, _, _ in report.hard]
+        report.hard = []
+        report.passes += 1
+        for step in retry:
+            verdict = _run(conn, step, report)
+            if verdict == "applied":
+                report.applied += 1
+                report.repaired += 1
     return report
 
 
@@ -401,8 +474,40 @@ def load_url(repo: pathlib.Path) -> str:
     return apply_migration.load_migration_url(repo)
 
 
-def refuse_production(url: str) -> str | None:
-    """Refuse the exam site by project ref, whatever hostname it arrives under."""
+#: The live site's own name. A DSN never carries it, but an operator pastes one
+#: into `--url` often enough that naming it costs nothing and closes the case
+#: where the ref cannot be read out of the string.
+LIVE_DOMAIN = "scangrade.web.id"
+#: Hosts a bootstrap may write to without being asked: the box it runs on.
+LOCAL_HOSTS = {"", "localhost", "127.0.0.1", "::1", "[::1]", "host.docker.internal"}
+
+
+def _looks_local(url: str) -> bool:
+    """A unix socket, a loopback host, or a socket path in the query."""
+    from urllib.parse import urlsplit
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return False
+    if (parts.hostname or "") in LOCAL_HOSTS:
+        return True
+    return "host=/" in (parts.query or "") or "host=%2F" in (parts.query or "").lower()
+
+
+def refuse_production(url: str, allow_unidentified: bool = False) -> str | None:
+    """Refuse the exam site by project ref, whatever hostname it arrives under.
+
+    The default has to be *no*, because the mistake this tool can make is not
+    recoverable: a bootstrap creates and alters tables, and the one database in
+    this project where that is not a rehearsal is production. Three refusals, in
+    order of how much they depend on parsing:
+
+    * the URL names production's project ref;
+    * the URL still carries the dashboard placeholder, so nothing real is in it;
+    * **no ref can be read at all** and the host is not this machine — an
+      unidentifiable remote target is refused unless `--allow-unidentified-target`
+      says otherwise. Silence is not evidence of safety.
+    """
     from deploy import supabase_region
     ref = target_ref(url)
     if ref == supabase_region.REF:
@@ -412,7 +517,43 @@ def refuse_production(url: str) -> str | None:
     if PLACEHOLDER in url:
         return (f"refusing: the URL still contains the dashboard placeholder "
                 f"`{PLACEHOLDER}` — nothing was run.")
+    if LIVE_DOMAIN in url.lower():
+        return (f"refusing: the URL names {LIVE_DOMAIN}, which is the live site. "
+                "A bootstrap never runs there.")
+    if ref is None and not _looks_local(url) and not allow_unidentified:
+        return ("refusing: no Supabase project ref can be read out of this URL and "
+                "the host is not this machine, so the target cannot be shown to be "
+                "anything but production. Pass --allow-unidentified-target only for a "
+                "database you know by name to be scratch.")
     return None
+
+
+def verify(cur) -> dict:
+    """The shape of what was built: foreign keys, RLS coverage, and what is invalid.
+
+    A relation that exists with the right name is not the claim. `NOT VALID` is how
+    Postgres lets a constraint exist without being enforced, and a table with RLS
+    switched off is a table whose policies apply to nobody — both are the kind of
+    "the table is there" that a count of tables cannot tell apart from a schema.
+    """
+    cur.execute(
+        "select count(*) from pg_constraint c join pg_namespace n "
+        "on n.oid = c.connamespace where n.nspname = 'public' and c.contype = 'f'")
+    foreign_keys = int(cur.fetchone()[0])
+    cur.execute(
+        "select count(*) from pg_constraint c join pg_namespace n "
+        "on n.oid = c.connamespace where n.nspname = 'public' "
+        "and c.contype = 'f' and not c.convalidated")
+    not_valid = int(cur.fetchone()[0])
+    cur.execute(
+        "select count(*) filter (where c.relrowsecurity), count(*) "
+        "from pg_class c join pg_namespace n on n.oid = c.relnamespace "
+        "where n.nspname = 'public' and c.relkind = 'r'")
+    with_rls, tables_total = (int(value) for value in cur.fetchone())
+    cur.execute("select count(*) from pg_policies where schemaname = 'public'")
+    policies = int(cur.fetchone()[0])
+    return {"foreign_keys": foreign_keys, "not_valid": not_valid,
+            "rls_tables": with_rls, "tables": tables_total, "policies": policies}
 
 
 def _audit(url: str, ref: str, json_path: str | None) -> int:
@@ -482,6 +623,9 @@ def main(argv: list[str] | None = None) -> int:
                              "find there; writes nothing")
     parser.add_argument("--json", default=None, metavar="PATH")
     parser.add_argument("--max-passes", type=int, default=MAX_PASSES)
+    parser.add_argument("--allow-unidentified-target", action="store_true",
+                        help="permit a remote target whose project ref cannot be "
+                             "read; only for a database you know by name to be scratch")
     args = parser.parse_args(argv)
 
     repo = pathlib.Path(args.repo).resolve()
@@ -513,7 +657,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"schema bootstrap: cannot measure  -  {exc}", file=sys.stderr)
             return 2
 
-    refusal = refuse_production(url)
+    refusal = refuse_production(url, args.allow_unidentified_target)
     if refusal:
         print(f"schema bootstrap: {refusal}", file=sys.stderr)
         return 1
@@ -538,6 +682,7 @@ def main(argv: list[str] | None = None) -> int:
         cur = conn.cursor()
         try:
             present = tables(cur)
+            shape = verify(cur)
         finally:
             cur.close()
     finally:
@@ -549,11 +694,12 @@ def main(argv: list[str] | None = None) -> int:
     legacy = sorted(name for name in absent if name in LEGACY)
     extra = sorted(present - wanted)
 
-    print(f"schema bootstrap: {report.applied} applied, "
+    print(f"schema bootstrap: {report.applied} applied "
+          f"({report.repaired} on the repair sweep), "
           f"{report.tolerated_total} already there, {len(report.hard)} refused, "
           f"{len(report.pending)} still waiting, over {report.passes} pass(es)")
-    for source, code, message, head in report.hard[:20]:
-        print(f"  REFUSED {source}  {code}  {message}\n      {head}")
+    for step, code, message in report.hard[:20]:
+        print(f"  REFUSED {step.source}  {code}  {message}\n      {step.head()}")
     if len(report.hard) > 20:
         print(f"  ... and {len(report.hard) - 20} more refused")
     for step in report.pending[:20]:
@@ -571,9 +717,18 @@ def main(argv: list[str] | None = None) -> int:
     for name in extra[:20]:
         print(f"  NOT DECLARED {name}")
 
-    verdict = "PASS" if report.converged and not missing else "FAIL"
+    print(f"schema bootstrap: {shape['foreign_keys']} foreign key(s), "
+          f"{shape['not_valid']} NOT VALID, {shape['rls_tables']}/{shape['tables']} "
+          f"table(s) with RLS on, {shape['policies']} polic(y/ies)")
+    if shape["not_valid"]:
+        print(f"  INVALID {shape['not_valid']} foreign key(s) exist without being "
+              f"enforced — a constraint that is not validated is not a constraint")
+
+    verdict = "PASS" if (report.converged and not missing
+                          and not shape["not_valid"]) else "FAIL"
     print(f"schema bootstrap: {verdict}  -  "
-          + ("every declared table exists and every statement ran"
+          + ("every declared relation exists, every statement ran, and every "
+             "foreign key is validated"
              if verdict == "PASS" else
              "the schema is not the one this repository describes (see above)"))
 
@@ -583,8 +738,10 @@ def main(argv: list[str] | None = None) -> int:
             "verdict": verdict,
             "applied": report.applied,
             "already_there": report.tolerated,
-            "refused": [{"source": s, "code": c, "message": m, "statement": h}
-                        for s, c, m, h in report.hard],
+            "refused": [{"source": st.source, "code": c, "message": m,
+                         "statement": st.head(200)} for st, c, m in report.hard],
+            "repaired_on_sweep": report.repaired,
+            "shape": shape,
             "waiting": [{"source": s.source, "statement": s.head(200)}
                         for s in report.pending],
             "present": sorted(present),

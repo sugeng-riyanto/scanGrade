@@ -207,16 +207,18 @@ class TestTheLoopDecidesBySqlstate:
         assert report.tolerated_total == 1
         assert report.converged, "a policy that already exists is a re-run, not a defect"
 
-    def test_a_real_error_is_a_finding_and_stops_being_retried(self):
+    def test_a_real_error_ends_up_a_finding_that_names_its_statement(self):
+        """It gets the sweep's one extra attempt, and it is the finding afterwards."""
         conn = StubConnection({"UPDATE c SET s = 1": PgError("42804", "type mismatch")})
         report = sb.apply(conn, [_step("UPDATE c SET s = 1", "007_x.sql")])
         assert report.converged is False
-        source, code, message, head = report.hard[0]
-        assert source == "007_x.sql" and code == "42804" and "type mismatch" in message
-        assert head.startswith("UPDATE c")
+        step, code, message = report.hard[0]
+        assert step.source == "007_x.sql" and code == "42804"
+        assert "type mismatch" in message
+        assert step.head().startswith("UPDATE c")
         assert report.pending == [], (
-            "a type conflict is not something another pass fixes: retrying it would "
-            "run the file's later statements against a schema it did not build")
+            "a type conflict is not a missing dependency: it is reported as refused, "
+            "not as something the next pass is expected to fix")
 
     def test_no_progress_ends_the_run_instead_of_looping(self):
         conn = StubConnection({"CREATE TABLE a": PgError("42P01", "missing")})
@@ -456,3 +458,206 @@ class TestTheAuditThroughMain:
         code = sb.main(["--repo", str(REPO), "--audit"])
         assert code == 2
         assert "cannot measure" in capsys.readouterr().err
+
+
+# ── the repair sweep ────────────────────────────────────────────────────────
+
+class TestARefusedStatementGetsOneMoreAttempt:
+    def test_a_shape_conflict_is_repaired_after_a_later_migration(self):
+        """`007` fails while `classes.school_id` is integer, and `076` sorts after it.
+
+        The sweep is what turns "eight RLS policies are missing" into "the repair
+        migration ran and the statements that tripped on the shape then applied".
+        """
+        attempts: dict[str, int] = {}
+
+        def fails_once():
+            arrived = attempts.get("u", 0) + 1
+            attempts["u"] = arrived
+            if arrived == 1:
+                raise PgError("42804", "column is of type integer but expression is of type uuid")
+
+        conn = StubConnection({"UPDATE classes SET school_id = 'x'": fails_once})
+        report = sb.apply(conn, [_step("UPDATE classes SET school_id = 'x'", "007_x.sql"),
+                                 _step("SELECT 1", "076_y.sql")])
+        assert report.applied == 2
+        assert report.repaired == 1, (
+            "the statement that failed on the shape must be retried once after the "
+            "plan, and the run must say that it was")
+        assert report.hard == [] and report.converged
+
+    def test_what_still_fails_after_the_sweep_is_the_finding(self):
+        conn = StubConnection({"UPDATE c SET s = 1": PgError("42804", "still wrong")})
+        report = sb.apply(conn, [_step("UPDATE c SET s = 1", "007_x.sql")])
+        assert len(report.hard) == 1
+        assert report.repaired == 0
+        step, code, message = report.hard[0]
+        assert step.source == "007_x.sql" and code == "42804" and "still wrong" in message
+
+    def test_the_sweep_does_not_run_for_ever(self):
+        attempts = {"n": 0}
+
+        def always():
+            attempts["n"] += 1
+            raise PgError("42804", "wrong")
+
+        conn = StubConnection({"UPDATE c SET s = 1": always})
+        sb.apply(conn, [_step("UPDATE c SET s = 1")])
+        assert attempts["n"] == 2, (
+            "a statement is tried once in the plan and once on the sweep — not "
+            "once per pass")
+
+
+class TestADuplicateSeedIsNotAFailure:
+    def test_a_seed_insert_of_a_row_that_exists_is_counted(self):
+        conn = StubConnection({"INSERT INTO schools (id) VALUES ('x')":
+                               PgError("23505", 'duplicate key value violates unique '
+                                                'constraint "schools_pkey"')})
+        report = sb.apply(conn, [_step("INSERT INTO schools (id) VALUES ('x')", "007_x.sql")])
+        assert report.hard == []
+        assert report.tolerated == {"23505": 1}
+
+    def test_a_duplicate_key_that_is_not_a_seed_is_still_a_finding(self):
+        """Only an INSERT of a fixed row counts: an UPDATE hitting 23505 is a defect."""
+        conn = StubConnection({"UPDATE schools SET id = 'x'": PgError("23505", "duplicate")})
+        report = sb.apply(conn, [_step("UPDATE schools SET id = 'x'")])
+        assert len(report.hard) == 1
+
+
+# ── the target, refused by default ──────────────────────────────────────────
+
+class TestTheDefaultIsNo:
+    def test_the_live_domain_is_refused_even_without_a_ref(self):
+        refusal = sb.refuse_production(
+            "postgresql://postgres:pw@db.scangrade.web.id:5432/postgres")
+        assert refusal and sb.LIVE_DOMAIN in refusal
+
+    def test_an_unidentifiable_remote_target_is_refused(self):
+        """Silence is not evidence of safety: no ref, not local, so not ours."""
+        refusal = sb.refuse_production("postgresql://postgres:pw@10.0.0.9:5432/other")
+        assert refusal and "no Supabase project ref" in refusal
+
+    def test_the_escape_hatch_is_explicit(self):
+        url = "postgresql://postgres:pw@10.0.0.9:5432/other"
+        assert sb.refuse_production(url, allow_unidentified=True) is None
+
+    def test_a_local_socket_needs_no_ref(self):
+        assert sb.refuse_production("postgresql://postgres:@/postgres?host=/tmp/pg") is None
+        assert sb.refuse_production("postgresql://postgres:pw@localhost:5432/postgres") is None
+
+
+# ── what was actually built ─────────────────────────────────────────────────
+
+class ShapeCursor:
+    """The four reads `verify()` makes, in order."""
+
+    def __init__(self, results):
+        self.results = list(results)
+        self.statements: list[str] = []
+        self._current = None
+
+    def execute(self, sql):
+        self.statements.append(sql)
+        self._current = self.results.pop(0)
+
+    def fetchone(self):
+        return self._current
+
+
+class TestTheShapeIsCheckedNotAssumed:
+    def test_foreign_keys_rls_and_policies_are_counted(self):
+        cur = ShapeCursor([(191,), (0,), (76, 89), (219,)])
+        shape = sb.verify(cur)
+        assert shape == {"foreign_keys": 191, "not_valid": 0,
+                         "rls_tables": 76, "tables": 89, "policies": 219}
+        assert len(cur.statements) == 4
+
+    def test_a_not_valid_foreign_key_is_asked_for_by_name(self):
+        """`NOT VALID` is a constraint that exists without being enforced."""
+        cur = ShapeCursor([(191,), (3,), (76, 89), (219,)])
+        shape = sb.verify(cur)
+        assert shape["not_valid"] == 3
+        assert any("convalidated" in sql for sql in cur.statements), (
+            "the count of unenforced foreign keys has to come from the catalogue "
+            "flag that means it, not from a total")
+
+
+# ── migration 076, and the history it must not rewrite ──────────────────────
+
+MIGRATIONS = REPO / "supabase" / "migrations"
+
+
+class TestTheRepairIsAdditive:
+    def test_076_exists_and_plans_last_among_the_numbered_files(self):
+        plan = sb.plan(REPO)
+        sources = [step.source for step in plan]
+        assert "supabase/migrations/076_classes_school_id_uuid.sql" in sources
+        numbered = [s for s in dict.fromkeys(sources)
+                    if s.startswith("supabase/migrations/0") and s.split("/")[-1][:3].isdigit()]
+        assert numbered[-1].endswith("076_classes_school_id_uuid.sql"), (
+            "a repair migration has to run after the files whose shape it repairs:\n    "
+            + "\n    ".join(numbered[-4:]))
+
+    def test_003_is_untouched_so_its_digest_still_matches_a_ledger_record(self):
+        """The repair is a new file; editing an applied one is the false alarm."""
+        text = (MIGRATIONS / "003_submission_hidden_retracted.sql").read_text(encoding="utf-8")
+        assert "ADD COLUMN IF NOT EXISTS school_id INT DEFAULT 1" in text, (
+            "003's bytes are what a box's ledger recorded; if this assertion fails "
+            "because the line was edited away, the repair took the path that "
+            "reports APPLIED, THEN EDITED for a file nobody edited")
+
+    def test_076_refuses_to_invent_a_school_for_a_row_it_cannot_map(self):
+        text = (MIGRATIONS / "076_classes_school_id_uuid.sql").read_text(encoding="utf-8")
+        assert "RAISE EXCEPTION" in text and "populated > 0" in text, (
+            "an integer that is already a value cannot be mapped to a schools(id) "
+            "uuid; the migration must stop rather than guess")
+        assert "DROP DEFAULT" in text, (
+            "the `DEFAULT 1` is the reason every class belonged to school 1")
+
+    def test_076_is_safe_to_re_run(self):
+        text = (MIGRATIONS / "076_classes_school_id_uuid.sql").read_text(encoding="utf-8")
+        assert "IF col_type IS NULL THEN" in text and "RETURN;" in text, (
+            "a second run must return without touching anything")
+        assert "col_type = 'integer'" in text, (
+            "the retype must be conditional on the column still being integer")
+        assert "DROP CONSTRAINT IF EXISTS classes_school_id_fkey" in text
+
+    def test_the_declared_table_that_nothing_creates_is_still_explained(self):
+        """92 declared = 91 relations + one name; the report has to say which."""
+        from deploy import schema_contract
+        declared = schema_contract.schema_from_migrations()
+        assert "activation_codes" in declared
+        assert declared["activation_codes"] == set(), (
+            "activation_codes is declared with no columns at all — it is a name in "
+            "guarded statements, not a table anything defines")
+
+
+class TestAViewThatCannotShrinkIsNotAFailure:
+    """`CREATE OR REPLACE VIEW` adds columns and cannot remove them.
+
+    The second run of a bootstrap meets the view a later file widened, and
+    Postgres answers `cannot drop columns from view` (42P16). Refusing there would
+    make a bootstrap runnable exactly once; dropping the view to replay the
+    narrower definition would take the later file's columns away until it ran.
+    """
+
+    def test_a_narrower_replace_of_a_wider_view_is_counted(self):
+        conn = StubConnection({"CREATE OR REPLACE VIEW active_school_years (id) AS SELECT 1":
+                               PgError("42P16", "cannot drop columns from view")})
+        report = sb.apply(conn, [_step(
+            "CREATE OR REPLACE VIEW active_school_years (id) AS SELECT 1")])
+        assert report.hard == []
+        assert report.tolerated == {"42P16": 1}
+
+    def test_the_same_code_on_anything_else_is_still_a_finding(self):
+        conn = StubConnection({"ALTER TABLE t ADD COLUMN a int": PgError("42P16", "other")})
+        report = sb.apply(conn, [_step("ALTER TABLE t ADD COLUMN a int")])
+        assert len(report.hard) == 1, (
+            "42P16 is tolerated only where it means 'the view is already wider'; "
+            "anywhere else it is a shape the release did not expect")
+
+    def test_the_recogniser_reads_the_statement_not_the_message(self):
+        assert sb._is_view_replace("CREATE OR REPLACE VIEW v (id) AS SELECT 1")
+        assert sb._is_view_replace("  create or replace view v (id) as select 1")
+        assert not sb._is_view_replace("CREATE VIEW v AS SELECT 1")
+        assert not sb._is_view_replace("SELECT * FROM v")
