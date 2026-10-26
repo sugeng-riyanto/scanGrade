@@ -108,13 +108,13 @@ class FakeConn:
 def test_the_ref_is_read_before_the_password_not_after():
     """The pooler username is `postgres.<ref>` and the password follows it, so the
     ref is terminated by `:` — matching on `@` refused every real URL."""
-    url = f"postgresql://postgres.{REF}:s3cret@aws-1-ap-south-1.pooler.supabase.com:5432/postgres"
+    url = f"postgresql://postgres.{REF}:s3cret@aws-1-ap-south-1.pooler.supabase.com:5432/postgres"  # secret-scan:allow a DSN fixture the parser splits, never dialled
 
     assert app_mig.project_ref(url) == REF
 
 
 def test_the_ref_is_read_when_the_password_is_percent_encoded():
-    url = f"postgresql://postgres.{REF}:p%40ss%3Aword@aws-1.pooler.supabase.com:5432/postgres"
+    url = f"postgresql://postgres.{REF}:p%40ss%3Aword@aws-1.pooler.supabase.com:5432/postgres"  # secret-scan:allow the percent-encoding is the subject
 
     assert app_mig.project_ref(url) == REF
 

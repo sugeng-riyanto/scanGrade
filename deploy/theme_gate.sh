@@ -235,7 +235,7 @@ set -uo pipefail
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # Word-split on purpose: pytest takes them as separate paths.
-TESTS="tests/unit/test_dark_theme_contrast.py tests/unit/test_tailwind_class_names.py tests/unit/test_theme_stylesheet.py tests/unit/test_language_toggle.py tests/unit/test_i18n_coverage.py tests/unit/test_css_freshness.py tests/unit/test_landing_facilities.py tests/unit/test_static_tree.py tests/unit/test_no_committed_secrets.py tests/unit/test_render_fixture_gate.py tests/unit/test_template_artifacts.py tests/unit/test_rendered_absence.py tests/unit/test_essay_answer_integrity.py tests/unit/test_essay_toolbar.py tests/unit/test_doc_links.py tests/unit/test_supabase_region.py tests/unit/test_ci_workflows.py tests/unit/test_shell_path_portability.py tests/unit/test_exam_graph_local.py tests/unit/test_scanmeet_vendored_sdk.py"
+TESTS="tests/unit/test_dark_theme_contrast.py tests/unit/test_tailwind_class_names.py tests/unit/test_theme_stylesheet.py tests/unit/test_language_toggle.py tests/unit/test_i18n_coverage.py tests/unit/test_css_freshness.py tests/unit/test_landing_facilities.py tests/unit/test_static_tree.py tests/unit/test_no_committed_secrets.py tests/unit/test_secret_scan.py tests/unit/test_render_fixture_gate.py tests/unit/test_template_artifacts.py tests/unit/test_rendered_absence.py tests/unit/test_essay_answer_integrity.py tests/unit/test_essay_toolbar.py tests/unit/test_doc_links.py tests/unit/test_supabase_region.py tests/unit/test_ci_workflows.py tests/unit/test_shell_path_portability.py tests/unit/test_exam_graph_local.py tests/unit/test_scanmeet_vendored_sdk.py"
 
 # The app's own refusal markers, and the reason they are named here rather than
 # spelled out in the block that reads them: they are literals in
@@ -254,7 +254,7 @@ ALLOW_DIRTY_VAR="SCANGRADE_ALLOW_DIRTY_CHECKOUT"
 # next defect, and every release after it ships unexamined. So the list is
 # checked up front, and a missing file is exit 3 (about the release), not exit 2
 # (about the box).
-ARMAMENT="$TESTS tests/unit/test_merge_runbook.py deploy/i18n_coverage.py deploy/css_freshness.py deploy/schema_contract.py deploy/render_fixture_gate.py deploy/school_authority_gate.py deploy/doc_links.py deploy/doc_links_gone.txt deploy/supabase_region.py"
+ARMAMENT="$TESTS tests/unit/test_merge_runbook.py deploy/i18n_coverage.py deploy/css_freshness.py deploy/schema_contract.py deploy/render_fixture_gate.py deploy/school_authority_gate.py deploy/doc_links.py deploy/doc_links_gone.txt deploy/supabase_region.py deploy/secret_scan.py"
 for check in $ARMAMENT; do
   # `-s` and not `-f`: a file that exists and holds nothing is the same release
   # as one where it was deleted, only quieter.
@@ -724,7 +724,7 @@ if [ "$RC" -eq 0 ]; then
     echo "$CSS_OUT"
     echo "$FIXTURES_OUT"
     echo "$SCHOOL_OUT"
-    echo "theme gate: OK — readable in both themes, every named utility is compiled, the committed stylesheet is the one the templates produce, the app's own stylesheet stays a cached file, every file under /static/ is one the app asks for and in a commit, every page declares the language of its own copy, no template prints a Jinja closer as text, no rendered document shows a value only a server-side object could produce, no template translates less than it did, the essay editor's behaviour was executed in a real DOM rather than skipped, no tracked file carries a service-role key or a hard-coded Flask secret, and every table, column and policy the code names is one this repository declares, with every role it compares against one the database holds${APPLIED_CLAIM}${FIXTURES_CLAIM}, and every facility the landing page advertises one this repository can show, and every teacher-facing write route files its rows under the school of this request${DOCLINKS_CLAIM}${RUNBOOK_CLAIM}${REGION_CLAIM}"
+    echo "theme gate: OK — readable in both themes, every named utility is compiled, the committed stylesheet is the one the templates produce, the app's own stylesheet stays a cached file, every file under /static/ is one the app asks for and in a commit, every page declares the language of its own copy, no template prints a Jinja closer as text, no rendered document shows a value only a server-side object could produce, no template translates less than it did, the essay editor's behaviour was executed in a real DOM rather than skipped, no tracked file carries a service-role key, a hard-coded Flask secret or a credential-shaped literal, and every table, column and policy the code names is one this repository declares, with every role it compares against one the database holds${APPLIED_CLAIM}${FIXTURES_CLAIM}, and every facility the landing page advertises one this repository can show, and every teacher-facing write route files its rows under the school of this request${DOCLINKS_CLAIM}${RUNBOOK_CLAIM}${REGION_CLAIM}"
     exit 0
   fi
   echo >&2
