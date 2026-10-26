@@ -23,13 +23,23 @@ def sweep_expired(db, *, end_room, enqueue, now=None, limit=25):
     stamp = moment.astimezone(timezone.utc).isoformat()
     report = {"measured": False, "schools": 0, "ended": 0,
               "cleanup_pending": [], "cleanup_unrecorded": [], "errors": []}
+    # Iterate stable pages: a fixed first-page limit would starve later schools
+    # forever, because expired licenses remain expired after their rooms end.
     try:
-        expired = (db.table("scanmeet_school_entitlements")
-                   .select("school_id,enabled,status,valid_until")
-                   .eq("enabled", True)
-                   .in_("status", ["trial", "paid"])
-                   .lte("valid_until", stamp).limit(limit)
-                   .execute().data or [])
+        expired = []
+        offset = 0
+        while True:
+            page = (db.table("scanmeet_school_entitlements")
+                    .select("school_id,enabled,status,valid_until")
+                    .eq("enabled", True)
+                    .in_("status", ["trial", "paid"])
+                    .lte("valid_until", stamp)
+                    .order("school_id").range(offset, offset + limit - 1)
+                    .execute().data or [])
+            expired.extend(page)
+            if len(page) < limit:
+                break
+            offset += len(page)
     except Exception as exc:
         report["errors"].append("entitlement query failed: " + type(exc).__name__)
         return report
