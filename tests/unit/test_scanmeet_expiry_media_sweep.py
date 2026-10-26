@@ -22,6 +22,8 @@ class Query:
     def lte(self, field, value):
         self.filters.append((field, "lte", value)); return self
     def limit(self, value): self.max_rows = value; return self
+    def order(self, field): self.order_field = field; return self
+    def range(self, start, end): self.offset = start; self.max_rows = end - start + 1; return self
     def update(self, values):
         self.patch = values; return self
 
@@ -33,7 +35,10 @@ class Query:
             if op == "eq": rows = [r for r in rows if r.get(field) == value]
             elif op == "in": rows = [r for r in rows if r.get(field) in value]
             else: rows = [r for r in rows if r.get(field) is not None and r[field] <= value]
-        rows = rows[:getattr(self, "max_rows", len(rows))]
+        if hasattr(self, "order_field"):
+            rows = sorted(rows, key=lambda row: row[self.order_field])
+        offset = getattr(self, "offset", 0)
+        rows = rows[offset:offset + getattr(self, "max_rows", len(rows))]
         if self.patch is not None:
             for row in rows: row.update(self.patch)
         return Response([dict(r) for r in rows])
@@ -100,3 +105,22 @@ def test_queue_failure_is_reported_as_unrecorded():
                            enqueue=fail_enqueue, now=NOW)
     assert result["cleanup_pending"] == ["session-a"]
     assert result["cleanup_unrecorded"] == ["session-a"]
+
+
+def test_pagination_reaches_expired_schools_beyond_first_page():
+    db = Database()
+    db.data["scanmeet_school_entitlements"] = [
+        {"school_id": "school-%03d" % i, "enabled": True,
+         "status": "trial", "valid_until": OLD}
+        for i in range(30)
+    ]
+    db.data["scan_live_sessions"] = [
+        {"id": "session-29", "school_id": "school-029",
+         "room_name": "last-room", "status": "active"}
+    ]
+    deleted = []
+    result = sweep_expired(db, end_room=deleted.append,
+                           enqueue=lambda *a, **k: None, now=NOW, limit=25)
+    assert result["schools"] == 30
+    assert result["ended"] == 1
+    assert deleted == ["last-room"]
