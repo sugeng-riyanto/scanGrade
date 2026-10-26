@@ -16,7 +16,15 @@ migration or a release.
 | re-read from | `git ls-remote` **and** a full (non-shallow) clone, 2026-10-25 |
 | PR #37 (draft) | `bde0385deb157bb8da7df167ecf131e05ed3c61e` |
 | PR #38 (draft) | `2857be540306cf5d0d2ce5657af4cf187015d7a1` |
-| PR #39 | `df0c0bce71d618cd782f0110d6ad159443b30126` (opened after the handoff was written) |
+| PR #39 | `df0c0bce71d618cd782f0110d6ad159443b30126` — ready for review, 6/6 workflows green |
+| PR #40 | `ec517080da13f4cd21f8149ecdecbf23a4d5e5ea` — ready for review, 5/5 green |
+| PR #41 | `f2a1050e8367160138e04c66253258f6e2e68de9` — draft |
+| PR #42 | `2ff0b2508b77c49c4e6af5e292d5edb5e91117ba` — draft, the integration of #39 + #40 + #41 |
+
+`main` has not moved. Everything from #39 upward was opened **after** the handoff was
+written, so its "#37 and #38 are the open work" reading is out of date: the ScanMeet
+security set is now five branches, and #42 is the only one carrying all three fixes
+together.
 
 The Cloud workspace that this chat started from was **not** this commit. It was
 missing 70 tracked files — every `supabase/migrations/07*` from 070 onward, the
@@ -99,6 +107,47 @@ accepts an NPSN from a form and checks only that it is non-empty. The lookup is 
 parameterised Supabase call, so this is a wasted round trip and a worse error
 message, not an injection.
 
+## PR #40's own open question, answered behaviourally
+
+PR #40 asks a reviewer to "validate HTTP 202 vs 200 contract on admin-disable with an
+already-connected browser, including LiveKit delete failure and cleanup ledger insert
+failure". Its test file is *structural* — it reads the source for `202` and
+`cleanup_pending` — which cannot distinguish a pending deletion from an unrecorded one
+and would keep passing if the branch were rearranged to return 200.
+
+tests/unit/test_scanmeet_revocation_http_contract.py (local commit `c9c86ecd`, branch
+`test/scanmeet-revocation-http-contract-20261026`) calls the view and asserts the
+response: 202 with `cleanup_pending` on a failed room deletion, 202 with
+`cleanup_unrecorded` when the queue write also fails (and when it returns nothing),
+200 without a `warning` on a clean revocation, and 202 when the session list cannot be
+read. **5 passed.** Run against PR #39's route the two failure cases read
+`assert 200 == 202` — the defect is real and the test names it.
+
+The browser half is **not** done and is not claimed: a 202 warns that media deletion is
+unconfirmed; it is not evidence that a pupil's camera stopped. That needs two real
+browsers against a real SFU.
+
+## PR #41 read, not run
+
+The new `live_expiry_cleanup` module in `app/services/` is the destructive one, so the question is what it
+does when it cannot tell. It is fail-closed in the right places: an unreadable or
+ambiguous entitlement read raises and skips that school, a DB error during the sweep
+returns a report with no destructive work, and it rechecks `_confirmed_expired`
+immediately before each row update. It paginates the entitlement query (a fixed
+first-page limit would starve every later school forever) and drains sessions in
+batches with an explicit no-progress guard.
+
+Two things to keep in view. The recheck is not atomic — a renewal can land between the
+check and the update, which the code says out loud and leaves as a staging gate. And
+`report["ended"]` counts rows it marked `ended` even when `end_room` then failed, so an
+operator reading `ended: 5, cleanup_pending: [s1]` may believe five rooms are dark when
+four are. That is a reporting clarity problem, not a safety one, but it is the kind of
+number someone acts on.
+
+A hypothesis I checked and dropped: `sweep_expired` compares `valid_until` to an
+`+00:00` ISO stamp, which would be wrong for a text column. `075` declares
+`valid_until timestamptz`, so the comparison is a real timestamp comparison.
+
 ## Deployment state — reported, not re-measured here
 
 This agent has no route to the VPS or the production database, so the following is
@@ -132,7 +181,14 @@ the operator's last report and is **not** verified by anything in this file:
 
 0. Merge PR #39 before anyone works on ScanMeet licences: the page it repairs
    cannot find a school today. It enables nothing on its own — the switches stay
-   OFF and the route stays Super Admin only.
+   OFF and the route stays Super Admin only. If #40 merges first, merge #42's
+   combined tree or re-run the suite afterwards: #39 and #40 both touch
+   `super_admin.py`, and two green branches are not a green merge.
+0b. PR #37's readiness probe is **still broken on GitHub**. `SAVEPOINT
+   scanmeet_readiness` against a `connect_readonly()` session (autocommit) raises
+   `25P01`, so `--live` reports a traceback instead of a verdict. Only the local
+   branch `fix/scanmeet-readiness-live-transaction-20261026` fixes it; no remote
+   branch carries the file at all except #37's.
 1. Push `fix/scanmeet-readiness-live-transaction-20261026` onto PR #37's branch
    (or open it against `main`), so the readiness tool PR #37 describes can be run
    at all. Running it from the old production checkout proves nothing.
