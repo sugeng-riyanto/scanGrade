@@ -16,6 +16,8 @@ def sweep_expired(db, *, end_room, enqueue, now=None, limit=25):
     media-disconnection bound still requires staging verification.
     """
     moment = now or datetime.now(timezone.utc)
+    if isinstance(moment, str):
+        moment = datetime.fromisoformat(moment.replace("Z", "+00:00"))
     if moment.tzinfo is None:
         raise ValueError("Expiry sweep requires an aware clock")
     stamp = moment.astimezone(timezone.utc).isoformat()
