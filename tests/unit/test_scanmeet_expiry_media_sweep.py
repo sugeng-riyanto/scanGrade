@@ -158,3 +158,28 @@ def test_renewal_during_sweep_stops_further_disconnects():
     assert result["ended"] == 1
     assert deleted == ["room-first"]
     assert db.data["scan_live_sessions"][1]["status"] == "active"
+
+
+def test_entitlement_read_error_never_authorizes_room_deletion():
+    db = Database()
+    original_table = db.table
+    calls = {"entitlement": 0}
+    def table(name):
+        query = original_table(name)
+        if name == "scanmeet_school_entitlements":
+            original_execute = query.execute
+            def execute():
+                calls["entitlement"] += 1
+                if calls["entitlement"] >= 2:
+                    raise ConnectionError("temporary entitlement DB outage")
+                return original_execute()
+            query.execute = execute
+        return query
+    db.table = table
+    deleted = []
+    report = sweep_expired(db, end_room=deleted.append,
+                           enqueue=lambda *a, **k: None, now=NOW)
+    assert deleted == []
+    assert report["ended"] == 0
+    assert report["errors"]
+    assert db.data["scan_live_sessions"][0]["status"] == "active"
