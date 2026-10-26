@@ -2640,7 +2640,7 @@ def scanmeet_school_licenses():
 
     db = get_supabase()
     npsn = (request.values.get("npsn") or "").strip()
-    if not re.fullmatch(r"\\d{8}", npsn):
+    if not re.fullmatch(r"[0-9]{8}", npsn):
         if request.method == "POST":
             return jsonify({"error": "NPSN must contain exactly eight digits"}), 400
         return render_template("super_admin/scanmeet_schools.html", npsn=npsn, school=None, license=None)
@@ -2709,6 +2709,7 @@ def scanmeet_school_licenses():
         # Revocation is already stored; do not pretend the change failed.
     revoked = []
     pending = []
+    cleanup_unrecorded = []
     if not enabled:
         try:
             sessions = (db.table("scan_live_sessions")
@@ -2727,13 +2728,25 @@ def scanmeet_school_licenses():
                 except Exception as exc:
                     pending.append(session["id"])
                     try:
-                        live_cleanup.enqueue(db, ended[0], reason="school_license_off", error=exc)
+                        debt = live_cleanup.enqueue(
+                            db, ended[0], reason="school_license_off", error=exc)
+                        if debt is None:
+                            cleanup_unrecorded.append(session["id"])
+                            current_app.logger.error("ScanMeet cleanup debt not recorded: %s", session["id"])
                     except Exception:
+                        cleanup_unrecorded.append(session["id"])
                         current_app.logger.exception("Live room cleanup debt could not be stored")
         except Exception:
             current_app.logger.exception("ScanMeet school room revocation needs reconciliation")
             return jsonify({"enabled": False, "status": "revoked",
                             "error": "License is OFF; room cleanup requires operator reconciliation",
-                            "revoked": revoked, "cleanup_pending": pending}), 202
-    return jsonify({"enabled": enabled, "status": status, "npsn": npsn,
-                    "revoked": revoked, "cleanup_pending": pending})
+                            "revoked": revoked, "cleanup_pending": pending,
+                            "cleanup_unrecorded": cleanup_unrecorded}), 202
+    response = {"enabled": enabled, "status": status, "npsn": npsn,
+                "revoked": revoked, "cleanup_pending": pending,
+                "cleanup_unrecorded": cleanup_unrecorded}
+    # New admissions are refused, but previously connected media may remain
+    # until LiveKit deletion succeeds. Do not imply cleanup was completed.
+    if pending:
+        response["warning"] = "License OFF; active media cleanup remains unconfirmed"
+        return jsonify(response)
