@@ -20,14 +20,38 @@ def test_offline_check_does_not_claim_live_database(capsys):
 
 
 def test_database_failures_are_reported_fail_closed():
-    class BrokenCursor:
+    """The probe is judged against a cursor that answers like the real server.
+
+    `connect_readonly()` sets ``autocommit=True``, and PostgreSQL refuses a
+    savepoint outside a transaction block (25P01). This stub used to *return*
+    quietly for those statements, so a probe that leaned on one passed here and
+    crashed on an operator's box — the stub is now the thing that would catch it.
+    """
+
+    class ReadOnlyAutocommitCursor:
         def execute(self, sql):
-            if sql.startswith("SAVEPOINT") or sql.startswith("ROLLBACK TO") or sql.startswith("RELEASE"):
-                return
+            statement = " ".join(sql.upper().split())
+            if statement.startswith(("SAVEPOINT", "ROLLBACK TO SAVEPOINT", "RELEASE SAVEPOINT")):
+                raise RuntimeError("SAVEPOINT can only be used in transaction blocks")
             raise RuntimeError("relation does not exist")
-    findings = gate.database_findings(BrokenCursor())
+
+    findings = gate.database_findings(ReadOnlyAutocommitCursor())
     assert len(findings) >= 8
     assert all("query unavailable" in finding for finding in findings)
+
+
+def test_the_probe_asks_for_no_transaction_block():
+    """Every statement it sends is a query; none is transaction scaffolding."""
+    import ast
+    import inspect
+    import textwrap
+
+    tree = ast.parse(textwrap.dedent(inspect.getsource(gate.database_findings)))
+    literals = [node.value for node in ast.walk(tree)
+                if isinstance(node, ast.Constant) and isinstance(node.value, str)]
+    assert literals, "the probe must be made of statements"
+    for literal in literals:
+        assert "SAVEPOINT" not in literal.upper()
 
 
 def test_no_mutating_sql_in_database_probe():

@@ -2,6 +2,16 @@
 
 Operator uses --live AFTER applying 073, 074, 075 and BEFORE retrying deploy.
 Never modifies database, migration ledger, backups, deployment or feature flags.
+
+The live half runs on the session `apply_migration.connect_readonly()` opens,
+which is ``autocommit=True``. Each statement is therefore its own transaction:
+a query that raises leaves no aborted transaction behind, so the probe needs no
+savepoint to recover from. Asking for one is not merely redundant there —
+PostgreSQL refuses it (25P01, "can only be used in transaction blocks"), and the
+rollback written in a ``finally`` then raised *out* of the probe, so ``--live``
+finished in a traceback instead of a verdict. A unit stub that returned quietly
+for those statements is what hid it; the guard is now a stub that answers the
+way the server does.
 """
 from __future__ import annotations
 
@@ -24,7 +34,11 @@ def files_ready(repo: Path) -> list[str]:
 
 
 def database_findings(cur) -> list[str]:
-    """Check observable postconditions, including 074 FK behaviour and RLS."""
+    """Check observable postconditions, including 074 FK behaviour and RLS.
+
+    Every query is independent: the caller's session is read-only *and*
+    autocommit, so one that raises cannot poison the next.
+    """
     queries = {
         "073 cleanup jobs table": "SELECT to_regclass('public.scan_live_cleanup_jobs') IS NOT NULL",
         "075 school entitlements table": "SELECT to_regclass('public.scanmeet_school_entitlements') IS NOT NULL",
@@ -51,16 +65,12 @@ def database_findings(cur) -> list[str]:
     findings = []
     for label, query in queries.items():
         try:
-            cur.execute("SAVEPOINT scanmeet_readiness")
             cur.execute(query)
             row = cur.fetchone()
             if not row or row[0] is not True:
                 findings.append(label)
         except Exception:
             findings.append(label + " (query unavailable)")
-        finally:
-            cur.execute("ROLLBACK TO SAVEPOINT scanmeet_readiness")
-            cur.execute("RELEASE SAVEPOINT scanmeet_readiness")
     return findings
 
 
