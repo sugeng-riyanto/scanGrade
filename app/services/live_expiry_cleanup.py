@@ -32,12 +32,16 @@ def _confirmed_expired(db, school_id, now):
     return deadline <= now
 
 
-def sweep_expired(db, *, end_room, enqueue, now=None, limit=25):
+def sweep_expired(db, *, end_room, enqueue, now=None, limit=25, max_schools=25):
     """Attempt expiry revocation; return explicit failures, never a false PASS.
 
     Expiry enforcement is eventually consistent, not instantaneous. The real
     media-disconnection bound still requires staging verification.
     """
+    if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
+        raise ValueError("limit must be a positive integer")
+    if not isinstance(max_schools, int) or isinstance(max_schools, bool) or max_schools < 1:
+        raise ValueError("max_schools must be a positive integer")
     moment = now or datetime.now(timezone.utc)
     if isinstance(moment, str):
         moment = datetime.fromisoformat(moment.replace("Z", "+00:00"))
@@ -45,29 +49,32 @@ def sweep_expired(db, *, end_room, enqueue, now=None, limit=25):
         raise ValueError("Expiry sweep requires an aware clock")
     stamp = moment.astimezone(timezone.utc).isoformat()
     report = {"measured": False, "schools": 0, "ended": 0,
-              "cleanup_pending": [], "cleanup_unrecorded": [], "errors": []}
+              "cleanup_pending": [], "cleanup_unrecorded": [], "errors": [],
+              "has_more": False, "atomic_revocation_verified": False}
     # Iterate stable pages: a fixed first-page limit would starve later schools
     # forever, because expired licenses remain expired after their rooms end.
     try:
         expired = []
         offset = 0
-        while True:
+        while len(expired) < max_schools + 1:
+            page_size = min(limit, max_schools + 1 - len(expired))
             page = (db.table("scanmeet_school_entitlements")
                     .select("school_id,enabled,status,valid_until")
                     .eq("enabled", True)
                     .in_("status", ["trial", "paid"])
                     .lte("valid_until", stamp)
-                    .order("school_id").range(offset, offset + limit - 1)
+                    .order("school_id").range(offset, offset + page_size - 1)
                     .execute().data or [])
             expired.extend(page)
-            if len(page) < limit:
+            if len(page) < page_size:
                 break
             offset += len(page)
     except Exception as exc:
         report["errors"].append("entitlement query failed: " + type(exc).__name__)
         return report
     report["measured"] = True
-    for school in expired:
+    report["has_more"] = len(expired) > max_schools
+    for school in expired[:max_schools]:
         school_id = school["school_id"]
         report["schools"] += 1
         try:
