@@ -2712,30 +2712,39 @@ def scanmeet_school_licenses():
     cleanup_unrecorded = []
     if not enabled:
         try:
-            sessions = (db.table("scan_live_sessions")
+            # Drain fixed-size batches: a single unbounded PostgREST response
+            # can be truncated, leaving connected pupils behind.
+            while True:
+                sessions = (db.table("scan_live_sessions")
                         .select("id,room_name,school_id,status")
                         .eq("school_id", school_id).eq("status", "active")
-                        .execute().data or [])
-            for session in sessions:
-                ended = (db.table("scan_live_sessions").update({"status": "ended"})
-                         .eq("id", session["id"]).eq("school_id", school_id)
-                         .eq("status", "active").execute().data or [])
-                if not ended:
-                    continue
-                revoked.append(session["id"])
-                try:
-                    livekit_gateway.end_room(current_app.config, session["room_name"])
-                except Exception as exc:
-                    pending.append(session["id"])
+                        .limit(100).execute().data or [])
+                if not sessions:
+                    break
+                progressed = 0
+                for session in sessions:
+                    ended = (db.table("scan_live_sessions").update({"status": "ended"})
+                             .eq("id", session["id"]).eq("school_id", school_id)
+                             .eq("status", "active").execute().data or [])
+                    if not ended:
+                        continue
+                    progressed += 1
+                    revoked.append(session["id"])
                     try:
-                        debt = live_cleanup.enqueue(
-                            db, ended[0], reason="school_license_off", error=exc)
-                        if debt is None:
+                        livekit_gateway.end_room(current_app.config, session["room_name"])
+                    except Exception as exc:
+                        pending.append(session["id"])
+                        try:
+                            debt = live_cleanup.enqueue(
+                                db, ended[0], reason="school_license_off", error=exc)
+                            if debt is None:
+                                cleanup_unrecorded.append(session["id"])
+                                current_app.logger.error("ScanMeet cleanup debt not recorded: %s", session["id"])
+                        except Exception:
                             cleanup_unrecorded.append(session["id"])
-                            current_app.logger.error("ScanMeet cleanup debt not recorded: %s", session["id"])
-                    except Exception:
-                        cleanup_unrecorded.append(session["id"])
-                        current_app.logger.exception("Live room cleanup debt could not be stored")
+                            current_app.logger.exception("Live room cleanup debt could not be stored")
+                if progressed == 0:
+                    raise RuntimeError("No progress while revoking active ScanMeet sessions")
         except Exception:
             current_app.logger.exception("ScanMeet school room revocation needs reconciliation")
             return jsonify({"enabled": False, "status": "revoked",
