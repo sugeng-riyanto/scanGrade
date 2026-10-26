@@ -183,3 +183,35 @@ def test_entitlement_read_error_never_authorizes_room_deletion():
     assert report["ended"] == 0
     assert report["errors"]
     assert db.data["scan_live_sessions"][0]["status"] == "active"
+
+
+def test_entitlement_read_failure_mid_batch_stops_further_deletion():
+    db = Database()
+    db.data["scan_live_sessions"] = [
+        {"id": "first", "school_id": "school-a",
+         "room_name": "room-first", "status": "active"},
+        {"id": "second", "school_id": "school-a",
+         "room_name": "room-second", "status": "active"},
+    ]
+    deleted = []
+    original_table = db.table
+    calls = {"count": 0}
+    def table(name):
+        query = original_table(name)
+        if name == "scanmeet_school_entitlements":
+            execute = query.execute
+            def guarded_execute():
+                calls["count"] += 1
+                # Initial query + initial recheck + first per-room validation
+                # succeed, but the second room's validation is unavailable.
+                if calls["count"] >= 5:
+                    raise ConnectionError("license DB offline")
+                return execute()
+            query.execute = guarded_execute
+        return query
+    db.table = table
+    result = sweep_expired(db, end_room=deleted.append,
+                           enqueue=lambda *a, **k: None, now=NOW)
+    assert deleted == ["room-first"]
+    assert db.data["scan_live_sessions"][1]["status"] == "active"
+    assert result["errors"]
