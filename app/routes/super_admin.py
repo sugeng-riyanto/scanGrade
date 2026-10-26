@@ -2640,7 +2640,7 @@ def scanmeet_school_licenses():
 
     db = get_supabase()
     npsn = (request.values.get("npsn") or "").strip()
-    if not re.fullmatch(r"\\d{8}", npsn):
+    if not re.fullmatch(r"\d{8}", npsn):
         if request.method == "POST":
             return jsonify({"error": "NPSN must contain exactly eight digits"}), 400
         return render_template("super_admin/scanmeet_schools.html", npsn=npsn, school=None, license=None)
