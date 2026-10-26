@@ -334,6 +334,51 @@ def test_status_distinguishes_applied_from_edited(tmp_path, capsys):
     assert "APPLIED, THEN EDITED" in out
 
 
+def test_status_refuses_to_report_zero_when_the_checkout_is_not_there(tmp_path, capsys):
+    """The inventory that gates 073–075 must not answer "nothing to apply" for a
+    path it could not find.
+
+    Measured before this test existed: `--repo` defaults to `/opt/scangrade`, so
+    running `--status` from a checkout elsewhere printed `no .sql files in
+    /opt/scangrade/supabase/migrations` and exited **0** — indistinguishable, by
+    exit code, from "all seventy-five migrations are recorded". Every operator's
+    first step before applying 073–075 is this inventory.
+    """
+    ledger = tmp_path / "ledger"
+    ledger.mkdir()
+    migrations = tmp_path / "not-this-checkout" / "supabase" / "migrations"
+
+    assert app_mig.status(ledger, migrations) == 2
+    out = capsys.readouterr().out
+    assert "cannot read any" in out
+    assert str(migrations) in out, "the refusal has to name the path it looked at"
+    assert "--repo" in out, "and the flag that would fix it"
+
+
+def test_status_refuses_an_empty_directory_rather_than_calling_it_clean(tmp_path, capsys):
+    ledger = tmp_path / "ledger"
+    ledger.mkdir()
+    migrations = tmp_path / "migrations"
+    migrations.mkdir()
+
+    assert app_mig.status(ledger, migrations) == 2
+    assert "holds no migrations" in capsys.readouterr().out
+
+
+def test_status_still_reports_a_directory_it_can_read(tmp_path, capsys):
+    """The control: the refusal above must not swallow the real answer."""
+    ledger = tmp_path / "ledger"
+    ledger.mkdir()
+    migrations = tmp_path / "migrations"
+    migrations.mkdir()
+    (migrations / "070_scan_live_sessions.sql").write_text("SELECT 1;", encoding="utf-8")
+
+    assert app_mig.status(ledger, migrations) == 0
+    out = capsys.readouterr().out
+    assert "070_scan_live_sessions.sql" in out
+    assert "1 of 1 have no record" in out
+
+
 def test_the_ledger_entry_names_the_file_the_hash_and_who(tmp_path):
     path = tmp_path / "026_z.sql"
     path.write_text("SELECT 1;", encoding="utf-8")
