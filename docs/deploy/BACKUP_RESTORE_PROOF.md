@@ -133,11 +133,11 @@ print(f"tables {len(manifest['tables'])}, manifest rows {manifest['total_rows']}
       f"archive rows {total}, mismatched tables {len(bad)}")
 for name, want, got in bad:
     print(f"  MISMATCH {name}: manifest {want} rows, archive {got}")
-sys.exit(1 if bad else 0)
+sys.exit(1 if bad or total != manifest["total_rows"] else 0)
 PY
 ```
 
-Exit 0 with `mismatched tables 0`, and `manifest rows` equal to `archive rows`, is
+Exit 0 requires `mismatched tables 0` **and** `manifest rows` equal to `archive rows`; this is
 tier 1 passing. Record those four numbers.
 
 Two honest limits: it reads members through `tarfile` in memory, so it creates no
