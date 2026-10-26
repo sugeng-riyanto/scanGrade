@@ -124,3 +124,37 @@ def test_pagination_reaches_expired_schools_beyond_first_page():
     assert result["schools"] == 30
     assert result["ended"] == 1
     assert deleted == ["last-room"]
+
+
+def test_more_than_one_hundred_active_rooms_are_terminated():
+    db = Database()
+    db.data["scan_live_sessions"] = [
+        {"id": "session-%03d" % i, "school_id": "school-a",
+         "room_name": "room-%03d" % i, "status": "active"}
+        for i in range(121)
+    ]
+    deleted = []
+    result = sweep_expired(db, end_room=deleted.append,
+                           enqueue=lambda *a, **k: None, now=NOW)
+    assert result["ended"] == 121
+    assert len(deleted) == 121
+    assert all(row["status"] == "ended" for row in db.data["scan_live_sessions"])
+
+
+def test_renewal_during_sweep_stops_further_disconnects():
+    db = Database()
+    db.data["scan_live_sessions"] = [
+        {"id": "session-first", "school_id": "school-a",
+         "room_name": "room-first", "status": "active"},
+        {"id": "session-second", "school_id": "school-a",
+         "room_name": "room-second", "status": "active"},
+    ]
+    deleted = []
+    def delete_and_renew(room):
+        deleted.append(room)
+        db.data["scanmeet_school_entitlements"][0]["valid_until"] = FUTURE
+    result = sweep_expired(db, end_room=delete_and_renew,
+                           enqueue=lambda *a, **k: None, now=NOW)
+    assert result["ended"] == 1
+    assert deleted == ["room-first"]
+    assert db.data["scan_live_sessions"][1]["status"] == "active"
