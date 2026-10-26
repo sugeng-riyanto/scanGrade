@@ -34,3 +34,16 @@ def test_integrated_expiry_maintenance_stays_enabled_with_flags_off():
     assert 'if not live_policy.feature_enabled(' not in start
     assert 'if not _confirmed_expired(db, school_id, moment)' in expiry
     assert 'cleanup_unrecorded' in expiry
+
+
+def test_maintenance_cannot_claim_complete_revocation_on_expiry_failure():
+    """A healthy deletion queue does not imply expiry-connected cameras are gone."""
+    worker = (ROOT / "app/services/live_cleanup.py").read_text(encoding="utf-8")
+    ast.parse(worker)
+    section = worker.split("def run_once(", 1)[1].split("def _loop(", 1)[0]
+    assert 'not expiry.get("measured")' in section
+    assert 'expiry.get("errors")' in section
+    assert 'expiry.get("cleanup_pending")' in section
+    assert 'expiry.get("cleanup_unrecorded")' in section
+    assert 'result["degraded"] = True' in section
+    assert 'result["expiry_blocked"]' in section
