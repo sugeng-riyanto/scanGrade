@@ -188,6 +188,58 @@ guards. Two ways to make that gate lie, both hit here and both the box's fault:
 
 Neither is a property of #42, and neither should be mistaken for one.
 
+## Fresh clone — the evidence does not depend on the imported tree
+
+Every number above was produced from a worktree that had to be *replaced* first,
+because the import was stale. So the same work was re-run from a clone that was
+never written to: `.freebuff/clone-main-16c08c2c`, gitignored so it cannot pollute
+the tracked tree, leaving the imported snapshot (`backup/cloud-import-1bf9333`) and
+the shared bare repository's configuration untouched.
+
+| check | result |
+| --- | --- |
+| `git rev-parse HEAD` | `16c08c2c1e0ccc9f7c010cc5bace950110749f90` |
+| branch | `main` |
+| `git status --porcelain` | empty |
+| tracked files | 1122 |
+| tree | `34871054a9522ecbfad6d44823b2f1fa58dd7493` |
+| `pytest tests/unit -q -rs` | **11 541 passed, 51 skipped, 0 failed** in 588.27 s |
+| `bash deploy/theme_gate.sh` | **exit 0** |
+
+The suite's two numbers are identical to the earlier run on the replaced worktree.
+That equality is the useful part: the reading is a property of the commit, not of
+which checkout produced it. The gate agrees, `2162 reference(s) checked, 0
+unresolved`, and it is honest about its two blind spots — the region guard says the
+configuration was **NOT measured** (no `.env` here) and the schema gate says the
+live schema was **not asked**. Neither absence is a pass.
+
+## GitHub capability, stated as two different facts
+
+**Read: yes.** Anonymous HTTPS is enough — `git clone`, `git ls-remote`, fetching any
+`refs/pull/N/head`, and the PR pages. This is why review work is possible here.
+
+**Write: no.** `gh auth status` reports no host logged in; there is no `GH_TOKEN` or
+`GITHUB_TOKEN` in the environment; there is no `~/.git-credentials`, `~/.netrc` or
+`~/.ssh`; and `git push --dry-run` answers `could not read Username for
+'https://github.com'`. Every commit in this file is therefore local, and the whole
+checkpoint is durable **in this workspace only** until a push path exists.
+
+## Whether work continues after the browser closes — NOT VERIFIED
+
+This is the one claim worth refusing, so it is measured rather than assumed.
+
+Measured: a detached process (`setsid nohup`, writing one timestamp per 10 s) ran
+for **690 s over 70 ticks with a maximum gap of 10 s**, while a ten-minute test
+suite competed for the box. So starting a long job and reading its log later in the
+same session works.
+
+Not measured: that it survives the turn ending or the browser closing. One
+observation points the other way — the runner was replaced mid-session here, which
+killed a running gate mid-flight (its log was 0 bytes) and reset the shell.
+
+So nothing should be scheduled that depends on a process outliving the turn. The
+durable artefact is a committed file, not a daemon.
+
 ## Deployment state — reported, not re-measured here
 
 This agent has no route to the VPS or the production database, so the following is
@@ -216,6 +268,13 @@ the operator's last report and is **not** verified by anything in this file:
 3. **The quarantine is a person's decision.** A release request through the super
    admin deploy status page is the only sanctioned path, and only after the
    schema gates pass against the verified target.
+
+## HOLD — nothing here authorises a migration or a release
+
+Migrations 073, 074 and 075, the one-shot release request and every VPS action stay
+**on hold**: there is no demonstrated restore, no database identity check from this
+side, no authorisation for production DDL, and no push path to land a reviewed
+branch. A green suite in this file is a statement about a commit, not a licence.
 
 ## Next safe action
 
