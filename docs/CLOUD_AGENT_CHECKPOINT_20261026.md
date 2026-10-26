@@ -119,8 +119,8 @@ failure". Its test file is *structural* — it reads the source for `202` and
 `cleanup_pending` — which cannot distinguish a pending deletion from an unrecorded one
 and would keep passing if the branch were rearranged to return 200.
 
-tests/unit/test_scanmeet_revocation_http_contract.py (local commit `c9c86ecd`, branch
-`test/scanmeet-revocation-http-contract-20261026`) calls the view and asserts the
+tests/unit/test_scanmeet_revocation_http_contract.py (commit `c9c86ecd`, branch
+`test/scanmeet-revocation-http-contract-20261026`, pushed) calls the view and asserts the
 response: 202 with `cleanup_pending` on a failed room deletion, 202 with
 `cleanup_unrecorded` when the queue write also fails (and when it returns nothing),
 200 without a `warning` on a clean revocation, and 202 when the session list cannot be
@@ -215,14 +215,30 @@ live schema was **not asked**. Neither absence is a pass.
 
 ## GitHub capability, stated as two different facts
 
-**Read: yes.** Anonymous HTTPS is enough — `git clone`, `git ls-remote`, fetching any
-`refs/pull/N/head`, and the PR pages. This is why review work is possible here.
+**Read: yes, without any credential.** Anonymous HTTPS is enough — `git clone`,
+`git ls-remote`, fetching any `refs/pull/N/head`, and the PR pages.
 
-**Write: no.** `gh auth status` reports no host logged in; there is no `GH_TOKEN` or
-`GITHUB_TOKEN` in the environment; there is no `~/.git-credentials`, `~/.netrc` or
-`~/.ssh`; and `git push --dry-run` answers `could not read Username for
-'https://github.com'`. Every commit in this file is therefore local, and the whole
-checkpoint is durable **in this workspace only** until a push path exists.
+**Write: yes, since the device-flow login — and this was not true when this page was
+written.** For most of this session `git push` answered `could not read Username`:
+no `gh` login, no `GH_TOKEN`, no `~/.git-credentials`, no `~/.netrc`, no `~/.ssh`. It
+was fixed the only way a headless box can: `gh auth login --hostname github.com
+--git-protocol https --web`, which prints a one-time code for the account holder to
+enter at `github.com/login/device`. Nothing was pasted into a file or a command, and
+`gh` never prints the token — it lands in `~/.config/gh/hosts.yml`, outside the
+repository. Git is given the credential per command
+(`-c credential.https://github.com.helper='!gh auth git-credential'`), so no global
+git configuration was written.
+
+Three branches are now on the remote, verified with `git ls-remote`:
+
+| branch | head | what it holds |
+| --- | --- | --- |
+| `docs/cloud-continuity-checkpoint-20261026` | `97b0bb5f` | this page |
+| `fix/scanmeet-readiness-live-transaction-20261026` | `5e836b79` | PR #37's probe, made able to report a verdict |
+| `test/scanmeet-revocation-http-contract-20261026` | `c9c86ecd` | the 202/200 contract test, stacked on #42's head |
+
+The checkpoint is therefore durable in GitHub, not merely in this workspace. What is
+still not possible is merging, enabling a flag, or anything on the VPS.
 
 ## Whether work continues after the browser closes — NOT VERIFIED
 
@@ -254,14 +270,11 @@ the operator's last report and is **not** verified by anything in this file:
   about the environment's variables.
 - no successful isolated restore has been demonstrated.
 
-## Blockers
-
-1. **No GitHub credentials in this Cloud workspace.** `git push` fails with
-   `could not read Username` and `gh auth status` reports no login. Every commit
-   this agent made is local. A durable checkpoint in GitHub is therefore a commit
-   waiting to be pushed, not a pushed commit — that is a permission gap, not a
-   finding about the repository. Read access works because the repository is
-   public.
+## Blockers1. ~~**No GitHub credentials in this Cloud workspace.**~~ **Resolved** by the device
+   flow described above; the three branches are pushed and this page is on the
+   remote. Recorded rather than deleted because it shaped what was and was not
+   possible for most of the session, and because it will recur on a fresh box: an
+   anonymous clone is read-only, and nothing in the environment supplies a token.
 2. **No production credentials, by design.** Migration execution, backup proof
    and the one-shot release request are operator actions. This agent can prepare
    and verify; it must not be given a database URL to "just run it".
@@ -288,9 +301,9 @@ branch. A green suite in this file is a statement about a commit, not a licence.
    `25P01`, so `--live` reports a traceback instead of a verdict. Only the local
    branch `fix/scanmeet-readiness-live-transaction-20261026` fixes it; no remote
    branch carries the file at all except #37's.
-1. Push `fix/scanmeet-readiness-live-transaction-20261026` onto PR #37's branch
-   (or open it against `main`), so the readiness tool PR #37 describes can be run
-   at all. Running it from the old production checkout proves nothing.
+1. Merge `fix/scanmeet-readiness-live-transaction-20261026` (pushed) into PR #37's
+   branch, so the readiness tool PR #37 describes can be run at all. Running it from
+   the old production checkout proves nothing.
 2. Prove a restorable backup — an archive that exists is not a restore. Until
    that passes, migrations stay unapplied.
 3. Dry-run 073, then 074, then 075 with the repository's own migration tool
