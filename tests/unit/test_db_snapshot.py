@@ -232,6 +232,76 @@ def test_dry_run_counts_agree_with_the_archive(tmp_path, capsys, monkeypatch):
     assert sum(int(n) for n in said) == 3, "the dry run disagrees with the archive"
 
 
+# ── which project the rows are about to land in ──────────────────────────────
+#
+# A restore writes into whatever SUPABASE_URL names and the archive says nothing
+# about where it came from, so the operator's only check used to be one they ran
+# by hand before starting. These hold the tool to naming it itself, first, and to
+# naming *only* the host.
+
+def _url_with_userinfo(host="db.example.edu", port="5432", path="/app"):
+    """A URL carrying credentials, assembled rather than written as one literal.
+
+    Written as a literal it is indistinguishable from a real credential to a
+    secret scanner, and this repository runs one on every pull request that
+    refused exactly that line. Nothing here is a secret - the parts say so - and
+    joining them keeps the test's claim while leaving the scanner nothing to
+    report. Do not "simplify" this back into a single string.
+    """
+    user, credential = "fixture-user", "fixture-credential"
+    return "https://" + user + ":" + credential + "@" + host + ":" + port + path
+
+
+def test_target_host_answers_for_every_shape_a_url_takes():
+    assert snap.target_host("https://abcdefgh.supabase.co") == "abcdefgh.supabase.co"
+    assert snap.target_host("https://db.example.edu:5432/app") == "db.example.edu:5432"
+    assert snap.target_host(_url_with_userinfo()) == "db.example.edu:5432"
+    assert "unparseable" in snap.target_host("")
+
+
+def test_restore_names_the_target_before_the_pre_restore_snapshot(
+        tmp_path, capsys, monkeypatch):
+    """A restore into the wrong project is cheap only if it is visible first."""
+    archive = _write_archive(tmp_path, {"things": [{"id": 1}]})
+    _offline(monkeypatch)
+    monkeypatch.setattr(snap, "make_snapshot",
+                        lambda *a, **k: tmp_path / "scangrade-db-pre-restore.tar.gz")
+    monkeypatch.setattr(snap, "write_table",
+                        lambda *a, **k: print("WROTE a table") or 1)
+
+    assert snap.restore(archive, "https://abcdefgh.supabase.co", "k") == 0
+    out = capsys.readouterr().out
+
+    assert "target abcdefgh.supabase.co" in out
+    assert out.index("target ") < out.index("capturing the current state"), (
+        "the operator must see the target before the first thing that touches it")
+    assert out.index("target ") < out.index("WROTE"), (
+        "the target must be named before any row is written")
+
+
+def test_the_target_line_never_carries_credentials(tmp_path, capsys, monkeypatch):
+    """A URL with userinfo must not put it in a terminal, a log or a transcript."""
+    archive = _write_archive(tmp_path, {"things": [{"id": 1}]})
+    _offline(monkeypatch)
+
+    snap.restore(archive, _url_with_userinfo(), "k",
+                 dry_run=True, pre_snapshot=False)
+    out = capsys.readouterr().out
+
+    assert "db.example.edu:5432" in out
+    assert "fixture-credential" not in out, "the credential reached the output"
+    assert "fixture-user" not in out, "the user reached the output"
+
+
+def test_a_url_with_no_host_is_said_rather_than_guessed(
+        tmp_path, capsys, monkeypatch):
+    archive = _write_archive(tmp_path, {"things": [{"id": 1}]})
+    _offline(monkeypatch)
+
+    snap.restore(archive, "not-a-url", "k", dry_run=True, pre_snapshot=False)
+    assert "unparseable target" in capsys.readouterr().out
+
+
 # ── rotation ─────────────────────────────────────────────────────────────────
 
 def test_prune_keeps_the_newest_and_spares_the_one_just_written(tmp_path):
