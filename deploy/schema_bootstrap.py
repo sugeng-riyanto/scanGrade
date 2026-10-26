@@ -46,6 +46,19 @@ The distinction that keeps this honest is the SQLSTATE, not the message:
   `RAISE` (`P0001`) are not things another pass will fix, and a bootstrap that
   shrugged at them would report a schema this repository cannot actually build.
 
+## A target that is not empty is a different question, and `--audit` is the answer
+
+Running the plan against a database that already holds another application's
+tables — which is what the Sydney staging project is: a legacy Django schema, a
+hand-written scaffold of `schools`, `profiles` and `exams`, and the ScanMeet
+migrations on top — is not a bootstrap, it is a merge, and `CREATE TABLE IF NOT
+EXISTS` turns a collision into a silent skip. `--audit` reads the target and
+writes nothing: which declared relations are absent, which are present but short
+of a declared column, and — with `pg_class.reltuples`, no scan and no lock — how
+many rows the tables it would alter already hold. A relation that exists with
+*more* columns than declared is not a finding: the migrations add columns with
+`IF NOT EXISTS`, so that is the normal case.
+
 ## What it refuses to do
 
 Production is refused by project ref (`deploy/supabase_region.py`'s ``REF``), not
@@ -297,8 +310,8 @@ def tables(cur) -> set[str]:
     return {row[0] for row in cur.fetchall()}
 
 
-def declared() -> set[str]:
-    """The tables the repository's SQL says the schema has.
+def declared_schema() -> dict[str, set[str]]:
+    """Every table the repository's SQL says the schema has, with its columns.
 
     `schema_contract` already parses them out of the SQL — including the `ALTER
     TABLE ... ADD COLUMN` that most migrations are — so this does not keep a second
@@ -306,7 +319,74 @@ def declared() -> set[str]:
     """
     sys.path.insert(0, str(ROOT))
     from deploy import schema_contract
-    return set(schema_contract.schema_from_migrations())
+    return schema_contract.schema_from_migrations()
+
+
+def declared() -> set[str]:
+    """The table names alone, which is all a completeness verdict needs."""
+    return set(declared_schema())
+
+
+# ── the audit, which writes nothing ─────────────────────────────────────────
+
+def live_columns(cur) -> dict[str, set[str]]:
+    """Every relation in `public` and its columns, read, never written."""
+    cur.execute(
+        "select table_name, column_name from information_schema.columns "
+        "where table_schema = 'public'")
+    out: dict[str, set[str]] = {}
+    for table, column in cur.fetchall():
+        out.setdefault(table, set()).add(column)
+    return out
+
+
+def row_estimates(cur) -> dict[str, int]:
+    """A cheap row count per relation, for the tables a bootstrap would alter.
+
+    `reltuples` is the planner's own estimate and needs no scan, no lock and no
+    ownership — which is the point on a database holding somebody else's data: the
+    number exists to stop a reader from treating a populated table as scaffolding.
+    """
+    cur.execute(
+        "select c.relname, greatest(c.reltuples, 0)::bigint from pg_class c "
+        "join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public'")
+    return {name: int(count) for name, count in cur.fetchall()}
+
+
+def audit(cur, declared_tables: dict[str, set[str]] | None = None) -> dict:
+    """What an empty-database bootstrap would do to *this* database, without doing it.
+
+    A target that is not empty is the case this exists for. Sydney already carries
+    a legacy application's tables and a hand-written scaffold of `schools`,
+    `profiles` and `exams`, so the question is never "is it empty" but "which of
+    the declarations would collide with something that is already there and has
+    rows in it". A relation that exists with *more* columns than declared is fine
+    — the migrations add columns with `IF NOT EXISTS`. One that exists with
+    *fewer*, or with a column of its own name and another type, is the dangerous
+    case, and it is reported with its row estimate so nobody reads a populated
+    table as scaffolding.
+    """
+    wanted = declared_tables if declared_tables is not None else declared_schema()
+    live = live_columns(cur)
+    rows = row_estimates(cur)
+    # The same exemption the completeness verdict uses: a name this repository says
+    # nothing creates is not a gap an audit can ask somebody to close.
+    absent = {name: cols for name, cols in wanted.items()
+              if name not in live and name not in LEGACY}
+    legacy = sorted(name for name in wanted if name not in live and name in LEGACY)
+    present = {name: cols for name, cols in wanted.items() if name in live}
+    short = {name: sorted(cols - live[name]) for name, cols in present.items()
+             if cols - live[name]}
+    foreign = sorted(set(live) - set(wanted))
+    return {
+        "absent": absent,
+        "legacy": legacy,
+        "short": short,
+        "rows": {name: rows.get(name, 0) for name in short},
+        "foreign": foreign,
+        "present": len(present),
+        "declared": len(wanted),
+    }
 
 
 # ── target ───────────────────────────────────────────────────────────────────
@@ -335,6 +415,61 @@ def refuse_production(url: str) -> str | None:
     return None
 
 
+def _audit(url: str, ref: str, json_path: str | None) -> int:
+    """The read-only answer: what is here, what is missing, what would collide."""
+    from deploy import apply_migration
+
+    conn = apply_migration.connect(url)
+    try:
+        cur = conn.cursor()
+        try:
+            reading = audit(cur)
+        finally:
+            cur.close()
+    finally:
+        conn.close()
+
+    absent, short, rows = reading["absent"], reading["short"], reading["rows"]
+    print(f"schema audit: target {ref} (read-only, nothing written)")
+    print(f"schema audit: {reading['present']} of {reading['declared']} declared "
+          f"relation(s) present, {len(absent)} absent, {len(short)} present but "
+          f"missing declared column(s), {len(reading['foreign'])} relation(s) this "
+          f"repository does not declare")
+    for name in sorted(absent):
+        print(f"  ABSENT {name}")
+    for name in sorted(short):
+        print(f"  SHORT {name}  ~{rows.get(name, 0)} row(s) here; would gain "
+              f"{', '.join(short[name])[:120]}")
+    for name in reading["legacy"]:
+        print(f"  LEGACY {name}  -  {LEGACY[name]}")
+    if reading["foreign"]:
+        shown = ", ".join(reading["foreign"][:12])
+        more = len(reading["foreign"]) - 12
+        print(f"  UNTOUCHED (not declared, so no statement in this repository names "
+              f"them, and this tool creates and drops nothing): {shown}"
+              + (f" ... and {more} more" if more > 0 else ""))
+
+    verdict = "PASS" if not absent and not short else "GAPS"
+    print(f"schema audit: {verdict}  -  "
+          + ("this target already has every relation and column the repository "
+             "declares" if verdict == "PASS" else
+             "an empty-database bootstrap would not be a no-op here (see above)"))
+
+    if json_path:
+        pathlib.Path(json_path).write_text(json.dumps({
+            "target_ref": ref,
+            "verdict": verdict,
+            "absent": {name: sorted(cols) for name, cols in absent.items()},
+            "legacy": reading["legacy"],
+            "short": short,
+            "estimated_rows": rows,
+            "not_declared": reading["foreign"],
+        }, indent=1), encoding="utf-8")
+        print("wrote", json_path)
+
+    return 0 if verdict == "PASS" else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--repo", default=str(ROOT))
@@ -342,6 +477,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="DIRECT_URL / DATABASE_URL for an empty database")
     parser.add_argument("--plan", action="store_true",
                         help="print the order and stop; touches no server")
+    parser.add_argument("--audit", action="store_true",
+                        help="read the target and report what a bootstrap would "
+                             "find there; writes nothing")
     parser.add_argument("--json", default=None, metavar="PATH")
     parser.add_argument("--max-passes", type=int, default=MAX_PASSES)
     args = parser.parse_args(argv)
@@ -387,6 +525,10 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     ref = target_ref(url) or "(no supabase ref in the URL)"
+
+    if args.audit:
+        return _audit(url, ref, args.json)
+
     print(f"schema bootstrap: target {ref}. {len(steps)} statement(s) from "
           f"{len(sources)} file(s)")
 

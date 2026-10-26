@@ -359,3 +359,100 @@ class TestTheExitCodes:
         code = sb.main(["--repo", str(tmp_path), "--plan"])
         assert code == 2
         assert "cannot measure" in capsys.readouterr().err
+
+
+# ── the audit, which must write nothing ─────────────────────────────────────
+
+class AuditCursor:
+    """Answers the two reads `audit()` makes, and records everything it is asked."""
+
+    def __init__(self, columns, rows):
+        self.columns = columns
+        self.rows = rows
+        self.statements: list[str] = []
+        self._result: list[tuple] = []
+
+    def execute(self, sql):
+        self.statements.append(sql)
+        flat = " ".join(sql.split()).lower()
+        if "information_schema.columns" in flat:
+            self._result = [(table, column)
+                            for table, cols in self.columns.items()
+                            for column in cols]
+        elif "pg_class" in flat:
+            self._result = [(name, count) for name, count in self.rows.items()]
+        else:                                   # pragma: no cover - a new query
+            raise AssertionError(f"the audit issued a statement it should not: {sql}")
+
+    def fetchall(self):
+        return self._result
+
+    def close(self):
+        return None
+
+
+WANTED = {"schools": {"id", "name", "npsn"}, "profiles": {"id", "full_name"},
+          "exams": {"id", "title", "answer_key"}}
+
+
+class TestTheAuditSeparatesTheFourCases:
+    def test_absent_short_and_untouched_are_told_apart(self):
+        cur = AuditCursor(
+            columns={"schools": {"id", "name", "npsn"},       # complete
+                     "profiles": {"id"},                       # short of full_name
+                     "auth_user_legacy": {"id", "username"}},  # not declared
+            rows={"schools": 12, "profiles": 3, "auth_user_legacy": 900})
+        reading = sb.audit(cur, WANTED)
+        assert reading["absent"] == {"exams": {"id", "title", "answer_key"}}
+        assert reading["short"] == {"profiles": ["full_name"]}
+        assert reading["foreign"] == ["auth_user_legacy"]
+        assert reading["rows"] == {"profiles": 3}, (
+            "a table the bootstrap would ALTER is reported with how many rows it "
+            "already holds, so nobody reads a populated table as scaffolding")
+
+    def test_a_table_with_more_columns_than_declared_is_not_a_finding(self):
+        """The normal case: migrations add columns with IF NOT EXISTS."""
+        cur = AuditCursor(columns={"schools": {"id", "name", "npsn", "legacy_extra"},
+                                   "profiles": {"id", "full_name"},
+                                   "exams": {"id", "title", "answer_key"}},
+                          rows={})
+        reading = sb.audit(cur, WANTED)
+        assert not reading["absent"] and not reading["short"]
+        assert reading["foreign"] == []
+
+    def test_a_legacy_name_nothing_creates_is_not_a_gap(self):
+        cur = AuditCursor(columns={}, rows={})
+        reading = sb.audit(cur, {"activation_codes": {"id"}})
+        assert reading["absent"] == {}, (
+            "the repository says nothing creates activation_codes; an audit that "
+            "demanded it would fail a target that is exactly right")
+        assert reading["legacy"] == ["activation_codes"]
+
+    def test_the_audit_issues_only_reads(self):
+        cur = AuditCursor(columns={"schools": {"id", "name", "npsn"}}, rows={})
+        sb.audit(cur, WANTED)
+        assert cur.statements, "the audit read nothing, so it measured nothing"
+        for sql in cur.statements:
+            assert sql.strip().lower().startswith("select"), (
+                f"the audit is documented as writing nothing and issued: {sql}")
+
+
+class TestTheAuditThroughMain:
+    def test_a_production_url_is_refused_before_anything_is_read(self, monkeypatch, capsys):
+        from deploy import supabase_region
+
+        def explode(url):
+            raise AssertionError("read a database it had already refused")
+
+        monkeypatch.setattr(sb, "_audit", explode)
+        code = sb.main(["--repo", str(REPO), "--audit",
+                        "--url", pooler(supabase_region.REF)])
+        assert code == 1
+        assert "refusing" in capsys.readouterr().err
+
+    def test_no_url_is_cannot_measure(self, monkeypatch, capsys):
+        monkeypatch.setattr(sb, "load_url", lambda repo: (_ for _ in ()).throw(
+            SystemExit("no DIRECT_URL")))
+        code = sb.main(["--repo", str(REPO), "--audit"])
+        assert code == 2
+        assert "cannot measure" in capsys.readouterr().err
