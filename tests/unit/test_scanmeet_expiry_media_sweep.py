@@ -120,7 +120,7 @@ def test_pagination_reaches_expired_schools_beyond_first_page():
     ]
     deleted = []
     result = sweep_expired(db, end_room=deleted.append,
-                           enqueue=lambda *a, **k: None, now=NOW, limit=25)
+                           enqueue=lambda *a, **k: None, now=NOW, limit=25, max_schools=30)
     assert result["schools"] == 30
     assert result["ended"] == 1
     assert deleted == ["last-room"]
