@@ -99,6 +99,7 @@ from dataclasses import dataclass, field
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import touch_gate  # noqa: E402  (the one CDP client, launcher and sign-in here)
+from deploy.safe_url import host_only
 
 EXIT_OK = 0
 EXIT_FINDING = 1
@@ -1681,7 +1682,7 @@ def main(argv=None) -> int:
         return EXIT_CANNOT_MEASURE
 
     if production_target(args.url) and not args.allow_production:
-        print(f"COULD NOT MEASURE: {ascii_safe(args.url.rstrip('/'))} is the live site.")
+        print(f"COULD NOT MEASURE: {ascii_safe(host_only(args.url))} is the live site.")
         print("This driver opens a Live room and presses a teacher's controls, so it "
               "runs against staging. Pass --allow-production for a deliberate pilot "
               "on the live site.")
@@ -1738,7 +1739,7 @@ def main(argv=None) -> int:
         return code
 
     print(ascii_safe(
-        f"scanmeet media gate: driving {args.url.rstrip('/')} with {binary}"
+        f"scanmeet media gate: driving {host_only(args.url)} with {binary}"
         f" ({'synthetic devices' if not args.no_fake_devices else 'real devices'})"))
     for item in rows:
         mark = {"pass": "PASS", "fail": "FAIL"}.get(item.state, "SKIP")
@@ -1748,7 +1749,7 @@ def main(argv=None) -> int:
     skipped = [item for item in rows if item.state == "skipped"]
     if failed:
         print(f"\nFAILED: {len(failed)} row(s) disagreed - {len(passed)}/{len(rows)} "
-              f"passed on {args.url.rstrip('/')}")
+              f"passed on {host_only(args.url)}")
         print("A room is not ready for pupils until every row here passes: the "
               "media claims are the pilot's own evidence.")
     elif skipped:

@@ -40,6 +40,7 @@ import os
 import secrets
 import sys
 import time
+from deploy.safe_url import host_only
 
 # The signing half of the optional staging set (`requirements-live.txt` pulls
 # PyJWT in with `livekit-api`). Kept optional so this module still imports on a
@@ -216,7 +217,7 @@ def main(argv=None) -> int:
               "it thinks it is: do not open the room to pupils until it passes.")
         return 1
     print(f"\nPASS: {len(rows)}/{len(rows)} webhook probes answered as expected "
-          f"on {args.url.rstrip('/')}")
+          f"on {host_only(args.url)}")
     return 0
 
 

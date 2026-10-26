@@ -52,6 +52,7 @@ from pathlib import Path
 import requests
 from dotenv import load_dotenv
 from supabase import create_client
+from deploy.safe_url import host_only
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -216,8 +217,8 @@ def main() -> int:
     second = school_by_npsn(svc, SECOND_NPSN)
     foreign = school_by_npsn(svc, FOREIGN_NPSN)
 
-    print("project : {}".format(url))
-    print("box     : {}".format(args.base_url))
+    print("project : {}".format(host_only(url)))
+    print("box     : {}".format(host_only(args.base_url)))
     print("home    : {} {} ({})".format(home["npsn"], home["name"], home["id"]))
     print("second  : {} {} ({})".format(second["npsn"], second["name"], second["id"]))
 
