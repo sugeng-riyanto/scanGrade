@@ -44,6 +44,10 @@ workspace before trusting a Cloud agent's numbers.
 - `bash deploy/theme_gate.sh` on the fix branch below: **exit 0**, including
   `doc links: 2162 reference(s) checked, 490 exempt, 0 unresolved`,
   `i18n coverage: OK`, and `merge runbook: 62 labelled row(s) agree`.
+- **PR #42 (the integrated tree), which nobody had run before**: `python -m pytest
+  tests/unit` → **11 467 passed, 165 skipped, 0 failed** in 601.71 s, then
+  `bash deploy/theme_gate.sh` → **exit 0** with the full OK sentence. Details below,
+  because a bare pass count is not the same claim.
 - GitHub Actions, read from the run list: `unit suite`, `region guard`,
   `skipped-path coverage`, `landing quality control` and `browser gate` are green
   on both draft PRs. `main`'s own unit-suite run was **cancelled** (superseded),
@@ -147,6 +151,42 @@ number someone acts on.
 A hypothesis I checked and dropped: `sweep_expired` compares `valid_until` to an
 `+00:00` ISO stamp, which would be wrong for a text column. `075` declares
 `valid_until timestamptz`, so the comparison is a real timestamp comparison.
+
+## PR #42 run — the numbers, and what moved them
+
+#42 is the only branch carrying #39 + #40 + #41 together, and the owner's own note
+says the combined tree is what needs the suite. It had never been run. Run again
+with `-rs` to read the skips rather than count them:
+
+| tree | passed | skipped | failed |
+| --- | --- | --- | --- |
+| `main` | 11 541 | 51 | 0 |
+| PR #42, one command, no `node_modules` | 11 467 | 165 | 0 |
+| PR #42, the 114 re-run after `npm ci` | 114 | 0 | 0 |
+
+Those two #42 rows are two runs, not one: the suite, then the four jsdom/tailwind
+files on their own. Summed they are **11 581 passed, 51 skipped, 0 failed** —
+`main` plus 40 new tests and nothing lost.
+
+The first reading looks like a regression — 74 fewer passes — and is not one. **113
+of the 114 extra skips are jsdom** (`test_exam_graph_local`, `test_essay_toolbar`,
+`test_essay_answer_integrity`) plus one tailwind CLI, because the scratch worktree
+had no `node_modules`; this box's `main` run had them installed at the time. After
+`npm ci` in that worktree those four files report **195 passed**. So the integrated
+tree is `main` + 40 new tests, all passing, with the same 51 environmental skips
+(no Chrome, no interpreter below the floor, no `.env` for two app-boot suites).
+
+The gate is exit 0 on that same SHA, so #39 + #40 + #41 do not break each other's
+guards. Two ways to make that gate lie, both hit here and both the box's fault:
+
+1. `deploy/theme_gate.sh` calls whichever `python3` is on `PATH`. Off the venv it
+   found `/usr/local/bin/python3`, which has no pytest, and the merge-runbook block
+   died with `ModuleNotFoundError` — a red gate that says nothing about the release.
+2. A scratch worktree under `/tmp` inherits the *repository's* ownership, so git
+   answered `detected dubious ownership` and ten tests that ask `git ls-files`
+   failed. A process-local `safe.directory` fixed it without writing any git config.
+
+Neither is a property of #42, and neither should be mistaken for one.
 
 ## Deployment state — reported, not re-measured here
 
