@@ -2751,4 +2751,3 @@ def scanmeet_school_licenses():
         response["warning"] = "License OFF; active media cleanup remains unconfirmed"
         return jsonify(response), 202
     return jsonify(response)
-                    "revoked": revoked, "cleanup_pending": pending})
