@@ -2749,4 +2749,5 @@ def scanmeet_school_licenses():
     # until LiveKit deletion succeeds. Do not imply cleanup was completed.
     if pending:
         response["warning"] = "License OFF; active media cleanup remains unconfirmed"
-        return jsonify(response)
+        return jsonify(response), 202
+    return jsonify(response)
