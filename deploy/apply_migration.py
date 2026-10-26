@@ -733,8 +733,22 @@ def recovery_line(entry_path: Path) -> str | None:
 def status(ledger: Path, migrations: Path) -> int:
     files = sorted(migrations.glob(f"*{MIGRATION_SUFFIX}"))
     if not files:
-        print(f"no {MIGRATION_SUFFIX} files in {migrations}")
-        return 0
+        # A zero here reads as "nothing to apply", which is the best possible news
+        # for a release — and it is also what a wrong `--repo` answers, silently.
+        # Measured: `--repo` defaults to `/opt/scangrade`, so running this from a
+        # checkout that is not there printed `no .sql files in
+        # /opt/scangrade/supabase/migrations` and exited **0**. Every operator's
+        # first step before 073–075 is this inventory, so a green zero that means
+        # "I could not find the checkout" is the one answer it must not give.
+        print(f"cannot read any {MIGRATION_SUFFIX} files in {migrations}")
+        if not migrations.is_dir():
+            print(f"  {migrations} is not a directory — is --repo pointing at the")
+            print("  checkout? It defaults to /opt/scangrade, which is the box's.")
+        else:
+            print("  the directory exists and holds no migrations — was --repo")
+            print("  given the checkout root rather than its parent?")
+        print("Nothing was inventoried. This is exit 2, not a clean report.")
+        return 2
 
     print(f"{'file':<58} {'record':<30} sha256")
     print("-" * 100)
