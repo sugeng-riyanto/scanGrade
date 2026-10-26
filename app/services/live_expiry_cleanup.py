@@ -61,6 +61,7 @@ def sweep_expired(db, *, end_room, enqueue, now=None, limit=25):
                 continue
             # Drain in batches without a fixed first-page ceiling. Ended rows
             # leave the active query; break if no progress to avoid a busy loop.
+            renewed = False
             while True:
                 sessions = (db.table("scan_live_sessions")
                             .select("id,room_name,school_id,status")
@@ -73,7 +74,8 @@ def sweep_expired(db, *, end_room, enqueue, now=None, limit=25):
                     # Recheck renewal close to the deletion boundary. This is
                     # not an atomic guard; race E2E remains a release gate.
                     if active(db, school_id, now=moment):
-                        return report
+                        renewed = True
+                        break
                     ended = (db.table("scan_live_sessions")
                              .update({"status": "ended"})
                              .eq("id", session["id"]).eq("school_id", school_id)
@@ -92,6 +94,8 @@ def sweep_expired(db, *, end_room, enqueue, now=None, limit=25):
                                 report["cleanup_unrecorded"].append(session["id"])
                         except Exception:
                             report["cleanup_unrecorded"].append(session["id"])
+                if renewed:
+                    break
                 if progressed == 0:
                     report["errors"].append("no progress ending sessions for " + str(school_id))
                     break
