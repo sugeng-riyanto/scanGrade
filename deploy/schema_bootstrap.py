@@ -219,6 +219,21 @@ def _excluded(name: str) -> bool:
     return low in EXCLUDED or low.startswith("combined_")
 
 
+#: Statements that remove a whole relation or every row in it. Nothing in this
+#: repository's plan should do either: a bootstrap adds, and a target that already
+#: holds another application's data is exactly where a `DROP TABLE` would be
+#: unrecoverable. `DELETE` is deliberately *not* here — migration 034's singleton
+#: cleanup deletes rows from a table this same plan creates, which is housekeeping
+#: rather than destruction — so it is counted separately.
+DESTRUCTIVE = re.compile(r"\b(DROP\s+TABLE|DROP\s+SCHEMA|TRUNCATE)\b", re.I)
+ROW_DELETE = re.compile(r"\bDELETE\s+FROM\b", re.I)
+
+
+def destructive(steps: list[Step]) -> list[Step]:
+    """The steps that would remove a relation, or every row in one."""
+    return [step for step in steps if DESTRUCTIVE.search(step.sql)]
+
+
 def plan(repo: pathlib.Path = ROOT) -> list[Step]:
     """Every statement to run, in the order this repository can actually run it."""
     files: list[pathlib.Path] = []
@@ -644,6 +659,9 @@ def main(argv: list[str] | None = None) -> int:
             count = sum(1 for step in steps if step.source == source)
             print(f"  {count:4d} statement(s)  {source}")
         print(f"{len(steps)} statement(s) from {len(sources)} file(s), in this order.")
+        print(f"  {len(destructive(steps))} statement(s) drop a table, a schema or "
+              f"truncate; {sum(1 for s in steps if ROW_DELETE.search(s.sql))} "
+              f"delete row(s)")
         for name, reason in EXCLUDED.items():
             print(f"  left out: {name}  -  {reason}")
         print("  left out: combined_*.sql  -  the same reason: an aggregate")

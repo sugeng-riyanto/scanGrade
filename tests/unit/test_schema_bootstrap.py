@@ -661,3 +661,42 @@ class TestAViewThatCannotShrinkIsNotAFailure:
         assert sb._is_view_replace("  create or replace view v (id) as select 1")
         assert not sb._is_view_replace("CREATE VIEW v AS SELECT 1")
         assert not sb._is_view_replace("SELECT * FROM v")
+
+
+class TestThePlanOnlyAdds:
+    """A bootstrap adds. The one place a `DROP TABLE` would be unrecoverable is
+    the target this tool exists to be pointed at: a database holding somebody
+    else's data."""
+
+    def test_no_step_drops_a_relation_or_truncates(self):
+        offenders = sb.destructive(sb.plan(REPO))
+        assert not offenders, (
+            "the plan removes a relation, which is not recoverable on a target that "
+            "already holds data:\n    "
+            + "\n    ".join(f"{s.source}: {s.head()}" for s in offenders))
+
+    def test_the_detector_would_recognise_one(self):
+        """A guard that finds nothing has to be shown able to find something."""
+        for sql in ("DROP TABLE legacy_users", "drop schema if exists old cascade",
+                    "TRUNCATE public.exams"):
+            assert sb.destructive([sb.Step("x.sql", sql)]), sql
+        for sql in ("DELETE FROM trial_settings WHERE id <> 1",
+                    "ALTER TABLE t DROP COLUMN IF EXISTS staged",
+                    "DROP POLICY IF EXISTS p ON t"):
+            assert not sb.destructive([sb.Step("x.sql", sql)]), sql
+
+    def test_the_row_deletes_that_exist_are_housekeeping_or_a_function_body(self):
+        """Two `DELETE FROM` clauses are in the plan, and neither runs on apply.
+
+        034 clears a singleton table this same plan creates (`trial_settings`),
+        and 065's `DELETE` is inside a `CREATE OR REPLACE FUNCTION` body — a
+        statement the bootstrap creates rather than executes. A future third one
+        has to be accounted for here rather than discovered on a customer's box.
+        """
+        deletes = [s for s in sb.plan(REPO) if sb.ROW_DELETE.search(s.sql)]
+        assert deletes, "the count printed by --plan is for statements that exist"
+        for step in deletes:
+            in_function = step.sql.lstrip().upper().startswith("CREATE OR REPLACE FUNCTION")
+            assert in_function or "trial_settings" in step.sql, (
+                f"{step.source} deletes rows and is neither the singleton cleanup "
+                f"nor a function body: {step.head()}")
