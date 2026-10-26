@@ -9,6 +9,29 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 
+def _confirmed_expired(db, school_id, now):
+    """Only a successful, explicit expired entitlement read permits deletion.
+
+    Admission is fail-closed on DB outages; destructive cleanup must not treat
+    an unknown license state as proof of expiry.
+    """
+    rows = (db.table("scanmeet_school_entitlements")
+            .select("enabled,status,valid_until")
+            .eq("school_id", school_id).limit(1).execute().data or [])
+    if len(rows) != 1:
+        raise ValueError("entitlement unavailable or ambiguous")
+    row = rows[0]
+    if row.get("enabled") is not True or row.get("status") not in ("trial", "paid"):
+        return False
+    expiry = row.get("valid_until")
+    if not isinstance(expiry, str):
+        raise ValueError("entitlement expiry unavailable")
+    deadline = datetime.fromisoformat(expiry.replace("Z", "+00:00"))
+    if deadline.tzinfo is None:
+        raise ValueError("entitlement expiry timezone unavailable")
+    return deadline <= now
+
+
 def sweep_expired(db, *, end_room, enqueue, now=None, limit=25):
     """Attempt expiry revocation; return explicit failures, never a false PASS.
 
@@ -55,9 +78,8 @@ def sweep_expired(db, *, end_room, enqueue, now=None, limit=25):
             if not latest:
                 report["errors"].append("entitlement disappeared: " + str(school_id))
                 continue
-            from app.services.live_school_entitlement import active
-            # A renewed entitlement should not have its active room terminated.
-            if active(db, school_id, now=moment):
+            # Do not delete on an unknown DB state: only confirmed expiry.
+            if not _confirmed_expired(db, school_id, moment):
                 continue
             # Drain in batches without a fixed first-page ceiling. Ended rows
             # leave the active query; break if no progress to avoid a busy loop.
@@ -73,7 +95,7 @@ def sweep_expired(db, *, end_room, enqueue, now=None, limit=25):
                 for session in sessions:
                     # Recheck renewal close to the deletion boundary. This is
                     # not an atomic guard; race E2E remains a release gate.
-                    if active(db, school_id, now=moment):
+                    if not _confirmed_expired(db, school_id, moment):
                         renewed = True
                         break
                     ended = (db.table("scan_live_sessions")
