@@ -409,3 +409,75 @@ class TheOptionalSdkIsNamedRatherThanBlamed(unittest.TestCase):
         self.assertIn("requirements-live.txt", out, out)
         self.assertNotIn("has no attribute", out, (
             "a reader sent to a NoneType traceback cannot install the package"))
+
+
+class TheProbeRefusesTheLiveSite(unittest.TestCase):
+    """The webhook probe is the one instrument that signs real deliveries.
+
+    Every row it checks is a genuine HS256 delivery, so pointing it at the live
+    site is posting signed webhook traffic at an exam. The media gate refused
+    that from the start; the probe asked nowhere -- and in
+    `.github/workflows/scanmeet-staging-media.yml` it runs *before* the media
+    gate, so a dispatched run with a production URL in `SCANMEET_STAGING_URL`
+    would have sent eight deliveries to production before the driver refused.
+    """
+
+    def _main(self, url, **patches):
+        import contextlib
+        import io
+
+        from deploy import scanmeet_webhook_probe as probe
+
+        class _NeverUsed:
+            def post(self, *a, **k):
+                raise AssertionError(
+                    "the probe sent a request to " + url + " before refusing it")
+
+            def __getattr__(self, name):
+                raise AssertionError("the probe touched the network: " + name)
+
+        buffer = io.StringIO()
+        with unittest.mock.patch.object(probe, "jwt", object()), \
+                unittest.mock.patch.object(probe, "requests", _NeverUsed()), \
+                contextlib.redirect_stdout(buffer):
+            code = probe.main(["--url", url, "--api-key", "synthetic-key",
+                               "--api-secret", "synthetic-secret"])
+        return code, buffer.getvalue()
+
+    def test_every_production_host_is_refused_before_a_delivery(self):
+        for host in gate.PRODUCTION_HOSTS:
+            with self.subTest(host=host):
+                code, out = self._main("https://" + host)
+                self.assertEqual(code, 2, out)
+                self.assertIn("is the live site", out, out)
+
+    def test_a_subdomain_of_the_live_domain_is_refused_too(self):
+        """`lmsshb.` proved those names reach the same box; a future alias cannot
+        be told from the site itself."""
+        code, out = self._main("https://pilot.scangrade.web.id")
+        self.assertEqual(code, 2, out)
+        self.assertIn("is the live site", out, out)
+
+    def test_a_staging_host_is_not_refused(self):
+        """The control: a guard that refuses everything refuses nothing useful."""
+        self.assertFalse(gate.production_target("https://staging.school.edu"))
+        self.assertFalse(gate.production_target("https://scanmeet-stage.up.railway.app"))
+
+    def test_the_refusal_never_prints_the_credentials_in_the_url(self):
+        code, out = self._main("https://probe:sup3r-secret@scangrade.web.id")
+        self.assertEqual(code, 2, out)
+        self.assertIn("scangrade.web.id", out)
+        self.assertNotIn("sup3r-secret", out, "the refusal echoed the password")
+        self.assertNotIn("probe:", out, "the refusal echoed the username")
+
+    def test_the_probe_and_the_media_gate_ask_the_same_question(self):
+        """Two lists that must not drift: the probe borrows the gate's function,
+        and the media gate keeps its own copy -- which a new host added to only
+        one of them would silently split."""
+        from deploy import scanmeet_media_gate as media
+
+        self.assertEqual(set(gate.PRODUCTION_HOSTS), set(media.PRODUCTION_HOSTS))
+        for host in gate.PRODUCTION_HOSTS + ("anything.scangrade.web.id",):
+            with self.subTest(host=host):
+                self.assertEqual(gate.production_target("https://" + host),
+                                 media.production_target("https://" + host))

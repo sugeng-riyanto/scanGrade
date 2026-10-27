@@ -55,6 +55,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from deploy.livekit_preflight import parse_env
+from deploy.safe_url import host_only
 
 #: The gates this runner drives, by the module that implements each.
 GATES = {"webhook": "deploy.scanmeet_webhook_probe",
@@ -290,7 +291,7 @@ def main(argv=None, *, spawn=subprocess.run, which=shutil.which,
 
     print("ScanMeet acceptance runner")
     print(f"  gates    {', '.join(gates)}")
-    print(f"  url      {settings.get('SCANMEET_STAGING_URL', '(missing)')}")
+    print(f"  url      {host_only(settings.get('SCANMEET_STAGING_URL'), missing='(missing)')}")
     print(f"  exam     {settings.get('SCANMEET_EXAM_ID', '(missing)')}")
     for key in IDENTITIES:
         present = "present" if split_identity(settings.get(key, "")) else "missing"

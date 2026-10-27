@@ -43,6 +43,28 @@ REQUIRED = ("SUPABASE_URL", "SUPABASE_SERVICE_KEY",
             "SUPABASE_ANON_KEY", "FLASK_SECRET_KEY", "SCANMEET_STAGING_URL")
 
 
+def production_target(url: str) -> bool:
+    """True when `url` is the live site rather than a staging host.
+
+    The live-site question is asked from two places that must never disagree:
+    `deploy/scanmeet_media_gate.py` before it opens a browser, and
+    `deploy/scanmeet_webhook_probe.py` before it sends a signed delivery. The
+    probe used to ask it nowhere, so a dispatched staging run with a production
+    URL in `SCANMEET_STAGING_URL` would have posted signed webhook traffic at the
+    live site -- the media gate would have refused, but only after the earlier
+    step had already probed. It lives here because this module is the one that
+    owns the list, and the media gate's copy is held equal to it by a test.
+
+    The suffix rule is what makes a new name under the live domain production
+    too: `lmsshb.` already proves those names reach this box's app, so a caller
+    cannot tell a future alias from the site itself.
+    """
+    host = (urlsplit(url).hostname or "").lower()
+    return (host in PRODUCTION_HOSTS
+            or host == PRODUCTION_DOMAIN
+            or host.endswith("." + PRODUCTION_DOMAIN))
+
+
 def validate(settings: dict[str, str], production_ref: str) -> list[str]:
     """Offline validation without reading actual credentials or using the network."""
     problems = audit(settings, pilot=True)

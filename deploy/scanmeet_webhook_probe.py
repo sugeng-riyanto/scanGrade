@@ -24,7 +24,8 @@ database at all). `--room` makes the probe use a real room name so the event is
 expected to be *stored*, and then 204 is a finding.
 
 Exit codes follow the other tools here: 0 every probe answered as expected,
-1 one disagreed, 2 could not probe (missing URL, key or secret).
+1 one disagreed, 2 could not probe (missing URL, key or secret, or a URL that is
+the live site rather than a staging host).
 
 Usage:
     python -m deploy.scanmeet_webhook_probe --url https://staging.example.edu
@@ -40,6 +41,8 @@ import os
 import secrets
 import sys
 import time
+from deploy.safe_url import host_only
+from deploy.scanmeet_staging_gate import production_target
 
 # The signing half of the optional staging set (`requirements-live.txt` pulls
 # PyJWT in with `livekit-api`). Kept optional so this module still imports on a
@@ -201,6 +204,18 @@ def main(argv=None) -> int:
               "and never needed in the same command twice.")
         return 2
 
+    # Refused before the first request, not after the run: every probe below is a
+    # signed delivery, and signing one for the live site is traffic a real exam
+    # does not need. The escape hatch a deliberate pilot would use does not exist
+    # here on purpose -- `--allow-production` belongs to the media driver, which
+    # an operator has to type; a probe that defaults to the staging secret has no
+    # legitimate reason to reach production.
+    if production_target(args.url):
+        print("COULD NOT PROBE: " + host_only(args.url) + " is the live site.")
+        print("These deliveries are signed with the staging LiveKit secret and "
+              "belong on a staging host; point SCANMEET_STAGING_URL at it.")
+        return 2
+
     try:
         rows = probes(args.url, args.api_key, args.api_secret, args.room or None)
     except ProbeError as exc:
@@ -216,7 +231,7 @@ def main(argv=None) -> int:
               "it thinks it is: do not open the room to pupils until it passes.")
         return 1
     print(f"\nPASS: {len(rows)}/{len(rows)} webhook probes answered as expected "
-          f"on {args.url.rstrip('/')}")
+          f"on {host_only(args.url)}")
     return 0
 
 
