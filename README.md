@@ -1,5 +1,7 @@
 # ScanGrade
 
+> **Konstitusi proyek / Project constitution:** Setiap ide, fitur, keputusan biaya, PR, migrasi dan deployment harus merujuk [Konstitusi ScanGrade](docs/SCANGRADE_CONSTITUTION.md). Keselamatan ujian, pengalaman guru/siswa, privasi, keterjangkauan, dan kejujuran bukti mendahului kecepatan rilis.
+
 Platform ujian digital untuk sekolah: penyusunan soal, ujian online **offline-first**, koreksi lembar jawaban dari **foto ponsel** (OMR), penilaian esai dengan bantuan AI + override guru, analisis butir soal, laporan resmi per kelas dan per murid, pengawasan ujian, komunikasi guru–murid, serta kepatuhan **UU PDP**.
 
 Dipakai produksi di <https://scangrade.web.id> — VPS 1 vCPU, 3 worker gunicorn+gevent, ~500 murid per sekolah dengan WiFi tidak merata.
