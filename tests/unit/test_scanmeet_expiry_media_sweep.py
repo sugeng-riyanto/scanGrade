@@ -49,7 +49,13 @@ class Database:
         self.data = {
             "scanmeet_school_entitlements": [
                 {"school_id": "school-a", "enabled": True,
-                 "status": "trial", "valid_until": valid_until}
+                 "status": "trial", "valid_until": valid_until},
+                # school-b is licensed on purpose: "a lapsed school's sweep does
+                # not touch another school's room" is only a claim about isolation
+                # while that other school is entitled. Session enumeration means a
+                # school with no row would now be revoked on its own merits.
+                {"school_id": "school-b", "enabled": True,
+                 "status": "paid", "valid_until": FUTURE},
             ],
             "scan_live_sessions": [
                 {"id": "session-a", "school_id": "school-a",
@@ -186,6 +192,12 @@ def test_entitlement_read_error_never_authorizes_room_deletion():
 
 
 def test_entitlement_read_failure_mid_batch_stops_further_deletion():
+    """A licence that becomes unreadable mid-pass deletes nothing further.
+
+    The failure is triggered by the first successful deletion rather than by
+    counting queries: a count encodes how many reads *this* implementation
+    happens to make, and the guarantee does not depend on that number.
+    """
     db = Database()
     db.data["scan_live_sessions"] = [
         {"id": "first", "school_id": "school-a",
@@ -194,24 +206,122 @@ def test_entitlement_read_failure_mid_batch_stops_further_deletion():
          "room_name": "room-second", "status": "active"},
     ]
     deleted = []
+    offline = {"on": False}
+
+    def delete_first(room):
+        deleted.append(room)
+        offline["on"] = True          # the licence database goes away after this
+
     original_table = db.table
-    calls = {"count": 0}
+
     def table(name):
         query = original_table(name)
         if name == "scanmeet_school_entitlements":
             execute = query.execute
+
             def guarded_execute():
-                calls["count"] += 1
-                # Initial query + initial recheck + first per-room validation
-                # succeed, but the second room's validation is unavailable.
-                if calls["count"] >= 5:
+                if offline["on"]:
                     raise ConnectionError("license DB offline")
                 return execute()
             query.execute = guarded_execute
         return query
+
     db.table = table
-    result = sweep_expired(db, end_room=deleted.append,
+    result = sweep_expired(db, end_room=delete_first,
                            enqueue=lambda *a, **k: None, now=NOW)
     assert deleted == ["room-first"]
     assert db.data["scan_live_sessions"][1]["status"] == "active"
     assert result["errors"]
+
+# ── a licence switched OFF, not merely expired ──────────────────────────────
+def _disable(db):
+    """Exactly what the super-admin form stores when a licence is switched off."""
+    db.data["scanmeet_school_entitlements"][0].update(
+        {"enabled": False, "status": "disabled", "valid_until": None})
+
+
+def test_a_disabled_licence_ends_the_room_that_is_already_running():
+    """The P0 row an expiry-only sweep could never reach.
+
+    `enabled=false` forces `status='disabled'` and `valid_until=NULL`, so a sweep
+    that asks for enabled rows past their deadline never saw this school at all —
+    the room kept publishing pupil video after the add-on was switched off.
+    """
+    db = Database()
+    _disable(db)
+    deleted = []
+
+    report = sweep_expired(db, end_room=deleted.append,
+                           enqueue=lambda *a, **k: None, now=NOW)
+
+    assert deleted == ["room-a"]
+    assert report["ended"] == 1
+    assert report["revoked_schools"] == 1 and report["expired_schools"] == 0
+    assert db.data["scan_live_sessions"][0]["status"] == "ended"
+    # Isolation still holds: the licensed school beside it is untouched.
+    assert db.data["scan_live_sessions"][1]["status"] == "active"
+
+
+def test_a_disabled_licence_records_its_own_reason_in_the_ledger():
+    db = Database()
+    _disable(db)
+    reasons = []
+
+    def record(_db, session, reason=None, error=None):
+        reasons.append(reason)
+        return {"id": "job"}
+
+    def unreachable(room):
+        raise RuntimeError("LiveKit unreachable")
+
+    report = sweep_expired(db, end_room=unreachable, enqueue=record, now=NOW)
+
+    assert reasons == ["school_license_disabled"]
+    assert report["cleanup_pending"] == ["session-a"]
+    assert report["cleanup_unrecorded"] == []
+    assert report["errors"] == []
+
+
+def test_a_status_that_is_not_trial_or_paid_revokes_even_when_enabled():
+    """A contradiction in the row is still a no: `enabled` cannot outvote `status`."""
+    db = Database(valid_until=FUTURE)
+    db.data["scanmeet_school_entitlements"][0]["status"] = "expired"
+    deleted = []
+
+    report = sweep_expired(db, end_room=deleted.append,
+                           enqueue=lambda *a, **k: None, now=NOW)
+
+    assert deleted == ["room-a"] and report["revoked_schools"] == 1
+
+
+def test_a_deleted_licence_row_still_ends_the_room_it_left_running():
+    """No row is a definitive no — and the session is how the school is reached.
+
+    Enumerating licences alone would miss this: with the row gone there is nothing
+    to list the school by, so the sweep takes its key set from active sessions too.
+    """
+    db = Database()
+    db.data["scanmeet_school_entitlements"] = []
+    deleted = []
+
+    report = sweep_expired(db, end_room=deleted.append,
+                           enqueue=lambda *a, **k: None, now=NOW)
+
+    assert sorted(deleted) == ["room-a", "room-b"]
+    assert report["revoked_schools"] == 2 and report["expired_schools"] == 0
+    assert report["errors"] == []
+
+
+def test_a_school_with_two_licence_rows_is_ambiguous_and_keeps_its_room():
+    db = Database()
+    db.data["scanmeet_school_entitlements"].append(
+        {"school_id": "school-a", "enabled": False, "status": "disabled",
+         "valid_until": None})
+    deleted = []
+
+    report = sweep_expired(db, end_room=deleted.append,
+                           enqueue=lambda *a, **k: None, now=NOW)
+
+    assert deleted == []
+    assert report["errors"]
+    assert db.data["scan_live_sessions"][0]["status"] == "active"

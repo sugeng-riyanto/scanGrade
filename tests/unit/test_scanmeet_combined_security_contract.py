@@ -32,7 +32,8 @@ def test_integrated_expiry_maintenance_stays_enabled_with_flags_off():
     assert 'live_expiry_cleanup.sweep_expired(' in start
     assert 'end_room=lambda room: livekit_gateway.end_room(config, room)' in start
     assert 'if not live_policy.feature_enabled(' not in start
-    assert 'if not _confirmed_expired(db, school_id, moment)' in expiry
+    # The recheck before every deletion (the guarantee), whatever name it has.
+    assert 'if _licence_verdict(db, school_id, moment) is None' in expiry
     assert 'cleanup_unrecorded' in expiry
 
 
