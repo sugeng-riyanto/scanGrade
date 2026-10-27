@@ -60,6 +60,19 @@ GATE = gate()
 BROWSER = GATE.touch_gate.locate_browser()
 
 
+@pytest.fixture(autouse=True)
+def _not_a_runner(monkeypatch):
+    """No test may inherit GitHub's own variables and silently expect a commit.
+
+    `expected_commit()` reads `GITHUB_ACTIONS` and `GITHUB_SHA`, which are set on
+    the very runner this suite runs on in CI — so a test that did not clear them
+    would pass here and refuse there. Test-local, because it is about the suite
+    being hermetic rather than about what the driver does.
+    """
+    for name in ("GITHUB_ACTIONS", "GITHUB_SHA", "SCANMEET_EXPECT_COMMIT"):
+        monkeypatch.delenv(name, raising=False)
+
+
 def token_with(sources, *, data=False):
     """A join token shaped like the one the deployment issues, signed with junk.
 
@@ -389,8 +402,26 @@ document.getElementById('live-end').onclick = () => {
 """
 
 
+#: What the harness answers on `/health`: the shape the app publishes, so the
+#: driver's own reader is measured against a real HTTP answer rather than a stub.
+HEALTH = json.dumps({
+    "status": "ok",
+    "commit": {"available": True, "commit": "77abe6f",
+               "full_commit": "77abe6fac0ac227eda219bfdf8596a59d86deaf9",
+               "reason_key": None},
+})
+
+
 class _Handler(BaseHTTPRequestHandler):
     def do_GET(self):  # noqa: N802 - the handler's own name
+        if self.path == GATE.served_commit_gate.DEFAULT_HEALTH_PATH:
+            body = HEALTH.encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         body = HARNESS.encode("utf-8")
         self.send_response(200 if self.path in ("/", "/index.html") else 404)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -575,6 +606,7 @@ def test_the_signoff_flag_prints_the_sheet_and_keeps_the_exit_code(monkeypatch,
 
     monkeypatch.setattr(GATE.touch_gate, "locate_browser", lambda: "/bin/chrome")
     monkeypatch.setattr(GATE, "run", fake_run)
+    _serving(monkeypatch, _reading())
     code = GATE.main(["--url", "https://staging.example.edu", "--exam", "exam-1",
                       "--teacher", "guru@x:pw", "--student", "murid@x:pw",
                       "--signoff"])
@@ -619,6 +651,7 @@ def test_json_out_keeps_the_reading_beside_the_sheet(monkeypatch, capsys,
     monkeypatch.setattr(GATE.touch_gate, "locate_browser", lambda: "/bin/chrome")
     monkeypatch.setattr(
         GATE, "run", lambda **kwargs: (GATE.EXIT_OK, _twelve(), payload))
+    _serving(monkeypatch, _reading())
     out_file = tmp_path / "reading.json"
     code = GATE.main(["--url", "https://staging.example.edu", "--exam", "exam-1",
                       "--teacher", "guru@x:pw", "--student", "murid@x:pw",
@@ -635,6 +668,7 @@ def test_a_reading_that_could_not_be_written_is_not_a_pass(monkeypatch, capsys,
     monkeypatch.setattr(GATE.touch_gate, "locate_browser", lambda: "/bin/chrome")
     monkeypatch.setattr(
         GATE, "run", lambda **kwargs: (GATE.EXIT_OK, _twelve(), {"rows": []}))
+    _serving(monkeypatch, _reading())
     code = GATE.main(["--url", "https://staging.example.edu", "--exam", "exam-1",
                       "--teacher", "guru@x:pw", "--student", "murid@x:pw",
                       "--signoff", "--json-out", str(tmp_path)])
@@ -670,6 +704,7 @@ def test_allow_production_lets_a_deliberate_pilot_through(monkeypatch, capsys):
     monkeypatch.setattr(GATE.touch_gate, "locate_browser", lambda: "/bin/chrome")
     monkeypatch.setattr(
         GATE, "run", lambda **kwargs: (GATE.EXIT_OK, _twelve(), {"rows": []}))
+    _serving(monkeypatch, _reading())
     code = GATE.main(["--url", "https://scan-grade.app", "--exam", "exam-1",
                       "--teacher", "guru@x:pw", "--student", "murid@x:pw",
                       "--signoff", "--allow-production"])
@@ -1105,3 +1140,221 @@ def test_the_teacher_grid_wait_is_for_a_decoded_frame_not_an_element():
     assert "videoWidth > 0" in expression, (
         "waiting for the element alone read as 'no frame of any size' on the next "
         "run — the element is appended before its first frame arrives")
+
+
+# ── which commit answered, and whether the sheet is about it ──────────
+#
+# The thirteen rows are about the code that served the pages, and nothing in them
+# says which code that was. A host dozens of commits behind serves the same
+# thirteen pages and passes the same thirteen rows. Measured on this repository:
+# `.github/workflows/scanmeet-staging-media.yml` ran on `0967b040` while the
+# staging host answered `/health` with `77abe6f`, and the sheet it produced said
+# `SIGNED OFF` — a sign-off for a release that host was not running.
+
+
+def _reading(commit="77abe6f", *, state=None, why="the app named it"):
+    """One `/health` answer, in the reader's own shape."""
+    return GATE.served_commit_gate.Reading(
+        state or GATE.served_commit_gate.READING_OK, commit, why)
+
+
+def _serving(monkeypatch, reading):
+    """Put a known answer in front of the driver.
+
+    The suite is offline on purpose: without this a `main()` test resolves a real
+    hostname, and a test that reaches the network is a test that fails on a box
+    with no DNS. The reader itself is measured against the harness instead.
+    """
+    monkeypatch.setattr(GATE, "served_commit", lambda *args, **kwargs: reading)
+    return reading
+
+
+def test_the_reading_is_the_deploy_gate_s_own_reader(harness):
+    """One reader of `/health`, measured against a real HTTP answer.
+
+    The path, the four states and the parse all belong to
+    `deploy/served_commit_gate.py` — the module the production deploy gates on
+    after every reload. A second parse in the media driver would be a second
+    opinion about what the app is serving, and two opinions is how one of them
+    goes stale.
+    """
+    reading = GATE.served_commit(harness)
+    assert reading.state == GATE.served_commit_gate.READING_OK
+    assert reading.commit == "77abe6fac0ac227eda219bfdf8596a59d86deaf9"
+    assert GATE.served_commit_gate.DEFAULT_HEALTH_PATH == "/health"
+
+
+def test_a_host_that_cannot_be_asked_is_not_a_pass(harness):
+    """A page that is not a JSON object is a reading nobody took."""
+    reading = GATE.served_commit(harness + "/nowhere")
+    assert reading.state == GATE.served_commit_gate.READING_UNREADABLE
+    assert reading.commit is None
+
+
+def test_a_host_on_another_commit_is_refused_before_a_room_is_opened(
+        monkeypatch, capsys):
+    """A green sheet for code the host is not running is worse than no sheet."""
+    drove = []
+    _serving(monkeypatch, _reading("77abe6f"))
+    monkeypatch.setattr(GATE.touch_gate, "locate_browser", lambda: "/bin/chrome")
+    monkeypatch.setattr(
+        GATE, "run", lambda **kwargs: drove.append(kwargs) or (0, _twelve(), {}))
+    code = GATE.main(["--url", "https://staging.example.edu", "--exam", "exam-1",
+                      "--teacher", "guru@x:pw", "--student", "murid@x:pw",
+                      "--expect-commit",
+                      "0967b04022f67040116fe2437fde321b9ef1834d"])
+    out = capsys.readouterr().out
+    assert code == GATE.EXIT_CANNOT_MEASURE
+    assert drove == [], (
+        "the rows would have been about the code that answered, not the commit "
+        "this run is evidence for")
+    assert "0967b040" in out and "77abe6f" in out, (
+        "the refusal has to name both commits, or nobody can act on it")
+    assert "--expect-commit" in out
+
+
+def test_a_host_that_could_not_say_is_not_a_signoff(monkeypatch, capsys):
+    """Silence is not agreement: an unreadable `/health` cannot verify anything."""
+    drove = []
+    _serving(monkeypatch, _reading(
+        None, state=GATE.served_commit_gate.READING_UNREADABLE,
+        why="the host did not answer /health: ConnectionError"))
+    monkeypatch.setattr(GATE.touch_gate, "locate_browser", lambda: "/bin/chrome")
+    monkeypatch.setattr(
+        GATE, "run", lambda **kwargs: drove.append(kwargs) or (0, _twelve(), {}))
+    code = GATE.main(["--url", "https://staging.example.edu", "--exam", "exam-1",
+                      "--teacher", "guru@x:pw", "--student", "murid@x:pw",
+                      "--expect-commit", "0967b040"])
+    out = capsys.readouterr().out
+    assert code == GATE.EXIT_CANNOT_MEASURE
+    assert drove == []
+    assert "ConnectionError" in out
+
+
+def test_the_run_says_what_the_host_served(monkeypatch, capsys):
+    """Read for every run, not only when a commit was demanded."""
+    asked = []
+
+    def reader(url, **kwargs):
+        asked.append(url)
+        return _reading("77abe6f")
+
+    monkeypatch.setattr(GATE, "served_commit", reader)
+    monkeypatch.setattr(GATE.touch_gate, "locate_browser", lambda: "/bin/chrome")
+    monkeypatch.setattr(
+        GATE, "run", lambda **kwargs: (GATE.EXIT_OK, _twelve(), {"rows": []}))
+    code = GATE.main(["--url", "https://staging.example.edu", "--exam", "exam-1",
+                      "--teacher", "guru@x:pw", "--student", "murid@x:pw"])
+    out = capsys.readouterr().out
+    assert code == GATE.EXIT_OK
+    assert asked == ["https://staging.example.edu"], (
+        "the reader asks the host this run drives, not some other one")
+    assert "77abe6f" in out, "a console run has to say which commit answered it"
+
+
+def test_the_sheet_names_the_commit_that_served_the_rows(monkeypatch, capsys,
+                                                         tmp_path):
+    full = "77abe6fac0ac227eda219bfdf8596a59d86deaf9"
+    _serving(monkeypatch, _reading(full))
+    monkeypatch.setattr(GATE.touch_gate, "locate_browser", lambda: "/bin/chrome")
+    monkeypatch.setattr(
+        GATE, "run", lambda **kwargs: (GATE.EXIT_OK, _twelve(), {"rows": []}))
+    out_file = tmp_path / "reading.json"
+    code = GATE.main(["--url", "https://staging.example.edu", "--exam", "exam-1",
+                      "--teacher", "guru@x:pw", "--student", "murid@x:pw",
+                      "--signoff", "--json-out", str(out_file)])
+    printed = capsys.readouterr().out
+    assert code == GATE.EXIT_OK
+    assert "Served commit:" in printed and full in printed, (
+        "a pasted sheet is filed as evidence about a commit; it has to name it")
+    kept = json.loads(out_file.read_text(encoding="utf-8"))["served_commit"]
+    assert kept["commit"] == full and kept["expected"] is None
+
+
+def test_a_sheet_that_could_not_read_the_commit_says_so(monkeypatch, capsys,
+                                                        tmp_path):
+    """A blank beside `13/13 passed` reads as a match, so it is never blank."""
+    _serving(monkeypatch, _reading(
+        None, state=GATE.served_commit_gate.READING_ABSENT,
+        why="the answer carried no commit block (a release from before the "
+            "reading)"))
+    monkeypatch.setattr(GATE.touch_gate, "locate_browser", lambda: "/bin/chrome")
+    monkeypatch.setattr(
+        GATE, "run", lambda **kwargs: (GATE.EXIT_OK, _twelve(), {"rows": []}))
+    code = GATE.main(["--url", "https://staging.example.edu", "--exam", "exam-1",
+                      "--teacher", "guru@x:pw", "--student", "murid@x:pw",
+                      "--signoff", "--json-out", str(tmp_path / "r.json")])
+    printed = capsys.readouterr().out
+    assert code == GATE.EXIT_OK
+    assert "could not be read" in printed
+
+
+def test_either_spelling_of_a_commit_answers_the_same_question():
+    """`$GITHUB_SHA` is forty characters and `/health` publishes both forms."""
+    full = "77abe6fac0ac227eda219bfdf8596a59d86deaf9"
+    assert GATE.commit_matches(_reading(full), "77abe6f")
+    assert GATE.commit_matches(_reading("77abe6f"), full)
+    assert not GATE.commit_matches(_reading("77abe6f"), "0967b040")
+    assert not GATE.commit_matches(_reading(full), ""), (
+        "an empty expectation is not a match for everything")
+    assert not GATE.commit_matches(_reading("77ab"), "77ab"), (
+        "four characters identify nothing, so it is not a match")
+    assert not GATE.commit_matches(
+        _reading(None, state=GATE.served_commit_gate.READING_UNREADABLE,
+                 why="nothing answered"), "77abe6f")
+
+
+def test_a_runner_is_evidence_about_the_commit_it_ran_on():
+    """A dispatched run is about the commit the caller dispatched it on.
+
+    This is the case the workflow was wrong about: it ran on `0967b040` while the
+    host answered `77abe6f`, and nothing asked the question. On a runner the
+    question has an answer the caller already gave, so it is asked by default.
+    """
+    full = "0967b04022f67040116fe2437fde321b9ef1834d"
+    wanted, why = GATE.expected_commit(None, {"GITHUB_ACTIONS": "true",
+                                             "GITHUB_SHA": full})
+    assert wanted == full
+    assert "GITHUB_SHA" in why
+
+
+def test_a_flag_beats_the_environment_and_an_empty_one_records():
+    """Empty is not absent: it is a person saying `record, do not judge`."""
+    environ = {"SCANMEET_EXPECT_COMMIT": "aaaaaaaa", "GITHUB_ACTIONS": "true",
+               "GITHUB_SHA": "bbbbbbbb"}
+    assert GATE.expected_commit("cccccccc", environ)[0] == "cccccccc"
+    assert GATE.expected_commit("", environ)[0] == ""
+    assert GATE.expected_commit(None, environ)[0] == "aaaaaaaa", (
+        "the environment decides before the runner's own variables do")
+
+
+def test_without_a_runner_or_a_value_nothing_is_demanded():
+    """A workstation run against a shared box may only record what answered."""
+    assert GATE.expected_commit(None, {}) == ("", "")
+    assert GATE.expected_commit(None, {"GITHUB_ACTIONS": "true"})[0] == "", (
+        "a runner with no sha cannot name a commit, so it demands nothing")
+
+
+def test_an_empty_expectation_records_the_host_without_refusing(
+        monkeypatch, capsys, tmp_path):
+    """The escape hatch is deliberate, and it still prints what served."""
+    _serving(monkeypatch, _reading("77abe6f"))
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("GITHUB_SHA", "0967b04022f67040116fe2437fde321b9ef1834d")
+    monkeypatch.setattr(GATE.touch_gate, "locate_browser", lambda: "/bin/chrome")
+    monkeypatch.setattr(
+        GATE, "run", lambda **kwargs: (GATE.EXIT_OK, _twelve(), {"rows": []}))
+    code = GATE.main(["--url", "https://staging.example.edu", "--exam", "exam-1",
+                      "--teacher", "guru@x:pw", "--student", "murid@x:pw",
+                      "--expect-commit", "", "--signoff", "--json-out",
+                      str(tmp_path / "r.json")])
+    printed = capsys.readouterr().out
+    assert code == GATE.EXIT_OK, "an explicit empty value must not refuse"
+    assert "77abe6f" in printed
+
+
+def test_a_printed_host_carries_no_credentials():
+    """The report is pasted into tickets; a URL may carry a password."""
+    assert GATE.host_of("https://guru:pw@staging.example.edu/live?e=1#x") == \
+        "https://staging.example.edu/live"
+    assert GATE.host_of("http://127.0.0.1:5055/") == "http://127.0.0.1:5055"
