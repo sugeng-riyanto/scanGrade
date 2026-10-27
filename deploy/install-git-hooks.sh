@@ -56,5 +56,6 @@ fi
 
 echo
 echo "Done — $installed hook(s) in $DEST_DIR"
-echo "They run the checks in $REPO/deploy/theme_gate.sh."
+echo "They run the credential scan (deploy/secret_scan.py) and the checks in"
+echo "$REPO/deploy/theme_gate.sh."
 echo "To skip once: git commit --no-verify"

@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
-# ─── ScanGrade pre-commit — template readability + Tailwind class names ──────
+# ─── ScanGrade pre-commit — credential scan, then the theme gate ─────────────
+#
+# Two checks, and the order is a decision: `deploy/secret_scan.py` runs on every
+# commit and on every staged path, while the theme gate below runs only when the
+# staged paths match its filter. A credential is the one defect that cannot be
+# fixed by a later commit — it is in the history the moment it is pushed — so it
+# is the one check that does not get to depend on which file was edited.
 #
 # Not installed by default: a hook lives in .git/, which is not committed, so
 # every clone has to opt in once with
@@ -10,8 +16,8 @@
 # warning rather than the only defence: it fails the commit instead of the
 # release.
 #
-# It runs only when a template or the stylesheet changed, so the common commit
-# does not pay for it. `git commit --no-verify` skips it, which is Git's own
+# The gate runs only when a template or the stylesheet changed, so the common
+# commit does not pay for it. `git commit --no-verify` skips both, which is Git's own
 # escape hatch and is deliberate — a second, private bypass flag would be the
 # thing that quietly stops this from ever running.
 # ─────────────────────────────────────────────────────────────────────────────
@@ -22,6 +28,53 @@ cd "$REPO" || exit 0
 
 # What is actually being committed, not what happens to be on disk.
 CHANGED=$(git diff --cached --name-only --diff-filter=ACMR)
+
+# ── The credential scan, on every commit and before the filter ───────────────
+#
+# Above the filter on purpose, and that is the whole point of it. A fixture
+# written as `scheme://someone:<password>@db.example.edu` went up in a pull request
+# and GitHub's own scanner failed the check there — after the branch existed, and
+# after the literal was in a commit that could only be cleaned out of the history
+# with a force-push. The theme gate below could not have caught it either: its
+# filter watches templates, stylesheets, Python under `app/`, SQL and `deploy/`,
+# and the offending commit touched one file under `tests/`.
+#
+# So this call takes no path filter at all. `deploy/secret_scan.py` reads the
+# index itself — what this commit will contain, not what is on disk — and exits 1
+# on a credential-shaped literal, printing the line with the value redacted. It is
+# a couple of hundred milliseconds over the staged files, which is the price of
+# not being the second place a secret leaks.
+#
+# The interpreter is looked for the way the gate looks for it, for the same
+# measured reason: Windows ships an executable App Execution Alias for python3
+# that prints "Python was not found" instead of running anything, so a candidate
+# has to answer before it is trusted.
+PY=""
+for candidate in "$REPO/.venv/bin/python" "$REPO/.venv/Scripts/python.exe" python3 python; do
+  case "$candidate" in
+    */*) path="$candidate" ;;
+    *) path=$(command -v "$candidate" 2>/dev/null) || continue ;;
+  esac
+  [ -n "$path" ] && [ -x "$path" ] || continue
+  if "$path" -c 'import sys' >/dev/null 2>&1; then PY="$path"; break; fi
+done
+if [ -z "$PY" ]; then
+  # Refused rather than skipped: a check that declines to run is indistinguish-
+  # able from one that ran and found nothing, and the next commit would trust it.
+  echo "pre-commit: the credential scan COULD NOT RUN — no working python interpreter." >&2
+  echo "            Install Python 3.12 or create .venv in this checkout:" >&2
+  echo "                python -m venv .venv && .venv/bin/pip install -r requirements.txt" >&2
+  echo "            Refusing the commit: a scan that did not run is not a clean scan." >&2
+  exit 1
+fi
+if ! "$PY" "$REPO/deploy/secret_scan.py" --staged; then
+  echo >&2
+  echo "Commit blocked. Take the literal out of the file, or say on that line why it" >&2
+  echo "is a fixture (\`secret-scan:allow <reason>\`). If it is a real credential it is" >&2
+  echo "already in the history you are about to push: rotate it — see" >&2
+  echo "docs/SECRET_ROTATION.md. To skip this once: git commit --no-verify" >&2
+  exit 1
+fi
 
 # tailwind.config.js and package.json are in this list because they change what
 # the stylesheet build produces: a colour changed in the config, or a flag added
