@@ -341,7 +341,8 @@ def run_once(app=None, *, now=None) -> dict:
     """
     from flask import current_app
 
-    from app.services import live_policy, live_reconcile, livekit_gateway
+    from app.services import (live_entitlement_sweep, live_policy, live_reconcile,
+                              livekit_gateway)
     from app.utils.auth import get_supabase
 
     app = app or current_app
@@ -362,6 +363,19 @@ def run_once(app=None, *, now=None) -> dict:
                   config, db,
                   end_room=lambda room: livekit_gateway.end_room(config, room),
                   now=now)}
+
+    # The same pass, for the other way a room outlives its permission: the
+    # school's add-on was switched off or expired after the room was opened.
+    # `live_school_entitlement` is asked on the way *in*; nothing asked it again,
+    # so a running camera sat behind a licence that no longer existed. It is here
+    # rather than in `reconcile` because that sweep answers "is this room still
+    # there", which is a different question with a different failure mode, and
+    # because this one deletes rooms: reconciling and revoking must stay apart
+    # enough that one cannot excuse the other's mistakes.
+    result["entitlement"] = live_entitlement_sweep.revoke_lapsed(
+        db,
+        end_room=lambda room: livekit_gateway.end_room(config, room),
+        enqueue=enqueue, now=now)
 
     global _last_reconcile
     moment = _now(now)

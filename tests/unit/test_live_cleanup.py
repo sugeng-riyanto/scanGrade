@@ -38,9 +38,17 @@ EXAM = {"id": "exam-1", "teacher_id": "teacher-a", "school_id": "school-1",
 
 
 def _db(*, sessions=None, jobs=None):
+    # The school is licensed on purpose. Maintenance also asks whether a running
+    # room's school may still use media (`live_entitlement_sweep`), and a fixture
+    # with no entitlement row is a school that is not entitled — so the sweep
+    # would legitimately delete the room these tests are about and change what
+    # they measure. Licensing has its own suite; here it is the background.
     return FakeDB({"exams": [dict(EXAM)],
                    "scan_live_sessions": [dict(r) for r in (sessions or [])],
-                   "scan_live_cleanup_jobs": [dict(r) for r in (jobs or [])]})
+                   "scan_live_cleanup_jobs": [dict(r) for r in (jobs or [])],
+                   "scanmeet_school_entitlements": [
+                       {"school_id": "school-1", "enabled": True,
+                        "status": "paid", "valid_until": "2026-12-31T00:00:00Z"}]})
 
 
 # ── the backoff ──────────────────────────────────────────────────────────────
