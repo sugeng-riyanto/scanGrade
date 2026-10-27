@@ -257,7 +257,7 @@ Baca [`docs/AUTO_DEPLOY.md`](docs/AUTO_DEPLOY.md) sebelum menyentuh produksi —
 
 ```bash
 .venv/Scripts/python.exe -m pytest tests -q   # offline, tanpa jaringan & tanpa Supabase nyata
-bash deploy/theme_gate.sh                     # statis, ~beberapa detik
+bash deploy/theme_gate.sh                     # statis, ~80 detik (78 s terukur, 22 berkas uji)
 ```
 
 Suite berjalan penuh offline (`TestingConfig` menyediakan kredensial dummy), jadi tidak ada project Supabase yang tersentuh. Saat ini **324 berkas tes, ~7.300 fungsi**. Sebagian besar modul punya *guard* tes pasangan; banyak area memakai harness mutasi di `.freebuff/mutate_*.py` (tidak ikut ke git).
