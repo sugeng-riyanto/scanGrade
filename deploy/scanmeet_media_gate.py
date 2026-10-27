@@ -157,7 +157,10 @@ def production_target(url: str) -> bool:
 
 def host_of(url: str) -> str:
     """Credential-safe host-only display shared with deployment tooling."""
-    return ascii_safe(host_only(url))
+    parsed = urllib.parse.urlsplit(url)
+    host = host_only(url)
+    path = parsed.path.rstrip("/")
+    return ascii_safe(host + path)
 
 
 #: How long `/health` is given to answer. The app builds that body out of its own
@@ -1914,7 +1917,7 @@ def main(argv=None) -> int:
     skipped = [item for item in rows if item.state == "skipped"]
     if failed:
         print(f"\nFAILED: {len(failed)} row(s) disagreed - {len(passed)}/{len(rows)} "
-              f"passed on {host_only(args.url)}")
+              f"passed on {host_of(args.url)}")
         print("A room is not ready for pupils until every row here passes: the "
               "media claims are the pilot's own evidence.")
     elif skipped:
