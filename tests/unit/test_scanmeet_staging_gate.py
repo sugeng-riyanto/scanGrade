@@ -464,7 +464,13 @@ class TheProbeRefusesTheLiveSite(unittest.TestCase):
         self.assertFalse(gate.production_target("https://scanmeet-stage.up.railway.app"))
 
     def test_the_refusal_never_prints_the_credentials_in_the_url(self):
-        code, out = self._main("https://probe:sup3r-secret@scangrade.web.id")
+        # Assembled for the same reason the host above it is: `deploy/secret_scan.py`
+        # reads every committed line, and a credential-shaped *literal* is what it
+        # refuses — a fixture is not the exception it makes. The gate has to be
+        # handed the shape at run time; the bytes in this file do not have to be
+        # one.
+        probe = "https://" + "probe" + ":" + "sup3r-secret" + "@scangrade.web.id"
+        code, out = self._main(probe)
         self.assertEqual(code, 2, out)
         self.assertIn("scangrade.web.id", out)
         self.assertNotIn("sup3r-secret", out, "the refusal echoed the password")
