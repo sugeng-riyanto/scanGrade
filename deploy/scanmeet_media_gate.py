@@ -76,12 +76,29 @@ Usage (on the staging host, with the staging env exported):
       --student2 murid2@example.edu:pw --outsider murid@lain.example.edu:pw
 
 Add ``--signoff`` to print the same thirteen rows as a Markdown sheet - the URL,
-``--exam``, when it ran, the browser it drove and the verdict the run earned -
-ready to paste into the staging ticket. The sheet carries the verdict it earned:
-a run that could not measure a row prints ``CANNOT MEASURE`` rather than a table
-that merely looks complete. ``--json-out <file>`` keeps the raw reading beside
-that sheet; ``--json`` and ``--signoff`` are refused together, because both write
-stdout and the first version dropped the sheet in silence.
+``--exam``, when it ran, the browser it drove, **the commit the host reported
+serving on `/health`** and the verdict the run earned - ready to paste into the
+staging ticket. The sheet carries the verdict it earned: a run that could not
+measure a row prints ``CANNOT MEASURE`` rather than a table that merely looks
+complete. ``--json-out <file>`` keeps the raw reading beside that sheet;
+``--json`` and ``--signoff`` are refused together, because both write stdout and
+the first version dropped the sheet in silence.
+
+``--expect-commit <sha>`` is how a caller says *which* build the rows have to be
+about. The host is asked what it is serving before a single browser is driven, and
+a host answering on another commit is refused (exit 2, no sheet) rather than
+measured: the thirteen rows say nothing about a release the host is not running,
+and a green sheet for the wrong code is worse than no sheet. Without any
+expectation the commit is still read and printed, so a reader can see what
+answered.
+
+The expectation has three sources, and `expected_commit()` is the one place that
+resolves them: the flag (an explicitly empty one means *record, do not judge*),
+then `$SCANMEET_EXPECT_COMMIT`, then **a GitHub runner's own `$GITHUB_SHA`**. The
+third is the case this driver was silently wrong about -- the workflow ran on
+`0967b040`, the host answered `77abe6f`, and the sheet said `SIGNED OFF` -- and on
+a runner the dispatched commit *is* the commit the run is evidence for, so
+following it is not a guess.
 """
 from __future__ import annotations
 
@@ -98,8 +115,9 @@ from dataclasses import dataclass, field
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import touch_gate  # noqa: E402  (the one CDP client, launcher and sign-in here)
+import served_commit_gate  # noqa: E402  (the one `/health` reader in this tree)
 from deploy.safe_url import host_only
+import touch_gate  # noqa: E402  (the one CDP client, launcher and sign-in here)
 
 EXIT_OK = 0
 EXIT_FINDING = 1
@@ -135,6 +153,110 @@ def production_target(url: str) -> bool:
     return (host in PRODUCTION_HOSTS
             or host == PRODUCTION_DOMAIN
             or host.endswith("." + PRODUCTION_DOMAIN))
+
+
+def host_of(url: str) -> str:
+    """Credential-safe host-only display shared with deployment tooling."""
+    return ascii_safe(host_only(url))
+
+
+#: How long `/health` is given to answer. The app builds that body out of its own
+#: process, so a host that needs longer than this is not answering at all.
+HEALTH_TIMEOUT = 10.0
+
+#: The shortest prefix that still identifies a commit rather than a coincidence.
+#: `$GITHUB_SHA` is forty characters and `/health` publishes both spellings, so a
+#: caller passing the short form is asking the same question as one passing the
+#: full one; comparing the exact strings would refuse a run whose caller merely
+#: spelled it the other way.
+SHORT_SHA = 7
+
+
+def served_commit(base_url: str, *, insecure: bool = False,
+                  timeout: float = HEALTH_TIMEOUT):
+    """What commit the host says it is serving: one read of `/health`.
+
+    The thirteen rows are about the code that answered them, and the sheet this
+    driver prints is filed as evidence about a *commit*. Nothing in the readings
+    says which commit that was, and a host dozens of commits behind serves the
+    same thirteen pages and passes the same thirteen rows: measured on this
+    repository, the workflow ran on `0967b040`, the host answered `/health` with
+    `77abe6f`, and the sheet it produced said `SIGNED OFF`.
+
+    The reader is not written here. `deploy/served_commit_gate.py` owns the
+    question — the production deploy gates on it after every reload — so this asks
+    its `reading_of`, and the four states it keeps apart arrive unchanged: a
+    readable commit, a host that cannot name itself, a release from before the
+    reading, and an answer that is not JSON. Two readers of one endpoint is how
+    they start disagreeing.
+
+    A host that cannot be asked is `READING_UNREADABLE` rather than an exception:
+    the caller decides what that means, and this driver's rule is that a reading it
+    could not take is never a pass.
+    """
+    import requests
+
+    url = base_url.rstrip("/") + served_commit_gate.DEFAULT_HEALTH_PATH
+    try:
+        answer = requests.get(url, timeout=timeout, verify=not insecure)
+    except requests.RequestException as exc:
+        return served_commit_gate.Reading(
+            served_commit_gate.READING_UNREADABLE, None,
+            f"the host did not answer {served_commit_gate.DEFAULT_HEALTH_PATH}: "
+            f"{type(exc).__name__}")
+    return served_commit_gate.reading_of(answer.text)
+
+
+def expected_commit(flag, environ=None) -> tuple[str, str]:
+    """The commit this run is evidence for, and where that claim came from.
+
+    Three sources, in the order a caller would expect them to win:
+
+    * **the flag**, including an explicitly empty one. Empty is not the same as
+      absent: it is a person saying "record what this host serves, do not judge
+      it", which is how a deliberate recording of an older build is taken.
+    * **`$SCANMEET_EXPECT_COMMIT`**, for a box that exports it.
+    * **a GitHub runner**, which is `GITHUB_ACTIONS=true`. A dispatched run is
+      evidence about the commit it was dispatched on, and `GITHUB_SHA` is that
+      commit -- not a guess, the caller's own statement. This is the case the
+      workflow was wrong about: it ran on `0967b040`, the host answered
+      `77abe6f`, and the sheet said `SIGNED OFF`.
+
+    With none of the three the run only *records* what answered, which is what a
+    workstation run against a shared staging box wants.
+    """
+    environ = os.environ if environ is None else environ
+    if flag is not None:
+        wanted = flag.strip()
+        return wanted, ("--expect-commit" if wanted else
+                        "--expect-commit '' (record only)")
+    env = (environ.get("SCANMEET_EXPECT_COMMIT") or "").strip()
+    if env:
+        return env, "$SCANMEET_EXPECT_COMMIT"
+    if (environ.get("GITHUB_ACTIONS") or "").lower() == "true":
+        sha = (environ.get("GITHUB_SHA") or "").strip()
+        if sha:
+            return sha, "$GITHUB_SHA (this run is about the commit it ran on)"
+    return "", ""
+
+
+def commit_matches(reading, expected: str) -> bool:
+    """Does the host's own answer name `expected`?"""
+    wanted = (expected or "").strip().lower()
+    served = (reading.commit or "").lower()
+    if not wanted or not served:
+        return False
+    if min(len(served), len(wanted)) < SHORT_SHA:
+        return False
+    return served.startswith(wanted) or wanted.startswith(served)
+
+
+def served_line(reading) -> str:
+    """One line for the console and the sheet: what answered, or why nothing did."""
+    if reading.state == served_commit_gate.READING_OK:
+        return f"{reading.commit} (from {served_commit_gate.DEFAULT_HEALTH_PATH})"
+    return f"could not be read - {ascii_safe(reading.why)}"
+
 
 PAGE = "/live/exam/{exam_id}"
 STATUS = "/api/live/exams/{exam_id}"
@@ -1556,7 +1678,8 @@ def _cell(text) -> str:
 
 
 def signoff_sheet(base_url: str, exam_id: str, rows: list, code: int, *,
-                  browser: str = "", devices: str = "", run_at: str = "") -> str:
+                  browser: str = "", devices: str = "", run_at: str = "",
+                  served=None) -> str:
     """The thirteen rows as a Markdown sign-off sheet a person can paste.
 
     `docs/SCANMEET_BIZNET_STAGING.md` §2 ends with a sheet a person fills in by
@@ -1572,12 +1695,8 @@ def signoff_sheet(base_url: str, exam_id: str, rows: list, code: int, *,
     passed = sum(1 for item in rows if item.state == "pass")
     failed = [item for item in rows if item.state == "fail"]
     skipped = [item for item in rows if item.state == "skipped"]
-    from urllib.parse import urlsplit, urlunsplit
 
-    parsed = urlsplit(base_url)
-    # The pasted report must not reveal URL credentials, query or fragment.
-    host = ascii_safe(urlunsplit((parsed.scheme, parsed.hostname or "",
-                                  parsed.path.rstrip("/"), "", "")))
+    host = host_of(base_url)
     lines = [
         f"## ScanMeet media sign-off - {host}",
         "",
@@ -1585,6 +1704,17 @@ def signoff_sheet(base_url: str, exam_id: str, rows: list, code: int, *,
         f"{passed}/{len(rows)} row(s) passed",
         f"- **Exam:** `{_cell(exam_id)}`",
     ]
+    # Which code answered is part of the reading, not a footnote to it: a sheet a
+    # person files is evidence about a commit, and every row above was taken
+    # against whatever the host was running. It is printed even when it could not
+    # be read, because a blank beside `13/13 passed` reads as a match.
+    if served is not None:
+        if served.state == served_commit_gate.READING_OK:
+            lines.append(f"- **Served commit:** `{_cell(served.commit)}` "
+                         f"(from {served_commit_gate.DEFAULT_HEALTH_PATH})")
+        else:
+            lines.append(f"- **Served commit:** could not be read - "
+                         f"{_cell(served.why)}")
     if run_at:
         lines.append(f"- **Run at:** {_cell(run_at)}")
     if browser:
@@ -1667,6 +1797,14 @@ def main(argv=None) -> int:
     parser.add_argument("--signoff", action="store_true",
                         help="print the thirteen rows as a Markdown sign-off sheet "
                              "carrying the run's URL, exam and verdict")
+    parser.add_argument("--expect-commit", default=None,
+                        help="the commit this host must report serving on /health; "
+                             "a host answering on another commit is refused before "
+                             "a room is opened, because the rows would be about the "
+                             "code that answered (short or full sha). Defaults to "
+                             "$SCANMEET_EXPECT_COMMIT, then to $GITHUB_SHA on a "
+                             "runner; pass an empty value to record without "
+                             "judging")
     parser.add_argument("--allow-production", action="store_true",
                         help="let the driver run against the live site (a deliberate "
                              "pilot, never an accident)")
@@ -1698,6 +1836,22 @@ def main(argv=None) -> int:
               "beside the sheet.")
         return EXIT_CANNOT_MEASURE
 
+    # Which code is answering, asked once and before three browsers are driven.
+    # Refusing here rather than filing a sheet is the whole point: the rows are
+    # about the commit that serves them, and a host on another commit can pass
+    # every one of them while a release it is not running is signed off.
+    served = served_commit(args.url, insecure=args.insecure)
+    expected, expected_from = expected_commit(args.expect_commit)
+    if expected and not commit_matches(served, expected):
+        print(f"COULD NOT MEASURE: {host_of(args.url)} is not known to be serving "
+              f"the commit this run asked for.")
+        print(f"  asked for:  {ascii_safe(expected)}  ({ascii_safe(expected_from)})")
+        print(f"  the host:   {_cell(served_line(served))}")
+        print("The thirteen rows are about the code that answered them, so no room "
+              "was opened and no sheet was produced. Deploy this commit to that "
+              "host, or drop --expect-commit to record whatever is serving.")
+        return EXIT_CANNOT_MEASURE
+
     binary = touch_gate.locate_browser()
     if not binary:
         print("COULD NOT MEASURE: no Chrome/Chromium found (set SG_CHROME).")
@@ -1713,6 +1867,13 @@ def main(argv=None) -> int:
         accounts=accounts, insecure=args.insecure, binary=binary,
         fake=not args.no_fake_devices, video_file=args.video_file,
         keep_room=args.keep_room)
+
+    # Kept beside the rows so a reader of the JSON can tell a reading about the
+    # commit they asked for from one about whatever happened to be deployed.
+    payload["served_commit"] = {"state": served.state, "commit": served.commit,
+                                "why": served.why,
+                                "expected": expected or None,
+                                "expected_from": expected_from or None}
 
     if args.json_out:
         try:
@@ -1735,12 +1896,16 @@ def main(argv=None) -> int:
         print(signoff_sheet(
             args.url, args.exam.strip(), rows, code, browser=binary,
             devices="synthetic devices" if not args.no_fake_devices else "real devices",
-            run_at=datetime.now(timezone.utc).isoformat(timespec="seconds")))
+            run_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            served=served))
         return code
 
     print(ascii_safe(
-        f"scanmeet media gate: driving {host_only(args.url)} with {binary}"
+        f"scanmeet media gate: driving {host_of(args.url)} with {binary}"
         f" ({'synthetic devices' if not args.no_fake_devices else 'real devices'})"))
+    print(ascii_safe(f"  serving:  {served_line(served)}"))
+    print(ascii_safe("  expecting: " + (f"{expected}  ({expected_from})" if expected
+                                         else "nothing - recording what this host serves")))
     for item in rows:
         mark = {"pass": "PASS", "fail": "FAIL"}.get(item.state, "SKIP")
         print(ascii_safe(f"  {mark}  {item.name:24} {item.detail}"))
