@@ -2640,7 +2640,7 @@ def scanmeet_school_licenses():
 
     db = get_supabase()
     npsn = (request.values.get("npsn") or "").strip()
-    if not re.fullmatch(r"\\d{8}", npsn):
+    if not re.fullmatch(r"[0-9]{8}", npsn):
         if request.method == "POST":
             return jsonify({"error": "NPSN must contain exactly eight digits"}), 400
         return render_template("super_admin/scanmeet_schools.html", npsn=npsn, school=None, license=None)
@@ -2709,31 +2709,54 @@ def scanmeet_school_licenses():
         # Revocation is already stored; do not pretend the change failed.
     revoked = []
     pending = []
+    cleanup_unrecorded = []
     if not enabled:
         try:
-            sessions = (db.table("scan_live_sessions")
+            # Drain fixed-size batches: a single unbounded PostgREST response
+            # can be truncated, leaving connected pupils behind.
+            while True:
+                sessions = (db.table("scan_live_sessions")
                         .select("id,room_name,school_id,status")
                         .eq("school_id", school_id).eq("status", "active")
-                        .execute().data or [])
-            for session in sessions:
-                ended = (db.table("scan_live_sessions").update({"status": "ended"})
-                         .eq("id", session["id"]).eq("school_id", school_id)
-                         .eq("status", "active").execute().data or [])
-                if not ended:
-                    continue
-                revoked.append(session["id"])
-                try:
-                    livekit_gateway.end_room(current_app.config, session["room_name"])
-                except Exception as exc:
-                    pending.append(session["id"])
+                        .limit(100).execute().data or [])
+                if not sessions:
+                    break
+                progressed = 0
+                for session in sessions:
+                    ended = (db.table("scan_live_sessions").update({"status": "ended"})
+                             .eq("id", session["id"]).eq("school_id", school_id)
+                             .eq("status", "active").execute().data or [])
+                    if not ended:
+                        continue
+                    progressed += 1
+                    revoked.append(session["id"])
                     try:
-                        live_cleanup.enqueue(db, ended[0], reason="school_license_off", error=exc)
-                    except Exception:
-                        current_app.logger.exception("Live room cleanup debt could not be stored")
+                        livekit_gateway.end_room(current_app.config, session["room_name"])
+                    except Exception as exc:
+                        pending.append(session["id"])
+                        try:
+                            debt = live_cleanup.enqueue(
+                                db, ended[0], reason="school_license_off", error=exc)
+                            if debt is None:
+                                cleanup_unrecorded.append(session["id"])
+                                current_app.logger.error("ScanMeet cleanup debt not recorded: %s", session["id"])
+                        except Exception:
+                            cleanup_unrecorded.append(session["id"])
+                            current_app.logger.exception("Live room cleanup debt could not be stored")
+                if progressed == 0:
+                    raise RuntimeError("No progress while revoking active ScanMeet sessions")
         except Exception:
             current_app.logger.exception("ScanMeet school room revocation needs reconciliation")
             return jsonify({"enabled": False, "status": "revoked",
                             "error": "License is OFF; room cleanup requires operator reconciliation",
-                            "revoked": revoked, "cleanup_pending": pending}), 202
-    return jsonify({"enabled": enabled, "status": status, "npsn": npsn,
-                    "revoked": revoked, "cleanup_pending": pending})
+                            "revoked": revoked, "cleanup_pending": pending,
+                            "cleanup_unrecorded": cleanup_unrecorded}), 202
+    response = {"enabled": enabled, "status": status, "npsn": npsn,
+                "revoked": revoked, "cleanup_pending": pending,
+                "cleanup_unrecorded": cleanup_unrecorded}
+    # New admissions are refused, but previously connected media may remain
+    # until LiveKit deletion succeeds. Do not imply cleanup was completed.
+    if pending:
+        response["warning"] = "License OFF; active media cleanup remains unconfirmed"
+        return jsonify(response), 202
+    return jsonify(response)
