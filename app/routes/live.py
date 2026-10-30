@@ -117,11 +117,16 @@ def status(exam_id):
         .eq("status", "active"))
     if session and not scanmeet_packages.session_open(session):
         session = None
-    if role == live_policy.LIVE_TEACHER and session and str(session.get("created_by") or "") != str(g.user_id):
-        return jsonify({"error": "Another teacher already supervises this Live session"}), 409
-    return jsonify({"session": session, "role": role,
-                    "enabled": live_exam_toggle.enabled(exam),
-                    "policy": live_policy.EXAM_POLICY})
+    # Reading state is not permission to receive pupil tracks. A school admin
+    # must be able to see/disable supervision while the original teacher owns it;
+    # token and moderation endpoints still enforce the pinned publisher identity.
+    can_join = (role != live_policy.LIVE_TEACHER or not session or
+                str(session.get("created_by") or "") == str(g.user_id))
+    response = jsonify({"session": session, "role": role, "can_join": can_join,
+                        "enabled": live_exam_toggle.enabled(exam),
+                        "policy": live_policy.EXAM_POLICY})
+    response.headers["Cache-Control"] = "private, no-store"
+    return response
 
 
 @live_bp.route("/exams/<exam_id>/sessions", methods=["POST"])

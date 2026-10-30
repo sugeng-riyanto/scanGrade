@@ -888,6 +888,18 @@
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
+    },
+    "live/exam_entry.html": {
+      "pairs": 11,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
+    "live/student_panel.html": {
+      "pairs": 8,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
     }
   }
 }

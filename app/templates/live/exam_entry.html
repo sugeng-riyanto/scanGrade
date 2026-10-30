@@ -1,0 +1,33 @@
+<section id="scanmeet-settings" data-scanmeet-entry data-exam-id="{{ exam.id | e }}"
+         data-available="{{ '1' if scanmeet_enabled else '0' }}" data-csrf="{{ csrf_token() }}"
+         class="card p-4 sm:p-5 mb-6 space-y-3" aria-label="ScanMeet">
+  <div class="flex flex-wrap items-center justify-between gap-3">
+    <div>
+      <h2 class="font-extrabold text-surface-800">ScanMeet</h2>
+      <p class="text-sm text-surface-500" x-text="t('Pengawasan kamera di halaman ujian murid','Camera supervision within the pupil exam page')"></p>
+    </div>
+    {% if scanmeet_enabled %}
+    <a href="{{ url_for('live_ui.live_exam_page', exam_id=exam.id) }}" class="btn btn-primary min-h-[44px]"
+       x-text="t('Buka pengawasan','Open supervision')"></a>
+    {% else %}
+    <a href="/scanmeet" class="btn btn-secondary min-h-[44px]" x-text="t('Lihat akses ScanMeet','View ScanMeet access')"></a>
+    {% endif %}
+  </div>
+  <p data-entry-status role="status" aria-live="polite" class="text-sm font-semibold text-surface-600">
+    {% if scanmeet_enabled %}<span x-text="t('Memeriksa status...','Checking status...')"></span>
+    {% else %}<span x-text="t('Layanan ScanMeet belum diaktifkan pada server. Kamera dan mikrofon murid tetap OFF.','ScanMeet has not been enabled on the server. Pupil cameras and microphones remain OFF.')"></span>{% endif %}
+  </p>
+  {% if scanmeet_enabled %}
+  <button data-entry-toggle type="button" disabled class="btn btn-secondary min-h-[44px]"
+          x-text="$el.dataset.enabled === '1' ? t('Nonaktifkan ScanMeet','Disable ScanMeet') : t('Aktifkan ScanMeet','Enable ScanMeet')"></button>
+  {% endif %}
+  <p class="text-sm text-surface-500" x-text="t('Saat OFF, kamera dan mikrofon tidak diminta. Saat ON, murid dapat bergabung dari halaman soal tanpa membuka tab baru. Pengawasan harus dimulai oleh guru atau admin sekolah.','When OFF, no camera or microphone is requested. When ON, pupils can join from the paper without opening another tab. A teacher or school administrator must start supervision.')"></p>
+  <div class="flex flex-wrap gap-2">
+    <button data-entry-copy type="button" class="btn btn-secondary min-h-[44px]" x-text="t('Salin link murid','Copy pupil link')"></button>
+    <a data-entry-whatsapp href="https://wa.me/?text={{ (request.url_root.rstrip('/') ~ '/student/exams/' ~ exam.id) | urlencode }}"
+       target="_blank" rel="noopener noreferrer" class="btn btn-secondary min-h-[44px]" x-text="t('Bagikan via WhatsApp','Share via WhatsApp')"></a>
+  </div>
+  <input data-entry-link readonly aria-label="ScanMeet pupil link" class="w-full rounded-xl border border-surface-200 bg-white px-3 py-2 text-sm"
+         value="{{ request.url_root.rstrip('/') }}/student/exams/{{ exam.id }}">
+  <p class="text-sm text-surface-500" x-text="t('Tautan ini tetap memerlukan login dan hak mengikuti ujian; membagikan tautan tidak membuka akses untuk umum.','This link still requires login and exam eligibility; sharing it does not make the exam public.')"></p>
+</section>

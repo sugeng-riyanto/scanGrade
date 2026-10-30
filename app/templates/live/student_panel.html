@@ -1,0 +1,27 @@
+{# Media stays on the sitting page: no extra tab, iframe, or exam-state writer. #}
+<section id="scan-live" hidden data-embedded="1" data-role="student"
+         data-exam-id="{{ exam.id | e }}" data-csrf="{{ csrf_token() }}"
+         data-sdk="{{ asset_v('vendor/livekit/2.23.0/livekit-client.umd.min.js') }}"
+         class="card p-4 mb-4 space-y-3" aria-label="ScanMeet">
+  <div class="flex flex-wrap items-center justify-between gap-3">
+    <h2 class="font-extrabold text-surface-800">ScanMeet</h2>
+    <div class="flex flex-wrap gap-2">
+      <button id="live-join" type="button" hidden class="btn btn-primary min-h-[44px]"
+              x-text="t('Aktifkan kamera & bergabung','Enable camera & join')"></button>
+      <button id="live-hand" type="button" disabled class="btn btn-secondary min-h-[44px]"
+              x-text="t('Angkat tangan','Raise hand')"></button>
+      <button id="live-mic" type="button" hidden class="btn btn-secondary min-h-[44px]"
+              x-text="t('Aktifkan mikrofon','Enable microphone')"></button>
+    </div>
+  </div>
+  <p class="text-sm text-surface-500" x-text="t('Kamera hanya untuk pengawas. Mikrofon memerlukan persetujuan. Tidak ada rekaman.','Your camera is shared only with the supervisor. Microphone use requires approval. Recording is disabled.')"></p>
+  <p id="live-status" role="status" aria-live="polite" class="text-sm font-semibold"></p>
+  <p id="live-switch-off" hidden class="text-sm text-surface-500" x-text="t('ScanMeet OFF: kamera dan mikrofon tidak digunakan.','ScanMeet OFF: camera and microphone are not used.')"></p>
+  <p id="live-warning" hidden role="alert" class="text-sm text-amber-700" x-text="t('Pengawasan belum tersambung. Jawaban dan waktu ujian tetap berjalan.','Supervision is disconnected. Your answers and exam timer continue.')"></p>
+  <p id="live-session-time" hidden class="text-sm font-bold text-primary-600"></p>
+  <details>
+    <summary class="min-h-[44px] cursor-pointer text-sm font-bold text-surface-600" x-text="t('Kamera & status mikrofon','Camera & microphone status')"></summary>
+    <div id="live-grid" class="grid grid-cols-1 sm:grid-cols-2 gap-3"></div>
+    <p id="live-raise-status" class="text-sm text-surface-500" x-text="t('Mikrofon menunggu izin pengawas.','Microphone awaits supervisor approval.')"></p>
+  </details>
+</section>

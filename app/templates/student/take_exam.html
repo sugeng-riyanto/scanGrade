@@ -552,6 +552,7 @@ body.sg-exam .sg-content { max-width: none; margin-left: 0; margin-right: 0; }
 
    It defaults to False so the pupil's page is untouched by this flag. #}
 {% set preview = preview if preview is defined else False %}
+{% if scanmeet_enabled and not preview %}{% include "live/student_panel.html" %}{% endif %}
 <div x-data="examApp({{ exam.duration_minutes * 60 }}, {{ exam.total_questions }}, '{{ started_at }}')" data-exam-id="{{ exam.id }}"{% if preview %} data-preview="1"{% endif %}>
     {% if preview %}
     {# Said once, at the top, in both languages: this is a picture of the paper,
@@ -2651,6 +2652,9 @@ body.sg-exam .sg-content { max-width: none; margin-left: 0; margin-right: 0; }
    execution, so the globals exist when `x-data` is evaluated — the same way the
    exam builder loads this file. See tests/unit/test_exam_script_order.py. #}
 {% block scripts %}
+{% if scanmeet_enabled and not (preview|default(false)) %}
+<script src="{{ asset_v('js/scan-live-exam.js') }}"></script>
+{% endif %}
 <script src="{{ asset_v('js/exam-media.js') }}"></script>
 <script src="{{ asset_v('js/tools.js') }}"></script>
 <!-- Classic, for the same reason as the two above: `examApp(...)` reads the
