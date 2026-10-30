@@ -64,6 +64,11 @@ def test_full_pupil_page_only_embeds_media_for_a_real_feature_enabled_sitting(ap
     assert ('id="scan-live"' in html) is expected
     assert ('js/scan-live-exam.js' in html) is expected
     assert '<script src="/static/vendor/livekit' not in html
+    if expected:
+        assert 'Microphone: ScanMeet panel' in html
+        assert 'Microphone unused' not in html
+    else:
+        assert 'Microphone unused' in html
 
 
 def test_admin_can_switch_off_an_existing_teacher_room_without_receiving_tracks(monkeypatch):

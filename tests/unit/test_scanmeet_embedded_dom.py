@@ -80,7 +80,7 @@ async function scenario(mode){
    denied=true;for(const t of timers.filter(t=>t.ms>=4000&&t.ms<=20000))t.fn();await drain();
   }
  }
- const out={before,camera,mic,micStops,stopped,disconnected,calls,handDisabled:w.document.getElementById('live-hand').disabled,
+ const out={before,camera,mic,micStops,stopped,disconnected,calls,micLabel:w.document.getElementById('live-mic').textContent,handDisabled:w.document.getElementById('live-hand').disabled,
    status:w.document.getElementById('live-status').textContent,joinHidden:w.document.getElementById('live-join').hidden};
  dom.window.close();return out;
 }
@@ -146,3 +146,4 @@ def test_microphone_permission_resolving_after_off_is_released(readings):
 def test_revoked_speaking_approval_stops_microphone_without_ending_camera(readings):
     r=readings['mic-revoked']
     assert r['mic']==1 and r['micStops']>=1 and r['disconnected']==0
+    assert r['micLabel']=='Enable microphone'

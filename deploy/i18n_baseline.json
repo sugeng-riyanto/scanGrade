@@ -452,9 +452,9 @@
       "frozen": false
     },
     "student/take_exam.html": {
-      "pairs": 378,
+      "pairs": 497,
       "leftovers": 0,
-      "coverage": 100,
+      "coverage": 100.0,
       "frozen": false
     },
     "student/whiteboard_canvas.html": {
@@ -896,7 +896,7 @@
       "frozen": false
     },
     "live/student_panel.html": {
-      "pairs": 8,
+      "pairs": 9,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false

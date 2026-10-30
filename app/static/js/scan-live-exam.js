@@ -25,12 +25,12 @@
     if (!clock || !sessionDeadline || !room) { if (clock) clock.hidden = true; return; }
     const seconds = Math.max(0, Math.ceil((sessionDeadline - Date.now()) / 1000));
     clock.hidden = false;
-    clock.textContent = "Sisa pengawasan: " + Math.floor(seconds / 60) + ":" + String(seconds % 60).padStart(2, "0");
+    clock.textContent = tr("Sisa pengawasan: ", "Supervision remaining: ") + Math.floor(seconds / 60) + ":" + String(seconds % 60).padStart(2, "0");
     if (!seconds) {
       sessionDeadline = 0;
       await stopMedia();
       if (start) start.hidden = !paperOn;
-      message("Durasi ScanMeet selesai. Ujian dan jawaban tetap berjalan.");
+      message(tr("Durasi ScanMeet selesai. Ujian dan jawaban tetap berjalan.", "ScanMeet time ended. Your exam and answers continue."));
     }
   }
   window.setInterval(updateSessionTime, 1000);
@@ -91,8 +91,8 @@
       }
       return;
     }
-    const name = local ? "Kamera saya" : names[participant.identity] ||
-      (role(participant) === "teacher" ? "Guru" : "Peserta");
+    const name = local ? tr("Kamera saya", "My camera") : names[participant.identity] ||
+      (role(participant) === "teacher" ? tr("Pengawas", "Supervisor") : tr("Peserta", "Participant"));
     const target = tile(participant.identity, name).querySelector("[data-media]");
     const video = track.attach();
     video.className = "w-full h-full object-cover";
@@ -129,7 +129,10 @@
     room = null; sid = null; connecting = false; sessionDeadline = 0; micAllowed = false;
     if (forgetIntent) joinIntent = false;
     if (hand) hand.disabled = true;
-    if (mic) mic.hidden = true;
+    if (mic) {
+      mic.hidden = true; mic.dataset.active = "0";
+      mic.textContent = tr("Aktifkan mikrofon", "Enable microphone");
+    }
     if (end) end.hidden = true;
     if (join) join.hidden = true;
     const clock = $("live-session-time");
@@ -218,7 +221,9 @@
       if (hand) hand.disabled = false;
       if (start) start.hidden = true;
       if (end) end.hidden = false;
-      message(tr("ScanMeet tersambung. Kamera aktif.", "ScanMeet connected. Camera active."));
+      message(camera && camera.track && !camera.isMuted
+        ? tr("ScanMeet tersambung. Kamera aktif.", "ScanMeet connected. Camera active.")
+        : tr("Pengawas tersambung tanpa kamera.", "Supervisor connected without a camera."));
       await updateSessionTime();
     } catch (error) {
       if (current()) {
@@ -348,13 +353,17 @@
         if (!micAllowed && microphone && !microphone.isMuted) {
           await room.localParticipant.setMicrophoneEnabled(false);
         }
+        if (!micAllowed && mic) {
+          mic.dataset.active = "0";
+          mic.textContent = tr("Aktifkan mikrofon", "Enable microphone");
+        }
         if (!room) return;
         $("live-raise-status").textContent = micAllowed
-          ? "Guru menyetujui. Klik Aktifkan mikrofon jika siap."
-          : "Mikrofon menunggu izin guru.";
+          ? tr("Pengawas menyetujui. Klik Aktifkan mikrofon jika siap.", "Approved. Select Enable microphone when ready.")
+          : tr("Mikrofon menunggu izin pengawas.", "Microphone awaits supervisor approval.");
         const camera = room.localParticipant.getTrackPublication("camera");
         if (!camera || camera.isMuted) {
-          message("Kamera terputus. Mohon aktifkan kembali.", true);
+          message(tr("Kamera terputus. Mohon aktifkan kembali.", "Camera disconnected. Please enable it again."), true);
         }
       }
     } catch (_) {
@@ -419,8 +428,11 @@
       if (!staff && !micAllowed) {
         await candidate.localParticipant.setMicrophoneEnabled(false); return;
       }
-      mic.textContent = enabled ? "Aktifkan mikrofon" : "Matikan mikrofon";
-    } catch (_) { message("Izin mikrofon belum tersedia.", true); }
+      mic.dataset.active = enabled ? "0" : "1";
+      mic.textContent = enabled ? tr("Aktifkan mikrofon", "Enable microphone") : tr("Matikan mikrofon", "Mute microphone");
+    } catch (_) {
+      if (epoch === generation) message(tr("Izin mikrofon belum tersedia.", "Microphone permission is unavailable."), true);
+    }
   };
   if (end) end.onclick = async () => {
     if (!confirm("Akhiri Live? Ujian siswa akan tetap berjalan.")) return;

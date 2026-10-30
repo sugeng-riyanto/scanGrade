@@ -11,7 +11,7 @@
       <button id="live-hand" type="button" disabled class="btn btn-secondary min-h-[44px]"
               x-text="t('Angkat tangan','Raise hand')"></button>
       <button id="live-mic" type="button" hidden class="btn btn-secondary min-h-[44px]"
-              x-text="t('Aktifkan mikrofon','Enable microphone')"></button>
+              x-text="$el.dataset.active === '1' ? t('Matikan mikrofon','Mute microphone') : t('Aktifkan mikrofon','Enable microphone')"></button>
     </div>
   </div>
   <p class="text-sm text-surface-500" x-text="t('Kamera hanya untuk pengawas. Mikrofon memerlukan persetujuan. Tidak ada rekaman.','Your camera is shared only with the supervisor. Microphone use requires approval. Recording is disabled.')"></p>
