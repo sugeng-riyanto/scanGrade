@@ -32,6 +32,12 @@ ROUTE_FILES = sorted((ROOT / "app" / "routes").glob("*.py"))
 #: a write route avoids the lock, so an unjustified entry is a hole. Keyed by
 #: "<blueprint> <path>".
 EXEMPT = {
+    "scanmeet_bp /requests":
+        "requests a school media package in scanmeet_plan_requests; never writes "
+        "a paper, sitting, answer, mark or academic-year record",
+    "super_bp /scanmeet-requests/<request_id>/reject":
+        "declines only a pending school media-package request; no academic-year "
+        "record or active license is changed",
     # LiveKit only updates isolated media coordination tables, not exams,
     # attempts, answers, scores, or an academic year's ledger. The existing
     # tenant and exam access checks still apply to each session action.
