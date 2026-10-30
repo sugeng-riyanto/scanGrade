@@ -6,6 +6,6 @@
 #
 # Obeyed once per exact content: the `issued` stamp below is what makes a
 # re-issued command a new plan rather than one already obeyed.
-command: recover
-issued: 2026-10-30T07:24:26Z
-note: Deploy PR 59: production metadata lacks ScanMeet migration 073-075 objects; zero draft attempts and active live sessions observed. Use recovery-point and trial gates before applying.
+command: none
+issued: 2026-10-30T07:31:21Z
+note: Supabase recovery of reviewed migrations 073-075 is being executed directly with pre-change scope backup; do not launch another recovery.
