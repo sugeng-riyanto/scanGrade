@@ -6,6 +6,6 @@
 #
 # Obeyed once per exact content: the `issued` stamp below is what makes a
 # re-issued command a new plan rather than one already obeyed.
-command: none
-issued: 2026-10-30T07:31:21Z
-note: Supabase recovery of reviewed migrations 073-075 is being executed directly with pre-change scope backup; do not launch another recovery.
+command: release
+issued: 2026-10-30T07:34:24Z
+note: Production migrations 073-075 applied atomically as 20261030073312 after rollback trial and saved scoped backup; RLS, FK, trigger and service grants verified. Retry tablet fix with all gates intact.
