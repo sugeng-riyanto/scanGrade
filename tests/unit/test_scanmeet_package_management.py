@@ -56,8 +56,9 @@ def test_admin_activation_is_scoped_audited_and_uses_server_catalog():
         "version": "", "session_limit_minutes": 99999, "price": 0}, "operator", {}, audit)
     assert code == 200 and result["ok"]
     row = db.rows[admin.LICENSES][0]
-    assert row["school_id"] == "school-a" and row["session_limit_minutes"] == 30
-    assert row["session_allowance"] == 3 and row["participant_limit"] == 5
+    assert row["school_id"] == "school-a" and row["session_limit_minutes"] == 45
+    assert row["session_allowance"] == 1 and row["participant_limit"] == 40
+    assert row["concurrent_room_limit"] == 1
     audit.assert_called_once()
 
 
@@ -126,3 +127,41 @@ def test_failed_debt_write_leaves_expired_row_for_next_sweep(monkeypatch):
     monkeypatch.setattr(scanmeet_limits.live_cleanup, "enqueue", Mock(side_effect=RuntimeError("offline")))
     result = scanmeet_limits.expire_sessions(db)
     assert result["pending"] == 1 and db.rows["scan_live_sessions"][0]["status"] == "active"
+
+
+@pytest.mark.parametrize("status,school_id,attached", [
+    ("pending", "school-a", True), ("approved", "school-a", False),
+    ("rejected", "school-a", False), ("pending", "school-b", False),
+])
+def test_review_link_never_leaves_closed_or_foreign_request_on_later_forms(status, school_id, attached):
+    db = database()
+    db.rows[admin.REQUESTS] = [{"id": "request-a", "school_id": school_id,
+        "status": status, "plan_code": "kelas", "created_at": "2026-10-30T00:00:00Z"}]
+    result = admin.dashboard(db, {"npsn": SCHOOL["npsn"], "request_id": "request-a"}, lambda template, **ctx: ctx)
+    assert result["request_id"] == ("request-a" if attached else "")
+    if attached:
+        assert result["selected_plan"] == "kelas"
+
+
+def test_direct_review_link_works_beyond_first_twenty_pending_requests():
+    db = database()
+    db.rows[admin.REQUESTS] = [{"id": f"request-{i}", "school_id": f"other-school-{i}",
+        "status": "pending", "plan_code": "trial", "created_at": f"{i:03}"} for i in range(20)]
+    db.rows[admin.REQUESTS].append({"id": "request-target", "school_id": "school-a",
+        "status": "pending", "plan_code": "sekolah", "created_at": "999"})
+    result = admin.dashboard(db, {"npsn": SCHOOL["npsn"], "request_id": "request-target"}, lambda template, **ctx: ctx)
+    assert len(result["pending"]) == 20
+    assert result["request_id"] == "request-target" and result["selected_plan"] == "sekolah"
+
+
+def test_unavailable_direct_request_lookup_keeps_a_readable_page(monkeypatch):
+    from tests.unit.scanmeet_package_fixtures import Query
+    original = Query.execute
+    def execute(query):
+        if query.name == admin.REQUESTS and len(query.filters) == 3:
+            raise RuntimeError("temporary transport failure")
+        return original(query)
+    monkeypatch.setattr(Query, "execute", execute)
+    result = admin.dashboard(database(), {"npsn": SCHOOL["npsn"], "request_id": "request-target"}, lambda template, **ctx: ctx)
+    assert result["school"]["id"] == "school-a"
+    assert result["error"] and not result["request_id"]
