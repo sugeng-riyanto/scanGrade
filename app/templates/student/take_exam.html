@@ -3264,6 +3264,8 @@ function examApp(duration, totalQ) {
         _rotationTimer: null,
         _rotationForgiven: false,
         _rotationWatch: null,
+        _lastScreenOrientation: null,
+        _fsLossTimer: null,
         // The student has left the exam — a new tab, another app, a minimise.
         // The paper is blurred behind a panel until they come back and dismiss
         // it, so a window nobody is watching is not a window anybody can read.
@@ -3799,6 +3801,8 @@ function examApp(duration, totalQ) {
             if (document.hidden) return;
 
             if (this._fsElement()) {
+                clearTimeout(this._fsLossTimer);
+                this._fsLossTimer = null;
                 // Reaching fullscreen from outside is the student establishing it.
                 // Arriving *already* in fullscreen is not: a reload keeps the
                 // state, and the browser drops it again on its own once the new
@@ -3861,19 +3865,46 @@ function examApp(duration, totalQ) {
                 }
                 return;
             }
+            if (this._platformLosesFullscreenOnRotation()) {
+                // Tablet browsers can emit fullscreenchange BEFORE the rotation
+                // signal. Block immediately, but let that bounded transition
+                // identify itself before charging. A resize alone cannot do so.
+                this._fsLossTimer = setTimeout(() => {
+                    this._fsLossTimer = null;
+                    if (this.submitted || !this.antiCheat.enabled ||
+                        !this.antiCheat.fullscreen_required || !this._isFocusTab ||
+                        document.hidden || this._fsElement() || !this.fullscreenBlocked) return;
+                    this.handleViolation('fullscreen_exit');
+                }, this.rotationGraceMs);
+                return;
+            }
             this.handleViolation('fullscreen_exit');
         },
         // ─── Orientation: the transition, told apart from the act ────────────
         //
-        // Both signals are watched, and that is not belt-and-braces: on a tablet
-        // `orientationchange` fires on the window, while a desktop window dragged
-        // across the portrait line fires only the media query. Neither is a
-        // violation by itself; together they are what lets the ladder tell a turn
-        // apart from a pupil who left.
+        // Browser event order differs: listen to native orientation and media
+        // signals, but verify the device angle before forgiving a loss. A window
+        // resize or keyboard opening can change the CSS aspect ratio without a
+        // device turn, and must not cancel a genuine fullscreen-exit charge.
         watchOrientation() {
-            const shift = () => this._noteOrientationShift();
+            this._lastScreenOrientation = this._screenOrientation();
+            const shift = (event) => {
+                const next = this._screenOrientation();
+                if (next !== null) {
+                    if (next === this._lastScreenOrientation) return;
+                    this._lastScreenOrientation = next;
+                } else if (!event || event.type !== 'orientationchange') {
+                    // Keyboard, split-screen and window resizing can flip the
+                    // CSS aspect ratio without the device turning at all.
+                    return;
+                }
+                this._noteOrientationShift();
+            };
             window.addEventListener('orientationchange', shift);
             try {
+                if (window.screen?.orientation?.addEventListener) {
+                    window.screen.orientation.addEventListener('change', shift);
+                }
                 this._rotationWatch = window.matchMedia('(orientation: portrait)');
                 if (this._rotationWatch.addEventListener) {
                     this._rotationWatch.addEventListener('change', shift);
@@ -3882,6 +3913,13 @@ function examApp(duration, totalQ) {
                 }
             } catch (e) { this._rotationWatch = null; }
         },
+        _screenOrientation() {
+            try {
+                const angle = window.screen?.orientation?.angle;
+                if (typeof angle === 'number') return angle;
+                return typeof window.orientation === 'number' ? window.orientation : null;
+            } catch (e) { return null; }
+        },
         _noteOrientationShift() {
             if (this.submitted) return;
             // Recorded for the paper's own timeline whatever it cost — a teacher
@@ -3889,6 +3927,17 @@ function examApp(duration, totalQ) {
             // infer it from a penalty that should not be there.
             this._ev('orientation_shift');
             if (!this.antiCheat.enabled) return;
+            if (this._fsLossTimer != null) {
+                clearTimeout(this._fsLossTimer);
+                this._fsLossTimer = null;
+                // The pending fullscreen loss has now been explained by a real
+                // device turn. Keep the overlay and file just one uncharged row.
+                if (this.fullscreenBlocked && !this._rotationForgiven) {
+                    this._rotationForgiven = true;
+                    this.recordNotCharged('orientation_shift',
+                                          'rotation_while_out_of_fullscreen');
+                }
+            }
             this._rotationGraceUntil = Date.now() + this.rotationGraceMs;
             // Most browsers will let the page back in now, having taken it away
             // themselves; one that will not resolves false and the overlay's own
@@ -3924,10 +3973,9 @@ function examApp(duration, totalQ) {
             this.handleViolation('fullscreen_exit', 'rotation');
         },
         // Whether this platform's fullscreen is *dropped by a rotation* rather than
-        // kept across it, and cannot be re-entered without a fresh gesture. iPadOS
-        // is the one that does this; everywhere else a turn either keeps fullscreen
-        // or the page can ask for it again. Fails to `false` (the strict rule) so a
-        // browser that hides its own identity cannot win a free window by hiding it.
+        // kept across it, and cannot be re-entered without a fresh gesture. Android
+        // tablet browsers can do this too; an automatic request can be denied for
+        // lacking user activation. The overlay remains mandatory on both platforms.
         _platformLosesFullscreenOnRotation() {
             let ua = '', platform = '', touch = 0;
             try {
@@ -3935,7 +3983,8 @@ function examApp(duration, totalQ) {
                 platform = navigator.platform || '';
                 touch = navigator.maxTouchPoints || 0;
             } catch (e) { return false; }
-            return /iPad|iPhone|iPod/.test(ua) || (platform === 'MacIntel' && touch > 1);
+            return /iPad|iPhone|iPod/.test(ua) || (platform === 'MacIntel' && touch > 1)
+                || (/Android/.test(ua) && touch > 0);
         },
         _tryAutoRefullscreen() {
             if (this.submitted) return;
@@ -4200,6 +4249,7 @@ function examApp(duration, totalQ) {
                     const gone = Date.now();
                     this._blurTimer = setTimeout(() => {
                         if (!this._isFocusTab || this.submitted) return;
+                        if (!document.hidden) return;
                         // A minimise is handled here, and only here: checkFullscreen()
                         // skips a hidden document so the same absence is not billed
                         // twice, and reads this flag when it raises the overlay.
@@ -4246,6 +4296,7 @@ function examApp(duration, totalQ) {
                     // the blur is raised after it, never before, so the tab a
                     // second exam tab has taken over from stays silent.
                     if (!this._isFocusTab || this.submitted || document.hidden) return;
+                    if (document.hasFocus()) return; // focus may return without a focus event
                     // Not while the fullscreen panel is up: that absence is already
                     // charged, and the paper behind it is already unreadable.
                     if (this.fullscreenBlocked) return;
