@@ -1028,6 +1028,7 @@ EXIT_TONES = ("quiet", "refused", "rolled_back", "blocked", "attention")
 
 EXIT_CODES: dict[int, str] = {
     0: "quiet",         # nothing new, already current, another run holds the lock
+    1: "refused",       # recovery preparation failed before any release was tried
     2: "blocked",       # not root: this run cannot reload the service
     3: "blocked",       # no checkout, or nothing in it that could serve a release
     4: "refused",       # the checkout could not be read, or carries hand edits

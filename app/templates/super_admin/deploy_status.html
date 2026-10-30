@@ -1904,6 +1904,7 @@
                     </span>
                     <span class="text-surface-600 min-w-0">
                         {% if code == 0 %}<span x-text="t('tidak ada yang menunggu; sudah terbaru; atau run lain sedang memegang kunci','nothing was waiting; already current; or another run holds the lock')"></span>
+                        {% elif code == 1 %}<span x-text="t('persiapan pemulihan gagal; rilis tidak dijalankan','recovery preparation failed; the release was not attempted')"></span>
                         {% elif code == 2 %}<span x-text="t('bukan root: run ini tidak bisa me-reload layanan','not root: this run cannot reload the service')"></span>
                         {% elif code == 3 %}<span x-text="t('tidak ada checkout, atau tidak ada apa pun di dalamnya yang bisa melayani rilis','no checkout, or nothing in it that could serve a release')"></span>
                         {% elif code == 4 %}<span x-text="t('checkout tidak bisa dibaca, atau membawa suntingan tangan','the checkout could not be read, or carries hand edits')"></span>
