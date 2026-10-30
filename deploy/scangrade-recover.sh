@@ -631,6 +631,18 @@ if [ "$VERIFY_RC" = "6" ] && [ -n "$PENDING" ]; then
   done <<< "$PENDING"
 fi
 
+# recover-call-context:start
+# A recover plan is already running inside the deploy oneshot. Its parent owns
+# the deploy lock and cannot finish while waiting here; systemctl start of that
+# same unit would wait for the parent forever. Leave the release to that caller.
+# Console sgfix keeps the synchronous release/verification ladder below.
+if [ "${SG_RECOVER_PREPARE_ONLY:-0}" = "1" ]; then
+  note "preparation complete — the calling deploy tick owns the release"
+  printf 'release delegated to the calling deploy tick\n' >> "$RECORD"
+  exit 0
+fi
+# recover-call-context:end
+
 # ── 3-5. the release ladder ──────────────────────────────────────────────────
 
 release_once() {
