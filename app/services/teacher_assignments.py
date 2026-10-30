@@ -494,8 +494,19 @@ def save(supabase, school_id, teacher_id, pairs, year_name=None, confirm_remove=
             .eq("school_id", school_id).eq("teacher_id", teacher_id) \
             .eq("class_id", class_id).eq("subject_id", subject_id).execute()
 
-    return True, {
+    payload = {
         "added": [{"class_id": c, "subject_id": s} for c, s in to_add],
         "removed": [{"class_id": c, "subject_id": s} for c, s in to_remove],
         "added_count": len(to_add), "removed_count": len(to_remove),
     }
+    if to_remove and not confirm_remove:
+        # The 409 check above ran *before* the write, so a paper minted in the
+        # window in between — by a teacher who was still authorised then — is
+        # legitimate and stays; but the admin asked for a clean removal, so a
+        # re-check says what started while the save was in flight. (With
+        # `confirm_remove` there was no clean baseline to compare against, so
+        # nothing is reported there.)
+        started = running_exams_for_removal(supabase, school_id, teacher_id, to_remove)
+        if started:
+            payload["started_during_save"] = started
+    return True, payload

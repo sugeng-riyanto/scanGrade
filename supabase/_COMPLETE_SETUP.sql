@@ -302,8 +302,9 @@ CREATE POLICY "subjects_guru_murid_read" ON subjects FOR SELECT USING ((public._
 -- TEACHER ASSIGNMENTS
 DROP POLICY IF EXISTS "ta_read_own" ON teacher_assignments;
 CREATE POLICY "ta_read_own" ON teacher_assignments FOR SELECT USING (teacher_id = auth.uid() OR EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('super_admin', 'admin_sekolah')));
-DROP POLICY IF EXISTS "ta_insert_own" ON teacher_assignments;
-CREATE POLICY "ta_insert_own" ON teacher_assignments FOR INSERT WITH CHECK (teacher_id = auth.uid() AND school_id = public._user_school_id());
+-- No teacher self-insert policy: INSERT is admin-only (migration 077). The exam-build
+-- gate trusts every active row, so a self-insert is a self-grant; admins insert
+-- through "ta_admin_all" below (FOR ALL without WITH CHECK applies USING to inserts).
 DROP POLICY IF EXISTS "ta_admin_all" ON teacher_assignments;
 CREATE POLICY "ta_admin_all" ON teacher_assignments FOR ALL USING (EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('super_admin', 'admin_sekolah') AND school_id = teacher_assignments.school_id));
 

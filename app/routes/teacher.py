@@ -1362,8 +1362,13 @@ def exam_form():
     # The dropdown is scoped; the write must be too, or the scoping is just a
     # suggestion the browser is free to disagree with. Admins are not scoped.
     if assignments_service.is_scoped_role(g.get("user_role")):
+        # The grant is per-year, like the dropdown and the dashboard: a pair the
+        # admin assigned only for a past year no longer authorises a new paper.
+        _year_name = (ta_service.active_school_year(
+            supabase, g.get("user_school_id")) or {}).get("name")
         _unassigned = assignments_service.unassigned_class_ids(
-            supabase, g.user_id, g.get("user_school_id"), subject_id, class_ids)
+            supabase, g.user_id, g.get("user_school_id"), subject_id, class_ids,
+            year_name=_year_name)
         if _unassigned:
             # 403 for a programmatic caller, so the refusal is legible instead of
             # arriving as a redirect it follows to a page that looks fine; a
@@ -1803,8 +1808,13 @@ def exam_detail(exam_id):
     # The dropdown is scoped; the write must be too, or the scoping is just a
     # suggestion the browser is free to disagree with. Admins are not scoped.
     if assignments_service.is_scoped_role(g.get("user_role")):
+        # The grant is per-year, like the dropdown and the dashboard: a pair the
+        # admin assigned only for a past year no longer authorises a new paper.
+        _year_name = (ta_service.active_school_year(
+            supabase, g.get("user_school_id")) or {}).get("name")
         _unassigned = assignments_service.unassigned_class_ids(
-            supabase, g.user_id, g.get("user_school_id"), subject_id, class_ids)
+            supabase, g.user_id, g.get("user_school_id"), subject_id, class_ids,
+            year_name=_year_name)
         if _unassigned:
             # 403 for a programmatic caller, so the refusal is legible instead of
             # arriving as a redirect it follows to a page that looks fine; a

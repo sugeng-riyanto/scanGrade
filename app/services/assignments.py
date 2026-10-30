@@ -22,6 +22,8 @@ from __future__ import annotations
 
 import logging
 
+from app.services.teacher_assignments import row_is_active
+
 logger = logging.getLogger(__name__)
 
 #: Roles whose writes are limited to the pairs they hold. Named, not inferred, so
@@ -38,12 +40,17 @@ def is_scoped_role(role) -> bool:
     return role in SCOPED_ROLES
 
 
-def active_rows(supabase, teacher_id, school_id) -> list:
+def active_rows(supabase, teacher_id, school_id, year_name=None) -> list:
     """The teacher's assignment rows that still grant the door.
 
     A row written before migration 045 — or by a deployment that has not run it —
     carries no `status` key at all; that is a real assignment and must not vanish,
     so the absence of the column is read as *active*.
+
+    `year_name` is the same year the matrix edits and the dashboard shows
+    (`teacher_assignments.row_is_active`, one rule for every reader): a pair the
+    admin assigned only for a past year no longer authorises a *new* paper. Omit
+    it only where no year is in force — legacy callers read all years, as before.
     """
     res = (supabase.table("teacher_assignments")
            .select("class_id, subject_id, status, school_year")
@@ -51,16 +58,20 @@ def active_rows(supabase, teacher_id, school_id) -> list:
            .eq("school_id", school_id)
            .execute())
     rows = getattr(res, "data", None) or []
-    return [r for r in rows if (r.get("status") or "active") == "active"]
+    return [r for r in rows if row_is_active(r, year_name)]
 
 
-def unassigned_class_ids(supabase, teacher_id, school_id, subject_id, class_ids) -> list:
+def unassigned_class_ids(supabase, teacher_id, school_id, subject_id, class_ids,
+                         year_name=None) -> list:
     """Which of `class_ids` this teacher may NOT attach a paper to.
 
     Empty list means every class is theirs to write for. When `subject_id` is
     absent the class alone is checked (there is no pair to test against); when it
     is present the *pair* is the unit, so teaching Physics in 8A does not carry
     Maths in 8A.
+
+    `year_name` scopes the grant to the year in force (the exam-building doors
+    pass the active year); without it every active row counts, as before.
 
     Fails **closed**: if the lookup itself raises, every class is returned as
     unassigned. A teacher being unable to save for a moment is a smaller fault
@@ -70,7 +81,7 @@ def unassigned_class_ids(supabase, teacher_id, school_id, subject_id, class_ids)
     if not wanted:
         return []
     try:
-        rows = active_rows(supabase, teacher_id, school_id)
+        rows = active_rows(supabase, teacher_id, school_id, year_name)
     except Exception:
         logger.exception("assignment lookup failed for teacher %s", teacher_id)
         return wanted
