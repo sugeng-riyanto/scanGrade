@@ -74,14 +74,29 @@ def dashboard(db, args, renderer):
     selected_plan = (license_row or {}).get("plan_code") or "trial"
     if selected_plan == "trial" and (license_row or {}).get("trial_started_at"):
         selected_plan = "kelas"
-    for item in pending:
-        if item["id"] == args.get("request_id") and school and item["school_id"] == school["id"]:
-            selected_plan = item["plan_code"]
+    request_id = ""
+    requested_id = str(args.get("request_id") or "")
+    if requested_id and school and requests_available:
+        selected = next((item for item in pending if item["id"] == requested_id
+                         and item["school_id"] == school["id"]), None)
+        if selected is None:
+            # A direct review link may refer beyond the 20-row inbox. Closed or
+            # foreign-school requests must not remain attached to later edits.
+            try:
+                selected = _one(db.table(REQUESTS).select("id,plan_code")
+                                .eq("id", requested_id).eq("school_id", school["id"])
+                                .eq("status", "pending"))
+            except Exception as exc:
+                log.warning("ScanMeet requested review unavailable: %s", type(exc).__name__)
+                error = "Pengajuan belum dapat dimuat. Muat ulang sebelum meninjau pengajuan ini."
+        if selected:
+            selected_plan = selected["plan_code"]
+            request_id = selected["id"]
     return renderer("super_admin/scanmeet_schools.html", npsn=npsn, school=school,
                     license=license_row, rows=rows, pending=pending, q=q, page=page,
                     total=total, pages=max(1, (total + 19) // 20), summary=summary,
                     plans=packages.PLANS, error=error, requests_available=requests_available,
-                    request_id=str(args.get("request_id") or ""), selected_plan=selected_plan)
+                    request_id=request_id, selected_plan=selected_plan)
 
 
 def revoke_rooms(db, school_id, config):
