@@ -1,4 +1,4 @@
-"""INSERT on `teacher_assignments` is admin-only (migration 077).
+"""INSERT on `teacher_assignments` is admin-only (migration 078).
 
 The exam-build gate trusts every active row, so the old \"Teachers insert own
 assignments\" policy was a self-grant: a signed-in teacher calling PostgREST
@@ -14,20 +14,20 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 MIGRATIONS = ROOT / "supabase" / "migrations"
-M077 = MIGRATIONS / "077_teacher_assignment_insert_admin_only.sql"
+M078 = MIGRATIONS / "078_teacher_assignment_insert_admin_only.sql"
 RUN_ALL = MIGRATIONS / "_RUN_ALL_AT_ONCE.sql"
 COMPLETE_SETUP = ROOT / "supabase" / "_COMPLETE_SETUP.sql"
 
 
-def test_077_drops_the_self_insert_in_both_lineages():
-    sql = M077.read_text(encoding="utf-8")
+def test_078_drops_the_self_insert_in_both_lineages():
+    sql = M078.read_text(encoding="utf-8")
     assert 'DROP POLICY IF EXISTS "Teachers insert own assignments"' in sql
     assert 'DROP POLICY IF EXISTS "ta_insert_own"' in sql
 
 
-def test_077_grants_nothing_and_only_drops():
+def test_078_grants_nothing_and_only_drops():
     """The fix narrows a door; a migration that grants here would reopen it."""
-    sql = M077.read_text(encoding="utf-8")
+    sql = M078.read_text(encoding="utf-8")
     assert "CREATE POLICY" not in sql
     assert "FOR INSERT" not in sql
     assert not re.search(r"DROP\s+(TABLE|COLUMN)", sql), "the migration is destructive"

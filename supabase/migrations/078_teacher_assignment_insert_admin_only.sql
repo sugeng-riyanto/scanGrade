@@ -1,4 +1,4 @@
--- Migration 077: teacher_assignments INSERT is admin-only.
+-- Migration 078: teacher_assignments INSERT is admin-only.
 --
 -- The exam-build gate (`app/services/assignments.py::unassigned_class_ids`) trusts
 -- every active row in this table, so a policy that lets a teacher INSERT their own
