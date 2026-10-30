@@ -162,6 +162,8 @@ def create_session(exam_id):
     try:
         created = db.table("scan_live_sessions").insert(row).execute().data[0]
     except Exception as exc:
+        if "scanmeet_school_room_busy" in str(exc):
+            return jsonify({"error": "Sekolah masih memiliki ruang ScanMeet aktif. Akhiri ruang itu sebelum memulai kelas berikutnya; ujian tetap berjalan."}), 409
         if "scanmeet_session_allowance_exhausted" in str(exc):
             return jsonify({"error": "Jatah sesi ScanMeet habis. Ajukan paket lanjutan; ujian tetap berjalan."}), 409
         log.warning("Concurrent Live creation or Live migration unavailable",

@@ -18,6 +18,7 @@ async function scenario(mode) {
  <button data-open-dialog="lookup">Open</button><dialog id="lookup"><button data-close-dialog>Close</button></dialog>
  <form action="/save" data-scanmeet-form ${mode==='cancel'?'data-confirm="revoke"':''}>
  <input name="_csrf_token" value="csrf-test"><input name="npsn" value="69893227">
+ ${mode==='hidden-action'?'<input type="hidden" name="action" value="revoke">':'<select name="action"><option value="activate">Activate</option></select>'}
  <button type="submit">Save</button><p data-form-result role="status"></p></form>`,
  {runScripts:'outside-only',url:'https://scangrade.test'});
  const w=dom.window, calls=[],timers=[];
@@ -32,6 +33,8 @@ async function scenario(mode) {
  };
  w.eval(script);
  const form=w.document.querySelector('form');
+ // jsdom omits HTMLFormElement named-property overrides present in browsers.
+ Object.defineProperty(form,'action',{value:form.elements.namedItem('action')});
  form.dispatchEvent(new w.Event('submit',{cancelable:true}));
  form.dispatchEvent(new w.Event('submit',{cancelable:true}));
  for(let i=0;i<12;i++)await Promise.resolve();
@@ -46,7 +49,7 @@ async function scenario(mode) {
  opened,closed:!dialog.hasAttribute('open')};
  dom.window.close();return result;
 }
-(async()=>{const out={};for(const mode of ['success','error','html','network','cancel'])out[mode]=await scenario(mode);console.log(JSON.stringify(out));})();
+(async()=>{const out={};for(const mode of ['success','error','html','network','cancel','hidden-action'])out[mode]=await scenario(mode);console.log(JSON.stringify(out));})();
 """
 
 
@@ -86,3 +89,10 @@ def test_package_preview_and_dialog_work_with_actual_handlers(dom_results):
     row = dom_results["success"]
     assert row["hidden"] == [True, False]
     assert row["opened"] and row["closed"]
+
+
+@pytest.mark.parametrize("mode", ["success", "hidden-action"])
+def test_action_control_cannot_replace_submission_url(dom_results, mode):
+    row = dom_results[mode]
+    assert row["calls"][0]["url"] == "/save"
+    assert "action=" in row["calls"][0]["body"]
