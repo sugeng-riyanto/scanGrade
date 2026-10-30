@@ -25,6 +25,33 @@ EXAM_POLICY = {
     "disconnect": "alert_teacher_continue_exam",
 }
 
+#: Mode pembelajaran (kelas online). Sengaja terpisah dari EXAM_POLICY:
+#: ujian mengunci media demi integritas, kelas membuka interaksi demi belajar.
+#: Nilai default OFF sama seperti ujian — diaktifkan eksplisit per sesi.
+CLASS_POLICY = {
+    "mode": "class",
+    "camera": "optional",
+    "microphone": "open",
+    "chat": True,
+    "raise_hand": True,
+    "recording": "local_only",
+    "screen_share": "teacher_only",
+    "layout": "grid",
+    "disconnect": "rejoin_keep_presence",
+    "attendance": True,
+}
+
+MODES = ("exam", "class")
+
+#: Aturan perekaman: server tidak pernah menyimpan blob media.
+#: - exam: dilarang total (token room_record=False, tidak ada tombol rekam).
+#: - class: hanya lokal di browser (MediaRecorder) / OBS via clean-feed
+#:   receive-only; upload ke Drive milik masing-masing user via OAuth.
+RECORDING_RULE = {
+    "exam": "disabled",
+    "class": "local_only_with_consent",
+}
+
 
 def feature_enabled(config) -> bool:
     """Both switches must be on; default OFF, including on deployed servers."""
@@ -63,6 +90,31 @@ def server_api_url(config) -> str:
     if not url.startswith("wss://") or not url[6:]:
         raise ValueError("LIVEKIT_URL must be a secure wss:// endpoint")
     return "https://" + url[6:]
+
+
+def policy_for(mode: str) -> dict:
+    """Kembalikan policy sesuai mode; exam tetap default yang dikunci."""
+    if mode == "class":
+        return dict(CLASS_POLICY)
+    if mode == "exam":
+        return dict(EXAM_POLICY)
+    raise ValueError("Unrecognized ScanMeet mode")
+
+
+def allowed_sources_for(mode: str, role: str, microphone_approved: bool = False) -> list[str]:
+    """Sumber publish per mode.
+
+    - exam: murid hanya kamera sampai guru approve (tetap dikunci).
+    - class: murid langsung kamera+mic (interaksi belajar terbuka).
+    - recorder (kedua mode): receive-only, tidak publish apa pun.
+    """
+    if role == "recorder":
+        return []
+    if mode == "class":
+        if role in (LIVE_TEACHER, LIVE_STUDENT):
+            return ["camera", "microphone"]
+        raise ValueError("Unrecognized Live participant role")
+    return allowed_sources(role, microphone_approved)
 
 
 def allowed_sources(role: str, microphone_approved: bool = False) -> list[str]:
