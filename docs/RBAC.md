@@ -249,7 +249,7 @@ dan `tests/unit/test_reports_hub.py` menahan daftar itu dalam dua arah.
 | `subjects` | ALL | ALL own_school | SELECT own_school | SELECT own_school |
 | `teachers` | ALL | SELECT own_school | SELECT own | ❌ |
 | `students` | ALL | SELECT own_school | SELECT own_school | SELECT own |
-| `teacher_assignments` | ALL | ALL own_school | INSERT own + SELECT own | ❌ |
+| `teacher_assignments` | ALL | ALL own_school (incl. INSERT, migrasi 077) | SELECT own | ❌ |
 | `violation_logs` | ❌ | ❌ | SELECT own_exam | ❌ |
 | `audit_logs` | ALL | ❌ | ❌ | ❌ |
 

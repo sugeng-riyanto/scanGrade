@@ -28,7 +28,7 @@ ScanGrade uses Supabase as its database with two clients:
 | 6 | `subjects` | ✅ | ✅ | 3 (SA all, admin all own, guru/murid read) | LOW | OK |
 | 7 | `teachers` | ✅ | ✅ | via profiles RLS | LOW | Extends profiles |
 | 8 | `students` | ✅ | ✅ | via profiles RLS | LOW | Extends profiles |
-| 9 | `teacher_assignments` | ✅ | ✅ | 3 (read own, insert own, admin all) | LOW | OK |
+| 9 | `teacher_assignments` | ✅ | ✅ | 2 + admin ALL (read own, admin all; self-insert dropped by 077 — it was a self-grant against the exam-build gate) | LOW | OK |
 | 10 | `school_years` | ✅ | ✅ | via profiles RLS | LOW | OK |
 | 11 | `violation_logs` | via exam_id | ✅ | 4 (guru, admin_sekolah, SA, service insert) | LOW | OK |
 | 12 | `exam_access_codes` | via exam_id | ✅ | 4 (guru, admin_sekolah, student, guru insert) | LOW | OK |

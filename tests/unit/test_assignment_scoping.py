@@ -179,6 +179,45 @@ def test_the_rule_reads_the_year_and_status_the_migration_adds():
         assert column in source
 
 
+def _yrow(class_id, subject_id, year):
+    row = _row(class_id, subject_id)
+    row["school_year"] = year
+    return row
+
+
+def test_a_pair_from_a_past_year_no_longer_authorises_a_new_paper():
+    """The grant is per-year: last year's pair does not build this year's paper."""
+    sb = _Sb([_yrow("c-1", "s-1", "2024/2025")])
+
+    assert assignments.unassigned_class_ids(
+        sb, "t-1", "sc-1", "s-1", ["c-1"], year_name="2025/2026") == ["c-1"]
+
+
+def test_a_current_year_pair_still_authorises():
+    sb = _Sb([_yrow("c-1", "s-1", "2025/2026")])
+
+    assert assignments.unassigned_class_ids(
+        sb, "t-1", "sc-1", "s-1", ["c-1"], year_name="2025/2026") == []
+
+
+def test_omitting_the_year_reads_all_years_as_before():
+    """Legacy callers pass no year and keep the old all-years grant."""
+    sb = _Sb([_yrow("c-1", "s-1", "2024/2025")])
+
+    assert assignments.unassigned_class_ids(sb, "t-1", "sc-1", "s-1", ["c-1"]) == []
+
+
+def test_both_exam_writes_scope_the_grant_to_the_active_year():
+    """`exam_form` and `exam_detail` must pass the year, not just the pair."""
+    src = _source()
+    for func in ("def exam_form(", "def exam_detail("):
+        body = src.split(func)[1].split("\ndef ")[0]
+        call = body.split("unassigned_class_ids(")[1][:500]
+        assert "year_name=" in call, (
+            f"{func.rstrip('(')} checks the pair but not the year — "
+            "a past-year assignment would authorise a new paper")
+
+
 def test_the_dropdown_fallback_is_gated_on_the_admin_role():
     """A whole-school read is the *admin's* privilege, not a guru's default.
 

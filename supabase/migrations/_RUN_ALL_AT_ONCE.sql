@@ -638,10 +638,9 @@ CREATE POLICY "Teachers read own assignments" ON teacher_assignments
     FOR SELECT USING (teacher_id = auth.uid() OR EXISTS (
         SELECT 1 FROM profiles WHERE profiles.id = auth.uid() AND profiles.role IN ('super_admin', 'admin_sekolah')
     ));
-DROP POLICY IF EXISTS "Teachers insert own assignments" ON teacher_assignments;
-CREATE POLICY "Teachers insert own assignments" ON teacher_assignments
-    FOR INSERT WITH CHECK (teacher_id = auth.uid()
-        AND school_id = (SELECT school_id FROM profiles WHERE id = auth.uid()));
+-- No teacher self-insert policy: INSERT is admin-only (migration 077). The exam-build
+-- gate trusts every active row, so a self-insert is a self-grant; admins insert
+-- through "Admin sekolah manage assignments" / "Super admin all assignments" below.
 DROP POLICY IF EXISTS "Admin sekolah manage assignments" ON teacher_assignments;
 CREATE POLICY "Admin sekolah manage assignments" ON teacher_assignments
     FOR ALL USING (EXISTS (
