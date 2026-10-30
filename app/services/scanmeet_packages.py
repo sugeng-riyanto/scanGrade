@@ -52,7 +52,6 @@ def describe(row, *, now=None):
     row["effective_status"] = state
     row["days_left"] = max(0, int((expiry - now).total_seconds() // 86400)) if expiry else 0
     row["unlimited_sessions"] = (row.get("plan_code") in ("kelas", "sekolah")
-                                  and row.get("status") == "paid"
                                   and row.get("concurrent_room_limit") == 1
                                   and row.get("session_allowance") is None)
     row["remaining_sessions"] = None if row["unlimited_sessions"] else max(0, int(row.get("session_allowance") or 0) - int(row.get("sessions_used") or 0))

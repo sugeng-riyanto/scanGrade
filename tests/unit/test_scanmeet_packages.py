@@ -79,3 +79,11 @@ def test_unlimited_is_based_on_stored_contract_not_only_current_catalog():
     old["concurrent_room_limit"] = 1
     assert packages.describe(old)["unlimited_sessions"]
     assert packages.describe(old)["remaining_sessions"] is None
+
+
+def test_archived_membership_keeps_its_terms_separate_from_access():
+    row = packages.describe({"plan_code": "kelas", "status": "disabled", "enabled": False,
+                            "concurrent_room_limit": 1, "session_allowance": None,
+                            "archived_at": NOW.isoformat()}, now=NOW)
+    assert row["effective_status"] == "archived"
+    assert row["unlimited_sessions"] and row["remaining_sessions"] is None
