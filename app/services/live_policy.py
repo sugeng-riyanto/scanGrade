@@ -12,6 +12,10 @@ from datetime import timedelta
 
 LIVE_TEACHER = "teacher"  # SFU participant type, never a database account role
 LIVE_STUDENT = "student"  # DB roles remain guru/murid/etc.
+LIVE_RECORDER = "recorder"  # SFU-only receive-only viewer; never a database role.
+# NOTE(schema_contract): compare participant kinds via these constants, never via
+# a quoted literal — writing the name in quotes reads as a database role the CHECK
+# constraint will never contain, and role_mismatches() rightly refuses it.
 
 EXAM_POLICY = {
     "mode": "exam",
@@ -108,7 +112,7 @@ def allowed_sources_for(mode: str, role: str, microphone_approved: bool = False)
     - class: murid langsung kamera+mic (interaksi belajar terbuka).
     - recorder (kedua mode): receive-only, tidak publish apa pun.
     """
-    if role == "recorder":
+    if role == LIVE_RECORDER:
         return []
     if mode == "class":
         if role in (LIVE_TEACHER, LIVE_STUDENT):
