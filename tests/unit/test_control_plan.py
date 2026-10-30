@@ -267,19 +267,19 @@ def _plan(command: str, *, issued: str = "2026-09-30T21:00:00Z") -> str:
 
 
 class TestTheCommands:
-    def test_recover_runs_the_lever_and_ends_the_tick(self, tmp_path):
+    def test_recover_prepares_and_leaves_release_to_its_calling_tick(self, tmp_path):
         seed, checkout = _sandbox(tmp_path, _plan("recover"))
         state = tmp_path / "state"
         (state / "lever" / "deploy").mkdir(parents=True)
         (state / "lever" / "deploy" / "scangrade-recover.sh").write_text(
-            "#!/usr/bin/env bash\necho LEVER-RAN\n", encoding="utf-8", newline="")
+            "#!/usr/bin/env bash\necho LEVER-RAN\necho MODE:${SG_RECOVER_PREPARE_ONLY:-0}\n", encoding="utf-8", newline="")
         done = _run(_harness(checkout, state), tmp_path)
 
         assert "LEVER-RAN" in done.stdout, (
             f"the lever did not run for a `recover` plan:\n{done.stdout}{done.stderr}")
-        assert "DONE" not in done.stdout, (
-            "the tick carried on after running the lever, which runs a release of its "
-            "own — the box would deploy twice for one command")
+        assert "MODE:1" in done.stdout, "the lever could synchronously start its own deploy unit"
+        assert "DONE" in done.stdout, "the calling tick must perform the only release"
+        assert done.returncode == 0
         assert seed  # the sandbox is used; kept for symmetry with the other cases
 
     def test_release_and_rebaseline_write_the_requests_the_runner_already_reads(
@@ -483,7 +483,7 @@ class TestAdoptingTheBranchesRunner:
             f"the adopted runner refused itself:\n{claimed.stdout}{claimed.stderr}")
         assert "REFUSING" not in claimed.stdout
 
-        lying = _run(f'SCANGRADE_RUNNER_ADOPTED="deadbeef"\n' + harness, tmp_path,
+        lying = _run('SCANGRADE_RUNNER_ADOPTED="deadbeef"\n' + harness, tmp_path,
                      name="lying.sh")
         assert lying.returncode == 14, (
             f"a hash that is not this file's was accepted as adoption:\n{lying.stdout}")
@@ -498,3 +498,39 @@ class TestAdoptingTheBranchesRunner:
 if __name__ == "__main__":                                   # pragma: no cover
     import sys
     sys.exit(pytest.main([__file__, "-q"]))
+
+
+class TestRecoveryCallContext:
+    def test_failed_preparation_stops_the_calling_deploy(self, tmp_path):
+        _, checkout = _sandbox(tmp_path, _plan("recover"))
+        state = tmp_path / "state"
+        lever = state / "lever" / "deploy" / "scangrade-recover.sh"
+        lever.parent.mkdir(parents=True)
+        lever.write_text("#!/usr/bin/env bash\nexit 7\n", encoding="utf-8")
+        done = _run(_harness(checkout, state), tmp_path)
+        assert done.returncode != 0
+        assert "DONE" not in done.stdout
+        records = list((state / "control").glob("*.applied"))
+        assert len(records) == 1
+        assert "recovery preparation failed" in records[0].read_text()
+
+    @pytest.mark.parametrize("prepared", ["0", "1"])
+    def test_real_lever_delegates_only_when_called_by_deploy(self, tmp_path, prepared):
+        source = (ROOT / "deploy" / "scangrade-recover.sh").read_text(encoding="utf-8")
+        start = "# recover-call-context:start"
+        end = "# recover-call-context:end"
+        assert start in source and end in source
+        assert source.index('note "applied $migration"') < source.index(start)
+        assert source.index(start) < source.index('say "3/6  a release"')
+        block = source.split(start, 1)[1].split(end, 1)[0]
+        record = tmp_path / "record"
+        harness = (f'SG_RECOVER_PREPARE_ONLY={prepared}\nRECORD="{record.as_posix()}"\n'
+                   'note() { echo "$*"; }\n' + block + '\necho NESTED_RELEASE\n')
+        done = _run(harness, tmp_path)
+        assert done.returncode == 0, done.stderr
+        if prepared == "1":
+            assert "NESTED_RELEASE" not in done.stdout
+            assert "delegated" in record.read_text()
+        else:
+            assert "NESTED_RELEASE" in done.stdout
+            assert not record.exists()

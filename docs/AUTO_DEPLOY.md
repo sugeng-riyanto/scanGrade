@@ -2202,7 +2202,7 @@ behind still be told what to do.
 
 | command | what the box does |
 |---|---|
-| `recover` | runs its own lever (`sgfix`'s code, installed from the same fetched commit) and ends that tick — the lever runs a release, so carrying on would deploy twice for one order |
+| `recover` | runs the lever in preparation-only mode inside the deploy unit, then the calling tick performs the release with all normal gates; it never synchronously starts its own unit |
 | `release` | writes the same `requests/release` the status page writes, so the quarantine on the held commit is lifted |
 | `rebaseline` | writes `requests/rebaseline`, so the perf gate re-measures the box instead of comparing against a stale baseline |
 | `pause` / `resume` | creates and removes `/etc/scangrade-deploy.pause` — the exam-week freeze, set and lifted from the pipeline |
@@ -3207,3 +3207,25 @@ need time: `touch /etc/scangrade-deploy.pause`.
 If the refusal came from the deploy itself it is already quarantined, and the
 journal says so: `git reset` by hand is then only needed when you want the
 checkout somewhere other than the previous release.
+
+### Recovery called from the deploy unit
+
+A `recover` plan executes inside the `scangrade-deploy.service` oneshot. Calling
+`systemctl start` for that same unit from its child waits for the current unit,
+while the unit waits for that child. On 30 October 2026 the VPS stopped at
+`3/6 a release` in exactly this call chain.
+
+The runner now calls the lever with `SG_RECOVER_PREPARE_ONLY=1`. After schema
+verification, ledger reconciliation and any required migration trials/applies,
+the lever records that release is delegated and returns. The calling runner
+retains the deploy lock and continues its normal release path and all gates.
+Preparation failure stops that tick and is recorded as a failure. No nested
+service start is made. Console `sgfix` without this environment flag retains
+its full synchronous release and recovery ladder, including its retry and arm
+remedies. Preparation-only mode does not run that post-release remedy ladder;
+a remaining refusal is reported by the calling runner's normal gates.
+
+Regression tests in `tests/unit/test_control_plan.py` execute the shipped shell
+blocks: preparation receives the flag, the parent reaches its release path,
+failed preparation stops the parent, and the real lever's preparation boundary
+exits before the nested release while console mode still reaches the ladder.

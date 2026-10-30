@@ -2220,8 +2220,9 @@ control_apply_plan() {
       fi
       ;;
     recover)
-      # Recorded before the lever runs, and the tick ends here: the lever runs a
-      # release of its own, so carrying on would deploy twice for one command. A lever
+      # Recorded before the lever runs. Inside this unit the lever only prepares:
+      # starting the same oneshot synchronously would wait for this very process.
+      # The caller keeps the lock and performs the one release afterwards. A lever
       # that cannot be installed is recorded too — the operator has to know that
       # `recover` reached a box with no lever on it.
       CONTROL_OUTCOME="the recovery lever was run"; control_plan_record
@@ -2233,8 +2234,16 @@ control_apply_plan() {
         return 0
       fi
       control_plan_clear
-      bash "$LEVER_DIR/deploy/scangrade-recover.sh"
-      exit 0
+      if SG_RECOVER_PREPARE_ONLY=1 bash "$LEVER_DIR/deploy/scangrade-recover.sh"; then
+        CONTROL_OUTCOME="recovery prepared; release delegated to the calling tick"
+        control_plan_record
+        log "control: recovery prepared — continuing this deploy with all gates"
+        return 0
+      fi
+      CONTROL_OUTCOME="refused: recovery preparation failed"
+      control_plan_record
+      log "control: recovery preparation failed — not deploying"
+      exit 1
       ;;
     *)
       log "control: REFUSING the plan — \"$CONTROL_COMMAND\" is not a command this runner knows"
