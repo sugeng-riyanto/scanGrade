@@ -13,11 +13,13 @@ def active(db, school_id: str, *, now: datetime | None = None) -> bool:
         return False
     try:
         rows = (db.table("scanmeet_school_entitlements")
-                .select("enabled,status,valid_until")
+                .select("enabled,status,valid_until,archived_at")
                 .eq("school_id", str(school_id)).limit(1).execute().data or [])
         if not rows:
             return False
         row = rows[0]
+        if row.get("archived_at"):
+            return False
         if row.get("enabled") is not True or row.get("status") not in ("trial", "paid"):
             return False
         expiry = row.get("valid_until")

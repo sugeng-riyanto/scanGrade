@@ -341,7 +341,7 @@ def run_once(app=None, *, now=None) -> dict:
     """
     from flask import current_app
 
-    from app.services import live_policy, live_reconcile, livekit_gateway
+    from app.services import live_policy, live_reconcile, livekit_gateway, scanmeet_limits
     from app.utils.auth import get_supabase
 
     app = app or current_app
@@ -357,7 +357,9 @@ def run_once(app=None, *, now=None) -> dict:
                            "is missing), so there is no ledger to drain",
                 "rules": FEATURE_INDEPENDENCE}
 
+    limits = scanmeet_limits.expire_sessions(db, now=_now(now))
     result = {"ran": True, "rules": FEATURE_INDEPENDENCE,
+              "limits": limits,
               "cleanup": run_pending(
                   config, db,
                   end_room=lambda room: livekit_gateway.end_room(config, room),

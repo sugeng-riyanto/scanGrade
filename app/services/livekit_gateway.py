@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone, timedelta
 from app.services.live_policy import (
     TOKEN_TTL, LIVE_STUDENT, allowed_sources, client_ready, participant_identity, server_api_url, setting,
 )
@@ -9,7 +10,7 @@ from app.services.live_policy import (
 
 def issue_join_token(config, session_id: str, room: str, user_id: str,
                      role: str, microphone_approved: bool = False,
-                     supervisor_id: str | None = None) -> dict:
+                     supervisor_id: str | None = None, expires_at=None) -> dict:
     if not client_ready(config):
         raise RuntimeError("LiveKit credentials are not configured")
     # Fail closed even without the optional SDK; validation must precede import.
@@ -26,14 +27,42 @@ def issue_join_token(config, session_id: str, room: str, user_id: str,
         can_publish_data=False, can_update_own_metadata=False,
         can_publish_sources=allowed_sources(role, microphone_approved),
     )
+    ttl = TOKEN_TTL
+    if expires_at:
+        from app.services.scanmeet_packages import parse_time
+        deadline = parse_time(expires_at)
+        if not deadline:
+            raise ValueError("Invalid session deadline")
+        remaining = (deadline - datetime.now(timezone.utc)).total_seconds()
+        if remaining <= 0:
+            raise ValueError("Session time has ended")
+        ttl = min(ttl, timedelta(seconds=remaining))
     jwt = (api.AccessToken(setting(config, "LIVEKIT_API_KEY"),
                            setting(config, "LIVEKIT_API_SECRET"))
            .with_identity(identity).with_metadata('{"role":"' + role + '"}')
-           .with_grants(grants).with_ttl(TOKEN_TTL).to_jwt())
+           .with_grants(grants).with_ttl(ttl).to_jwt())
     return {"url": setting(config, "LIVEKIT_URL"), "token": jwt,
             "room": room, "identity": identity, "role": role,
             "mic_approved": bool(microphone_approved),
             "supervisor_identity": supervisor_identity}
+
+
+async def _ensure_capacity(config, room, limit):
+    from livekit import api
+    client = api.LiveKitAPI(url=server_api_url(config),
+                            api_key=setting(config, "LIVEKIT_API_KEY"),
+                            api_secret=setting(config, "LIVEKIT_API_SECRET"))
+    try:
+        await client.room.create_room(api.CreateRoomRequest(name=room, max_participants=int(limit)))
+    finally:
+        await client.aclose()
+
+
+def ensure_capacity(config, room, limit):
+    """Set the SFU participant cap before any limited-package token is issued."""
+    if not isinstance(limit, int) or isinstance(limit, bool) or limit < 2:
+        raise ValueError("Invalid participant limit")
+    asyncio.run(_ensure_capacity(config, room, limit))
 
 
 async def _set_student_mic(config, session_id, room, student_id, enabled):

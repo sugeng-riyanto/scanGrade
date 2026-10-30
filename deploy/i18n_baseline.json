@@ -278,9 +278,9 @@
       "frozen": false
     },
     "base.html": {
-      "pairs": 185,
+      "pairs": 187,
       "leftovers": 0,
-      "coverage": 100,
+      "coverage": 100.0,
       "frozen": false
     },
     "compliance/privacy.html": {
@@ -566,9 +566,9 @@
       "frozen": false
     },
     "super_admin/scanmeet_schools.html": {
-      "pairs": 18,
+      "pairs": 68,
       "leftovers": 0,
-      "coverage": 100,
+      "coverage": 100.0,
       "frozen": false
     },
     "super_admin/schools.html": {
@@ -881,6 +881,12 @@
       "pairs": 6,
       "leftovers": 0,
       "coverage": 100,
+      "frozen": false
+    },
+    "scanmeet/offers.html": {
+      "pairs": 41,
+      "leftovers": 0,
+      "coverage": 100.0,
       "frozen": false
     }
   }

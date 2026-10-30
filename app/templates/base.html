@@ -493,6 +493,7 @@ window.sgSavePrefs = function (patch) {
             <a href="/wb/student/whiteboard" class="nav-item {% if '/wb/' in request.path %}active{% endif %}"><i class="fas fa-chalkboard"></i><span x-text="t('Whiteboard','Whiteboard')"></span></a>
             {% endif %}
 {% endif %}
+            <a href="/scanmeet" class="nav-item {% if request.path == '/scanmeet' %}active{% endif %}"><i class="fas fa-video"></i><span x-text="t('Paket ScanMeet','ScanMeet plans')"></span></a>
         </nav>
 
         <!-- User -->
@@ -626,6 +627,7 @@ window.sgSavePrefs = function (patch) {
                     'grading-queue': ('Antrean Koreksi', 'Grading Queue'),
                     'guide': ('Panduan', 'Guide'),
                     'import': ('Impor', 'Import'),
+                    'scanmeet': ('Paket ScanMeet', 'ScanMeet Packages'),
                     'scanmeet-schools': ('Lisensi ScanMeet', 'ScanMeet Licenses'),
                     'seb': ('Safe Exam Browser', 'Safe Exam Browser'),
                     'seb-claim': ('Buka dengan SEB', 'Open with SEB'),
