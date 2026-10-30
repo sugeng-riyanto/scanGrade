@@ -1,68 +1,47 @@
 {% extends "base.html" %}
-{% block title %}ScanMeet Licenses - ScanGrade{% endblock %}
-{% block page_title %}<span x-text="t('Lisensi ScanMeet','ScanMeet Licenses')"></span>{% endblock %}
+{% block title %}ScanMeet · ScanGrade{% endblock %}
+{% block page_title %}<span x-text="t('Kelola ScanMeet','Manage ScanMeet')"></span>{% endblock %}
+{% block head_extra %}<style>[data-package-code][hidden] { display: none; }</style>{% endblock %}
 {% block content %}
-<div class="container mx-auto max-w-3xl p-6">
-  <h1 class="text-2xl font-bold mb-3" x-text="t('Lisensi ScanMeet per NPSN','ScanMeet licenses by NPSN')"></h1>
-  <p class="mb-4" x-text="t('Hanya Super Admin. Default OFF; tidak ada penagihan otomatis.','Super Admin only. Default OFF; nothing is billed automatically.')"></p>
-  <form method="get" class="flex gap-2 mb-6">
-    <label for="npsn" x-text="t('NPSN (8 digit)','NPSN (8 digits)')"></label>
-    <input id="npsn" name="npsn" pattern="[0-9]{8}" maxlength="8" required value="{{ npsn|e }}" class="border rounded px-2">
-    <button class="border rounded px-3" type="submit" x-text="t('Cari sekolah','Find the school')"></button>
-  </form>
-  {% if school %}
-  <section class="border rounded-lg p-4">
-    <h2 class="font-semibold">{{ school.name|e }} — {{ school.npsn|e }}</h2>
-    <p>
-      <span x-text="t('Lisensi saat ini','Current license')"></span>:
-      {% if license and license.enabled %}{{ license.status|e }}{% else %}OFF{% endif %}
-    </p>
-    <p class="mb-4">
-      <span x-text="t('Berlaku sampai','Valid until')"></span>:
-      {{ (license.valid_until if license else none) or '—' }}
-    </p>
-    <form method="post" id="licenseForm">
-      <input type="hidden" name="npsn" value="{{ school.npsn|e }}">
-      <label for="enabled" x-text="t('Akses ScanMeet','ScanMeet access')"></label>
-      <select id="enabled" name="enabled" class="border rounded p-2">
-        <option value="false" x-text="t('OFF — cabut akses dan akhiri room','OFF — revoke access and end the room')"></option>
-        <option value="true" x-text="t('ON','ON')"></option>
-      </select>
-      <label for="status" class="block mt-3" x-text="t('Jenis','Kind')"></label>
-      <select id="status" name="status" class="border rounded p-2">
-        <option value="disabled" x-text="t('Tidak aktif','Not active')"></option>
-        <option value="trial" x-text="t('Uji coba','Trial')"></option>
-        <option value="paid" x-text="t('Berbayar (pembayaran terverifikasi)','Paid (payment verified)')"></option>
-      </select>
-      <label for="valid_until" class="block mt-3" x-text="t('Tanggal kedaluwarsa (ISO 8601 + zona waktu)','Expiry (ISO 8601 with a timezone)')"></label>
-      <input id="valid_until" name="valid_until" type="text" placeholder="2026-12-31T23:59:59+07:00" class="border rounded p-2 w-full">
-      <label class="block mt-3">
-        <input type="checkbox" name="payment_verified" value="true">
-        <span x-text="t('Saya sudah memverifikasi pembayaran (untuk status berbayar)','I have verified the payment (needed for a paid licence)')"></span>
-      </label>
-      <button type="submit" class="mt-4 rounded border px-4 py-2" x-text="t('Simpan keputusan','Save the decision')"></button>
-    </form>
-    <p id="result" role="status" class="mt-4"></p>
+<div class="space-y-6" data-scanmeet-management>
+  <header class="card p-6 md:p-8 flex flex-col md:flex-row gap-5 md:items-center md:justify-between">
+    <div class="max-w-2xl space-y-3"><span class="inline-flex items-center gap-2 text-primary-600 text-sm font-extrabold"><i class="fas fa-video" aria-hidden="true"></i> ScanMeet</span><h1 class="text-2xl md:text-3xl font-extrabold text-surface-900" x-text="t('Pengawasan yang terkelola.','Supervision, under control.')"></h1><p class="text-surface-500" x-text="t('Atur paket, durasi sesi, dan akses sekolah dalam satu tempat. Setiap keputusan tercatat.','Manage packages, session duration, and school access in one place. Every decision is recorded.')"></p></div>
+    <div class="flex flex-wrap gap-3 shrink-0"><a href="/scanmeet" class="btn btn-secondary min-h-[44px]"><i class="fas fa-tags" aria-hidden="true"></i><span x-text="t('Lihat penawaran','View offers')"></span></a><button type="button" class="btn btn-primary min-h-[44px]" data-open-dialog="scanmeet-find-school"><i class="fas fa-plus" aria-hidden="true"></i><span x-text="t('Kelola sekolah','Manage a school')"></span></button></div>
+  </header>
+  {% if error %}<div role="alert" class="card p-4 border border-amber-300 text-amber-700">{{ error }}</div>{% endif %}
+  <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+    <div class="card p-4"><p class="text-sm text-surface-500" x-text="t('Sekolah ditemukan','Schools found')"></p><p class="text-3xl font-extrabold text-surface-900 mt-2">{{ total }}</p></div>
+    <div class="card p-4"><p class="text-sm text-surface-500" x-text="t('Aktif di halaman ini','Active on this page')"></p><p class="text-3xl font-extrabold text-primary-600 mt-2">{{ summary.active + summary.trial }}</p></div>
+    <div class="card p-4"><p class="text-sm text-surface-500" x-text="t('Trial di halaman ini','Trials on this page')"></p><p class="text-3xl font-extrabold text-surface-900 mt-2">{{ summary.trial }}</p></div>
+    <div class="card p-4"><p class="text-sm text-surface-500" x-text="t('Kedaluwarsa di halaman ini','Expired on this page')"></p><p class="text-3xl font-extrabold text-amber-700 mt-2">{{ summary.expired }}</p></div>
+  </div>
+  {% if pending %}
+  <section class="card p-5 space-y-4" aria-labelledby="scanmeet-requests-title"><div class="flex flex-wrap items-center justify-between gap-2"><h2 id="scanmeet-requests-title" class="font-extrabold text-lg text-surface-900" x-text="t('Pengajuan menunggu tinjauan','Requests awaiting review')"></h2><span class="text-sm text-surface-500" x-text="t('Maksimal 20 pengajuan terlama','Up to 20 oldest requests')"></span></div>
+    <div class="divide-y divide-surface-100">{% for r in pending %}<article class="py-4 flex flex-col md:flex-row gap-3 md:items-center md:justify-between"><div class="min-w-0"><p class="font-bold text-surface-800">{{ r.school.name if r.school else r.school_id }}</p><p class="text-sm text-surface-500">{{ r.school.npsn if r.school else '—' }} · {{ r.plan.name if r.plan else r.plan_code }}</p>{% if r.note %}<p class="text-sm text-surface-600 mt-2 break-words">{{ r.note }}</p>{% endif %}</div><div class="flex gap-2 shrink-0">{% if r.school %}<a class="btn btn-primary min-h-[44px]" href="{{ url_for('super_admin.scanmeet_school_licenses', npsn=r.school.npsn, request_id=r.id) }}#license-editor" x-text="t('Tinjau','Review')"></a>{% endif %}<form method="post" action="{{ url_for('super_admin.scanmeet_reject_request', request_id=r.id) }}" data-scanmeet-form data-confirm="reject"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}"><button class="btn btn-secondary min-h-[44px]" x-text="t('Tolak','Decline')"></button><p class="text-sm mt-2" role="status" aria-live="polite" data-form-result></p></form></div></article>{% endfor %}</div>
   </section>
-  <script>
-  // The CSRF header is added by `base.html`'s own `fetch` wrapper, which stamps
-  // every non-GET call from the session's meta tag — so this form posts the same
-  // way the rest of the app does, and a page that hand-rolled its headers would be
-  // the one that gets refused.
-  document.getElementById('licenseForm').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    if (!confirm(sgT('Konfirmasi perubahan lisensi sekolah. OFF akan mencabut akses ScanMeet dan menghentikan room aktif.',
-                      'Confirm the licence change. OFF revokes ScanMeet access and ends the live rooms.'))) return;
-    const form = e.currentTarget;
-    const response = await fetch(location.pathname, {
-      method: 'POST', credentials: 'same-origin',
-      headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-      body: new URLSearchParams(new FormData(form))
-    });
-    document.getElementById('result').textContent = JSON.stringify(await response.json());
-    if (response.ok) location.reload();
-  });
-  </script>
-  {% endif %}
+  {% elif not requests_available %}<p role="status" class="text-sm text-amber-700" x-text="t('Daftar pengajuan belum dapat dimuat. Ini bukan berarti tidak ada pengajuan.','Requests could not be loaded. This does not mean the inbox is empty.')"></p>{% endif %}
+  <section class="card overflow-hidden" aria-labelledby="scanmeet-schools-title">
+    <div class="p-5 border-b border-surface-100 flex flex-col lg:flex-row gap-4 lg:items-center lg:justify-between"><div><h2 id="scanmeet-schools-title" class="text-lg font-extrabold text-surface-900" x-text="t('Akses sekolah','School access')"></h2><p class="text-sm text-surface-500 mt-1" x-text="t('Satu lisensi untuk satu NPSN, termasuk guru dan siswa.','One license per school identifier, including teachers and pupils.')"></p></div><form method="get" class="flex flex-wrap gap-2"><label for="scanmeet-search" class="sr-only" x-text="t('Cari nama sekolah atau NPSN','Search school name or identifier')"></label><input id="scanmeet-search" name="q" value="{{ q }}" maxlength="80" class="min-h-[44px] rounded-xl border border-surface-200 bg-white px-4 text-surface-800 w-full sm:w-64" :placeholder="t('Nama sekolah atau NPSN','School name or identifier')"><button class="btn btn-primary min-h-[44px]"><i class="fas fa-search" aria-hidden="true"></i><span x-text="t('Cari','Search')"></span></button>{% if q or npsn %}<a href="{{ url_for('super_admin.scanmeet_school_licenses') }}" class="btn btn-secondary min-h-[44px]" x-text="t('Reset','Reset')"></a>{% endif %}</form></div>
+    {% if rows %}<div class="overflow-x-auto"><table class="w-full min-w-[760px] text-left text-sm"><thead class="bg-surface-50 text-surface-500"><tr><th scope="col" class="px-5 py-4" x-text="t('Sekolah','School')"></th><th scope="col" class="px-5 py-4" x-text="t('Status','Status')"></th><th scope="col" class="px-5 py-4" x-text="t('Paket & durasi','Plan & duration')"></th><th scope="col" class="px-5 py-4" x-text="t('Sesi tersisa','Sessions left')"></th><th scope="col" class="px-5 py-4" x-text="t('Berlaku sampai','Valid until')"></th><th scope="col" class="px-5 py-4"><span class="sr-only" x-text="t('Tindakan','Actions')"></span></th></tr></thead><tbody class="divide-y divide-surface-100">
+    {% for row in rows %}{% set lic = row.license %}<tr class="hover:bg-surface-50"><th scope="row" class="px-5 py-5"><p class="font-bold text-surface-800">{{ row.name }}</p><p class="font-normal text-surface-500 mt-1">{{ row.npsn or '—' }}</p></th><td class="px-5 py-5">
+      {% if lic.effective_status == 'active' %}<span class="inline-flex rounded-full px-3 py-1 bg-emerald-50 text-emerald-700 font-bold" x-text="t('Aktif','Active')"></span>{% elif lic.effective_status == 'trial' %}<span class="inline-flex rounded-full px-3 py-1 bg-primary-50 text-primary-700 font-bold" x-text="t('Trial aktif','Active trial')"></span>{% elif lic.effective_status == 'expired' %}<span class="inline-flex rounded-full px-3 py-1 bg-amber-50 text-amber-700 font-bold" x-text="t('Kedaluwarsa','Expired')"></span>{% elif lic.effective_status == 'archived' %}<span class="inline-flex rounded-full px-3 py-1 bg-surface-100 text-surface-500 font-bold" x-text="t('Diarsipkan','Archived')"></span>{% else %}<span class="inline-flex rounded-full px-3 py-1 bg-surface-100 text-surface-600 font-bold" x-text="t('Belum aktif','Inactive')"></span>{% endif %}</td>
+      <td class="px-5 py-5 text-surface-700">{% if lic.plan %}<p class="font-bold">{{ lic.plan.name }}</p><p class="text-surface-500 mt-1">{{ lic.session_limit_minutes }} <span x-text="t('menit / sesi','min / session')"></span></p>{% elif lic.school_id %}<span x-text="t('Lisensi khusus','Custom license')"></span>{% else %}—{% endif %}</td><td class="px-5 py-5 text-surface-700">{% if lic.plan %}<span class="font-bold">{{ lic.remaining_sessions }}</span> / {{ lic.session_allowance }}{% else %}—{% endif %}</td><td class="px-5 py-5 text-surface-600">{{ lic.expiry_label }}</td><td class="px-5 py-5"><a class="btn btn-secondary min-h-[44px]" href="{{ url_for('super_admin.scanmeet_school_licenses', npsn=row.npsn) }}#license-editor" x-text="t('Kelola','Manage')"></a></td></tr>{% endfor %}
+    </tbody></table></div>{% else %}<div class="text-center px-6 py-14"><i class="fas fa-school text-3xl text-surface-300" aria-hidden="true"></i><h3 class="mt-4 text-lg font-extrabold text-surface-800" x-text="t('Sekolah belum ditemukan','No school found')"></h3><p class="text-surface-500 mt-2" x-text="t('Coba nama lain atau masukkan NPSN delapan digit.','Try another name or an eight-digit school identifier.')"></p></div>{% endif %}
+    <div class="px-5 py-4 border-t border-surface-100 flex flex-wrap items-center justify-between gap-3 text-sm text-surface-500"><p><span x-text="t('Halaman','Page')"></span> {{ page }} / {{ pages }} · {{ total }} <span x-text="t('sekolah','schools')"></span></p><div class="flex gap-2">{% if page > 1 %}<a class="btn btn-secondary min-h-[44px]" href="{{ url_for('super_admin.scanmeet_school_licenses', q=q, page=page-1) }}" x-text="t('Sebelumnya','Previous')"></a>{% endif %}{% if page < pages %}<a class="btn btn-secondary min-h-[44px]" href="{{ url_for('super_admin.scanmeet_school_licenses', q=q, page=page+1) }}" x-text="t('Berikutnya','Next')"></a>{% endif %}</div></div>
+  </section>
+  {% if school %}<section id="license-editor" class="grid grid-cols-1 lg:grid-cols-3 gap-5 scroll-mt-24">
+    <div class="card p-6 space-y-4"><p class="text-sm font-bold text-primary-600" x-text="t('Sekolah terpilih','Selected school')"></p><h2 class="text-xl font-extrabold text-surface-900">{{ school.name }}</h2><p class="font-mono text-surface-500">{{ school.npsn }}</p><dl class="space-y-4 text-sm"><div><dt class="text-surface-500" x-text="t('Berlaku sampai','Valid until')"></dt><dd class="font-bold text-surface-800 mt-1">{{ license.expiry_label }}</dd></div><div><dt class="text-surface-500" x-text="t('Batas peserta termasuk pengawas','Participant cap includes the supervisor')"></dt><dd class="font-bold text-surface-800 mt-1">{{ license.participant_limit or '—' }}</dd></div></dl><p class="text-sm text-surface-500" x-text="t('Pencabutan akses menghentikan media. Ujian, jawaban, dan waktu siswa tetap berjalan.','Revoking access stops media. Exams, answers, and pupil timers continue.')"></p>
+      {% if license.school_id %}<div class="pt-3 border-t border-surface-100 space-y-3">{% for action in ['revoke','archive'] %}<form method="post" data-scanmeet-form data-confirm="{{ action }}" action="{{ url_for('super_admin.scanmeet_school_licenses') }}"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="npsn" value="{{ school.npsn }}"><input type="hidden" name="version" value="{{ license.updated_at or '' }}"><input type="hidden" name="action" value="{{ action }}"><button class="btn btn-secondary w-full min-h-[44px]">{% if action == 'revoke' %}<i class="fas fa-ban text-red-600" aria-hidden="true"></i><span x-text="t('Cabut akses','Revoke access')"></span>{% else %}<i class="fas fa-box-archive" aria-hidden="true"></i><span x-text="t('Arsipkan lisensi','Archive license')"></span>{% endif %}</button><p role="status" aria-live="polite" data-form-result class="text-sm mt-2"></p></form>{% endfor %}<p class="text-sm text-surface-500" x-text="t('Arsip mempertahankan riwayat dan tidak mengulang jatah trial.','Archiving preserves history and does not reset the trial allowance.')"></p></div>{% endif %}
+    </div>
+    <div class="card p-6 lg:col-span-2"><h2 class="text-lg font-extrabold text-surface-900" x-text="t('Aktivasi & perpanjangan','Activation & renewal')"></h2><p class="text-sm text-surface-500 mt-2" x-text="t('Batas paket dihitung di server. Paket berbayar aktif setelah pembayaran diverifikasi.','Package limits are calculated on the server. Paid plans activate after payment verification.')"></p>
+      <form id="licenseForm" method="post" data-scanmeet-form data-confirm="license" class="mt-6 space-y-5" action="{{ url_for('super_admin.scanmeet_school_licenses') }}"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="npsn" value="{{ school.npsn }}"><input type="hidden" name="version" value="{{ license.updated_at or '' }}"><input type="hidden" name="request_id" value="{{ request_id }}">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4"><div><label for="scanmeet-action" class="block font-bold text-sm text-surface-700 mb-2" x-text="t('Tindakan','Action')"></label><select id="scanmeet-action" name="action" class="w-full min-h-[48px] rounded-xl border border-surface-200 bg-white px-3 text-surface-800"><option value="activate" x-text="t('Aktifkan / ganti paket','Activate / replace plan')"></option>{% if license.plan %}<option value="extend" x-text="t('Perpanjang paket yang sama','Extend the same plan')"></option>{% endif %}</select></div><div><label for="scanmeet-plan" class="block font-bold text-sm text-surface-700 mb-2" x-text="t('Paket pengawasan','Supervision package')"></label><select id="scanmeet-plan" name="plan_code" required class="w-full min-h-[48px] rounded-xl border border-surface-200 bg-white px-3 text-surface-800">{% for p in plans %}<option value="{{ p.code }}" {% if selected_plan == p.code %}selected{% endif %} {% if p.code == 'trial' and license.trial_started_at %}disabled{% endif %}>{{ p.name }} · {{ p.minutes }} min · Rp {{ '{:,.0f}'.format(p.price).replace(',', '.') }}</option>{% endfor %}</select></div></div>
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3" aria-live="polite">{% for p in plans %}<div data-package-code="{{ p.code }}" class="contents" {% if selected_plan != p.code %}hidden{% endif %}><div class="rounded-xl bg-surface-50 p-4"><p class="text-sm text-surface-500" x-text="t('Durasi tiap sesi','Per-session duration')"></p><p class="font-extrabold text-surface-800 mt-1">{{ p.minutes }} <span x-text="t('menit','minutes')"></span></p></div><div class="rounded-xl bg-surface-50 p-4"><p class="text-sm text-surface-500" x-text="t('Sesi / peserta','Sessions / participants')"></p><p class="font-extrabold text-surface-800 mt-1">{{ p.sessions }} / {{ p.participants }}</p></div><div class="rounded-xl bg-surface-50 p-4"><p class="text-sm text-surface-500" x-text="t('Masa berlaku','Validity')"></p><p class="font-extrabold text-surface-800 mt-1">{{ p.days }} <span x-text="t('hari','days')"></span></p></div></div>{% endfor %}</div>
+        <p class="text-sm text-surface-500" x-text="t('Aktivasi paket baru mengganti sisa jatah. Perpanjangan paket yang sama menambah masa berlaku dan jatah sesi yang belum kedaluwarsa.','A new activation replaces the remaining allowance. Extending the same unexpired plan adds validity and session allowance.')"></p><label class="flex items-start gap-3 p-4 border border-surface-200 rounded-xl"><input type="checkbox" name="payment_verified" value="true" class="mt-1 w-5 h-5"><span class="text-sm text-surface-600" x-text="t('Saya telah memverifikasi pembayaran untuk paket berbayar. Trial tidak memerlukan pembayaran.','I have verified payment for a paid plan. No payment is required for a trial.')"></span></label><div class="flex flex-wrap gap-3 items-center"><button type="submit" class="btn btn-primary min-h-[48px]"><i class="fas fa-check" aria-hidden="true"></i><span x-text="t('Simpan keputusan','Save decision')"></span></button><span class="text-sm text-surface-500" x-text="t('Tidak ada penagihan otomatis','No automatic charges')"></span></div><p class="text-sm font-semibold" role="status" aria-live="polite" data-form-result></p>
+      </form>
+    </div>
+  </section>{% endif %}
+  <dialog id="scanmeet-find-school" class="rounded-2xl p-0 w-full max-w-lg bg-white text-surface-800 border border-surface-200 shadow-xl"><form method="get" class="p-6 space-y-5"><div class="flex items-center justify-between gap-3"><h2 class="text-xl font-extrabold" x-text="t('Kelola akses sekolah','Manage school access')"></h2><button type="button" data-close-dialog class="tap-44 rounded-lg" :aria-label="t('Tutup','Close')"><i class="fas fa-xmark" aria-hidden="true"></i></button></div><div><label for="npsn" class="block font-bold text-sm mb-2" x-text="t('NPSN sekolah','School identifier')"></label><input id="npsn" name="npsn" pattern="[0-9]{8}" minlength="8" maxlength="8" inputmode="numeric" autocomplete="off" required placeholder="69893227" class="w-full min-h-[48px] rounded-xl border border-surface-200 bg-white px-4"><p class="text-sm text-surface-500 mt-2" x-text="t('Gunakan delapan digit NPSN sekolah yang sudah terdaftar.','Use the eight-digit identifier of a registered school.')"></p></div><button type="submit" class="btn btn-primary min-h-[48px] w-full" x-text="t('Temukan sekolah','Find school')"></button></form></dialog>
 </div>
 {% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/scanmeet-management.js') }}?v={{ asset_v('js/scanmeet-management.js') }}" defer></script>{% endblock %}

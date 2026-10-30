@@ -14,6 +14,27 @@
   let room = null, sid = null, connecting = false, names = {}, students = {}, micAllowed = false;
   // The paper's own switch, only ever written by the server response.
   let paperOn = false;
+  let sessionDeadline = 0;
+  async function updateSessionTime() {
+    const clock = $("live-session-time");
+    if (!clock || !sessionDeadline || !room) { if (clock) clock.hidden = true; return; }
+    const seconds = Math.max(0, Math.ceil((sessionDeadline - Date.now()) / 1000));
+    clock.hidden = false;
+    clock.textContent = "Sisa pengawasan: " + Math.floor(seconds / 60) + ":" + String(seconds % 60).padStart(2, "0");
+    if (!seconds) {
+      sessionDeadline = 0;
+      const endedRoom = room;
+      room = null; sid = null;
+      if (hand) hand.disabled = true;
+      if (mic) mic.hidden = true;
+      if (end) end.hidden = true;
+      if (start) start.hidden = !paperOn;
+      await endedRoom.disconnect().catch(() => {});
+      grid.replaceChildren();
+      message("Durasi ScanMeet selesai. Ujian dan jawaban tetap berjalan.");
+    }
+  }
+  window.setInterval(updateSessionTime, 1000);
 
   function message(msg, failed = false) {
     $("live-status").textContent = msg;
@@ -110,6 +131,9 @@
         message("Koneksi pengawasan terputus. Ujian tetap berjalan.", true);
       });
       await room.connect(grant.url, grant.token);
+      sessionDeadline = grant.expires_at ? Date.parse(grant.expires_at) : 0;
+      if (!Number.isFinite(sessionDeadline)) sessionDeadline = 0;
+      await updateSessionTime();
       // LiveKit enforces this at the SFU. A pupil only permits the room
       // supervisor to receive their camera/mic, even if another pupil hacks
       // their own canSubscribe client. Set BEFORE any track is published.

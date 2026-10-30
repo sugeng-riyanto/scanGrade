@@ -7,6 +7,7 @@ import secrets
 from flask import Blueprint, current_app, g, jsonify, request, render_template
 from app.decorators.year_lock import open_year_required
 from app.services import live_cleanup, live_exam_toggle, live_policy, livekit_gateway, live_school_entitlement
+from app.services import scanmeet_packages
 from app.utils.auth import get_supabase, login_required
 from app.utils.exam_access import can_manage_exam, exam_sitting_allowed
 
@@ -83,7 +84,7 @@ def _session(db, sid):
 
 
 def _check(db, session, staff_only=False):
-    if not session or session.get("status") != "active":
+    if not scanmeet_packages.session_open(session):
         return None
     exam = _exam(db, session["exam_id"])
     role = _access(db, exam, staff_only=staff_only)
@@ -111,9 +112,11 @@ def status(exam_id):
     if not role:
         return _denied()
     session = _one(db.table("scan_live_sessions").select(
-        "id,exam_id,status,created_at,created_by"
+        "id,exam_id,status,created_at,created_by,expires_at,participant_limit"
     ).eq("exam_id", exam_id).eq("school_id", exam["school_id"])
         .eq("status", "active"))
+    if session and not scanmeet_packages.session_open(session):
+        session = None
     if role == live_policy.LIVE_TEACHER and session and str(session.get("created_by") or "") != str(g.user_id):
         return jsonify({"error": "Another teacher already supervises this Live session"}), 409
     return jsonify({"session": session, "role": role,
@@ -143,7 +146,13 @@ def create_session(exam_id):
     if existing:
         if str(existing.get("created_by") or "") != str(g.user_id):
             return jsonify({"error": "Another teacher already supervises this Live session"}), 409
-        return jsonify({"session_id": existing["id"], "existing": True})
+        if scanmeet_packages.session_open(existing):
+            return jsonify({"session_id": existing["id"], "existing": True})
+        try:
+            live_cleanup.enqueue(db, existing, reason="scanmeet_time_limit", error="previous session expired")
+            db.table("scan_live_sessions").update({"status": "ended"}).eq("id", existing["id"]).eq("school_id", existing["school_id"]).eq("status", "active").execute()
+        except Exception:
+            return jsonify({"error": "Sesi sebelumnya masih dibersihkan. Coba lagi sebentar."}), 409
     # Unique partial index prevents parallel callers creating two active rooms.
     row = {
         "school_id": exam["school_id"], "exam_id": exam_id,
@@ -152,7 +161,9 @@ def create_session(exam_id):
     }
     try:
         created = db.table("scan_live_sessions").insert(row).execute().data[0]
-    except Exception:
+    except Exception as exc:
+        if "scanmeet_session_allowance_exhausted" in str(exc):
+            return jsonify({"error": "Jatah sesi ScanMeet habis. Ajukan paket lanjutan; ujian tetap berjalan."}), 409
         log.warning("Concurrent Live creation or Live migration unavailable",
                     exc_info=True)
         return jsonify({"error": "Could not start Live; exam unaffected"}), 503
@@ -222,10 +233,18 @@ def join_token(sid):
                              .eq("session_id", sid).eq("school_id", session["school_id"])
                              .eq("student_id", g.user_id).eq("status", "approved")))
     try:
+        limits = {}
+        if session.get("expires_at"):
+            limits["expires_at"] = session["expires_at"]
+        if session.get("participant_limit"):
+            livekit_gateway.ensure_capacity(current_app.config, session["room_name"], session["participant_limit"])
         result = livekit_gateway.issue_join_token(
             current_app.config, sid, session["room_name"], g.user_id,
-            role, approved, supervisor_id=session.get("created_by"))
-    except (ImportError, RuntimeError, ValueError):
+            role, approved, supervisor_id=session.get("created_by"), **limits)
+        if session.get("expires_at"):
+            result["expires_at"] = session["expires_at"]
+        result["participant_limit"] = session.get("participant_limit")
+    except Exception:
         log.warning("LiveKit join token unavailable", exc_info=True)
         return _unavailable()
     response = jsonify(result)

@@ -2630,6 +2630,17 @@ def email_settings_test():
     return redirect("/super-admin/email-settings")
 
 
+@super_bp.route("/scanmeet-requests/<request_id>/reject", methods=["POST"])
+@_sa_required
+def scanmeet_reject_request(request_id):
+    from app.routes.scanmeet import reject_request
+    try:
+        result, code = reject_request(get_supabase(), request_id, g.user_id)
+        return jsonify(result), code
+    except Exception:
+        return jsonify({"error": "Pengajuan belum dapat diperbarui."}), 503
+
+
 @super_bp.route("/scanmeet-schools", methods=["GET", "POST"])
 @_sa_required
 def scanmeet_school_licenses():
@@ -2640,6 +2651,13 @@ def scanmeet_school_licenses():
 
     db = get_supabase()
     npsn = (request.values.get("npsn") or "").strip()
+    from app.services import scanmeet_admin
+    if request.method == "GET":
+        return scanmeet_admin.dashboard(db, request.args, render_template)
+    incoming = (request.get_json(silent=True) if request.is_json else request.form) or {}
+    if incoming.get("action"):
+        result, code = scanmeet_admin.mutate(db, incoming, g.user_id, current_app.config, log_activity)
+        return jsonify(result), code
     if not re.fullmatch(r"[0-9]{8}", npsn):
         if request.method == "POST":
             return jsonify({"error": "NPSN must contain exactly eight digits"}), 400
