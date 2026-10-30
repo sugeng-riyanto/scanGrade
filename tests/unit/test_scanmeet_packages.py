@@ -8,13 +8,15 @@ NOW = datetime(2026, 10, 30, 12, tzinfo=timezone.utc)
 
 
 @pytest.mark.parametrize("code,minutes,participants,sessions,days,price", [
-    ("trial", 30, 5, 3, 7, 0), ("kelas", 60, 10, 5, 30, 149000),
-    ("sekolah", 120, 35, 3, 30, 399000),
+    ("trial", 45, 40, 1, 7, 0), ("kelas", 120, 40, None, 30, 49000),
+    ("sekolah", 120, 40, None, 365, 399000),
 ])
 def test_activation_uses_catalog_limits(code, minutes, participants, sessions, days, price):
     row = packages.activation(None, code, "activate", code != "trial", now=NOW)
     assert row["session_limit_minutes"] == minutes
     assert row["participant_limit"] == participants
+    assert row["session_allowance"] == sessions
+    assert row["concurrent_room_limit"] == 1
     assert row["session_allowance"] == sessions
     assert packages.parse_time(row["valid_until"]) == NOW + timedelta(days=days)
     assert packages.plan(code)["price"] == price
@@ -36,7 +38,7 @@ def test_extension_adds_days_and_allowance_without_erasing_usage():
     old = {"plan_code": "kelas", "valid_until": (NOW + timedelta(days=5)).isoformat(),
            "session_allowance": 5, "sessions_used": 2}
     row = packages.activation(old, "kelas", "extend", True, now=NOW)
-    assert row["session_allowance"] == 10 and row["sessions_used"] == 2
+    assert row["session_allowance"] is None and row["sessions_used"] == 2
     assert packages.parse_time(row["valid_until"]) == NOW + timedelta(days=35)
 
 
@@ -44,7 +46,7 @@ def test_expired_package_renews_without_carrying_expired_slots():
     old = {"plan_code": "kelas", "valid_until": (NOW - timedelta(days=1)).isoformat(),
            "session_allowance": 5, "sessions_used": 2}
     row = packages.activation(old, "kelas", "extend", True, now=NOW)
-    assert row["session_allowance"] == 5 and row["sessions_used"] == 0
+    assert row["session_allowance"] is None and row["sessions_used"] == 0
 
 
 def test_extension_cannot_silently_change_package():
@@ -66,3 +68,14 @@ def test_expired_and_archived_licenses_never_look_active():
     assert packages.describe(row, now=NOW)["effective_status"] == "expired"
     row["archived_at"] = NOW.isoformat()
     assert packages.describe(row, now=NOW)["effective_status"] == "archived"
+
+
+def test_unlimited_is_based_on_stored_contract_not_only_current_catalog():
+    old = {"plan_code": "kelas", "status": "paid", "session_allowance": 5, "sessions_used": 2}
+    assert packages.describe(old)["remaining_sessions"] == 3
+    assert not packages.describe(old)["unlimited_sessions"]
+    old["session_allowance"] = None
+    assert not packages.describe(old)["unlimited_sessions"]
+    old["concurrent_room_limit"] = 1
+    assert packages.describe(old)["unlimited_sessions"]
+    assert packages.describe(old)["remaining_sessions"] is None

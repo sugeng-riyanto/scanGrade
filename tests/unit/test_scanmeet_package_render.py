@@ -27,7 +27,9 @@ def test_offers_render_all_prices_and_limits_from_one_catalog(app, monkeypatch):
         actor()
         html = render_template('scanmeet/offers.html', plans=scanmeet_packages.PLANS,
                                school=SCHOOL, license=None, pending=None, error='', can_request=True)
-    assert '149.000' in html and '399.000' in html
+    assert '49.000' in html and '399.000' in html
+    assert 'No session-count limit during the validity period' in html
+    assert '>None<' not in html
     for code in ('trial','kelas','sekolah'):
         assert f'value="{code}"' in html
     assert 'name="_csrf_token"' in html and 'maxlength="500"' in html

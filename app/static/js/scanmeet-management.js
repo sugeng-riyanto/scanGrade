@@ -36,7 +36,7 @@
       buttons.forEach(button => { button.disabled = true; });
       if (output) output.textContent = text("Menyimpan…", "Saving…");
       try {
-        const response = await fetch(form.action, {
+        const response = await fetch(form.getAttribute("action") || window.location.pathname, {
           method: "POST", credentials: "same-origin",
           signal: controller.signal,
           headers: {"Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded",
@@ -45,7 +45,7 @@
         });
         const reply = await response.json().catch(() => null);
         if (!reply) throw Error(text("Server tidak memberi jawaban yang dapat dibaca. Muat ulang untuk memeriksa status.", "The server did not return a readable response. Reload to check the status."));
-        if (!response.ok) throw Error(reply.error || text("Perubahan belum tersimpan.", "Changes were not saved."));
+        if (!response.ok) throw Error(reply.message || reply.error || text("Perubahan belum tersimpan.", "Changes were not saved."));
         succeeded = true;
         if (output) output.textContent = reply.cleanup_pending?.length
           ? text("Akses dicabut. Penghentian media sedang dicoba ulang; ujian tetap berjalan.", "Access revoked. Media shutdown is being retried; exams continue.")

@@ -3,19 +3,20 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+# Paid prices match Bahasa Cerdas Guru Pro; one concurrent 40-person class.
 PLANS = (
     {"code": "trial", "name": "Uji coba", "name_en": "Trial", "price": 0,
-     "minutes": 30, "participants": 5, "sessions": 3, "days": 7,
-     "description": "Kenali alur pengawasan bersama kelompok kecil.",
-     "description_en": "Try the supervision workflow with a small group."},
-    {"code": "kelas", "name": "Kelas", "name_en": "Class", "price": 149000,
-     "minutes": 60, "participants": 10, "sessions": 5, "days": 30,
-     "description": "Untuk kelompok belajar dan pengawasan rutin.",
-     "description_en": "For study groups and regular supervision."},
-    {"code": "sekolah", "name": "Sekolah", "name_en": "School", "price": 399000,
-     "minutes": 120, "participants": 35, "sessions": 3, "days": 30,
-     "description": "Waktu lebih panjang untuk ujian satu kelas.",
-     "description_en": "Longer sessions for a full classroom exam."},
+     "minutes": 45, "participants": 40, "sessions": 1, "days": 7,
+     "description": "Coba pengawasan satu kelas bersama guru dan murid.",
+     "description_en": "Try supervision with a complete class and its teacher."},
+    {"code": "kelas", "name": "Premium Bulanan", "name_en": "Monthly Premium", "price": 49000,
+     "minutes": 120, "participants": 40, "sessions": None, "days": 30,
+     "description": "Satu ruang kelas aktif, dengan sesi selama masa berlaku.",
+     "description_en": "One active classroom, with sessions throughout the validity period."},
+    {"code": "sekolah", "name": "Premium Tahunan", "name_en": "Annual Premium", "price": 399000,
+     "minutes": 120, "participants": 40, "sessions": None, "days": 365,
+     "description": "Pengawasan kelas setahun dengan harga lebih hemat.",
+     "description_en": "Classroom supervision for a year at a lower annual price."},
 )
 
 
@@ -37,7 +38,7 @@ def describe(row, *, now=None):
     row = {"school_id": None, "updated_at": "", "plan_code": None,
            "trial_started_at": None, "participant_limit": None,
            "session_limit_minutes": None, "session_allowance": None,
-           "sessions_used": 0, **dict(row or {})}
+           "sessions_used": 0, "concurrent_room_limit": None, **dict(row or {})}
     now = now or datetime.now(timezone.utc)
     expiry = parse_time(row.get("valid_until"))
     if row.get("archived_at"):
@@ -50,7 +51,11 @@ def describe(row, *, now=None):
         state = "trial" if row["status"] == "trial" else "active"
     row["effective_status"] = state
     row["days_left"] = max(0, int((expiry - now).total_seconds() // 86400)) if expiry else 0
-    row["remaining_sessions"] = max(0, int(row.get("session_allowance") or 0) - int(row.get("sessions_used") or 0))
+    row["unlimited_sessions"] = (row.get("plan_code") in ("kelas", "sekolah")
+                                  and row.get("status") == "paid"
+                                  and row.get("concurrent_room_limit") == 1
+                                  and row.get("session_allowance") is None)
+    row["remaining_sessions"] = None if row["unlimited_sessions"] else max(0, int(row.get("session_allowance") or 0) - int(row.get("sessions_used") or 0))
     row["expiry_label"] = expiry.astimezone(timezone(timedelta(hours=7))).strftime("%d %b %Y, %H.%M WIB") if expiry else "—"
     row["plan"] = plan(row.get("plan_code"))
     return row
@@ -75,7 +80,9 @@ def activation(existing, code, action, payment_verified, *, now=None):
     return {"enabled": True, "status": "trial" if code == "trial" else "paid",
             "plan_code": code, "valid_until": (start + timedelta(days=package["days"])).isoformat(),
             "session_limit_minutes": package["minutes"], "participant_limit": package["participants"],
-            "session_allowance": int(existing.get("session_allowance") or 0) + package["sessions"] if carry else package["sessions"],
+            "concurrent_room_limit": 1,
+            "session_allowance": (None if package["sessions"] is None else
+                                  int(existing.get("session_allowance") or 0) + package["sessions"] if carry else package["sessions"]),
             "sessions_used": int(existing.get("sessions_used") or 0) if carry else 0,
             "trial_started_at": existing.get("trial_started_at") or (now.isoformat() if code == "trial" else None),
             "archived_at": None}

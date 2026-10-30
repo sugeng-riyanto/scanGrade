@@ -566,7 +566,7 @@
       "frozen": false
     },
     "super_admin/scanmeet_schools.html": {
-      "pairs": 68,
+      "pairs": 70,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -884,7 +884,7 @@
       "frozen": false
     },
     "scanmeet/offers.html": {
-      "pairs": 41,
+      "pairs": 43,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false

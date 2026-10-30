@@ -56,8 +56,9 @@ def test_admin_activation_is_scoped_audited_and_uses_server_catalog():
         "version": "", "session_limit_minutes": 99999, "price": 0}, "operator", {}, audit)
     assert code == 200 and result["ok"]
     row = db.rows[admin.LICENSES][0]
-    assert row["school_id"] == "school-a" and row["session_limit_minutes"] == 30
-    assert row["session_allowance"] == 3 and row["participant_limit"] == 5
+    assert row["school_id"] == "school-a" and row["session_limit_minutes"] == 45
+    assert row["session_allowance"] == 1 and row["participant_limit"] == 40
+    assert row["concurrent_room_limit"] == 1
     audit.assert_called_once()
 
 
