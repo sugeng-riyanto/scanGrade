@@ -42,7 +42,7 @@ def enabled(exam) -> bool:
 
 def _active(db, exam):
     rows = (db.table("scan_live_sessions")
-            .select("id,room_name,created_by,status")
+            .select("*")
             .eq("school_id", exam["school_id"]).eq("exam_id", exam["id"])
             .eq("status", "active").limit(1).execute().data or [])
     return rows[0] if rows else None
@@ -76,7 +76,7 @@ def set_enabled(db, exam, *, value: bool, end_room, record_cleanup=None) -> dict
 
     ended = (db.table("scan_live_sessions").update({"status": "ended"})
              .eq("id", active["id"]).eq("school_id", exam["school_id"])
-             .eq("status", "active").execute().data or [])
+             .eq("status", "active").eq("room_name", active["room_name"]).execute().data or [])
     if not ended:
         # Another writer closed or recreated the room between the read and the
         # write. The switch is already stored; report the state we can see.

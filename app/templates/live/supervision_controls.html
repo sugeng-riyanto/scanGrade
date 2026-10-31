@@ -1,0 +1,27 @@
+<section :lang="lang" id="supervisor-management" class="card p-5 space-y-4" data-exam-id="{{ live_exam_id | e }}" data-csrf="{{ csrf_token() }}">
+  <div>
+    <h2 class="font-bold" x-text="t('Pengawas pengganti','Substitute supervisors')"></h2>
+    <p class="text-sm text-surface-500" x-text="t('Penugasan khusus pengawasan, maksimal 7 hari. Pengalihan tidak mengulang durasi atau kuota sesi.','Media supervision only, up to 7 days. Handover preserves the session allowance and remaining time.')"></p>
+  </div>
+  <p id="supervisor-status" class="text-sm" role="status" aria-live="polite"></p>
+  <form id="supervisor-form" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+    <label class="text-sm font-semibold"><span x-text="t('Akun pengawas','Supervisor account')"></span>
+      <select id="supervisor-target" required class="w-full min-h-[44px] rounded-lg border border-surface-300 bg-surface-50 p-2"></select>
+    </label>
+    <label class="text-sm font-semibold"><span x-text="t('Berlaku sampai (waktu perangkat)','Valid until (device time)')"></span>
+      <input id="supervisor-until" type="datetime-local" required class="w-full min-h-[44px] rounded-lg border border-surface-300 bg-surface-50 p-2">
+    </label>
+    <label class="text-sm font-semibold sm:col-span-2"><span x-text="t('Alasan penugasan atau pengalihan','Assignment or handover reason')"></span>
+      <input id="supervisor-reason" required maxlength="500" class="w-full min-h-[44px] rounded-lg border border-surface-300 bg-surface-50 p-2">
+    </label>
+    <div class="flex flex-wrap gap-3 sm:col-span-2">
+      <button id="supervisor-grant" type="submit" class="min-h-[44px] rounded-lg bg-primary-600 px-4 py-2 text-white" x-text="t('Simpan penugasan','Save assignment')"></button>
+      <button id="supervisor-revoke" type="button" class="min-h-[44px] rounded-lg border border-surface-300 px-4 py-2" x-text="t('Cabut penugasan','Revoke assignment')"></button>
+      <button id="supervisor-transfer" type="button" class="min-h-[44px] rounded-lg border border-surface-300 px-4 py-2" x-text="t('Alihkan pengawasan','Transfer supervision')"></button>
+    </div>
+  </form>
+  <label class="block text-sm font-semibold"><span x-text="t('Tautan akun pengawas','Supervisor account link')"></span>
+    <input id="supervisor-link" readonly class="w-full min-h-[44px] rounded-lg border border-surface-300 bg-surface-50 p-2">
+  </label>
+  <p class="text-xs text-surface-500" x-text="t('Salin tautan ini untuk pengawas yang sudah ditugaskan. Tautan tetap memerlukan login dan tidak memberikan izin dengan sendirinya.','Copy this link for an assigned supervisor. It requires sign-in and does not grant access by itself.')"></p>
+</section>

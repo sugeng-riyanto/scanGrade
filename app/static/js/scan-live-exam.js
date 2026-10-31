@@ -19,7 +19,7 @@
   let room = null, sid = null, connecting = false, names = {}, students = {}, micAllowed = false;
   // The paper's own switch, only ever written by the server response.
   let paperOn = false;
-  let sessionDeadline = 0;
+  let sessionDeadline = 0, mediaVersion = 1;
   async function updateSessionTime() {
     const clock = $("live-session-time");
     if (!clock || !sessionDeadline || !room) { if (clock) clock.hidden = true; return; }
@@ -165,8 +165,8 @@
     if (connecting || room || !sid || !paperOn || !joinIntent) return;
     connecting = true;
     if (join) join.hidden = true;
-    const epoch = generation, target = sid;
-    const current = () => epoch === generation && paperOn && sid === target && joinIntent;
+    const epoch = generation, target = sid, targetVersion = mediaVersion;
+    const current = () => epoch === generation && paperOn && sid === target && mediaVersion === targetVersion && joinIntent;
     let candidate = null;
     try {
       if (!window.LivekitClient) await ensureSdk();
@@ -196,6 +196,17 @@
       });
       await candidate.connect(grant.url, grant.token);
       if (!current()) { await release(candidate); return; }
+      // A room may have retired while a token/connect promise was pending.
+      // Revalidate before camera access; room rotation is not JWT revocation.
+      const fresh = await call("/api/live/exams/" + encodeURIComponent(examId));
+      if (!current() || !fresh.enabled || fresh.handover_pending || fresh.can_join === false ||
+          !fresh.session || fresh.session.id !== target ||
+          (fresh.session.media_version || 1) !== targetVersion ||
+          (grant.media_version || 1) !== targetVersion) {
+        if (room === candidate) await stopMedia(false);
+        else await release(candidate);
+        return;
+      }
       sessionDeadline = grant.expires_at ? Date.parse(grant.expires_at) : 0;
       if (!Number.isFinite(sessionDeadline)) sessionDeadline = 0;
       if (sessionDeadline && sessionDeadline <= Date.now()) throw Error("Supervision has ended");
@@ -209,11 +220,31 @@
           participantIdentity: grant.supervisor_identity, allowAll: true,
         }]);
       }
+      // Capture first, then recheck authorization after the native permission
+      // prompt, before publishing. A late prompt must not publish in a retired room.
+      let captured = null;
       try {
-        await candidate.localParticipant.setCameraEnabled(true);
+        captured = await lib.createLocalVideoTrack();
       } catch (error) {
         if (!staff) throw error;
         message(tr("Pengawas bergabung tanpa kamera.", "Supervisor joined without a camera."));
+      }
+      if (captured) {
+        try {
+          const authorized = await call("/api/live/exams/" + encodeURIComponent(examId));
+          if (!current() || !authorized.enabled || authorized.handover_pending ||
+              authorized.can_join === false || !authorized.session || authorized.session.id !== target ||
+              (authorized.session.media_version || 1) !== targetVersion) {
+            captured.stop();
+            if (room === candidate) await stopMedia(false);
+            else await release(candidate);
+            return;
+          }
+          await candidate.localParticipant.publishTrack(captured, {source: lib.Track.Source.Camera});
+        } catch (error) {
+          captured.stop();
+          throw error;
+        }
       }
       if (!current()) { await release(candidate); return; }
       const camera = candidate.localParticipant.getTrackPublication("camera");
@@ -253,6 +284,15 @@
     try {
       const data = await call("/api/live/exams/" + encodeURIComponent(examId));
       const next = data.session && data.session.id;
+      const nextVersion = data.session && (data.session.media_version || 1);
+      if (data.handover_pending) {
+        if (room || connecting || sid) await stopMedia(false);
+        paintSwitch(data.enabled);
+        if (start) start.hidden = true;
+        message(tr("Sedang mengganti pengawas. Kamera dan mikrofon dihentikan sementara.",
+                   "Changing supervisor. Camera and microphone are temporarily stopped."));
+        return;
+      }
       if (staff && data.can_join === false) {
         if (room || connecting || sid) await stopMedia();
         paintSwitch(data.enabled);
@@ -269,8 +309,9 @@
           : tr("Menunggu pengawas memulai ScanMeet.", "Waiting for the supervisor to start ScanMeet."));
         return;
       }
-      if (sid && sid !== next) await stopMedia();
+      if (sid && (sid !== next || mediaVersion !== nextVersion)) await stopMedia(false);
       sid = next;
+      mediaVersion = nextVersion;
       paintSwitch(true);
       if (!room && !connecting) {
         if (joinIntent) {
