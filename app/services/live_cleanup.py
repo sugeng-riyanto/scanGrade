@@ -365,6 +365,17 @@ def run_once(app=None, *, now=None) -> dict:
                   end_room=lambda room: livekit_gateway.end_room(config, room),
                   now=now)}
 
+    # Expiry is a revocation event, not merely a new-token admission check.
+    # Report missing migration 075 or unavailable DB as a blocked sweep rather
+    # than allowing the maintenance pass to claim successful media cleanup.
+    from app.services import live_expiry_cleanup
+    result["expiry"] = live_expiry_cleanup.sweep_expired(
+        db,
+        end_room=lambda room: livekit_gateway.end_room(config, room),
+        enqueue=enqueue,
+        now=now,
+    )
+
     global _last_reconcile
     moment = _now(now)
     due = _last_reconcile is None or (
