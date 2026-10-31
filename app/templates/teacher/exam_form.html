@@ -86,11 +86,9 @@
                    for. Both point at the survivor page, whose two anchors are below. #}
                 {# A separate, feature-gated LiveKit pilot. The existing invigilation
                     page remains the default route and production flow. #}
-                {% if scanmeet_enabled %}
-                <a href="{{ url_for('live_ui.live_exam_page', exam_id=exam.id) }}"
+                <a href="#scanmeet-settings"
                    class="h-10 px-3 rounded-xl border border-surface-200 text-surface-600 hover:text-primary-600 hover:border-primary-200 text-xs font-bold inline-flex items-center gap-1.5 transition"
-                   x-text="t('Uji Video LiveKit','LiveKit Video Pilot')"></a>
-                {% endif %}
+                   x-text="t('ScanMeet','ScanMeet')"></a>
                 <a href="{{ url_for('teacher.exam_sessions', exam_id=exam.id) }}#room"
                    class="h-10 px-3 rounded-xl border border-surface-200 text-surface-600 hover:text-primary-600 hover:border-primary-200 text-xs font-bold inline-flex items-center gap-1.5 transition">
                     <i class="fas fa-tower-broadcast"></i><span x-text="t('Pengawasan Langsung','Live proctoring')"></span>
@@ -139,6 +137,8 @@
         </div>
     </div>
     {% endif %}
+
+    {% if exam and exam.id %}{% include "live/exam_entry.html" %}{% endif %}
 
     {% if component_gap %}
     {# A paper filed under a component the subject does not weight contributes
@@ -2172,6 +2172,7 @@
      resolves links through the same file the student's exam page uses. It is the
      one implementation of "a pasted link" in the app: see
      app/static/js/exam-media.js. -->
+{% if exam and exam.id %}<script src="{{ asset_v('js/scanmeet-exam-entry.js') }}"></script>{% endif %}
 <script src="{{ asset_v('js/exam-media.js') }}"></script>
 <script>
 // The question-type vocabulary, handed over by the server. Writing the names out

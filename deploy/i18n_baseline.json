@@ -452,9 +452,9 @@
       "frozen": false
     },
     "student/take_exam.html": {
-      "pairs": 378,
+      "pairs": 498,
       "leftovers": 0,
-      "coverage": 100,
+      "coverage": 100.0,
       "frozen": false
     },
     "student/whiteboard_canvas.html": {
@@ -885,6 +885,18 @@
     },
     "scanmeet/offers.html": {
       "pairs": 43,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
+    "live/exam_entry.html": {
+      "pairs": 11,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
+    "live/student_panel.html": {
+      "pairs": 9,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
