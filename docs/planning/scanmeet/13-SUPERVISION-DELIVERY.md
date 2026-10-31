@@ -61,6 +61,19 @@ school actors, assignment versions, room rotation, quota and deadline preservati
 reserved concurrency, claim ownership, idempotency, revocation, denied starts,
 OFF cancellation, audit and browser privilege restrictions.
 
+Native multi-connection checks are also wired to the pull request in
+`.github/workflows/scanmeet-supervision-sql.yml`. The disposable PostgreSQL 17
+service runs `deploy/scanmeet_supervision_postgres.py`: two independent
+service-role connections compete to assign a supervisor, reserve different
+exam rooms, begin duplicate/competing handovers, finalize once, and revoke while
+finalization is in flight. Assertions require one quota charge and no revived
+revoked supervisor. The runner refuses non-loopback targets, non-test database
+names, libpq redirection overrides and databases with existing application tables.
+It never reads Supabase configuration or credentials. This adds database race
+proof; provider deletion, native browser prompts and device acceptance still need
+isolated staging. GitHub's job result is the evidence, not the presence of the
+workflow file.
+
 Before enabling the flag, apply/rehearse the migration on isolated staging,
 ensure all serving workers use the same tested SHA, then prove actual two-host
 handover, interrupted cleanup/restart, old-token isolation, native permission
