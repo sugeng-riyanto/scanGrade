@@ -86,3 +86,23 @@ def test_admin_can_switch_off_an_existing_teacher_room_without_receiving_tracks(
     assert db.rows['exams'][0]['scan_live_enabled'] is False
     assert db.rows['scan_live_sessions'][0]['status']=='ended'
     assert ended==['sg_synthetic']
+
+
+def test_pupil_status_contains_only_their_own_microphone_request(monkeypatch):
+    app=Flask(__name__)
+    db=FakeDB({'scan_live_sessions':[dict(SESSION)],'scan_live_hand_raises':[
+        {'id':'own','session_id':'room-1','school_id':'school-1','student_id':'pupil-a','status':'approved','created_at':'2026-10-30T10:00:00Z'},
+        {'id':'other-pupil','session_id':'room-1','school_id':'school-1','student_id':'pupil-b','status':'approved','created_at':'2026-10-30T11:00:00Z'},
+        {'id':'other-school','session_id':'room-1','school_id':'school-2','student_id':'pupil-a','status':'approved','created_at':'2026-10-30T12:00:00Z'},
+    ]})
+    monkeypatch.setattr(live,'_off',lambda:None)
+    monkeypatch.setattr(live,'get_supabase',lambda:db)
+    monkeypatch.setattr(live,'_exam',lambda *_:EXAM)
+    monkeypatch.setattr(live,'exam_sitting_allowed',lambda *_:(True,''))
+    with app.test_request_context():
+        actor('murid','pupil-a')
+        result=app.make_response(unwrap(live.status)('exam-1'))
+    assert result.status_code==200
+    assert result.get_json()['request']=={'id':'own','status':'approved','created_at':'2026-10-30T10:00:00Z'}
+    assert 'other-pupil' not in result.get_data(as_text=True)
+    assert 'other-school' not in result.get_data(as_text=True)

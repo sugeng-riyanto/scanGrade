@@ -122,8 +122,16 @@ def status(exam_id):
     # token and moderation endpoints still enforce the pinned publisher identity.
     can_join = (role != live_policy.LIVE_TEACHER or not session or
                 str(session.get("created_by") or "") == str(g.user_id))
+    own_request = None
+    if role == live_policy.LIVE_STUDENT and session and live_exam_toggle.enabled(exam):
+        # One polling request reads the room and this pupil's own approval.
+        # Querying /hand-raises as well repeats the exam/access/session reads
+        # for every pupil on the small serving box.
+        own_request = _one(db.table("scan_live_hand_raises").select("id,status,created_at")
+                           .eq("session_id", session["id"]).eq("school_id", exam["school_id"])
+                           .eq("student_id", g.user_id).order("created_at", desc=True))
     response = jsonify({"session": session, "role": role, "can_join": can_join,
-                        "enabled": live_exam_toggle.enabled(exam),
+                        "request": own_request, "enabled": live_exam_toggle.enabled(exam),
                         "policy": live_policy.EXAM_POLICY})
     response.headers["Cache-Control"] = "private, no-store"
     return response

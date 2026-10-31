@@ -13,6 +13,7 @@ Implemented in this change:
 - In-page pupil media panel, omitted from preview and when global feature flags are OFF.
 - Explicit embedded join gesture and same-origin, versioned, lazy SDK loading.
 - Status refresh and capture cleanup on OFF, ended/denied session and transport disconnect.
+- Pupil polling combines lifecycle and own microphone approval in one request; no redundant hand-raise GET repeats authorization/session reads.
 - Generation guard for SDK/token/connection/camera permission resolving after OFF.
 - Microphone permission/revocation cleanup, keeping exam answers, autosave and timer code unchanged.
 - Same-school admin may read/disable a teacher session without receiving the teacher's private pupil tracks.

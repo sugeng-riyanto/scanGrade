@@ -634,7 +634,7 @@ body.sg-exam .sg-content { max-width: none; margin-left: 0; margin-right: 0; }
             <span class="sg-sit-mic flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-surface-200"
                   :title="t('Mikrofon diatur melalui panel ScanMeet setelah pengawas memberikan izin.','Use the ScanMeet panel to control your microphone after supervisor approval.')">
                 <i class="fas fa-microphone-slash text-surface-400"></i>
-                <span x-text="t('Mikrofon: panel ScanMeet','Microphone: ScanMeet panel')"></span>
+                <span x-text="audioInputs > 0 ? t('Mikrofon: panel ScanMeet','Microphone: ScanMeet panel') : t('Mikrofon tidak terdeteksi','Microphone not detected')"></span>
             </span>
             {% else %}
             <!-- The microphone, as a status and not a switch: this paper never

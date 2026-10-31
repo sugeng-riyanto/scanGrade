@@ -36,6 +36,7 @@
   window.setInterval(updateSessionTime, 1000);
 
   function message(msg, failed = false) {
+    if (embedded) root.hidden = false;
     $("live-status").textContent = msg;
     $("live-warning").hidden = !failed;
   }
@@ -281,6 +282,7 @@
                      "Supervision is active. Select Enable camera to join on this page."));
         }
       }
+      return data;
     } catch (error) {
       if ([401, 403, 404, 409].includes(error.status)) {
         await stopMedia();
@@ -295,9 +297,9 @@
     if (polling) return;
     polling = true;
     try {
-      await discover();
-      if (!sid || !room || connecting) return;
-      const data = await call("/api/live/sessions/" + sid + "/hand-raises");
+      const state = await discover();
+      if (!state || !sid || !room || connecting) return;
+      const data = staff ? await call("/api/live/sessions/" + sid + "/hand-raises") : state;
       if (staff) {
         const audit = await call("/api/live/sessions/" + sid + "/events");
         const eventsEl = $("live-events");

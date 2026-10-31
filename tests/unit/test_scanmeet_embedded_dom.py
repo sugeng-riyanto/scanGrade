@@ -14,7 +14,7 @@ const root=process.argv[2];
 const {JSDOM}=require(path.join(root,'node_modules/jsdom'));
 const source=fs.readFileSync(path.join(root,'app/static/js/scan-live-exam.js'),'utf8');
 async function scenario(mode){
- const dom=new JSDOM(`<section id="scan-live" data-exam-id="exam-1" data-role="student" data-csrf="csrf" data-embedded="1" data-sdk="/static/vendor/sdk.js">
+ const dom=new JSDOM(`<section id="scan-live" hidden data-exam-id="exam-1" data-role="student" data-csrf="csrf" data-embedded="1" data-sdk="/static/vendor/sdk.js">
  <button id="live-join" hidden>Join</button><button id="live-hand" disabled>Hand</button><button id="live-mic" hidden>Mic</button>
  <p id="live-status"></p><p id="live-warning" hidden></p><p id="live-switch-off" hidden></p><p id="live-raise-status"></p>
  <p id="live-session-time" hidden></p><div id="live-grid"></div></section>`,{url:'https://scanmeet.test/student/exams/exam-1',runScripts:'outside-only'});
@@ -51,9 +51,10 @@ async function scenario(mode){
  w.setInterval=(fn,ms)=>{timers.push({fn,ms});return timers.length};w.clearInterval=()=>{};
  w.fetch=async(url,opts)=>{
   calls.push({url,method:opts?.method||'GET'});
+  if(mode==='initial-error')throw Error('synthetic network error');
   if(url.endsWith('/token')){if(mode==='token-race')await new Promise(r=>tokenResolve=r);return{ok:!denied,status:denied?403:200,json:async()=>({supervisor_identity:'p_teacher',url:'wss://synthetic.invalid',token:'synthetic'})}};
   if(url.includes('/hand-raises'))return {ok:true,status:200,json:async()=>({request:approved?{status:'approved'}:null})};
-  return {ok:!denied,status:denied?403:200,json:async()=>({enabled,role:'student',session:active?{id:'session-1'}:null})};
+  return {ok:!denied,status:denied?403:200,json:async()=>({enabled,role:'student',request:approved?{status:'approved'}:null,session:active?{id:'session-1'}:null})};
  };
  const drain=async()=>{for(let i=0;i<24;i++)await Promise.resolve();await new Promise(r=>setImmediate(r))};
  w.eval(source);await drain();
@@ -80,11 +81,11 @@ async function scenario(mode){
    denied=true;for(const t of timers.filter(t=>t.ms>=4000&&t.ms<=20000))t.fn();await drain();
   }
  }
- const out={before,camera,mic,micStops,stopped,disconnected,calls,micLabel:w.document.getElementById('live-mic').textContent,handDisabled:w.document.getElementById('live-hand').disabled,
+ const out={before,camera,mic,micStops,stopped,disconnected,calls,panelHidden:w.document.getElementById('scan-live').hidden,micLabel:w.document.getElementById('live-mic').textContent,handDisabled:w.document.getElementById('live-hand').disabled,
    status:w.document.getElementById('live-status').textContent,joinHidden:w.document.getElementById('live-join').hidden};
  dom.window.close();return out;
 }
-(async()=>{const result={};for(const mode of ['initial','join','off','off-live','camera-race','connect-race','ended','denied','token-race','sdk-race','sdk-reject','mic-race','mic-revoked'])result[mode]=await scenario(mode);console.log(JSON.stringify(result))})();
+(async()=>{const result={};for(const mode of ['initial','join','off','off-live','camera-race','connect-race','ended','denied','token-race','sdk-race','sdk-reject','mic-race','mic-revoked','initial-error'])result[mode]=await scenario(mode);console.log(JSON.stringify(result))})();
 '''
 
 @pytest.fixture(scope='module')
@@ -147,3 +148,15 @@ def test_revoked_speaking_approval_stops_microphone_without_ending_camera(readin
     r=readings['mic-revoked']
     assert r['mic']==1 and r['micStops']>=1 and r['disconnected']==0
     assert r['micLabel']=='Enable microphone'
+
+
+def test_pupil_poll_does_not_fetch_a_second_copy_of_exam_and_session(readings):
+    calls=readings['mic-revoked']['calls']
+    redundant=[c for c in calls if isinstance(c,dict) and c['method']=='GET' and '/hand-raises' in c['url']]
+    assert redundant==[], 'pupil polling must combine room state and own microphone approval'
+
+
+def test_initial_api_failure_is_visible_without_requesting_media(readings):
+    r=readings['initial-error']
+    assert not r['panelHidden'] and r['status']
+    assert r['camera']==0 and r['mic']==0 and r['handDisabled']
