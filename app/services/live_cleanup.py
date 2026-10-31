@@ -157,7 +157,7 @@ def enqueue(db, session, *, reason="session_ended", error=None, now=None) -> dic
         return again
 
 
-def claim_next(db, *, owner: str, now=None) -> dict | None:
+def claim_next(db, *, owner: str, now=None, job_id=None) -> dict | None:
     """Take ownership of one due job, or return ``None`` when there is none.
 
     Ordered by due time and bounded by a read limit, so a large ledger does not
@@ -166,8 +166,10 @@ def claim_next(db, *, owner: str, now=None) -> dict | None:
     which of several workers gets the row.
     """
     moment = _now(now)
-    rows = (db.table(TABLE).select("*").eq("status", "pending")
-            .order("next_attempt_at").limit(25).execute().data or [])
+    query = db.table(TABLE).select("*").eq("status", "pending")
+    if job_id is not None:
+        query = query.eq("id", job_id)
+    rows = query.order("next_attempt_at").limit(25).execute().data or []
     for job in rows:
         due = _parse(job.get("next_attempt_at"))
         if due is not None and due > moment:
@@ -270,14 +272,20 @@ def attempt(config, db, job, *, end_room, now=None) -> dict:
         # The lease expired and somebody else claimed the room while this worker
         # was between the claim and the call. Not ours to delete or to report.
         return {"state": "lost", "job": job}
+    note = None
     try:
         end_room(job.get("room_name"))
-    except Exception as exc:  # noqa: BLE001 - the debt must survive any failure
-        if _already_gone(exc):
-            # The room is gone; the goal is met, so this is not a retry.
-            return _close(db, job, moment, note="room was already absent: %s" % exc)
-        return _defer(db, job, moment, exc)
-    return _close(db, job, moment, note=None)
+    except Exception as exc:  # noqa: BLE001 - debt survives transport failure
+        if not _already_gone(exc):
+            return _defer(db, job, moment, exc)
+        note = "room was already absent: %s" % exc
+    if job.get("handover_id"):
+        try:
+            from app.services import live_supervision
+            live_supervision.finish(db, job)
+        except Exception as exc:  # noqa: BLE001 - retry deletion + finalization
+            return _defer(db, job, moment, exc)
+    return _close(db, job, moment, note=note)
 
 
 def run_pending(config, db, *, end_room, owner=None, now=None, limit=10) -> dict:

@@ -900,6 +900,18 @@
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
+    },
+    "live/assignments.html": {
+      "pairs": 3,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
+    "live/supervision_controls.html": {
+      "pairs": 10,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
     }
   }
 }

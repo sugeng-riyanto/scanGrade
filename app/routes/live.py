@@ -7,7 +7,7 @@ import secrets
 from flask import Blueprint, current_app, g, jsonify, request, render_template
 from app.decorators.year_lock import open_year_required
 from app.services import live_cleanup, live_exam_toggle, live_policy, livekit_gateway, live_school_entitlement
-from app.services import scanmeet_packages
+from app.services import scanmeet_packages, live_supervision
 from app.utils.auth import get_supabase, login_required
 from app.utils.exam_access import can_manage_exam, exam_sitting_allowed
 
@@ -18,7 +18,8 @@ live_ui_bp = Blueprint("live_ui", __name__, url_prefix="/live")
 @live_ui_bp.app_context_processor
 def scanmeet_template_context():
     """Expose the same two-switch policy to links as to the API and pages."""
-    return {"scanmeet_enabled": live_policy.feature_enabled(current_app.config)}
+    return {"scanmeet_enabled": live_policy.feature_enabled(current_app.config),
+            "scanmeet_supervision_enabled": live_supervision.enabled(current_app.config)}
 
 log = logging.getLogger(__name__)
 STAFF = ("guru", "principal", "vice_principal", "admin_sekolah", "super_admin")
@@ -69,6 +70,9 @@ def _access(db, exam, *, staff_only=False):
         return None
     if role in STAFF and can_manage_exam(uid, role, school, exam):
         return live_policy.LIVE_TEACHER
+    if (role in ("guru", "principal", "vice_principal") and
+            live_supervision.enabled(current_app.config) and live_supervision.assigned(db, exam, uid)):
+        return live_policy.LIVE_TEACHER
     if not staff_only and role == "murid":
         allowed, _ = exam_sitting_allowed(db, exam, exam["id"], uid)
         if allowed:
@@ -84,7 +88,7 @@ def _session(db, sid):
 
 
 def _check(db, session, staff_only=False):
-    if not scanmeet_packages.session_open(session):
+    if not scanmeet_packages.session_open(session) or session.get("transfer_state", "ready") != "ready":
         return None
     exam = _exam(db, session["exam_id"])
     role = _access(db, exam, staff_only=staff_only)
@@ -111,9 +115,7 @@ def status(exam_id):
     role = _access(db, exam)
     if not role:
         return _denied()
-    session = _one(db.table("scan_live_sessions").select(
-        "id,exam_id,status,created_at,created_by,expires_at,participant_limit"
-    ).eq("exam_id", exam_id).eq("school_id", exam["school_id"])
+    session = _one(db.table("scan_live_sessions").select("*").eq("exam_id", exam_id).eq("school_id", exam["school_id"])
         .eq("status", "active"))
     if session and not scanmeet_packages.session_open(session):
         session = None
@@ -122,6 +124,14 @@ def status(exam_id):
     # token and moderation endpoints still enforce the pinned publisher identity.
     can_join = (role != live_policy.LIVE_TEACHER or not session or
                 str(session.get("created_by") or "") == str(g.user_id))
+    pending = bool(session and session.get("transfer_state") == "closing")
+    if pending:
+        session = None
+    elif session:
+        # Internal room names/policy and future database columns are never public.
+        session = {key: session.get(key) for key in ("id", "exam_id", "status", "created_at",
+                   "created_by", "expires_at", "participant_limit", "media_version")}
+        session["media_version"] = session.get("media_version") or 1
     own_request = None
     if role == live_policy.LIVE_STUDENT and session and live_exam_toggle.enabled(exam):
         # One polling request reads the room and this pupil's own approval.
@@ -131,7 +141,7 @@ def status(exam_id):
                            .eq("session_id", session["id"]).eq("school_id", exam["school_id"])
                            .eq("student_id", g.user_id).order("created_at", desc=True))
     response = jsonify({"session": session, "role": role, "can_join": can_join,
-                        "request": own_request, "enabled": live_exam_toggle.enabled(exam),
+                        "request": own_request, "handover_pending": pending, "enabled": live_exam_toggle.enabled(exam),
                         "policy": live_policy.EXAM_POLICY})
     response.headers["Cache-Control"] = "private, no-store"
     return response
@@ -157,6 +167,8 @@ def create_session(exam_id):
                     .eq("school_id", exam["school_id"]).eq("exam_id", exam_id)
                     .eq("status", "active"))
     if existing:
+        if existing.get("transfer_state") == "closing":
+            return jsonify({"error": "Supervisor handover is pending"}), 409
         if str(existing.get("created_by") or "") != str(g.user_id):
             return jsonify({"error": "Another teacher already supervises this Live session"}), 409
         if scanmeet_packages.session_open(existing):
@@ -201,6 +213,8 @@ def set_exam_enabled(exam_id):
     exam = _exam(db, exam_id)
     if _access(db, exam, staff_only=True) != live_policy.LIVE_TEACHER:
         return _denied()
+    if not can_manage_exam(g.user_id, g.user_role, g.user_school_id, exam):
+        return _denied()  # Delegation is media access, never exam editing.
     body = request.get_json(silent=True) or {}
     value = body.get("enabled")
     if not isinstance(value, bool):
@@ -259,6 +273,7 @@ def join_token(sid):
         if session.get("expires_at"):
             result["expires_at"] = session["expires_at"]
         result["participant_limit"] = session.get("participant_limit")
+        result["media_version"] = session.get("media_version") or 1
     except Exception:
         log.warning("LiveKit join token unavailable", exc_info=True)
         return _unavailable()
@@ -442,9 +457,12 @@ def end_session(sid):
     session = _session(db, sid)
     if _check(db, session, staff_only=True) != live_policy.LIVE_TEACHER:
         return _denied()
-    rows = (db.table("scan_live_sessions").update({"status": "ended"})
-            .eq("id", sid).eq("school_id", session["school_id"])
-            .eq("status", "active").execute().data or [])
+    query = (db.table("scan_live_sessions").update({"status": "ended"})
+             .eq("id", sid).eq("school_id", session["school_id"])
+             .eq("status", "active").eq("created_by", session["created_by"]))
+    if "media_version" in session:
+        query = query.eq("media_version", session["media_version"]).eq("transfer_state", "ready")
+    rows = query.execute().data or []
     if not rows:
         return jsonify({"error": "Session already closed"}), 409
     try:
@@ -505,7 +523,9 @@ def live_exam_page(exam_id):
     role = _access(db, exam)
     if not role:
         return _denied()
-    return render_template("live/exam.html", live_exam_id=exam_id, live_role=role)
+    return render_template("live/exam.html", live_exam_id=exam_id, live_role=role,
+                           live_can_manage=can_manage_exam(g.user_id, g.user_role, g.user_school_id, exam),
+                           live_can_assign=g.user_role in ("super_admin", "admin_sekolah"))
 
 
 @live_bp.route("/sessions/<sid>/events", methods=["GET"])
@@ -522,3 +542,119 @@ def recent_events(sid):
             .eq("school_id", session["school_id"]).eq("session_id", sid)
             .order("received_at", desc=True).limit(25).execute().data or [])
     return jsonify({"events": rows})
+
+
+def _supervision_scope(db, exam_id):
+    if not live_supervision.enabled(current_app.config):
+        return None, (jsonify({"error": "Supervisor management is disabled"}), 404)
+    exam = _exam(db, exam_id)
+    if _access(db, exam, staff_only=True) != live_policy.LIVE_TEACHER:
+        return None, _denied()
+    if g.user_role not in ("super_admin", "admin_sekolah"):
+        return None, _denied()
+    return exam, None
+
+
+def _supervision_error(exc):
+    # Public codes contain neither database details nor profile data.
+    codes = ("version_conflict", "handover_busy", "session_closing", "session_unavailable",
+             "target_denied", "supervisor_denied", "reason_required", "invalid_expiry",
+             "assignment_missing", "already_supervisor", "license_inactive")
+    code = next((code for code in codes if "scanmeet_" + code in str(exc)), None)
+    if code:
+        return jsonify({"error": "scanmeet_" + code}), 409
+    log.warning("ScanMeet supervision unavailable", exc_info=True)
+    return _unavailable()
+
+
+@live_bp.route("/exams/<exam_id>/supervisors", methods=["GET", "POST"])
+@login_required
+@open_year_required("exam_id")
+def supervisors(exam_id):
+    if (off := _off()) is not None:
+        return off
+    db = get_supabase()
+    exam, error = _supervision_scope(db, exam_id)
+    if error is not None:
+        return error
+    try:
+        if request.method == "GET":
+            candidates = (db.table("profiles").select("id,full_name,role")
+                          .eq("school_id", exam["school_id"])
+                          .in_("role", ["guru", "principal", "vice_principal", "admin_sekolah"])
+                          .order("full_name").execute().data or [])
+            assignments = (db.table("scanmeet_exam_supervisors")
+                           .select("id,supervisor_id,valid_until,revoked_at,version")
+                           .eq("school_id", exam["school_id"]).eq("exam_id", exam_id).execute().data or [])
+            session = _one(db.table("scan_live_sessions")
+                           .select("id,created_by,media_version,transfer_state,expires_at")
+                           .eq("school_id", exam["school_id"]).eq("exam_id", exam_id).eq("status", "active"))
+            response = jsonify({"candidates": candidates, "assignments": assignments,
+                                "session": session, "owner_id": exam["teacher_id"]})
+            response.headers["Cache-Control"] = "private, no-store"
+            return response
+        body = request.get_json(silent=True) or {}
+        if (not isinstance(body.get("version"), int) or isinstance(body.get("version"), bool)
+                or not isinstance(body.get("revoke"), bool)):
+            return jsonify({"error": "version and revoke are required"}), 400
+        data = live_supervision.rpc(db, "scanmeet_supervisor_assignment", {
+            "p_exam": exam_id, "p_actor": g.user_id, "p_target": body.get("target_id"),
+            "p_until": body.get("valid_until"), "p_version": body["version"],
+            "p_reason": body.get("reason"), "p_revoke": body["revoke"],
+        })
+        if data.get("handover_id"):
+            data["media_cleanup"] = live_supervision.attempt_handover(
+                current_app.config, db, data["handover_id"], exam["school_id"],
+                end_room=lambda room: livekit_gateway.end_room(current_app.config, room))
+        return jsonify(data), 202 if data.get("media_cleanup") == "pending" else 200
+    except Exception as exc:
+        return _supervision_error(exc)
+
+
+@live_bp.route("/exams/<exam_id>/handover", methods=["POST"])
+@login_required
+@open_year_required("exam_id")
+def handover(exam_id):
+    if (off := _off()) is not None:
+        return off
+    db = get_supabase()
+    exam, error = _supervision_scope(db, exam_id)
+    if error is not None:
+        return error
+    body = request.get_json(silent=True) or {}
+    if not body.get("target_id") or not isinstance(body.get("version"), int) or isinstance(body.get("version"), bool):
+        return jsonify({"error": "target_id and version are required"}), 400
+    try:
+        data = live_supervision.rpc(db, "scanmeet_begin_handover", {
+            "p_exam": exam_id, "p_actor": g.user_id, "p_session": body.get("session_id"),
+            "p_target": body["target_id"], "p_version": body["version"], "p_reason": body.get("reason"),
+        })
+        data["media_cleanup"] = live_supervision.attempt_handover(
+            current_app.config, db, data["handover_id"], exam["school_id"],
+            end_room=lambda room: livekit_gateway.end_room(current_app.config, room))
+        return jsonify(data), 202 if data["media_cleanup"] == "pending" else 200
+    except Exception as exc:
+        return _supervision_error(exc)
+
+
+@live_ui_bp.route("/supervision", methods=["GET"])
+@login_required
+def supervision_assignments():
+    if (off := _off()) is not None:
+        return off
+    if not live_supervision.enabled(current_app.config):
+        return jsonify({"error": "Supervisor management is disabled"}), 404
+    if g.get("user_role") not in STAFF or not g.get("user_school_id"):
+        return _denied()
+    from datetime import datetime, timezone
+    db = get_supabase()
+    rows = (db.table("scanmeet_exam_supervisors").select("exam_id,valid_until,revoked_at")
+            .eq("school_id", g.user_school_id).eq("supervisor_id", g.user_id).execute().data or [])
+    now = datetime.now(timezone.utc)
+    ids = [row["exam_id"] for row in rows if not row.get("revoked_at") and
+           (scanmeet_packages.parse_time(row.get("valid_until")) or now) > now]
+    exams = (db.table("exams").select("id,title").eq("school_id", g.user_school_id)
+             .in_("id", ids).order("title").execute().data or []) if ids else []
+    response = current_app.make_response(render_template("live/assignments.html", exams=exams))
+    response.headers["Cache-Control"] = "private, no-store"
+    return response

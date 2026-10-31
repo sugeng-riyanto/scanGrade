@@ -493,6 +493,9 @@ window.sgSavePrefs = function (patch) {
             <a href="/wb/student/whiteboard" class="nav-item {% if '/wb/' in request.path %}active{% endif %}"><i class="fas fa-chalkboard"></i><span x-text="t('Whiteboard','Whiteboard')"></span></a>
             {% endif %}
 {% endif %}
+            {% if scanmeet_enabled and scanmeet_supervision_enabled and g.user_role in ('guru','principal','vice_principal','admin_sekolah','super_admin') %}
+            <a href="/live/supervision" class="nav-item {% if request.path == '/live/supervision' %}active{% endif %}"><i class="fas fa-user-shield"></i><span x-text="t('Tugas pengawasan','Supervision assignments')"></span></a>
+            {% endif %}
             <a href="/scanmeet" class="nav-item {% if request.path == '/scanmeet' %}active{% endif %}"><i class="fas fa-video"></i><span x-text="t('Paket ScanMeet','ScanMeet plans')"></span></a>
         </nav>
 

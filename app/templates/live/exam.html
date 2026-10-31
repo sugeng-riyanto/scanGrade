@@ -11,6 +11,7 @@
     <p class="text-sm text-surface-500">Kamera wajib · Mikrofon dengan izin guru · Chat dan rekaman nonaktif · Grid</p>
     <div class="flex flex-wrap gap-3">
       {% if live_role == "teacher" %}
+      <button id="live-join" type="button" hidden class="min-h-[44px] px-4 py-2 rounded-lg bg-primary-600 text-white" x-text="t('Gabung sebagai pengawas','Join as supervisor')"></button>
       <button id="live-start" type="button" hidden class="min-h-[44px] px-4 py-2 rounded-lg bg-primary-600 text-white">Mulai pengawasan</button>
       <button id="live-end" type="button" hidden class="min-h-[44px] px-4 py-2 rounded-lg border border-rose-200 text-red-600">Akhiri Live</button>
       {% else %}
@@ -19,7 +20,7 @@
       {% endif %}
       <button id="live-mic" type="button" hidden class="min-h-[44px] px-4 py-2 rounded-lg border border-indigo-300">Aktifkan mikrofon</button>
     </div>
-    {% if live_role == "teacher" %}
+    {% if live_role == "teacher" and live_can_manage %}
     {# The paper's own switch (migration 071). It is read from the server on
        every load; the button never guesses, so a second device toggling the
        same paper is reflected instead of silently overwritten. It sits below
@@ -56,6 +57,9 @@
     </aside>
   </div>
 </section>
+{% if live_can_assign and scanmeet_supervision_enabled %}
+{% include "live/supervision_controls.html" %}
+{% endif %}
 {# The pinned SDK is served strictly from this origin. If loading fails,
    the room reports media unavailable; the exam itself continues safely.
    Do not load executable third-party JavaScript from a public CDN. #}

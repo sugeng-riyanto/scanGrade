@@ -27,7 +27,7 @@ def expire_sessions(db, *, now=None):
             # row active so the next sweep retries; its deadline already denies
             # every token. Never strand an ended room without a deletion job.
             live_cleanup.enqueue(db, session, reason="scanmeet_time_limit", error="session or license expired")
-            ended = db.table("scan_live_sessions").update({"status": "ended"}).eq("id", session["id"]).eq("school_id", session["school_id"]).eq("status", "active").execute().data or []
+            ended = db.table("scan_live_sessions").update({"status": "ended"}).eq("id", session["id"]).eq("school_id", session["school_id"]).eq("status", "active").eq("room_name", session["room_name"]).execute().data or []
             if not ended:
                 continue
             result["ended"] += 1

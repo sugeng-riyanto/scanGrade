@@ -22,8 +22,8 @@ async function scenario(mode){
  let enabled=mode!=='off', active=true, camera=0, mic=0, stopped=0, disconnected=0;
  let connectingResolve, cameraResolve, tokenResolve, sdkResolve, micResolve;
  let approved=mode==='mic-race'||mode==='mic-revoked', micPublication=null, micStops=0;
- const raceCamera=mode==='camera-race', raceConnect=mode==='connect-race';
- let denied=false;
+ const raceCamera=mode==='camera-race'||mode==='handover-camera', raceConnect=mode==='connect-race'||mode==='handover-connect';
+ let denied=false, mediaVersion=1, handoverPending=false;
  const publication={isMuted:false,track:{kind:'video',stop(){stopped++},attach(){return w.document.createElement('video')}}};
  class Room{
   constructor(){this.localParticipant={
@@ -34,13 +34,14 @@ async function scenario(mode){
      micPublication={isMuted:false,track:{stop(){micStops++}}};this.trackPublications.set('mic',micPublication);
     }else if(micPublication){micPublication.isMuted=true;micPublication.track.stop()}
    },
+   async publishTrack(){calls.push('publish')},
    getTrackPublication(source){return source==='camera'?publication:micPublication},
    trackPublications:new Map([['cam',publication]])};this.remoteParticipants=new Map();}
   on(event,fn){events[event]=fn;return this}
   async connect(){if(raceConnect)await new Promise(r=>connectingResolve=r)}
   async disconnect(){disconnected++;publication.track.stop();if(events.disconnected)events.disconnected();}
  }
- const sdk={Room,RoomEvent:{TrackSubscribed:'sub',TrackUnsubscribed:'unsub',ParticipantDisconnected:'left',Disconnected:'disconnected'}};
+ const sdk={Room,Track:{Source:{Camera:'camera'}},async createLocalVideoTrack(){camera++;calls.push('camera');if(raceCamera)await new Promise(r=>cameraResolve=r);return publication.track},RoomEvent:{TrackSubscribed:'sub',TrackUnsubscribed:'unsub',ParticipantDisconnected:'left',Disconnected:'disconnected'}};
  w.LivekitClient=sdk;
  if(mode==='sdk-race'||mode==='sdk-reject'){
   w.LivekitClient=undefined;
@@ -52,9 +53,9 @@ async function scenario(mode){
  w.fetch=async(url,opts)=>{
   calls.push({url,method:opts?.method||'GET'});
   if(mode==='initial-error')throw Error('synthetic network error');
-  if(url.endsWith('/token')){if(mode==='token-race')await new Promise(r=>tokenResolve=r);return{ok:!denied,status:denied?403:200,json:async()=>({supervisor_identity:'p_teacher',url:'wss://synthetic.invalid',token:'synthetic'})}};
+  if(url.endsWith('/token')){const issuedVersion=mediaVersion;if(mode==='token-race')await new Promise(r=>tokenResolve=r);return{ok:!denied,status:denied?403:200,json:async()=>({supervisor_identity:'p_teacher',url:'wss://synthetic.invalid',token:'synthetic',media_version:issuedVersion})}};
   if(url.includes('/hand-raises'))return {ok:true,status:200,json:async()=>({request:approved?{status:'approved'}:null})};
-  return {ok:!denied,status:denied?403:200,json:async()=>({enabled,role:'student',request:approved?{status:'approved'}:null,session:active?{id:'session-1'}:null})};
+  return {ok:!denied,status:denied?403:200,json:async()=>({enabled,role:'student',handover_pending:handoverPending,request:approved?{status:'approved'}:null,session:active?{id:'session-1',media_version:mediaVersion}:null})};
  };
  const drain=async()=>{for(let i=0;i<24;i++)await Promise.resolve();await new Promise(r=>setImmediate(r))};
  w.eval(source);await drain();
@@ -62,10 +63,14 @@ async function scenario(mode){
  if(mode!=='initial'){
   w.document.getElementById('live-join').click();await drain();
   if(mode==='off-live'||raceCamera||raceConnect||mode==='token-race'||mode==='sdk-race'){
-   enabled=false;
+   if(mode.startsWith('handover-')){mediaVersion=2;handoverPending=true}else enabled=false;
    for(const t of timers.filter(t=>t.ms>=4000&&t.ms<=20000))t.fn();
    await drain();
    if(cameraResolve)cameraResolve();if(connectingResolve)connectingResolve();if(tokenResolve)tokenResolve();if(sdkResolve)sdkResolve();await drain();
+  }
+  if(mode==='handover-active'){
+   mediaVersion=2;handoverPending=true;for(const t of timers.filter(t=>t.ms>=4000&&t.ms<=20000))t.fn();await drain();
+   handoverPending=false;for(const t of timers.filter(t=>t.ms>=4000&&t.ms<=20000))t.fn();await drain();
   }
   if(mode==='ended'){
    active=false;for(const t of timers.filter(t=>t.ms>=4000&&t.ms<=20000))t.fn();await drain();
@@ -85,7 +90,7 @@ async function scenario(mode){
    status:w.document.getElementById('live-status').textContent,joinHidden:w.document.getElementById('live-join').hidden};
  dom.window.close();return out;
 }
-(async()=>{const result={};for(const mode of ['initial','join','off','off-live','camera-race','connect-race','ended','denied','token-race','sdk-race','sdk-reject','mic-race','mic-revoked','initial-error'])result[mode]=await scenario(mode);console.log(JSON.stringify(result))})();
+(async()=>{const result={};for(const mode of ['initial','join','off','off-live','camera-race','connect-race','ended','denied','token-race','sdk-race','sdk-reject','mic-race','mic-revoked','initial-error','handover-camera','handover-connect','handover-active'])result[mode]=await scenario(mode);console.log(JSON.stringify(result))})();
 '''
 
 @pytest.fixture(scope='module')
@@ -160,3 +165,17 @@ def test_initial_api_failure_is_visible_without_requesting_media(readings):
     r=readings['initial-error']
     assert not r['panelHidden'] and r['status']
     assert r['camera']==0 and r['mic']==0 and r['handDisabled']
+
+
+@pytest.mark.parametrize('mode', ['handover-camera', 'handover-connect'])
+def test_retired_generation_does_not_publish_after_pending_permission(readings, mode):
+    r = readings[mode]
+    assert 'publish' not in r['calls']
+    assert r['disconnected'] >= 1 and r['stopped'] >= 1
+    assert r['mic'] == 0
+
+
+def test_handover_rejoins_new_generation_without_opening_microphone(readings):
+    r = readings['handover-active']
+    assert r['camera'] == 2 and r['calls'].count('publish') == 2
+    assert r['disconnected'] >= 1 and r['mic'] == 0

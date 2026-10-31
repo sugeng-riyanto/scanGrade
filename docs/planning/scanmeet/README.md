@@ -18,7 +18,7 @@ Implemented in this change:
 - Microphone permission/revocation cleanup, keeping exam answers, autosave and timer code unchanged.
 - Same-school admin may read/disable a teacher session without receiving the teacher's private pupil tracks.
 
-Not implemented by this PR: supervisor assignment/safe takeover, standalone meetings,
+Not implemented by the first delivery: supervisor assignment/safe takeover, standalone meetings,
 new attendance/export features, camera effects, production scenes or local recorder.
 The existing creator-only token boundary remains enforced until takeover is proven.
 No feature flags, entitlement, production data, service or migrations are changed.
@@ -36,3 +36,10 @@ Critical next proof: camera/microphone permission prompts during an armed exam m
 not create false anti-cheat penalties. This change adds no blanket anti-cheat exemption.
 Takeover will require server/SFU revocation and quota-safe transfer; merely changing
 created_by is prohibited. See 02-ACCESS.md, 07-ACCEPTANCE.md and 09-IMPLEMENTATION.md.
+
+## Second delivery: assigned supervisors and room rotation
+
+The next draft implements scoped, expiring supervisor assignments and durable,
+quota-preserving room handover. See [13-SUPERVISION-DELIVERY.md](13-SUPERVISION-DELIVERY.md)
+for behavior, local SQL evidence and outstanding staging/device requirements.
+The new supervision flag defaults OFF; this is not a production activation.
