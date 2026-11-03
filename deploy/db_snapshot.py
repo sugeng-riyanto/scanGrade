@@ -61,6 +61,7 @@ import tarfile
 import tempfile
 import time
 from datetime import datetime, timezone
+from urllib.parse import urlsplit
 from pathlib import Path
 
 import requests
@@ -691,6 +692,23 @@ def patch_rows(base: str, headers: dict[str, str], table: str, archive: Path,
     return reverted, missing
 
 
+def target_host(base: str) -> str:
+    """The host a command is about to write to, with any credentials stripped.
+
+    A restore overwrites whatever ``SUPABASE_URL`` names, and the archive says
+    nothing about where it came from. Printing the host before anything is
+    written is what turns "I think this is the scratch project" into a line the
+    operator can point at afterwards. Only the host and port survive: a URL that
+    carried ``user:password@`` must not put those in a terminal, a log or a
+    pasted transcript.
+    """
+    parts = urlsplit(base)
+    host = parts.hostname or ""
+    if not host:
+        return "(unparseable target: no host in SUPABASE_URL)"
+    return f"{host}:{parts.port}" if parts.port else host
+
+
 def restore(archive: Path, base: str, key: str, dry_run: bool = False,
             pre_snapshot: bool = True) -> int:
     manifest = describe(archive)
@@ -700,6 +718,10 @@ def restore(archive: Path, base: str, key: str, dry_run: bool = False,
     deferred: dict[str, list[str]] = manifest.get("deferred_columns") or {}
 
     print(f"restoring {archive.name}")
+    # First line after the archive's name, and before the pre-restore snapshot or
+    # any write: where the rows are going. A restore aimed at the wrong project is
+    # only cheap if someone sees it before it starts.
+    print(f"   target {target_host(base)}")
     print(f"   snapshot taken {manifest.get('created_at')} "
           f"(label {manifest.get('label')}, {manifest.get('total_rows')} rows)")
     if not manifest.get("restore_order"):
