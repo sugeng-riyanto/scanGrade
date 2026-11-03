@@ -373,6 +373,17 @@ def run_once(app=None, *, now=None) -> dict:
                   end_room=lambda room: livekit_gateway.end_room(config, room),
                   now=now)}
 
+    # Admission denial cannot disconnect existing publishers.
+    from app.services import live_expiry_cleanup
+    result["expiry"] = live_expiry_cleanup.sweep_expired(
+        db, end_room=lambda room: livekit_gateway.end_room(config, room),
+        enqueue=enqueue, now=now)
+    expiry = result["expiry"]
+    if (not expiry.get("measured") or expiry.get("errors")
+            or expiry.get("cleanup_pending") or expiry.get("cleanup_unrecorded")):
+        result["degraded"] = True
+        result["expiry_blocked"] = "entitlement revocation is unmeasured or has cleanup debt"
+
     global _last_reconcile
     moment = _now(now)
     due = _last_reconcile is None or (
