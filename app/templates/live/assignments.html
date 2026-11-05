@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}ScanMeet{% endblock %}
+{% block page_title %}ScanMeet{% endblock %}
+{% block content %}
+<section class="card p-5 space-y-4">
+  <h1 class="text-xl font-bold" x-text="t('Tugas pengawasan','Supervision assignments')"></h1>
+  <p class="text-sm text-surface-500" x-text="t('Penugasan yang masih berlaku untuk akun Anda. Admin sekolah mengatur pergantian pengawas.','Current assignments for your account. Your school admin manages supervisor handover.')"></p>
+  {% for exam in exams %}
+  <a href="{{ url_for('live_ui.live_exam_page', exam_id=exam.id) }}" class="block min-h-[44px] rounded-lg border border-surface-300 p-3 font-semibold">{{ exam.title | e }}</a>
+  {% else %}
+  <p class="text-sm" x-text="t('Belum ada penugasan aktif.','No active assignments.')"></p>
+  {% endfor %}
+</section>
+{% endblock %}

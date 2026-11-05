@@ -1000,7 +1000,11 @@ def test_the_attempt_uses_the_sdk_shape_the_page_itself_uses():
     source = GATE.CONNECT_WITH
     page = (ROOT / "app" / "static" / "js" / "scan-live-exam.js").read_text(
         encoding="utf-8")
-    assert "new lib.Room(" in page and "room.connect(grant.url, grant.token)" in page
+    # The page captures the in-flight instance as `candidate` so a delayed
+    # permission/connection cannot resurrect a room after OFF. The instrument
+    # must still exercise the SDK Room method, regardless of that local name.
+    assert "new lib.Room(" in page
+    assert re.search(r"(?:room|candidate)\.connect\(grant\.url, grant\.token\)", page)
     assert "new lib.Room(" in source and "room.connect(" in source, (
         "the driver must speak the API the page speaks")
     assert "typeof lib.Room !== 'function'" in source, (

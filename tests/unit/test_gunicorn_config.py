@@ -36,3 +36,25 @@ def test_preload_app_is_disabled():
         "preload_app must stay False with gevent workers — preloading imports ssl "
         "before monkey-patching and breaks all outbound HTTPS (Supabase/auth)"
     )
+
+
+def test_health_worker_count_uses_effective_server_config(monkeypatch):
+    conf = _load_gunicorn_conf()
+    monkeypatch.setattr(conf.os, "makedirs", lambda *args, **kwargs: None)
+    monkeypatch.delenv("GUNICORN_WORKERS", raising=False)
+
+    class Config:
+        workers = 1
+        worker_class = "gthread"
+        worker_connections = 20
+
+    class Logger:
+        def info(self, *args):
+            pass
+
+    class Server:
+        cfg = Config()
+        log = Logger()
+
+    conf.on_starting(Server())
+    assert conf.os.environ["GUNICORN_WORKERS"] == "1"

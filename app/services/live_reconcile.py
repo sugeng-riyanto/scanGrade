@@ -41,7 +41,7 @@ log = logging.getLogger(__name__)
 
 TABLE = "scan_live_sessions"
 STALE_REASON = "media room missing"
-COLUMNS = "id,school_id,exam_id,room_name,status,media_state,missing_since,created_at"
+COLUMNS = "*"  # Private maintenance: compatible with optional handover columns.
 
 #: How long a room must stay absent before its session is parked. Long enough to
 #: outlast a LiveKit restart or a room list taken mid-move, short enough that a
@@ -78,6 +78,15 @@ def _active_sessions(db) -> list[dict]:
             .execute().data or [])
 
 
+def _same_media(query, session):
+    # A sweep can overlap room rotation: observations of generation N must never
+    # park or overwrite generation N+1, nor free a slot while cleanup owns it.
+    query = query.eq("room_name", session.get("room_name"))
+    if "media_version" in session:
+        query = query.eq("media_version", session["media_version"]).eq("transfer_state", "ready")
+    return query
+
+
 def _record(db, session, moment, *, media_state) -> bool:
     """Note what this pass saw, without moving the session's status."""
     # No `updated_at` here: `scan_live_sessions` has none (migration 070), and a
@@ -88,9 +97,9 @@ def _record(db, session, moment, *, media_state) -> bool:
     payload = {"reconciled_at": _stamp(moment), "missing_since": None}
     if media_state:
         payload["media_state"] = media_state
-    rows = (db.table(TABLE).update(payload)
+    rows = _same_media((db.table(TABLE).update(payload)
             .eq("id", session["id"]).eq("school_id", session["school_id"])
-            .eq("status", "active").execute().data or [])
+            .eq("status", "active")), session).execute().data or []
     return bool(rows)
 
 
@@ -101,22 +110,21 @@ def _mark_missing(db, session, moment) -> bool:
     so a second pass cannot restart the clock and a session that was never seen
     cannot enter the state at all.
     """
-    rows = (db.table(TABLE).update({
+    rows = _same_media((db.table(TABLE).update({
         "missing_since": _stamp(moment), "reconciled_at": _stamp(moment),
     }).eq("id", session["id"]).eq("school_id", session["school_id"])
         .eq("status", "active").eq("media_state", "live")
-        .is_("missing_since", "null").execute().data or [])
+        .is_("missing_since", "null")), session).execute().data or []
     return bool(rows)
 
 
 def _park(db, session, moment) -> bool:
     """Park a session whose room we had seen and can no longer find."""
-    rows = (db.table(TABLE).update({
+    rows = _same_media((db.table(TABLE).update({
         "status": "stale", "media_state": "missing",
         "stale_reason": STALE_REASON, "reconciled_at": _stamp(moment),
     }).eq("id", session["id"]).eq("school_id", session["school_id"])
-        .eq("status", "active").eq("media_state", "live")
-        .execute().data or [])
+        .eq("status", "active").eq("media_state", "live")), session).execute().data or []
     if rows:
         log.warning("ScanMeet session %s is stale: its room %s no longer exists",
                     session["id"], session.get("room_name"))
@@ -151,6 +159,9 @@ def reconcile(config, db, *, room_names, enqueue=None, now=None) -> dict:
 
     live = missing = stale = waiting = 0
     for session in _active_sessions(db):
+        if session.get("transfer_state") == "closing":
+            waiting += 1
+            continue  # Cleanup owns this room; absence must not release its slot.
         if session.get("room_name") in present:
             _record(db, session, moment, media_state="live")
             live += 1

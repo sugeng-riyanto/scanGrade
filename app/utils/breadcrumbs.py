@@ -82,6 +82,8 @@ MACHINE = frozenset({
     # LiveKit video events and temporary requests are JSON readbacks for the
     # pilot console, not standalone navigation destinations.
     "events", "hand-raises",
+    # Expiring supervisor assignments are private JSON management readbacks.
+    "supervisors",
     "api", "ai", "class", "me", "count", "read-status", "unread-count",
     # `/teacher/api/exam-roster` answers the class roster as JSON for the exam
     # builder's Target Classes panel: a readback, never a page of its own.

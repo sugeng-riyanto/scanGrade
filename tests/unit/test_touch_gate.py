@@ -234,6 +234,7 @@ class TestTheBrowserStartsWithAWritableHome:
         g = gate()
         monkeypatch.setattr(g.os, "geteuid", lambda: 0, raising=False)
         argv, _ = g.browser_launch("/usr/bin/google-chrome", 9222, "/tmp/sg-p")
+        assert argv[-1] == "about:blank", "root-only flags must precede the page URL"
         assert "--no-sandbox" in argv, (
             "a root-run browser refuses to start without --no-sandbox, so the gate "
             "can never see a debug target"

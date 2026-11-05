@@ -181,7 +181,7 @@ def browser_launch(browser, port, profile):
         "about:blank",
     ]
     if hasattr(os, "geteuid") and os.geteuid() == 0:
-        argv.append("--no-sandbox")
+        argv.insert(-1, "--no-sandbox")
     env = dict(os.environ)
     env["HOME"] = profile
     return argv, env
