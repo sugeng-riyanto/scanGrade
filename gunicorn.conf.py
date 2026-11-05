@@ -48,11 +48,13 @@ limit_request_field_size = 8190
 
 # ─── Hooks ────────────────────────────────────────────────────────
 def on_starting(server):
-    """Create log directory and set worker count for health endpoint."""
+    """Create log directory and report the effective worker count to the app."""
     os.makedirs("/var/log/scangrade", exist_ok=True)
-    os.environ["GUNICORN_WORKERS"] = str(workers)
-    server.log.info("Gunicorn starting with %d workers (gevent, %d connections each)",
-                    workers, worker_connections)
+    effective_workers = server.cfg.workers
+    os.environ["GUNICORN_WORKERS"] = str(effective_workers)
+    server.log.info("Gunicorn starting with %d workers (%s, %d connections each)",
+                    effective_workers, server.cfg.worker_class,
+                    server.cfg.worker_connections)
 
 def post_fork(server, worker):
     """Log worker spawn."""
