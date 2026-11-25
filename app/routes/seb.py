@@ -29,14 +29,14 @@ from __future__ import annotations
 
 import io
 import re
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone
 
 from flask import (Blueprint, abort, flash, g, jsonify, redirect,
                    render_template, request, send_file, session, url_for)
 
 from app.services import (seb_access, seb_config_key, seb_crypto, seb_door_log,
                           seb_service)
-from app.utils.auth import get_supabase, login_required
+from app.utils.auth import admin_sekolah_required, get_supabase, login_required
 from app.utils.helpers import row_or_none
 from app.utils.logger import get_logger
 
@@ -304,6 +304,91 @@ def reveal_password(exam_id):
                         "role": out.get("role"),
                         "on_behalf_of": out.get("on_behalf_of")})
     response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+WIB = timezone(timedelta(hours=7))
+
+
+@seb_bp.route("/admin-sekolah/seb-exit-codes", methods=["POST"])
+@admin_sekolah_required
+@_rate_limit("10 per minute")
+def daily_exit_codes():
+    school_id = g.get("user_school_id")
+    if not school_id or school_id == "None":
+        abort(403)
+    output = request.form.get("format")
+    try:
+        day = date.fromisoformat(request.form.get("date", ""))
+        start = datetime.combine(day, time.min, WIB)
+        end = start + timedelta(days=1)
+    except (ValueError, OverflowError):
+        abort(400)
+    if output not in {"xlsx", "whatsapp"}:
+        abort(400)
+
+    db = _supabase()
+    rows = []
+    offset = 0
+    while True:
+        exams = (db.table("exams").select(EXAM_COLUMNS)
+                 .eq("school_id", school_id).eq("require_seb", True)
+                 .eq("is_published", True).not_.is_("seb_config_key", "null")
+                 .gte("start_at", start.astimezone(timezone.utc).isoformat())
+                 .lt("start_at", end.astimezone(timezone.utc).isoformat())
+                 .order("start_at").order("id").range(offset, offset + 199)
+                 .execute().data or [])
+        for exam in exams:
+            if not _verdict(exam, seb_access.ACCESS_VIEW_PASSWORD).get("ok"):
+                abort(403)
+            credential = seb_service.credentials_for(db, exam["id"])
+            if not credential:
+                abort(409)
+            try:
+                code = seb_service.reveal(credential, "quit")
+            except seb_crypto.SebCryptoError:
+                abort(409)
+            if not code:
+                abort(409)
+            scheduled = datetime.fromisoformat(exam["start_at"]).astimezone(WIB)
+            rows.append((scheduled.strftime("%H:%M"), " ".join(exam["title"].split()), code))
+        if len(exams) < 200:
+            break
+        offset += len(exams)
+
+    if output == "whatsapp":
+        lines = [f"*Kode Keluar SEB | {day:%d/%m/%Y} (WIB)*", "",
+                 "Khusus pengawas ujian. Mohon simpan untuk digunakan saat diperlukan.", ""]
+        for hour, title, code in rows:
+            lines.append(f"• {hour} WIB — {title} — kode: `{code}`")
+        if not rows:
+            lines.append("Tidak ada ujian SEB terjadwal pada tanggal ini.")
+        response = jsonify(text="\n".join(lines))
+    else:
+        from openpyxl import Workbook
+        from openpyxl.styles import Font
+
+        book = Workbook()
+        sheet = book.active
+        sheet.title = "Kode Keluar SEB"
+        sheet.append(["Tanggal", "Mulai (WIB)", "Ujian", "Kode Keluar SEB"])
+        for cell in sheet[1]:
+            cell.font = Font(bold=True)
+        for hour, title, code in rows:
+            sheet.append([day.isoformat(), hour, title, code])
+            for cell in sheet[sheet.max_row]:
+                cell.data_type = "s"
+        for column, width in zip("ABCD", (14, 16, 52, 22)):
+            sheet.column_dimensions[column].width = width
+        sheet.freeze_panes = "A2"
+        sheet.auto_filter.ref = sheet.dimensions
+        buffer = io.BytesIO()
+        book.save(buffer)
+        buffer.seek(0)
+        response = send_file(buffer, as_attachment=True,
+                             download_name=f"kode-keluar-seb-{day.isoformat()}.xlsx",
+                             mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    response.headers["Cache-Control"] = "private, no-store"
     return response
 
 

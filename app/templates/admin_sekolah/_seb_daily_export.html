@@ -1,0 +1,52 @@
+<section class="card p-5 mb-5" x-data="{
+    message: '', state: '', busy: false,
+    async prepare(form) {
+        this.busy = true;
+        this.message = '';
+        this.state = '';
+        try {
+            const body = new FormData(form);
+            body.set('format', 'whatsapp');
+            const response = await fetch(form.action, { method: 'POST', body });
+            if (!response.ok) throw Error();
+            this.message = (await response.json()).text;
+            this.state = 'ready';
+        } catch {
+            this.state = 'failed';
+        } finally {
+            this.busy = false;
+        }
+    },
+    async copy() {
+        try {
+            await navigator.clipboard.writeText(this.message);
+            this.state = 'copied';
+        } catch {
+            this.$refs.message.select();
+            this.state = 'manual';
+        }
+    }
+}">
+    <h2 class="font-extrabold text-surface-800" x-text="t('Kode keluar SEB per tanggal','Daily SEB exit codes')"></h2>
+    <form x-ref="exportForm" method="post" action="{{ url_for('seb.daily_exit_codes') }}" class="flex flex-wrap items-end gap-3 mt-3">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <label class="text-sm text-surface-700">
+            <span x-text="t('Tanggal mulai ujian (WIB)','Exam start date (WIB)')"></span>
+            <input name="date" type="date" :disabled="busy" required value="{{ seb_export_date }}" class="block rounded-lg border p-2" @change="message = ''; state = ''">
+        </label>
+        <button name="format" value="xlsx" class="btn-primary" :disabled="busy"
+                x-text="t('Unduh Excel','Download Excel')"></button>
+        <button type="button" class="btn-secondary" :disabled="busy"
+                @click="$refs.exportForm.reportValidity() && prepare($refs.exportForm)"
+                x-text="t('Siapkan teks WhatsApp','Prepare WhatsApp text')"></button>
+    </form>
+    <div x-show="message" x-cloak class="mt-3">
+        <textarea x-ref="message" :value="message" readonly rows="6" class="w-full rounded-lg border p-2"
+                  aria-label="WhatsApp"></textarea>
+        <button type="button" class="btn-secondary" @click="copy()"
+                x-text="t('Salin teks','Copy text')"></button>
+    </div>
+    <p x-show="state === 'copied'" x-cloak role="status" x-text="t('Teks disalin.','Text copied.')"></p>
+    <p x-show="state === 'manual'" x-cloak role="status" x-text="t('Salin teks yang telah dipilih.','Copy the selected text.')"></p>
+    <p x-show="state === 'failed'" x-cloak role="alert" x-text="t('Teks tidak dapat disiapkan.','Could not prepare the text.')"></p>
+</section>

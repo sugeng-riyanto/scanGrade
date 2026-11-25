@@ -25,6 +25,12 @@
       "coverage": 6.2,
       "frozen": true
     },
+    "admin_sekolah/_seb_daily_export.html": {
+      "pairs": 8,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
     "admin_sekolah/dashboard.html": {
       "pairs": 29,
       "leftovers": 0,
