@@ -175,3 +175,18 @@ def test_an_answer_with_no_text_is_empty_rather_than_missing(monkeypatch, app):
 
     assert body["students"][0]["essayText"] == ""
     assert body["students"][0]["name"] == "Ayu"
+
+
+def test_queue_offers_canvas_detail_and_preserves_zero(monkeypatch, app):
+    answers = {"2": {"type": "essay_canvas", "text": ESSAY,
+                     "pages": {"0": {"textBoxes": [{"text": "400 N s"}]}},
+                     "ai_score": 0, "score": 85}}
+    client = _teacher_client(monkeypatch, app, [_submission(answers)])
+
+    response = client.get(f"/teacher/api/grade-question/{EXAM}/2")
+
+    assert response.status_code == 200
+    student = response.get_json()["students"][0]
+    assert student["essayText"] == ESSAY
+    assert student["hasCanvas"] is True
+    assert student["feedback"]["score"] == 0

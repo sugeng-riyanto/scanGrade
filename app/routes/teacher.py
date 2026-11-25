@@ -4205,11 +4205,18 @@ def grade_question_api(exam_id, question_index):
 
         if isinstance(ans_data, dict):
             answer_val = ans_data.get("answer", "")
-            if ans_data.get("pages"):
-                has_canvas = True
+            pages = ans_data.get("pages")
+            has_canvas = bool(ans_data.get("text_boxes") or ans_data.get("boxes"))
+            if isinstance(pages, dict):
+                has_canvas = has_canvas or any(
+                    isinstance(page, dict) and (page.get("canvas") or page.get("textBoxes"))
+                    for page in pages.values()
+                )
             if ans_data.get("text"):
                 essay_text = ans_data["text"]
-            feedback["score"] = ans_data.get("ai_score") or ans_data.get("score")
+            feedback["score"] = ans_data.get("ai_score")
+            if feedback["score"] is None:
+                feedback["score"] = ans_data.get("score")
             feedback["feedback"] = ans_data.get("feedback") or ans_data.get("ai_feedback")
         elif isinstance(ans_data, str):
             answer_val = ans_data
@@ -4287,7 +4294,7 @@ def grade_question_save(exam_id, question_index):
     if "answer" in data:
         current["answer"] = data["answer"]
     if "essay_score" in data:
-        current["ai_score"] = float(data["essay_score"]) if data.get("essay_score") else None
+        current["ai_score"] = float(data["essay_score"]) if data["essay_score"] not in (None, "") else None
     if "essay_feedback" in data:
         current["feedback"] = data["essay_feedback"]
 
