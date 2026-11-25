@@ -22,8 +22,8 @@ SESSION_TIMEOUTS = {
     #: through a meeting and comes back to it.
     "principal":      {"idle_minutes": 45,  "absolute_hours": 10},
     "vice_principal": {"idle_minutes": 45,  "absolute_hours": 10},
-    "guru":           {"idle_minutes": 120,  "absolute_hours": 12},
-    "murid":          {"idle_minutes": 120, "absolute_hours": 24},
+    "guru":           {"idle_minutes": 60,  "absolute_hours": 12},
+    "murid":          {"idle_minutes": 121, "absolute_hours": 24},
 }
 
 #: The two school-official roles, as one vocabulary. They share every door — one

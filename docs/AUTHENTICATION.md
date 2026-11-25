@@ -368,7 +368,7 @@ Role-specific timeouts are configured in `app/utils/auth.py`:
 | super_admin | 15 min | 4 h |
 | admin_sekolah | 30 min | 8 h |
 | guru | 60 min | 12 h |
-| murid | 120 min | 24 h |
+| murid | 121 min | 24 h |
 
 The idle and absolute checks are application-level controls. Supabase token expiry/refresh remains a separate authentication mechanism.
 

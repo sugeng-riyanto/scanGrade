@@ -340,7 +340,7 @@ class TestAnExpiredSessionUsesTheSameDoor:
         assert resp.status_code == 302, "the session must still be refused"
         assert resp.headers["Location"] == _hint("guru")
         # And the notice describing the expiry is readable where the reader lands.
-        assert "120 menit" in client.get(_hint("guru")).get_data(as_text=True)
+        assert "60 menit" in client.get(_hint("guru")).get_data(as_text=True)
 
     def test_an_idle_admin_still_goes_to_the_admin_tab(self, app, monkeypatch):
         monkeypatch.setattr(authmod, "_session_for", lambda token: {

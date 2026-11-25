@@ -216,19 +216,19 @@ def test_the_clamp_does_not_weaken_the_timeout(app, monkeypatch):
     # admin tab is not how a teacher should be told to log in again. See
     # tests/unit/test_login_door.py.
     assert resp.headers["Location"] == _hint("guru")
-    assert "120 menit" in client.get(_hint("guru")).get_data(as_text=True)
+    assert "60 menit" in client.get(_hint("guru")).get_data(as_text=True)
 
 
-@pytest.mark.parametrize("idle_minutes, expected", [(31, 200), (119, 200), (121, 302)])
-def test_teacher_idle_limit_also_applies_after_refresh(app, monkeypatch, idle_minutes, expected):
+@pytest.mark.parametrize("idle_minutes, expected", [(31, 200), (120, 200), (122, 302)])
+def test_student_idle_limit_also_applies_after_refresh(app, monkeypatch, idle_minutes, expected):
     from flask import g
 
     def expired(_):
         raise ValueError("access token expired")
 
     def refresh():
-        g.user_id = "g-1"
-        g.user_role = "guru"
+        g.user_id = "m-1"
+        g.user_role = "murid"
         g.user_status = "active"
         g._new_access_token = "fresh"
         g._new_refresh_token = "rotated"
