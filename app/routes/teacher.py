@@ -231,10 +231,34 @@ def _exam_save_refused(autosave, message):
     the field the teacher is editing instead of replacing the page with an exam
     list they did not ask for.
     """
-    if autosave:
+    if autosave or _wants_json():
         return jsonify({"ok": False, "error": message}), 400
     flash(message, "error")
     return redirect(request.referrer or "/teacher/exams")
+
+
+def _exam_publish_refusal(title, subject_id, class_ids, count, question_types, answer_key):
+    """Validate the builder's publish action before writing the exam or targets."""
+    missing = []
+    if not (title or "").strip():
+        missing.append(("Isi judul ujian / Enter an exam title", "title"))
+    if not subject_id:
+        missing.append(("Pilih mata pelajaran / Select a subject", "subject_id"))
+    if not class_ids:
+        missing.append(("Pilih kelas tujuan / Select a destination class", "class_ids"))
+    if count < 1:
+        missing.append(("Tambahkan minimal satu soal / Add at least one question", ""))
+    else:
+        unkeyed = objective_result(question_types, answer_key, {}, count).unkeyed
+        if unkeyed:
+            numbers = ", ".join(str(i + 1) for i in unkeyed)
+            missing.append((f"Lengkapi kunci jawaban / Complete the answer key ({numbers})", ""))
+    if not missing:
+        return None
+    message = " · ".join(text for text, _ in missing)
+    if _wants_json():
+        return jsonify({"ok": False, "error": message, "field": missing[0][1]}), 400
+    return _exam_save_refused(False, message)
 
 
 def _owned_draft(supabase, draft_id, school_id, user_id):
@@ -1388,7 +1412,7 @@ def exam_form():
     max_attempts = int(request.form.get("max_attempts", 1))
     publish_mode = request.form.get("publish_mode", "manual")
     total_questions = int(request.form.get("total_questions", 10))
-    if total_questions < 1:
+    if total_questions < 0 or (total_questions == 0 and action not in ("autosave", "publish")):
         return _exam_save_refused(autosave, "Minimal 1 soal")
     duration_minutes = int(request.form.get("duration_minutes", 60))
     passing_score = int(request.form.get("passing_score", 70))
@@ -1428,6 +1452,11 @@ def exam_form():
 
     question_types = json.loads(request.form.get("question_types", "{}"))
     answer_key = json.loads(request.form.get("answer_key", "{}"))
+    if action == "publish":
+        refusal = _exam_publish_refusal(
+            title, subject_id, class_ids, total_questions, question_types, answer_key)
+        if refusal is not None:
+            return refusal
     question_weights = json.loads(request.form.get("question_weights", "{}"))
     # A stimulus is a container, not a question: it carries no type, no key and no
     # marks, so it is stored beside the others rather than becoming a seventh kind
@@ -1693,6 +1722,8 @@ def exam_form():
     # A new exam is a new row on the dashboard, including its own "no answer key"
     # card if it has MCQ questions.
     _invalidate_teacher_dashboard()
+    if action == "publish" and _wants_json():
+        return jsonify({"ok": True, "redirect": url_for("teacher.my_exams")})
     return redirect("/teacher/exams" if action == "publish" else f"/teacher/exams/{exam_id}")
 
 
@@ -1862,7 +1893,7 @@ def exam_detail(exam_id):
     max_attempts = int(request.form.get("max_attempts", 1))
     publish_mode = request.form.get("publish_mode", "manual")
     total_questions = int(request.form.get("total_questions", 10))
-    if total_questions < 1:
+    if total_questions < 0 or (total_questions == 0 and action not in ("autosave", "publish")):
         return _exam_save_refused(autosave, "Minimal 1 soal")
     duration_minutes = int(request.form.get("duration_minutes", 60))
     passing_score = int(request.form.get("passing_score", 70))
@@ -1902,6 +1933,11 @@ def exam_detail(exam_id):
 
     question_types = json.loads(request.form.get("question_types", "{}"))
     answer_key = json.loads(request.form.get("answer_key", "{}"))
+    if action == "publish":
+        refusal = _exam_publish_refusal(
+            title, subject_id, class_ids, total_questions, question_types, answer_key)
+        if refusal is not None:
+            return refusal
     question_weights = json.loads(request.form.get("question_weights", "{}"))
     # A stimulus is a container, not a question: it carries no type, no key and no
     # marks, so it is stored beside the others rather than becoming a seventh kind
@@ -2106,6 +2142,8 @@ def exam_detail(exam_id):
     # Everything the dashboard shows about this exam just changed — its key, its
     # question types, its status — and that page is cached for 20 seconds.
     _invalidate_teacher_dashboard()
+    if action == "publish" and _wants_json():
+        return jsonify({"ok": True, "redirect": url_for("teacher.my_exams")})
     return redirect("/teacher/exams" if action in ("publish", "save_active") else f"/teacher/exams/{exam_id}")
 
 
