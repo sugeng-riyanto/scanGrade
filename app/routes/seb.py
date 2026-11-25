@@ -39,6 +39,7 @@ from app.services import (seb_access, seb_config_key, seb_crypto, seb_door_log,
 from app.utils.auth import admin_sekolah_required, get_supabase, login_required
 from app.utils.helpers import row_or_none
 from app.utils.logger import get_logger
+from app.utils.req_cache import school_classes
 
 seb_bp = Blueprint("seb", __name__)
 logger = get_logger("seb")
@@ -355,23 +356,32 @@ def daily_exit_codes():
                         pass
             if output == "xlsx" and not code:
                 abort(409)
-            rows.append((scheduled.strftime("%H:%M"), subject, title, code, exam["require_seb"]))
+            rows.append((scheduled.strftime("%H:%M"), subject, title, code, exam))
         if len(exams) < 200:
             break
         offset += len(exams)
 
     if output == "whatsapp":
-        lines = [f"*Jadwal Ujian | {day:%d/%m/%Y} (WIB)*", "",
-                 "Khusus pengawas ujian. Mohon simpan untuk digunakan saat diperlukan.", ""]
-        for hour, subject, title, code, requires_seb in rows:
+        school = row_or_none(db.table("schools").select("name")
+                             .eq("id", school_id).maybe_single().execute()) or {}
+        school_name = " ".join((school.get("name") or "Sekolah").split())
+        class_names = {str(row["id"]): row["name"] for row in school_classes(school_id)}
+        lines = [f"*Jadwal Ujian {school_name} | {day:%d/%m/%Y} (WIB)*", "",
+                 "Halo Bapak/Ibu Pengawas! Semoga hari ini menyenangkan.",
+                 "Berikut jadwal ujian hari ini. Kode keluar SEB khusus pengawas.", ""]
+        for hour, subject, title, code, exam in rows:
             label = f"{subject} — {title}" if subject and subject.casefold() != title.casefold() else title
+            classes = sorted({class_names[str(cid)] for cid in exam.get("class_ids") or []
+                              if str(cid) in class_names}, key=str.casefold)
+            class_label = ", ".join(classes) or "belum tercatat"
             if code:
                 status = f"kode SEB: `{code}`"
             else:
-                status = "kode SEB belum tersedia" if requires_seb else "tanpa SEB"
-            lines.append(f"• {hour} WIB — {label} — {status}")
+                status = "kode SEB belum tersedia" if exam["require_seb"] else "tanpa SEB"
+            lines.append(f"• {hour} WIB — {label} — Kelas: {class_label} — {status}")
         if not rows:
             lines.append("Tidak ada ujian terjadwal pada tanggal ini.")
+        lines.extend(["", "Terima kasih atas pendampingannya. Semoga ujian berjalan lancar!"])
         response = jsonify(text="\n".join(lines))
     else:
         from openpyxl import Workbook

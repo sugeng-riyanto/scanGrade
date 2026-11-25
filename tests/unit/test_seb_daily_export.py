@@ -27,7 +27,7 @@ class ExamQuery:
         assert self.filters["lt"] == [("start_at", "2026-11-25T17:00:00+00:00")]
         exams = [{"id": "exam-1", "start_at": "2026-11-25T00:30:00Z",
                   "title": "=1+1", "subject": "Matematika", "require_seb": True,
-                  "seb_config_key": "configured"}]
+                  "seb_config_key": "configured", "class_ids": ["b", "a", "other"]}]
         if ("require_seb", True) not in self.filters["eq"]:
             exams.extend([
                 {"id": "exam-2", "start_at": "2026-11-25T02:00:00Z",
@@ -43,7 +43,14 @@ class ExamQuery:
 def test_export_uses_school_day_and_only_reveals_the_quit_code(monkeypatch, output):
     app = Flask(__name__)
     query = ExamQuery()
-    monkeypatch.setattr(seb, "_supabase", lambda: SimpleNamespace(table=lambda _: query))
+    school = SimpleNamespace(select=lambda _: school, eq=lambda *_: school,
+                             maybe_single=lambda: school,
+                             execute=lambda: SimpleNamespace(data={"name": "SMP Harapan"}))
+    monkeypatch.setattr(seb, "_supabase", lambda: SimpleNamespace(
+        table=lambda name: query if name == "exams" else school))
+    monkeypatch.setattr(seb, "school_classes", lambda _: [
+        {"id": "b", "name": "IX-B"}, {"id": "a", "name": "IX-A"},
+    ])
     decisions = []
     monkeypatch.setattr(seb, "_verdict", lambda exam, access:
                         decisions.append((exam["id"], access)) or {"ok": True})
@@ -61,9 +68,12 @@ def test_export_uses_school_day_and_only_reveals_the_quit_code(monkeypatch, outp
         assert decisions == [("exam-1", seb.seb_access.ACCESS_VIEW_PASSWORD)]
         if output == "whatsapp":
             message = response.get_json()["text"]
-            assert "07:30 WIB — Matematika — =1+1 — kode SEB: `001234`" in message
-            assert "09:00 WIB — Bahasa Indonesia — Ujian 2 — tanpa SEB" in message
-            assert "10:00 WIB — Fisika — kode SEB belum tersedia" in message
+            assert "*Jadwal Ujian SMP Harapan | 25/11/2026 (WIB)*" in message
+            assert "Halo Bapak/Ibu Pengawas!" in message
+            assert message.endswith("Semoga ujian berjalan lancar!")
+            assert "07:30 WIB — Matematika — =1+1 — Kelas: IX-A, IX-B — kode SEB: `001234`" in message
+            assert "09:00 WIB — Bahasa Indonesia — Ujian 2 — Kelas: belum tercatat — tanpa SEB" in message
+            assert "10:00 WIB — Fisika — Kelas: belum tercatat — kode SEB belum tersedia" in message
         else:
             response.direct_passthrough = False
             sheet = load_workbook(BytesIO(response.get_data())).active
