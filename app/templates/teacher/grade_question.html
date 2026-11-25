@@ -1,6 +1,7 @@
 {% set content_lang = 'id' %}
 {% extends "base.html" %}
 {% block title %}Koreksi Soal - ScanGrade{% endblock %}
+{% block body_class %}sg-grade-question{% endblock %}
 {% block page_title %}Koreksi per Soal{% endblock %}
 {% block head_extra %}
 <style>
@@ -10,6 +11,18 @@
 .q-nav-btn:hover { transform: scale(1.05); }
 .q-nav-btn.active { box-shadow: 0 0 0 2px rgba(99,102,241,0.4); }
 .student-canvas img { max-width: 100%; height: auto; }
+@media (pointer: coarse) and (min-width: 641px) and (max-width: 1400px) {
+    .sg-grade-question .sg-content { padding-inline: 12px; }
+    .sg-grade-question .q-nav-btn,
+    .sg-grade-question .essay-score-preset,
+    .sg-grade-question .essay-score-input { min-width: 44px; min-height: 44px; }
+    .sg-grade-question .answer-body { max-height: 46vh; overflow-wrap: anywhere; }
+    .sg-grade-question .student-card:hover { transform: none; }
+}
+@media (pointer: coarse) and (min-width: 1024px) and (max-width: 1400px) {
+    .sg-grade-question .sg-app-sidebar { position: fixed; z-index: var(--sg-layer-drawer); }
+    .sg-grade-question .sg-app-sidebar.-translate-x-full { transform: translateX(-100%); }
+}
 </style>
 {% endblock %}
 {% block content %}
@@ -147,7 +160,7 @@
                                            the teacher hunting for the next card. #}
                                         <template x-for="preset in [0, 20, 40, 60, 80, 100]" :key="preset">
                                             <button @click="pickScore(s, preset)"
-                                                    class="w-9 h-9 rounded-lg text-xs font-bold border transition-all active:scale-95"
+                                                    class="essay-score-preset w-9 h-9 rounded-lg text-xs font-bold border transition-all active:scale-95"
                                                     :class="s.scoreVal == preset
                                                         ? (preset >= 70 ? 'bg-emerald-500 text-white border-emerald-500 shadow-sm' : preset > 0 ? 'bg-amber-500 text-white border-amber-500 shadow-sm' : 'bg-surface-500 text-white border-surface-500 shadow-sm')
                                                         : 'bg-white text-surface-500 border-surface-200 hover:border-primary-300'"
@@ -157,7 +170,7 @@
                                     <input type="number" x-model="s.scoreVal" @input="onScoreTyped(s)"
                                            @change="flushScore(s)" @keydown.enter.prevent="pickScore(s, s.scoreVal)"
                                            min="0" max="100" step="0.5" inputmode="decimal"
-                                           class="w-16 px-2 py-1.5 border-2 border-surface-200 rounded-lg text-sm font-bold text-center focus:border-primary-500"
+                                           class="essay-score-input w-16 px-2 py-1.5 border-2 border-surface-200 rounded-lg text-sm font-bold text-center focus:border-primary-500"
                                            :class="s.scoreVal >= 70 ? 'text-emerald-600 border-emerald-300' : s.scoreVal > 0 ? 'text-amber-600 border-amber-300' : ''">
                                     <span class="text-[10px] text-surface-400 font-medium">%</span>
                                     <span class="text-[10px] font-bold text-primary-600 whitespace-nowrap"

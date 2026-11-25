@@ -194,7 +194,7 @@ body.sg-exam .sidebar-overlay { display: none !important; }
    (0,2,1) beats Tailwind's `max-w-7xl` and `mx-auto` (0,1,0) whatever the order
    the two stylesheets arrive in. */
 body.sg-exam .sg-content { max-width: none; margin-left: 0; margin-right: 0; }
-@media (max-width: 640px) {
+@media (max-width: 640px), (pointer: coarse) and (orientation: portrait) and (max-width: 1100px) {
     .exam-qcol, .exam-qcol--rail {
         position: fixed; top: 0; bottom: 0; left: 0; z-index: var(--sg-layer-rail);
         width: 86vw; max-width: 320px;
@@ -547,6 +547,15 @@ html:not(.dark) body.sg-exam[data-exam-tone="mint"] .sg-content { background: #e
 html:not(.dark) body.sg-exam[data-exam-tone="sand"] .sg-content { background: #faf3e7; }
 html:not(.dark) body.sg-exam[data-exam-tone="sky"] .sg-content { background: #edf4fb; }
 html.dark body.sg-exam[data-exam-tone] .sg-content { background: var(--bg-subtle); }
+@media (pointer: coarse) and (min-width: 641px) and (max-width: 1400px) {
+    body.sg-exam .sg-content { padding-inline: 12px; }
+    .exam-qcol:not(.exam-qcol--rail) { min-width: 0; }
+    .exam-column-toggle, .sg-exam-tone { min-height: 44px; }
+}
+@media (pointer: coarse) and (orientation: landscape) and (min-width: 641px) and (max-width: 1400px) {
+    .exam-qcol { width: 116px; }
+    .exam-qcol--rail { width: 100px; }
+}
 .sg-exam-tone { color: var(--text); background: var(--bg-card); }
 </style>
 {% endblock %}
@@ -1263,8 +1272,8 @@ html.dark body.sg-exam[data-exam-tone] .sg-content { background: var(--bg-subtle
         <!-- The column can go away, and the count goes with it: on a small laptop
              the rail and the paper fight for the same width, and the student
              should decide who wins. -->
-        <button type="button" @click="toggleChrome()"
-                class="flex items-center gap-1.5 px-2.5 py-1 rounded-xl border border-surface-200 bg-white text-[10px] font-extrabold text-surface-500 hover:bg-surface-100 shadow-sm transition"
+        <button type="button" @click="toggleChrome()" :aria-expanded="!chromeHidden"
+                class="exam-column-toggle flex items-center gap-1.5 px-2.5 py-1 rounded-xl border border-surface-200 bg-white text-[10px] font-extrabold text-surface-500 hover:bg-surface-100 shadow-sm transition"
                 x-text="chromeHidden ? t('Tampilkan kolom','Show column') : t('Sembunyikan kolom','Hide column')"></button>
         <span class="ml-auto text-[10px] font-bold text-surface-400 tabular-nums"
               x-text="t('Soal ','Question ') + (currentQ + 1) + '/' + totalQ + ' · ' + t('Hal ','Page ') + page + '/' + (totalPages || 1)"></span>
@@ -1276,7 +1285,7 @@ html.dark body.sg-exam[data-exam-tone] .sg-content { background: var(--bg-subtle
              owns it are never more than one tap apart — and the whole column
              collapses to a strip that brings it back. -->
         <div x-show="!chromeHidden"
-             @click.outside="closeColumnOnPhone()"
+             @click.outside="closeQuestionDrawer()"
              class="shrink-0 flex flex-col items-center gap-1 exam-qcol"
              :class="examLayout === 'rail' ? 'exam-qcol--rail' : ''">
             <!-- Scroll Up -->
@@ -3167,13 +3176,13 @@ function examApp(duration, totalQ) {
         railCollapsed: (function () {
             try {
                 const v = localStorage.getItem('sg_exam_rail_hidden');
-                return v !== null ? v === '1' : window.matchMedia('(max-width: 640px)').matches;
+                return v !== null ? v === '1' : window.matchMedia('(max-width: 640px), (pointer: coarse) and (orientation: portrait) and (max-width: 1100px)').matches;
             } catch (e) { return false; }
         })(),
         navCollapsed: (function () {
             try {
                 const v = localStorage.getItem('sg_exam_nav_hidden');
-                return v !== null ? v === '1' : window.matchMedia('(max-width: 640px)').matches;
+                return v !== null ? v === '1' : window.matchMedia('(max-width: 640px), (pointer: coarse) and (orientation: portrait) and (max-width: 1100px)').matches;
             } catch (e) { return false; }
         })(),
         // ─── The strip above the paper ───────────────────────────────────────
@@ -4918,16 +4927,16 @@ function examApp(duration, totalQ) {
             }
             this.$nextTick(() => this.updateScrollState());
         },
-        // On a phone the column is a drawer over the paper, so touching the paper
+        // When the column is a drawer, touching the paper
         // puts it away — the paper is what the student came for. On a desktop it is
         // a column, and a column stays where it was put. The choice is deliberate
         // either way, so only the drawer closes by itself; the stored preference is
         // left alone (`toggleChrome` would have written it).
-        closeColumnOnPhone() {
+        closeQuestionDrawer() {
             if (this.chromeHidden) return;
-            let phone = false;
-            try { phone = window.matchMedia('(max-width: 640px)').matches; } catch (e) { phone = false; }
-            if (!phone) return;
+            let drawer = false;
+            try { drawer = window.matchMedia('(max-width: 640px), (pointer: coarse) and (orientation: portrait) and (max-width: 1100px)').matches; } catch (e) { drawer = false; }
+            if (!drawer) return;
             if (this.examLayout === 'rail') this.railCollapsed = true;
             else this.navCollapsed = true;
             this.$nextTick(() => this.updateScrollState());
