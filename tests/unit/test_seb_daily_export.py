@@ -22,7 +22,9 @@ class ExamQuery:
 
     def execute(self):
         assert ("school_id", "school-1") in self.filters["eq"]
-        assert ("is_published", True) in self.filters["eq"]
+        assert all(field != "is_published" for field, _ in self.filters["eq"])
+        assert ("teacher_id", "null") in self.filters["is_"]
+        assert self.filters["or_"] == [("is_template.is.null,is_template.eq.false",)]
         assert self.filters["gte"] == [("start_at", "2026-11-24T17:00:00+00:00")]
         assert self.filters["lt"] == [("start_at", "2026-11-25T17:00:00+00:00")]
         exams = [{"id": "exam-1", "start_at": "2026-11-25T00:30:00Z",

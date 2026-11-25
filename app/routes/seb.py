@@ -333,7 +333,8 @@ def daily_exit_codes():
     offset = 0
     while True:
         query = (db.table("exams").select(f"{EXAM_COLUMNS}, subject")
-                 .eq("school_id", school_id).eq("is_published", True)
+                 .eq("school_id", school_id).not_.is_("teacher_id", "null")
+                 .or_("is_template.is.null,is_template.eq.false")
                  .gte("start_at", start.astimezone(timezone.utc).isoformat())
                  .lt("start_at", end.astimezone(timezone.utc).isoformat()))
         if output == "xlsx":
