@@ -32,7 +32,7 @@ import re
 from datetime import date, datetime, time, timedelta, timezone
 
 from flask import (Blueprint, abort, flash, g, jsonify, redirect,
-                   render_template, request, send_file, session, url_for)
+                   make_response, render_template, request, send_file, session, url_for)
 
 from app.services import (seb_access, seb_config_key, seb_crypto, seb_door_log,
                           seb_service)
@@ -824,7 +824,9 @@ def test_verified():
     verified = seb_service.verify({"require_seb": True, "seb_config_key": key},
                                   request.url,
                                   request.headers.get(seb_config_key.CONFIG_KEY_HEADER))
-    return render_template("seb_verified.html", verified=verified)
+    response = make_response(render_template("seb_verified.html", verified=verified))
+    response.cache_control.no_store = True
+    return response
 
 
 __all__ = ["CONFIRM_FIELD", "EXAM_COLUMNS", "OFFICIAL_DOWNLOADS", "TEST_CONFIG_PATH",
