@@ -67,6 +67,11 @@ def test_export_uses_school_day_and_only_reveals_the_quit_code(monkeypatch, outp
         assert response.headers["Cache-Control"] == "private, no-store"
         assert decisions == [("exam-1", seb.seb_access.ACCESS_VIEW_PASSWORD)]
         if output == "whatsapp":
+            english = response.get_json()["english_text"]
+            assert "*SMP Harapan Exam Schedule | 25/11/2026 (WIB)*" in english
+            assert "Class: IX-A, IX-B — SEB exit code: `001234`" in english
+            assert "no SEB required" in english
+            assert "SEB exit code unavailable" in english
             message = response.get_json()["text"]
             assert "*Jadwal Ujian SMP Harapan | 25/11/2026 (WIB)*" in message
             assert "Halo Bapak/Ibu Pengawas!" in message

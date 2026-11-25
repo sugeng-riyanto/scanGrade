@@ -366,23 +366,34 @@ def daily_exit_codes():
                              .eq("id", school_id).maybe_single().execute()) or {}
         school_name = " ".join((school.get("name") or "Sekolah").split())
         class_names = {str(row["id"]): row["name"] for row in school_classes(school_id)}
-        lines = [f"*Jadwal Ujian {school_name} | {day:%d/%m/%Y} (WIB)*", "",
-                 "Halo Bapak/Ibu Pengawas! Semoga hari ini menyenangkan.",
-                 "Berikut jadwal ujian hari ini. Kode keluar SEB khusus pengawas.", ""]
+        messages = {
+            "id": [f"*Jadwal Ujian {school_name} | {day:%d/%m/%Y} (WIB)*", "",
+                   "Halo Bapak/Ibu Pengawas! Semoga hari ini menyenangkan.",
+                   "Berikut jadwal ujian hari ini. Kode keluar SEB khusus pengawas.", ""],
+            "en": [f"*{school_name} Exam Schedule | {day:%d/%m/%Y} (WIB)*", "",
+                   "Hello, proctors! We hope you're having a wonderful day.",
+                   "Here's today's exam schedule. SEB exit codes are for proctors only.", ""],
+        }
         for hour, subject, title, code, exam in rows:
             label = f"{subject} — {title}" if subject and subject.casefold() != title.casefold() else title
             classes = sorted({class_names[str(cid)] for cid in exam.get("class_ids") or []
                               if str(cid) in class_names}, key=str.casefold)
-            class_label = ", ".join(classes) or "belum tercatat"
+            class_label = ", ".join(classes)
             if code:
-                status = f"kode SEB: `{code}`"
+                status_id, status_en = f"kode SEB: `{code}`", f"SEB exit code: `{code}`"
+            elif exam["require_seb"]:
+                status_id, status_en = "kode SEB belum tersedia", "SEB exit code unavailable"
             else:
-                status = "kode SEB belum tersedia" if exam["require_seb"] else "tanpa SEB"
-            lines.append(f"• {hour} WIB — {label} — Kelas: {class_label} — {status}")
+                status_id, status_en = "tanpa SEB", "no SEB required"
+            prefix = f"• {hour} WIB — {label}"
+            messages["id"].append(f"{prefix} — Kelas: {class_label or 'belum tercatat'} — {status_id}")
+            messages["en"].append(f"{prefix} — Class: {class_label or 'unlisted'} — {status_en}")
         if not rows:
-            lines.append("Tidak ada ujian terjadwal pada tanggal ini.")
-        lines.extend(["", "Terima kasih atas pendampingannya. Semoga ujian berjalan lancar!"])
-        response = jsonify(text="\n".join(lines))
+            messages["id"].append("Tidak ada ujian terjadwal pada tanggal ini.")
+            messages["en"].append("No exams are scheduled for this date.")
+        messages["id"].extend(["", "Terima kasih atas pendampingannya. Semoga ujian berjalan lancar!"])
+        messages["en"].extend(["", "Thank you for supporting our students. Wishing everyone a smooth exam day!"])
+        response = jsonify(text="\n".join(messages["id"]), english_text="\n".join(messages["en"]))
     else:
         from openpyxl import Workbook
         from openpyxl.styles import Font
