@@ -542,6 +542,12 @@ body.sg-exam .sg-content { max-width: none; margin-left: 0; margin-right: 0; }
 .sg-tool-pop > summary { list-style: none; cursor: pointer; }
 .sg-tool-pop > summary::-webkit-details-marker { display: none; }
 .sg-tool-pop[open] > summary { background: var(--bg-hover); }
+/* Reading tints keep the exam paper and ink in their original colors. */
+body.sg-exam[data-exam-tone="mint"]:not(.dark) .sg-content { background: #edf6f1; }
+body.sg-exam[data-exam-tone="sand"]:not(.dark) .sg-content { background: #faf3e7; }
+body.sg-exam[data-exam-tone="sky"]:not(.dark) .sg-content { background: #edf4fb; }
+html.dark body.sg-exam[data-exam-tone] .sg-content { background: var(--bg-subtle); }
+.sg-exam-tone { color: var(--text); background: var(--bg-card); }
 </style>
 {% endblock %}
 {% block content %}
@@ -592,6 +598,18 @@ body.sg-exam .sg-content { max-width: none; margin-left: 0; margin-right: 0; }
                 <i class="fas" :class="darkMode ? 'fa-sun text-amber-500' : 'fa-moon text-surface-500'"></i>
                 <span class="hidden sm:inline" x-text="darkMode ? t('Terang','Light') : t('Gelap','Dark')"></span>
             </button>
+
+            <label class="inline-flex items-center gap-1.5">
+                <i class="fas fa-palette" aria-hidden="true"></i>
+                <select class="sg-exam-tone tap-44 px-2 rounded-xl border border-surface-200"
+                        :aria-label="t('Warna latar ujian','Exam background color')"
+                        :value="examTone" @change="setExamTone($event.target.value)">
+                    <option value="default" x-text="t('Bawaan','Default')"></option>
+                    <option value="mint" x-text="t('Hijau lembut','Soft mint')"></option>
+                    <option value="sand" x-text="t('Krem hangat','Warm sand')"></option>
+                    <option value="sky" x-text="t('Biru lembut','Soft sky')"></option>
+                </select>
+            </label>
 
             <!-- The language. The exam bar carries the same control; this one is
                  drawn during the terms modal as well, which is exactly when a
@@ -3412,7 +3430,15 @@ function examApp(duration, totalQ) {
         audioOutputs: 0,
         audioInputLabel: '',
         audioOutputLabel: '',
+        examTone: 'default',
+        setExamTone(value) {
+            this.examTone = ['default', 'mint', 'sand', 'sky'].includes(value) ? value : 'default';
+            document.body.dataset.examTone = this.examTone;
+            try { localStorage.setItem('sg_exam_tone', this.examTone); } catch (_) {}
+        },
+
         init() {
+            try { this.setExamTone(localStorage.getItem('sg_exam_tone')); } catch (_) {}
             // Reading comfort first: the paper is drawn at the pupil's chosen size
             // before they read a word of it.
             this._applyTextScale();
