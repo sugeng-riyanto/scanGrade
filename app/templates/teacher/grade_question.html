@@ -375,7 +375,7 @@ function autoCommentFor(pct, earned, max) {
 
 function graderApp() {
     return {
-        currentQ: 0, totalQuestions: {{ exam.total_questions }},
+        currentQ: {{ question_index|default(0)|tojson }}, totalQuestions: {{ exam.total_questions }},
         questionTypes: {{ (exam.question_types or {}) | tojson | safe }},
         answerKey: {{ (exam.answer_key or {}) | tojson | safe }},
         // What each question is worth, so a 0–100 box can say what it is worth in
@@ -389,7 +389,7 @@ function graderApp() {
         sel: null, picked: null, noteDraft: '',
 
         get displayedStudents() { return this.students; },
-        get isMCQ() { return this.questionTypes[this.currentQ] !== 'essay'; },
+        get isMCQ() { return !['essay', 'essay_text', 'essay_canvas'].includes(this.questionTypes[this.currentQ]); },
         get correctCount() {
             return this.students.filter(s => {
                 const k = this.answerKey[this.currentQ];

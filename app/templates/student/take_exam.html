@@ -543,9 +543,9 @@ body.sg-exam .sg-content { max-width: none; margin-left: 0; margin-right: 0; }
 .sg-tool-pop > summary::-webkit-details-marker { display: none; }
 .sg-tool-pop[open] > summary { background: var(--bg-hover); }
 /* Reading tints keep the exam paper and ink in their original colors. */
-body.sg-exam[data-exam-tone="mint"]:not(.dark) .sg-content { background: #edf6f1; }
-body.sg-exam[data-exam-tone="sand"]:not(.dark) .sg-content { background: #faf3e7; }
-body.sg-exam[data-exam-tone="sky"]:not(.dark) .sg-content { background: #edf4fb; }
+html:not(.dark) body.sg-exam[data-exam-tone="mint"] .sg-content { background: #edf6f1; }
+html:not(.dark) body.sg-exam[data-exam-tone="sand"] .sg-content { background: #faf3e7; }
+html:not(.dark) body.sg-exam[data-exam-tone="sky"] .sg-content { background: #edf4fb; }
 html.dark body.sg-exam[data-exam-tone] .sg-content { background: var(--bg-subtle); }
 .sg-exam-tone { color: var(--text); background: var(--bg-card); }
 </style>

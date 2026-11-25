@@ -4115,7 +4115,7 @@ def grade_question(exam_id, question_index):
     # did not, so any teacher could read any exam's key just by typing the URL.
     exam, err = _guard_exam(
         supabase, exam_id, as_json=_wants_json(),
-        columns="id,teacher_id,school_id,title,total_questions,question_types,answer_key")
+        columns="id,teacher_id,school_id,title,total_questions,question_types,answer_key,question_weights")
     if err:
         return err
     for f in ("question_types", "answer_key"):
@@ -4123,7 +4123,8 @@ def grade_question(exam_id, question_index):
         if isinstance(v, str):
             try: exam[f] = json.loads(v)
             except: exam[f] = {}
-    return render_template("teacher/grade_question.html", exam=exam, exam_id=exam_id)
+    return render_template("teacher/grade_question.html", exam=exam, exam_id=exam_id,
+                           question_index=min(question_index, max(0, int(exam.get("total_questions") or 0) - 1)))
 
 
 def _review_flags_for(supabase, submission_ids):
