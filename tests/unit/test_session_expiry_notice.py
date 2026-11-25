@@ -206,8 +206,8 @@ def test_the_clamp_does_not_weaken_the_timeout(app, monkeypatch):
 
     client = app.test_client()
     client.set_cookie("access_token", "tok")
-    client.set_cookie("last_activity", str(time.time() - 2 * 3600))
-    client.set_cookie("session_start", str(time.time() - 2 * 3600))
+    client.set_cookie("last_activity", str(time.time() - 121 * 60))
+    client.set_cookie("session_start", str(time.time() - 121 * 60))
 
     resp = client.get("/_probe_protected")
 
@@ -216,7 +216,38 @@ def test_the_clamp_does_not_weaken_the_timeout(app, monkeypatch):
     # admin tab is not how a teacher should be told to log in again. See
     # tests/unit/test_login_door.py.
     assert resp.headers["Location"] == _hint("guru")
-    assert "60 menit" in client.get(_hint("guru")).get_data(as_text=True)
+    assert "120 menit" in client.get(_hint("guru")).get_data(as_text=True)
+
+
+@pytest.mark.parametrize("idle_minutes, expected", [(31, 200), (119, 200), (121, 302)])
+def test_teacher_idle_limit_also_applies_after_refresh(app, monkeypatch, idle_minutes, expected):
+    from flask import g
+
+    def expired(_):
+        raise ValueError("access token expired")
+
+    def refresh():
+        g.user_id = "g-1"
+        g.user_role = "guru"
+        g.user_status = "active"
+        g._new_access_token = "fresh"
+        g._new_refresh_token = "rotated"
+        return "fresh"
+
+    monkeypatch.setattr(authmod, "_session_for", expired)
+    monkeypatch.setattr(authmod, "_refresh_token", refresh)
+    client = app.test_client()
+    client.set_cookie("access_token", "expired")
+    client.set_cookie("refresh_token", "old")
+    client.set_cookie("session_start", str(time.time() - 3 * 3600))
+    client.set_cookie("last_activity", str(time.time() - idle_minutes * 60))
+    response = client.get("/_probe_protected")
+    assert response.status_code == expected
+    if expected == 200:
+        assert client.get_cookie("refresh_token").value == "rotated"
+    else:
+        assert client.get_cookie("access_token") is None
+        assert client.get_cookie("refresh_token") is None
 
 
 def test_a_login_with_no_idle_cookie_still_works(app, monkeypatch):

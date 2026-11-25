@@ -22,7 +22,7 @@ SESSION_TIMEOUTS = {
     #: through a meeting and comes back to it.
     "principal":      {"idle_minutes": 45,  "absolute_hours": 10},
     "vice_principal": {"idle_minutes": 45,  "absolute_hours": 10},
-    "guru":           {"idle_minutes": 60,  "absolute_hours": 12},
+    "guru":           {"idle_minutes": 120,  "absolute_hours": 12},
     "murid":          {"idle_minutes": 120, "absolute_hours": 24},
 }
 
@@ -767,58 +767,64 @@ def login_required(f):
             return _unauthorized()
         try:
             _apply_session(_session_for(token), token)
-
-            # Block pending users from accessing protected routes
-            if g.get("user_status") == "pending":
-                return redirect("/auth/activate?email={}&pending=1".format(g.user_email))
-
-            # A password a school printed on a login card is a one-time password.
-            # Until its owner replaces it, every page is closed — the same shape as
-            # the pending branch above, and it is a *redirect* rather than a 403 on
-            # purpose: the reader is not being refused, they are being sent to the
-            # one page that lets them in.
-            if g.get("must_change_password") and not _change_password_exempt(
-                    request.path):
-                return redirect(CHANGE_PASSWORD_URL)
-
-            # Session timeout check (idle + absolute)
-            role = g.get("user_role")
-            to = SESSION_TIMEOUTS.get(role, DEFAULT_SESSION_TIMEOUT)
-            now = time.time()
-            try:
-                last_act = float(request.cookies.get("last_activity", "0"))
-            except Exception:
-                last_act = 0.0
-            try:
-                sess_start = float(request.cookies.get("session_start", "0"))
-            except Exception:
-                sess_start = 0.0
-
-            # The idle clock can never predate the session it belongs to. This
-            # cookie is only refreshed by an authenticated response, so a browser
-            # that kept one from an earlier session arrives with a stale value —
-            # and logging in does not overwrite it, which meant every re-login was
-            # rejected on its very first request and the account stayed locked out
-            # until the cookie expired 24h later. Signing in issues a fresh
-            # session_start, so clamping to it gives a new login a fresh window.
-            idle_base = max(last_act, sess_start)
-            if idle_base > 0 and now - idle_base > to["idle_minutes"] * 60:
-                return _unauthorized(
-                    auth_error("session_idle", minutes=to["idle_minutes"])
-                )
-            if sess_start > 0 and now - sess_start > to["absolute_hours"] * 3600:
-                return _unauthorized(
-                    auth_error("session_absolute", hours=to["absolute_hours"])
-                )
         except Exception:
-            # Token expired — try refresh using refresh_token cookie
+            # A provider access token can expire before this application's session.
             token = _refresh_token()
             if not token:
                 return _unauthorized()
             g.user_token = token
+
+        # Block pending users from accessing protected routes
+        if g.get("user_status") == "pending":
+            return redirect("/auth/activate?email={}&pending=1".format(g.user_email))
+
+        # A password a school printed on a login card is a one-time password.
+        # Until its owner replaces it, every page is closed — the same shape as
+        # the pending branch above, and it is a *redirect* rather than a 403 on
+        # purpose: the reader is not being refused, they are being sent to the
+        # one page that lets them in.
+        if g.get("must_change_password") and not _change_password_exempt(
+                request.path):
+            return redirect(CHANGE_PASSWORD_URL)
+
+        # Session timeout check (idle + absolute)
+        role = g.get("user_role")
+        to = SESSION_TIMEOUTS.get(role, DEFAULT_SESSION_TIMEOUT)
+        now = time.time()
+        try:
+            last_act = float(request.cookies.get("last_activity", "0"))
+        except Exception:
+            last_act = 0.0
+        try:
+            sess_start = float(request.cookies.get("session_start", "0"))
+        except Exception:
+            sess_start = 0.0
+
+        # The idle clock can never predate the session it belongs to. This
+        # cookie is only refreshed by an authenticated response, so a browser
+        # that kept one from an earlier session arrives with a stale value —
+        # and logging in does not overwrite it, which meant every re-login was
+        # rejected on its very first request and the account stayed locked out
+        # until the cookie expired 24h later. Signing in issues a fresh
+        # session_start, so clamping to it gives a new login a fresh window.
+        idle_base = max(last_act, sess_start)
+        if idle_base > 0 and now - idle_base > to["idle_minutes"] * 60:
+            return _expire_session(auth_error("session_idle", minutes=to["idle_minutes"]))
+        if sess_start > 0 and now - sess_start > to["absolute_hours"] * 3600:
+            return _expire_session(auth_error("session_absolute", hours=to["absolute_hours"]))
         return f(*args, **kwargs)
 
     return wrapper
+
+
+def _expire_session(message):
+    from flask import make_response
+
+    g.session_expired = True
+    response = make_response(_unauthorized(message))
+    for key in ("access_token", "refresh_token", "session_start", "last_activity"):
+        set_auth_cookie(response, key, "", max_age=0)
+    return response
 
 
 def _refresh_token():
@@ -888,6 +894,7 @@ def _refresh_token():
             g.user_status = "active"
             g.must_change_password = False
         g._new_access_token = token
+        g._new_refresh_token = getattr(res.session, "refresh_token", None)
         return token
     except Exception:
         return None

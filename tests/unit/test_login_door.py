@@ -332,15 +332,15 @@ class TestAnExpiredSessionUsesTheSameDoor:
         })
         client = app.test_client()
         client.set_cookie("access_token", "tok")
-        client.set_cookie("last_activity", str(time.time() - 2 * 3600))
-        client.set_cookie("session_start", str(time.time() - 2 * 3600))
+        client.set_cookie("last_activity", str(time.time() - 121 * 60))
+        client.set_cookie("session_start", str(time.time() - 121 * 60))
 
         resp = client.get("/_probe_protected")
 
         assert resp.status_code == 302, "the session must still be refused"
         assert resp.headers["Location"] == _hint("guru")
         # And the notice describing the expiry is readable where the reader lands.
-        assert "60 menit" in client.get(_hint("guru")).get_data(as_text=True)
+        assert "120 menit" in client.get(_hint("guru")).get_data(as_text=True)
 
     def test_an_idle_admin_still_goes_to_the_admin_tab(self, app, monkeypatch):
         monkeypatch.setattr(authmod, "_session_for", lambda token: {

@@ -857,7 +857,7 @@ idle dan absolut:
 | `super_admin` | 15 menit | 4 jam |
 | `admin_sekolah` | 30 menit | 8 jam |
 | `principal`, `vice_principal` | 45 menit | 10 jam |
-| `guru` | 60 menit | 12 jam |
+| `guru` | 120 menit | 12 jam |
 | `murid` | 120 menit | 24 jam |
 
 Sesi yang habis tidak mengalihkan ke pintu yang salah: `login_door_for(role, path)` memilih

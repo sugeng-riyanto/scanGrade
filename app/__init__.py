@@ -15,15 +15,6 @@ from app.config import get_config
 
 DEFAULT_TZ_OFFSET = 7
 
-# Session timeout by role (OWASP + UU PDP standard)
-SESSION_TIMEOUTS = {
-    "super_admin":    {"idle_minutes": 15,  "absolute_hours": 4},
-    "admin_sekolah":  {"idle_minutes": 30,  "absolute_hours": 8},
-    "guru":           {"idle_minutes": 60,  "absolute_hours": 12},
-    "murid":          {"idle_minutes": 120, "absolute_hours": 24},
-}
-DEFAULT_SESSION_TIMEOUT = {"idle_minutes": 30, "absolute_hours": 8}
-
 _lru_cache = {}
 _lru_cache_ttl = {}
 _lru_max = 256
@@ -1164,15 +1155,13 @@ def _register_request_logging(app):
                     traffic.note_session(visitor, school_id)
             except Exception:
                 app.logger.debug("traffic rollup note failed", exc_info=True)
-        # Set refreshed access_token cookie if token was refreshed. Through the
-        # shared helper so it carries Secure on HTTPS like the session cookie.
-        new_token = getattr(g, "_new_access_token", None)
-        if new_token:
+        # Do not renew cookies from a request rejected by the session timeout.
+        if g.get("user_id") and not g.get("session_expired"):
             from app.utils.auth import set_auth_cookie
-            set_auth_cookie(response, "access_token", new_token, max_age=86400)
-        # Update last_activity timestamp for session timeout tracking
-        if g.get("user_id"):
-            from app.utils.auth import set_auth_cookie
+            if g.get("_new_access_token"):
+                set_auth_cookie(response, "access_token", g._new_access_token, max_age=86400)
+            if g.get("_new_refresh_token"):
+                set_auth_cookie(response, "refresh_token", g._new_refresh_token, max_age=86400 * 7)
             set_auth_cookie(response, "last_activity", str(time.time()), max_age=86400)
         return response
 
