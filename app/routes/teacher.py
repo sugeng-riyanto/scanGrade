@@ -49,7 +49,7 @@ from app.services import attempt_timeline
 from app.services import invigilation
 from app.services import invigilation_matrix
 from app.services import session_review
-from app.services import seb_door_log
+from app.services import seb_door_log, seb_service
 from app.services import teacher_assignments as ta_service
 from app.services import grade_weighting
 from app.services import subject_kkm as kkm_service
@@ -763,7 +763,7 @@ def dashboard():
     # answered its error page on 2 of 5 loads while nothing was wrong. A retry is
     # what `read_with_retry` exists for, and this is the page a teacher opens
     # first.
-    res = read_with_retry(lambda: supabase.table("exams").select("id,title,subject,question_types,answer_key,total_questions,status,is_published,created_at,start_at,question_canvas,question_audio,class_ids").eq("teacher_id", g.user_id).order("created_at", desc=True).execute())
+    res = read_with_retry(lambda: supabase.table("exams").select("id,title,subject,question_types,answer_key,total_questions,status,is_published,created_at,start_at,question_canvas,question_audio,class_ids,school_id,require_seb,seb_config_key").eq("teacher_id", g.user_id).order("created_at", desc=True).execute())
     exams = res.data or []
 
     exam_ids = [e["id"] for e in exams]
@@ -918,6 +918,12 @@ def dashboard():
         # cache, so the reads behind them happen once per teacher per 20 seconds
         # rather than once per load. A teacher with no duty pays one read (the
         # assignment lookup, which comes back empty).
+        "seb_exams": [
+            {"id": exam["id"], "title": exam["title"]}
+            for exam in exams
+            if exam.get("school_id") == g.get("user_school_id")
+            and exam.get("require_seb") and exam.get("seb_config_key")
+        ][:20],
         "invigilation_tasks": board["tasks"],
         "invigilation_requests": board["pending_requests"],
     }
@@ -1562,6 +1568,11 @@ def exam_form():
         allowed, refusal = check_feature_limit(school_id, "create_exam")
         if not allowed:
             return _exam_save_refused(autosave, refusal)
+    # Keep the new paper private until its credentials and matching Config Key exist.
+    setup_seb = not draft_row and request.form.get("require_seb") == "true"
+    if setup_seb:
+        publish_state = {"status": data["status"], "is_published": data["is_published"]}
+        data.update(status="draft", is_published=False)
     try:
         if draft_row:
             res = supabase.table("exams").update(data, returning="minimal").eq("id", draft_row["id"]).execute()
@@ -1584,6 +1595,29 @@ def exam_form():
         else:
             res = supabase.table("exams").insert(data).execute()
             exam_id = res.data[0]["id"]
+    if setup_seb:
+        try:
+            issued = seb_service.issue(
+                supabase, {**data, **res.data[0]},
+                start_url=seb_service.start_url(exam_id), actor_id=g.user_id,
+            )
+            if not issued.get("ok"):
+                raise RuntimeError("SEB credential issuance failed")
+            enabled = supabase.table("exams").update(
+                {**publish_state, "require_seb": True},
+            ).eq("id", exam_id).eq("school_id", school_id).execute()
+            if not enabled.data:
+                raise RuntimeError("Could not enable SEB for the new exam")
+        except Exception:
+            current_app.logger.exception("SEB setup failed for new exam %s", exam_id)
+            try:
+                supabase.table("exams").delete().eq("id", exam_id).eq(
+                    "school_id", school_id
+                ).eq("status", "draft").eq("require_seb", False).execute()
+            except Exception:
+                current_app.logger.exception("Could not clear incomplete SEB draft %s", exam_id)
+            return _exam_save_refused(autosave, "seb_issue_failed")
+        _invalidate_teacher_dashboard()
     # Logged once, when the row is minted. An autosave that keeps writing the same
     # draft is not a new paper, and a "created" entry every few seconds would bury
     # the one that matters.
@@ -2000,9 +2034,23 @@ def exam_detail(exam_id):
         # A row that had no school gets one now, and it is the school this request
         # was verified in — the only repair an edit is allowed to make.
         data["school_id"] = filing_school_id
+    # Before publication, keep the draft's file in sync without rotating its
+    # exit password. Published papers keep the SEB panel's explicit reissue flow.
+    if (exam_row.get("status") == "draft" and not exam_row.get("is_published")
+            and exam_row.get("require_seb") and any(
+                data[column] != exam_row.get(column)
+                for column in set(seb_service.EXAM_OWNS.values())
+            )):
+        credential = seb_service.credentials_for(supabase, exam_id)
+        key = seb_service.current_key({**exam_row, **data}, credential)
+        if not key:
+            return _exam_save_refused(autosave, "seb_issue_failed")
+        data["seb_config_key"] = key
     try:
         supabase.table("exams").update(data, returning="minimal").eq("id", exam_id).execute()
     except Exception:
+        if "seb_config_key" in data:
+            return _exam_save_refused(autosave, "seb_issue_failed")
         for key in ["question_weights", "question_texts", "question_stimuli", "anti_cheat_enabled", "penalty_per_violation", "max_violations", "auto_submit_on_max", "fullscreen_required", "randomize_questions", "randomize_options", "watermark_name", "block_copy_paste", "block_right_click", "block_screenshot", "allow_calculator", "lock_pending_resume", "resume_code_limit", "grade_component_type_id", "school_year_id", "subject_id", "class_ids", "start_at", "end_at", "assessment_period_id", "auto_submit_on_window_end", "is_template", "source_exam_id", "max_attempts", "publish_mode", "question_pages", "question_cognitive"]:
             data.pop(key, None)
         supabase.table("exams").update(data, returning="minimal").eq("id", exam_id).execute()

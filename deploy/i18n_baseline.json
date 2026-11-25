@@ -1,6 +1,18 @@
 {
   "note": "floors: a page may not lose bilingual units, and its coverage may not fall. Written by deploy/i18n_coverage.py --write-baseline, one deliberate act at a time.",
   "pages": {
+    "shared/_seb_dashboard_codes.html": {
+      "pairs": 1,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
+    "shared/_seb_exit_code.html": {
+      "pairs": 3,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
     "admin_sekolah/accounts.html": {
       "pairs": 19,
       "leftovers": 0,

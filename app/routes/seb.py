@@ -300,9 +300,11 @@ def reveal_password(exam_id):
     except seb_crypto.SebCryptoError as exc:
         logger.warning("SEB password reveal failed for exam %s: %s", exam_id, exc)
         return jsonify({"ok": False, "reason": "unreadable"}), 409
-    return jsonify({"ok": True, "kind": kind, "password": password,
-                    "role": out.get("role"),
-                    "on_behalf_of": out.get("on_behalf_of")})
+    response = jsonify({"ok": True, "kind": kind, "password": password,
+                        "role": out.get("role"),
+                        "on_behalf_of": out.get("on_behalf_of")})
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @seb_bp.route("/teacher/exams/<exam_id>/seb/file")
