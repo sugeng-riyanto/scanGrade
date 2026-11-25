@@ -126,6 +126,20 @@
                 <i class="fas fa-circle-check"></i>
                 <span x-text="t('Lihat halaman hasil uji','See the test result page')"></span>
             </a>
+            <div class="border-t border-surface-100 pt-4 space-y-2">
+                <h3 class="font-bold text-surface-800"
+                    x-text="t('Cara keluar dari tes SEB','How to exit the SEB test')"></h3>
+                <p class="text-sm text-surface-500"
+                   x-text="t('Di iPad, geser dari tepi kiri layar lalu ketuk Quit Session. Di Windows atau Mac, klik tombol Quit di SEB.',
+                            'On iPad, swipe in from the left edge and tap Quit Session. On Windows or Mac, click the Quit button in SEB.')"></p>
+                <p class="text-sm text-surface-500">
+                    <span x-text="t('Masukkan kode keluar tes instalasi','Enter the installation test exit code')"></span>
+                    <code class="font-bold text-surface-800">SEB-TEST-QUIT</code>
+                </p>
+                <p class="text-sm text-surface-500"
+                   x-text="t('Untuk ujian resmi, gunakan kode keluar dari pengawas setelah jawaban berstatus Terkirim.',
+                            'For an official exam, use the exit code from your invigilator after your answers are marked Submitted.')"></p>
+            </div>
         </div>
 
         {# ── shareable, and worth saying so ────────────────────────────────── #}
