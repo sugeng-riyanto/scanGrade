@@ -331,38 +331,47 @@ def daily_exit_codes():
     rows = []
     offset = 0
     while True:
-        exams = (db.table("exams").select(EXAM_COLUMNS)
-                 .eq("school_id", school_id).eq("require_seb", True)
-                 .eq("is_published", True).not_.is_("seb_config_key", "null")
+        query = (db.table("exams").select(f"{EXAM_COLUMNS}, subject")
+                 .eq("school_id", school_id).eq("is_published", True)
                  .gte("start_at", start.astimezone(timezone.utc).isoformat())
-                 .lt("start_at", end.astimezone(timezone.utc).isoformat())
-                 .order("start_at").order("id").range(offset, offset + 199)
+                 .lt("start_at", end.astimezone(timezone.utc).isoformat()))
+        if output == "xlsx":
+            query = query.eq("require_seb", True).not_.is_("seb_config_key", "null")
+        exams = (query.order("start_at").order("id").range(offset, offset + 199)
                  .execute().data or [])
         for exam in exams:
-            if not _verdict(exam, seb_access.ACCESS_VIEW_PASSWORD).get("ok"):
-                abort(403)
-            credential = seb_service.credentials_for(db, exam["id"])
-            if not credential:
-                abort(409)
-            try:
-                code = seb_service.reveal(credential, "quit")
-            except seb_crypto.SebCryptoError:
-                abort(409)
-            if not code:
-                abort(409)
             scheduled = datetime.fromisoformat(exam["start_at"]).astimezone(WIB)
-            rows.append((scheduled.strftime("%H:%M"), " ".join(exam["title"].split()), code))
+            title = " ".join(exam["title"].split())
+            subject = " ".join((exam.get("subject") or "").split())
+            code = None
+            if exam["require_seb"] and exam.get("seb_config_key"):
+                if not _verdict(exam, seb_access.ACCESS_VIEW_PASSWORD).get("ok"):
+                    abort(403)
+                credential = seb_service.credentials_for(db, exam["id"])
+                if credential:
+                    try:
+                        code = seb_service.reveal(credential, "quit")
+                    except seb_crypto.SebCryptoError:
+                        pass
+            if output == "xlsx" and not code:
+                abort(409)
+            rows.append((scheduled.strftime("%H:%M"), subject, title, code, exam["require_seb"]))
         if len(exams) < 200:
             break
         offset += len(exams)
 
     if output == "whatsapp":
-        lines = [f"*Kode Keluar SEB | {day:%d/%m/%Y} (WIB)*", "",
+        lines = [f"*Jadwal Ujian | {day:%d/%m/%Y} (WIB)*", "",
                  "Khusus pengawas ujian. Mohon simpan untuk digunakan saat diperlukan.", ""]
-        for hour, title, code in rows:
-            lines.append(f"• {hour} WIB — {title} — kode: `{code}`")
+        for hour, subject, title, code, requires_seb in rows:
+            label = f"{subject} — {title}" if subject and subject.casefold() != title.casefold() else title
+            if code:
+                status = f"kode SEB: `{code}`"
+            else:
+                status = "kode SEB belum tersedia" if requires_seb else "tanpa SEB"
+            lines.append(f"• {hour} WIB — {label} — {status}")
         if not rows:
-            lines.append("Tidak ada ujian SEB terjadwal pada tanggal ini.")
+            lines.append("Tidak ada ujian terjadwal pada tanggal ini.")
         response = jsonify(text="\n".join(lines))
     else:
         from openpyxl import Workbook
@@ -374,7 +383,7 @@ def daily_exit_codes():
         sheet.append(["Tanggal", "Mulai (WIB)", "Ujian", "Kode Keluar SEB"])
         for cell in sheet[1]:
             cell.font = Font(bold=True)
-        for hour, title, code in rows:
+        for hour, _, title, code, _ in rows:
             sheet.append([day.isoformat(), hour, title, code])
             for cell in sheet[sheet.max_row]:
                 cell.data_type = "s"

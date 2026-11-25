@@ -25,9 +25,18 @@ class ExamQuery:
         assert ("is_published", True) in self.filters["eq"]
         assert self.filters["gte"] == [("start_at", "2026-11-24T17:00:00+00:00")]
         assert self.filters["lt"] == [("start_at", "2026-11-25T17:00:00+00:00")]
-        return SimpleNamespace(data=[
-            {"id": "exam-1", "start_at": "2026-11-25T00:30:00Z", "title": "=1+1"}
-        ])
+        exams = [{"id": "exam-1", "start_at": "2026-11-25T00:30:00Z",
+                  "title": "=1+1", "subject": "Matematika", "require_seb": True,
+                  "seb_config_key": "configured"}]
+        if ("require_seb", True) not in self.filters["eq"]:
+            exams.extend([
+                {"id": "exam-2", "start_at": "2026-11-25T02:00:00Z",
+                 "title": "Ujian 2", "subject": "Bahasa Indonesia", "require_seb": False},
+                {"id": "exam-3", "start_at": "2026-11-25T03:00:00Z",
+                 "title": "Fisika", "subject": "Fisika", "require_seb": True},
+            ])
+        return SimpleNamespace(data=exams)
+
 
 
 @pytest.mark.parametrize("output", ["xlsx", "whatsapp"])
@@ -51,7 +60,10 @@ def test_export_uses_school_day_and_only_reveals_the_quit_code(monkeypatch, outp
         assert response.headers["Cache-Control"] == "private, no-store"
         assert decisions == [("exam-1", seb.seb_access.ACCESS_VIEW_PASSWORD)]
         if output == "whatsapp":
-            assert "07:30 WIB — =1+1 — kode: `001234`" in response.get_json()["text"]
+            message = response.get_json()["text"]
+            assert "07:30 WIB — Matematika — =1+1 — kode SEB: `001234`" in message
+            assert "09:00 WIB — Bahasa Indonesia — Ujian 2 — tanpa SEB" in message
+            assert "10:00 WIB — Fisika — kode SEB belum tersedia" in message
         else:
             response.direct_passthrough = False
             sheet = load_workbook(BytesIO(response.get_data())).active
