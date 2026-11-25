@@ -189,6 +189,7 @@
 
         function fire() {
             timer = null;
+            if (opts.paused && opts.paused()) return;
             if (inFlight) return;                    // the open request re-checks
             var state = read();
             if (state.snapshot === last) return;     // nothing new to write

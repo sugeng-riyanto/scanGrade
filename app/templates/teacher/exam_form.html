@@ -165,7 +165,7 @@
                     {code:'zh-Hant', label:'繁', name:'繁體中文', bg:'bg-blue-100', text:'text-blue-700'},
                     {code:'ar', label:'ع', name:'العربية', bg:'bg-amber-100', text:'text-amber-700'},
                 ],
-                examTitle: '{{ exam.title if exam else '' }}',
+                examTitle: {{ ((exam.title or '') if exam else '') | tojson | forceescape }},
                 hasClasses: {{ 'true' if (exam and exam.class_ids) or (not exam and builder_defaults.class_ids) else 'false' }},
                 pdfUrl: '{{ exam.pdf_url if exam else '' }}',
                 qCount: 0,
@@ -607,6 +607,7 @@
                             if (this._timer) { clearInterval(this._timer); this._timer = null; }
                             this.loadingProgress = 100;
                             if (d.error) { this.errorMsg = d.error; this.loading = false; window.dispatchEvent(new CustomEvent('pdf-error')); return; }
+                            if (!pd.examTitle.trim()) pd.examTitle = file.name.replace(/\.pdf$/i, '').trim();
                             this.preview = d.preview_html;
                             // Each parsed question carries the PDF page it was printed
                             // on, so the page field arrives filled. The teacher
@@ -692,11 +693,13 @@
                             if (!pdfInput) {
                                 pdfInput = document.createElement('input');
                                 pdfInput.type = 'hidden'; pdfInput.name = 'pdf_preview_url';
-                                document.querySelector('form').appendChild(pdfInput);
+                                document.querySelector('form[data-save-url]').appendChild(pdfInput);
                             }
                             pdfInput.value = this.pdfUrl;
                         }
                         this.applied = true;
+                        document.querySelector('form[data-save-url]')
+                            ?.dispatchEvent(new Event('change'));
                         return detail.adopted || 0;
                     },
                 };
@@ -767,7 +770,7 @@
             <form method="POST"
                   action="{{ url_for('teacher.exam_detail', exam_id=exam.id) if exam else url_for('teacher.exam_form') }}"
                   data-save-url="{{ url_for('teacher.exam_detail', exam_id='SG_DRAFT_ID') }}"
-                  class="space-y-6" onsubmit="return prepareSubmit()" enctype="multipart/form-data">
+                  class="space-y-6" enctype="multipart/form-data">
                 {# The draft this page is writing, if one has been minted yet. The
                    autosave loop fills it on its first successful save and rewrites
                    the form action to match, so the explicit Publish writes that same
@@ -1087,11 +1090,16 @@
                             <template x-for="row in schemeRows()" :key="'ms-' + row.type">
                                 <div class="flex flex-wrap items-center gap-2 p-2 rounded-xl bg-slate-50 border border-slate-200">
                                     <span class="text-xs font-extrabold text-slate-700 w-32" x-text="t(row.kind, row.kind)"></span>
+                                    <input type="number" min="0" max="500" step="1" :value="row.count"
+                                           :aria-label="t('Jumlah soal', 'Question count') + ' — ' + t(row.kind, row.kind)"
+                                           @blur="applyQuestionCount(row.type, $el)"
+                                           @keydown.enter.prevent="applyQuestionCount(row.type, $el)"
+                                           class="tap-44 w-16 px-2 py-1 border-2 border-primary-200 rounded-lg text-center font-extrabold text-primary-700">
                                     <span class="text-xs font-bold text-slate-500"
-                                          x-text="row.count + ' ' + (row.count === 1 ? t('soal','question') : t('soal','questions'))"></span>
+                                          x-text="row.count === 1 ? t('soal','question') : t('soal','questions')"></span>
                                     <span class="text-xs font-bold text-slate-400">×</span>
                                     <input type="number" min="0" step="0.5"
-                                           x-model.number="_schemeByType[row.type]"
+                                           x-model.number="_schemeByType[row.type]" :disabled="row.count === 0"
                                            @input="_schemeOn = true"
                                            class="w-16 px-2 py-1 border-2 border-primary-200 rounded-lg text-center font-extrabold text-primary-700 focus:border-primary-400">
                                     <span class="text-xs font-bold text-slate-500" x-text="t('poin →','marks →')"></span>
@@ -2166,12 +2174,14 @@
                        the only sign it was running was the browser tab spinner —
                        so a teacher whose connection took a moment clicked again
                        and submitted the paper twice. #}
-                    <button type="submit" name="action" value="publish" data-sg-busy
+                    <button type="submit" name="action" value="publish" data-sg-busy formnovalidate
                             class="bg-gradient-to-r from-emerald-600 to-emerald-500 text-white px-5 py-3 rounded-xl font-extrabold shadow-lg hover:from-emerald-700 hover:to-emerald-600 transition flex items-center gap-2"
                             :title="t('Simpan dan publikasikan — siswa langsung bisa mengerjakannya','Save and publish — students can start immediately')">
                         <i class="fas fa-paper-plane"></i><span x-text="t('Publish &amp; Kirim ke Kelas','Publish &amp; Send to Classes')"></span>
                     </button>
                 </div>
+                <p id="exam-publish-warning" role="alert" tabindex="-1" hidden
+                   class="p-3 rounded-xl border border-amber-200 bg-amber-50 text-amber-800 font-semibold"></p>
             </form>
         </div>
 
@@ -2461,7 +2471,7 @@ function questionManager() {
                         q.bonus = k === 'bonus';
                         q.answers = Array.isArray(k) ? k : (k && k !== 'essay' ? [k] : ['A']);
                     } else if (kind === 'truefalse') {
-                        q.tf = (k === 'false' || k === false) ? 'false' : 'true';
+                        q.tf = k === '' ? '' : ((k === 'false' || k === false) ? 'false' : 'true');
                     } else if (kind === 'match') {
                         var pairs = (k && k.pairs) || (Array.isArray(k) ? k : []) || [];
                         q.pairs = pairs.map(function(p) {
@@ -2614,14 +2624,13 @@ function questionManager() {
             var rows = [];
             SG_SCHEME_ORDER.forEach(function(t) {
                 var idxs = buckets[t] || [];
-                if (!idxs.length) return;
                 var scaled = idxs.map(function(i) { return points[i] || 0; });
                 var sum = scaled.reduce(function(a, b) { return a + b; }, 0);
                 rows.push({
                     type: t, kind: sgKind(t), count: idxs.length,
                     marks: self.marksOf(t),
                     rawSubtotal: Math.round(self.marksOf(t) * idxs.length * 100) / 100,
-                    scaledEach: Math.round((sum / idxs.length) * 100) / 100,
+                    scaledEach: idxs.length ? Math.round((sum / idxs.length) * 100) / 100 : 0,
                     scaledSubtotal: Math.round(sum * 100) / 100,
                 });
             });
@@ -2646,7 +2655,6 @@ function questionManager() {
             var self = this;
             SG_SCHEME_ORDER.forEach(function(t) {
                 if (self._schemeByType[t] != null) return;
-                if (!self.questions.some(function(q) { return sgSchemeType(q.type) === t; })) return;
                 self._schemeByType[t] = self.marksOf(t);
             });
         },
@@ -2655,7 +2663,7 @@ function questionManager() {
             this.$watch('questions.length', () => this.seedScheme());
         },
         useMarkScheme() { this._schemeOn = true; },
-        resetSchemeMarks() { this._schemeByType = {}; this._schemeOn = true; },
+        resetSchemeMarks() { this._schemeByType = {}; this.seedScheme(); this._schemeOn = true; },
         // Every id is a string, so a question added after a restore can never
         // borrow a restored id — that collision is what made Alpine's x-for reuse
         // the wrong DOM node and draw one question's key inside another's card.
@@ -2943,7 +2951,52 @@ function questionManager() {
                 return {id: st.id, numbers: idxs.join(', ')};
             });
         },
-        addQuestionOf(type) { this.questions.push(this.blankQuestion(type)); },
+        blankBulkQuestion(type) {
+            const question = this.blankQuestion(type);
+            switch (question._kind) {
+                case 'choice': question.answers = []; break;
+                case 'truefalse': question.tf = ''; break;
+                case 'match': question.pairs = [{l: '', r: ''}]; break;
+                case 'pgk': question.pgkStatements = question.pgkStatements.map(() => ''); break;
+                case 'matrix': question.mxRows.forEach(row => { row.text = ''; }); break;
+            }
+            return question;
+        },
+        applyQuestionCount(type, input) {
+            const rows = this.questions.map((q, index) => ({q, index}))
+                .filter(({q}) => sgSchemeType(q.type) === type).reverse();
+            const count = input.valueAsNumber;
+            input.value = rows.length;
+            if (!Number.isSafeInteger(count) || count < 0 || count > 500 || count === rows.length) return;
+
+            if (count > rows.length) {
+                const mark = this.marksOf(type);
+                if (this._schemeByType[type] == null) this._schemeByType[type] = mark;
+                for (let i = rows.length; i < count; i++) this.addQuestionOf(type, true);
+            } else {
+                const blank = [], filled = [];
+                for (const row of rows) {
+                    const {_initial, ...fields} = row.q;
+                    const untouched = _initial === JSON.stringify(fields);
+                    (untouched ? blank : filled).push(row);
+                }
+                const removed = blank.concat(filled).slice(0, rows.length - count);
+                const numbers = removed.filter(row => filled.includes(row))
+                    .map(({index}) => index + 1).sort((a, b) => a - b);
+                if (numbers.length && !window.confirm(
+                    sgT('Hapus soal berikut beserta isinya?', 'Delete these questions and their contents?') +
+                    ' ' + numbers.join(', '))) return;
+                const indexes = new Set(removed.map(({index}) => index));
+                this.questions = this.questions.filter((q, index) => !indexes.has(index));
+            }
+            input.value = count;
+            input.dispatchEvent(new Event('change', {bubbles: true}));
+        },
+        addQuestionOf(type, bulk = false) {
+            const question = bulk ? this.blankBulkQuestion(type) : this.blankQuestion(type);
+            question._initial = JSON.stringify(question);
+            this.questions.push(question);
+        },
         addMcq() { this.addQuestionOf('mcq'); },
         addEssay() { this.addQuestionOf('essay_canvas'); },
         removeQuestion(i) { this.questions.splice(i, 1); },
@@ -3267,7 +3320,7 @@ function questionManager() {
             const kind = this.kindOf(q);
             if (kind === 'choice') {
                 if (q.bonus) return 'bonus';
-                const answers = (q.answers && q.answers.length) ? q.answers : [this.optionLetters[0]];
+                const answers = q.answers || [];
                 // One letter for a single-answer question (the shape it has always
                 // stored) and the *set* for the exception: the stored key says how
                 // many answers the question allows, so a report or a hand-written
@@ -3275,7 +3328,7 @@ function questionManager() {
                 if (this.isMulti(q)) return answers.slice();
                 return answers.length === 1 ? answers[0] : answers;
             }
-            if (kind === 'truefalse') return q.tf || 'true';
+            if (kind === 'truefalse') return q.tf || '';
             if (kind === 'match') {
                 const out = {pairs: (q.pairs || [])
                     .map(p => ({left: String(p.l || '').trim(), right: String(p.r || '').trim()}))
@@ -3550,10 +3603,6 @@ function gradeComponentPicker() {
     };
 }
 
-function prepareSubmit() {
-    return true;
-}
-
 function deleteExam(id) {
     if (confirm(sgT('Hapus ujian ini?', 'Delete this exam?'))) {
         fetch('/teacher/exams/' + id, {method:'DELETE'}).then(() => window.location.href='/teacher/exams');
@@ -3598,9 +3647,67 @@ function deleteExam(id) {
     var sebChoice = form.querySelector('[name="require_seb"]');
     var sebPanel = document.getElementById('new-exam-seb-panel');
     var savedSebChoice;
+    var publishing = false;
+    var inFlight;
+    var warning = document.getElementById('exam-publish-warning');
+    function showWarning(message, field) {
+        warning.textContent = message;
+        warning.hidden = false;
+        warning.focus();
+        if (field && field.getClientRects().length) field.focus();
+    }
+    form.addEventListener('submit', async function (event) {
+        if (event.submitter?.value !== 'publish') return;
+        event.preventDefault();
+        if (publishing) return;
+        var invalid = Array.from(form.elements).find(function (field) {
+            return field.willValidate && field.getClientRects().length && !field.validity.valid;
+        });
+        if (invalid) {
+            window.sgBusy?.clear(event.submitter);
+            window.sgBusy?.finish();
+            showWarning(invalid.validationMessage, invalid);
+            return;
+        }
+        publishing = true;
+        warning.hidden = true;
+        var button = event.submitter;
+        button.disabled = true;
+        var navigating = false;
+        try {
+            await inFlight;
+            var body = new FormData(form);
+            body.set('action', 'publish');
+            var reply = await fetch(form.getAttribute('action'), {
+                method: 'POST', body: body, credentials: 'same-origin',
+                headers: {'Accept': 'application/json'}
+            });
+            var data = await reply.json().catch(function () { return {}; });
+            if (reply.ok && data.redirect) {
+                navigating = true;
+                window.location.assign(data.redirect);
+                return;
+            }
+            var field = data.field ? form.elements.namedItem(data.field) : null;
+            showWarning(data.error || sgT('Ujian belum bisa dipublikasikan. Coba lagi.',
+                'Could not publish the exam. Try again.'), field?.getClientRects ? field : field?.[0]);
+        } catch (error) {
+            showWarning(sgT('Koneksi terputus saat memublikasikan. Periksa koneksi sebelum mencoba lagi.',
+                'Connection lost during publication. Check your connection before retrying.'));
+        } finally {
+            if (!navigating) {
+                publishing = false;
+                window.sgBusy?.clear(button);
+                window.sgBusy?.finish();
+                button.disabled = false;
+                form.dispatchEvent(new Event('change'));
+            }
+        }
+    });
     window.SGExamAutosave.wire({
         form: form,
         indicator: document.getElementById('autosave-status'),
+        paused: function () { return publishing; },
         read: function () { return window.SGExamAutosave.collect(form); },
         send: function (state) {
             var body = new FormData();
@@ -3610,7 +3717,7 @@ function deleteExam(id) {
                and the verb that tells the save door not to navigate. */
             body.append('action', 'autosave');
             body.append('draft_id', state.id || '');
-            return fetch(form.getAttribute('action'), {
+            inFlight = fetch(form.getAttribute('action'), {
                 method: 'POST',
                 body: body,
                 credentials: 'same-origin',
@@ -3640,6 +3747,7 @@ function deleteExam(id) {
             /* Offline, DNS gone, connection reset mid-flight: `fetch` rejects and
                no verdict exists. The draft is queued, not marked as failed. */
             .catch(function () { return { queued: true }; });
+            return inFlight;
         },
         adopt: function (examId) {
             /* The draft exists now, so every later save and the explicit Publish
