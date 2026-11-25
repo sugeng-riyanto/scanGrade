@@ -9,7 +9,7 @@
 .q-nav-btn { transition: all 0.15s; }
 .q-nav-btn:hover { transform: scale(1.05); }
 .q-nav-btn.active { box-shadow: 0 0 0 2px rgba(99,102,241,0.4); }
-@media (max-width:640px) { .student-canvas { display: none; } }
+.student-canvas img { max-width: 100%; height: auto; }
 </style>
 {% endblock %}
 {% block content %}
@@ -24,6 +24,14 @@
                 <h1 class="font-extrabold text-surface-800 text-sm sm:text-base truncate max-w-[200px] sm:max-w-md">{{ exam.title }}</h1>
                 <p class="text-[10px] text-surface-400">Koreksi per Soal — <span x-text="students.length"></span> siswa</p>
             </div>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+            <a href="/teacher/exams/{{ exam_id }}/answer-keys" class="tap-44 inline-flex items-center gap-2 px-3 rounded-xl border border-surface-200 text-sm font-bold text-primary-700">
+                <i class="fas fa-list-check" aria-hidden="true"></i> Kunci &amp; Rubrik
+            </a>
+            <a href="/teacher/results?exam_id={{ exam_id }}" class="tap-44 inline-flex items-center gap-2 px-3 rounded-xl border border-surface-200 text-sm font-bold text-primary-700">
+                <i class="fas fa-chart-bar" aria-hidden="true"></i> Hasil
+            </a>
         </div>
         <div class="flex items-center gap-2">
             <span class="text-[10px] font-bold text-surface-500">Soal:</span>
@@ -46,12 +54,12 @@
     </div>
 
     <!-- Question info bar -->
-    <div class="bg-gradient-to-r from-primary-50 to-blue-50 rounded-xl border border-primary-200 p-3 mb-4 flex items-center justify-between">
-        <div class="flex items-center gap-2 text-xs font-bold text-primary-800">
+    <div class="bg-gradient-to-r from-primary-50 to-blue-50 rounded-xl border border-primary-200 p-3 mb-4 flex flex-wrap gap-3 items-center justify-between">
+        <div class="flex flex-wrap min-w-0 items-center gap-2 text-xs font-bold text-primary-800">
             <i class="fas fa-question-circle"></i>
             <span x-text="'Soal ' + (currentQ + 1)"></span>
             <span class="text-primary-400">|</span>
-            <span class="text-primary-600 font-medium" x-text="'Kunci: ' + (answerKey[currentQ] || '-')"></span>
+            <span class="text-primary-600 font-medium break-words" x-text="'Kunci: ' + (answerKey[currentQ] || '-')"></span>
         </div>
         <div class="flex items-center gap-2">
             <button @click="gradeAllMCQ()" x-show="isMCQ" class="text-[10px] font-bold px-3 py-1.5 bg-emerald-100 text-emerald-700 rounded-lg hover:bg-emerald-200 transition">
@@ -168,7 +176,7 @@
                             {# The answer is rendered as segments so a mark can be drawn
                                over a range of it. The words are still the pupil's: a
                                mark changes which span carries a class, never the text. #}
-                            <div class="answer-body text-base leading-relaxed text-surface-700 bg-blue-50/50 rounded-lg p-3 max-h-56 overflow-y-auto mb-3 whitespace-pre-wrap border border-blue-100 select-text"
+                            <div aria-label="Jawaban teks siswa" class="answer-body text-base leading-relaxed text-surface-700 bg-blue-50/50 rounded-lg p-3 max-h-56 overflow-y-auto mb-3 whitespace-pre-wrap border border-blue-100 select-text"
                                  :class="sel && sel.student === s.submission_id ? 'ring-2 ring-sky-300 border-sky-300' : ''"
                                  @mouseup="onAnswerSelect($event, s)"
                                  @keyup="onAnswerSelect($event, s)">
@@ -183,12 +191,12 @@
                             </div>
                             <!-- Canvas thumbnail -->
                             <div x-show="s.hasCanvas" class="mb-3">
-                                <div class="relative rounded-lg overflow-hidden border border-surface-200 bg-surface-50" style="max-height:280px">
+                                <div class="relative rounded-lg overflow-auto border border-surface-200 bg-surface-50" :style="s.showCanvas ? '' : 'max-height:280px'">
                                     <div class="student-canvas" x-html="s.canvasThumb"></div>
                                 </div>
-                                <button @click="s.showCanvas = !s.showCanvas" class="text-[10px] text-primary-600 hover:text-primary-700 mt-1.5 font-bold">
+                                <button @click="s.showCanvas = !s.showCanvas" class="tap-44 text-sm text-primary-600 hover:text-primary-700 mt-1.5 font-bold" :aria-expanded="!!s.showCanvas">
                                     <i class="fas" :class="s.showCanvas ? 'fa-eye-slash' : 'fa-eye'"></i>
-                                    <span x-text="s.showCanvas ? ' Sembunyikan canvas' : ' Lihat canvas'"></span>
+                                    <span x-text="s.showCanvas ? ' Ringkas tampilan' : ' Perbesar jawaban gambar'"></span>
                                 </button>
                             </div>
                             {# The bank: comments this teacher already wrote, most-used
@@ -226,7 +234,7 @@
                             <!-- Feedback + AI -->
                             <div class="flex items-center gap-2">
                                 <input type="text" x-model="s.feedbackVal" @change="onCommentTyped(s)"
-                                       placeholder="Feedback..." class="flex-1 px-3 py-1.5 border border-surface-200 rounded-lg text-xs focus:border-primary-400 focus:ring-1 focus:ring-primary-200">
+                                       aria-label="Umpan balik untuk siswa" placeholder="Umpan balik untuk siswa" class="flex-1 px-3 py-1.5 border border-surface-200 rounded-lg text-xs focus:border-primary-400 focus:ring-1 focus:ring-primary-200">
                                 <button @click="aiGradeEssay(s)" class="px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition shrink-0 flex items-center gap-1"
                                         :class="s._aiLoading ? 'bg-violet-100 text-violet-500' : 'bg-violet-50 text-violet-700 hover:bg-violet-100'">
                                     <i class="fas" :class="s._aiLoading ? 'fa-spinner fa-spin' : 'fa-wand-magic-sparkles'"></i>

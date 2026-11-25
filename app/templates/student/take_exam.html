@@ -291,8 +291,9 @@ body.sg-exam .sg-content { max-width: none; margin-left: 0; margin-right: 0; }
    the wrapper is invisible to the layout on a wide screen — the four buttons sit
    in the toolbar row exactly as they did — and becomes a group that can be put
    away below 640px. */
-.math-tools { display: contents; }
-.math-tools-toggle { display: none; }
+.math-tools { display: none; }
+.math-tools.sg-open { display: contents; }
+.math-tools-toggle { display: inline-flex; align-items: center; }
 @media (max-width: 640px) {
     .math-tools { display: none; }
     .math-tools.sg-open { display: contents; }
@@ -1399,11 +1400,15 @@ body.sg-exam .sg-content { max-width: none; margin-left: 0; margin-right: 0; }
                                  screen spent on chrome before a single question is
                                  read. On a phone they fold behind one button; the pen,
                                  the eraser, undo and clear stay one tap away. -->
+                            <button type="button" class="px-2.5 py-1.5 text-[11px] font-bold"
+                                    x-show="qKind(i) === 'essay'" @click="$nextTick(() => document.getElementById('essay-response-' + i)?.scrollIntoView({block: 'start'}))">
+                                <i class="fas fa-pen mr-1"></i><span x-text="t('Ke jawaban','Go to answer')"></span>
+                            </button>
                             <button type="button" @click="showMathTools = !showMathTools"
                                     class="math-tools-toggle px-2.5 py-1.5 text-[11px] font-bold"
-                                    :class="showMathTools ? 'active' : ''"
+                                    :class="showMathTools ? 'active' : ''" :aria-expanded="showMathTools"
                                     :title="t('Alat gambar (penggaris, busur, siku, jangka)','Drafting tools (ruler, protractor, set square, compass)')">
-                                <i class="fas fa-drafting-compass mr-1"></i><span x-text="t('Alat','Tools')"></span>
+                                <i class="fas fa-drafting-compass mr-1"></i><span x-text="t('Alat ukur','Measuring tools')"></span>
                             </button>
                             <span class="math-tools" :class="showMathTools ? 'sg-open' : ''">
                             <span class="text-[9px] font-extrabold text-stone-400 uppercase tracking-wider mr-1" x-text="t('Alat:','Tools:')"></span>
@@ -2256,13 +2261,14 @@ body.sg-exam .sg-content { max-width: none; margin-left: 0; margin-right: 0; }
                         </div>
                     </template>
                     <template x-if="qKind(i) === 'essay' && !isCanvasEssay(i)">
-                        <div class="mt-2">
+                        <div class="mt-2" :id="'essay-response-' + i" style="scroll-margin-top: 6rem">
+                            <h3 class="text-sm font-extrabold text-surface-800 mb-2" x-text="t('Jawaban esai','Essay answer')"></h3>
                             <!-- Tab: Teks / Canvas -->
                             <div class="flex gap-1 bg-surface-100 rounded-lg p-0.5 mb-3 max-w-[200px]">
-                                <button type="button" @click="essayMode[i]='text'" :class="(essayMode[i]||'text')==='text' ? 'bg-white shadow-sm text-primary-600' : 'text-surface-500'" class="flex-1 py-1.5 text-[11px] font-bold rounded-md transition text-center">
+                                <button type="button" @click="essayMode[i]='text'" :class="(essayMode[i]||'text')==='text' ? 'bg-white shadow-sm text-primary-600' : 'text-surface-500'" class="tap-44 flex-1 py-1.5 text-[11px] font-bold rounded-md transition text-center">
                                     <i class="fas fa-font mr-1"></i><span x-text="t('Teks','Text')"></span>
                                 </button>
-                                <button type="button" @click="essayMode[i]='canvas'" :class="(essayMode[i]||'text')==='canvas' ? 'bg-white shadow-sm text-primary-600' : 'text-surface-500'" class="flex-1 py-1.5 text-[11px] font-bold rounded-md transition text-center">
+                                <button type="button" @click="essayMode[i]='canvas'" :class="(essayMode[i]||'text')==='canvas' ? 'bg-white shadow-sm text-primary-600' : 'text-surface-500'" class="tap-44 flex-1 py-1.5 text-[11px] font-bold rounded-md transition text-center">
                                     <i class="fas fa-paint-brush mr-1"></i>Canvas
                                 </button>
                             </div>
@@ -2441,13 +2447,14 @@ body.sg-exam .sg-content { max-width: none; margin-left: 0; margin-right: 0; }
                         </div>
                     </template>
                     <template x-if="qKind(i) === 'essay' && isCanvasEssay(i)">
-                        <div class="mt-2">
+                        <div class="mt-2" :id="'essay-response-' + i" style="scroll-margin-top: 6rem">
+                            <h3 class="text-sm font-extrabold text-surface-800 mb-2" x-text="t('Jawaban esai','Essay answer')"></h3>
                             <!-- Tab: Teks / Canvas (default Canvas untuk essay_canvas) -->
                             <div class="flex gap-1 bg-surface-100 rounded-lg p-0.5 mb-3 max-w-[200px]">
-                                <button type="button" @click="essayMode[i]='text'" :class="(essayMode[i]||'canvas')==='text' ? 'bg-white shadow-sm text-primary-600' : 'text-surface-500'" class="flex-1 py-1.5 text-[11px] font-bold rounded-md transition text-center">
+                                <button type="button" @click="essayMode[i]='text'" :class="(essayMode[i]||'canvas')==='text' ? 'bg-white shadow-sm text-primary-600' : 'text-surface-500'" class="tap-44 flex-1 py-1.5 text-[11px] font-bold rounded-md transition text-center">
                                     <i class="fas fa-font mr-1"></i><span x-text="t('Teks','Text')"></span>
                                 </button>
-                                <button type="button" @click="essayMode[i]='canvas'" :class="(essayMode[i]||'canvas')==='canvas' ? 'bg-white shadow-sm text-primary-600' : 'text-surface-500'" class="flex-1 py-1.5 text-[11px] font-bold rounded-md transition text-center">
+                                <button type="button" @click="essayMode[i]='canvas'" :class="(essayMode[i]||'canvas')==='canvas' ? 'bg-white shadow-sm text-primary-600' : 'text-surface-500'" class="tap-44 flex-1 py-1.5 text-[11px] font-bold rounded-md transition text-center">
                                     <i class="fas fa-paint-brush mr-1"></i>Canvas
                                 </button>
                             </div>
@@ -3348,7 +3355,7 @@ function examApp(duration, totalQ) {
         agreed: false,
         examRules: {{ (exam.get('exam_rules') or '') | tojson | safe }},
         // Drafting instruments folded behind one button on a phone (see the
-        // .math-tools rule in the head block); always out on a wide screen.
+        // .math-tools rule in the head block).
         showMathTools: false,
         // Calculator — Scientific (standar matematika/fisika)
         showCalculator: false,
