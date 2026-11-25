@@ -4282,6 +4282,22 @@ function examApp(duration, totalQ) {
             // and nothing was recorded. The same panel the hidden path raises goes
             // up here, charged on the same ladder, after the same debounce, so a
             // moment's inattention is not an event.
+            // A touch browser can blur the window while the pupil is still
+            // scrolling the visible exam. Require an in-page touch move AND
+            // actual scrolling after blur before treating it as a false alarm.
+            let examTouchMoveAt = 0;
+            let examTouchScrollAt = 0;
+            document.addEventListener('touchmove', (event) => {
+                if (event.isTrusted && event.touches.length === 1 && !document.hidden) {
+                    examTouchMoveAt = Date.now();
+                }
+            }, { passive: true });
+            document.addEventListener('scroll', (event) => {
+                const now = Date.now();
+                if (event.isTrusted && !document.hidden && now - examTouchMoveAt <= 250) {
+                    examTouchScrollAt = examTouchMoveAt;
+                }
+            }, { passive: true, capture: true });
             window.addEventListener('blur', () => {
                 if (this.submitted) return;
                 if (this.questions[this.currentQ]?.youtube) return;
@@ -4297,6 +4313,7 @@ function examApp(duration, totalQ) {
                     // second exam tab has taken over from stays silent.
                     if (!this._isFocusTab || this.submitted || document.hidden) return;
                     if (document.hasFocus()) return; // focus may return without a focus event
+                    if (examTouchScrollAt > gone) return;
                     // Not while the fullscreen panel is up: that absence is already
                     // charged, and the paper behind it is already unreadable.
                     if (this.fullscreenBlocked) return;
