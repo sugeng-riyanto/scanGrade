@@ -263,9 +263,9 @@ class TestTheBody:
             phone="0812 3456", message="Kami ingin demo untuk 600 murid",
             submitted_at="17 Okt 2026 09:30 WIB")
 
-    def test_the_subject_names_the_school(self):
+    def test_the_subject_is_fixed(self):
         out = self.build()
-        assert "SMPN 1 Bandung" in out["subject"] and "ScanGrade" in out["subject"]
+        assert out["subject"] == "[ScanGrade] Permintaan Demo"
 
     def test_both_halves_are_content(self):
         out = self.build()
@@ -330,7 +330,7 @@ class TestTheRoute:
     def test_a_form_post_goes_straight_to_whatsapp(self, wired, monkeypatch, app):
         monkeypatch.setattr(demo_leads, "whatsapp_url",
                             lambda *a, **k: "https://api.whatsapp.com/send?phone=62812")
-        res = _post(app, school_name="SMPN 1", email="a@b.c", phone="0812")
+        res = _post(app, school_name="SMPN 1", email="a@b.c", phone="081234567890")
         assert res.status_code == 302
         assert res.headers["Location"] == "https://api.whatsapp.com/send?phone=62812"
 
@@ -365,9 +365,28 @@ class TestTheRoute:
         assert res.get_json()["success"] is False
         assert "sekolah" in res.get_json()["message"].lower()
 
+    @pytest.mark.parametrize("invalid", [
+        {"school_name": "A" * 121},
+        {"school_name": "https://example.test"},
+        {"email": ["school@example.test"]},
+        {"phone": "+44-test"},
+    ])
+    def test_invalid_fields_never_reach_mail_or_audit(self, wired, app, invalid):
+        payload = {"school_name": "SMPN 1", "email": "school@example.test"}
+        payload.update(invalid)
+        assert _post_json(app, payload).status_code == 400
+        assert wired["notified"] == []
+        assert wired["db"].log == []
+
+    def test_oversized_form_is_rejected_before_csrf_parses_it(self, wired, app):
+        response = _post(app, school_name="SMPN 1", message="A" * 9000)
+        assert response.status_code == 413
+        assert wired["notified"] == []
+        assert wired["db"].log == []
+
     def test_the_request_is_recorded_before_the_mail_is_built(self, wired, app):
         """"The relay cannot send" must not mean "the lead is gone"."""
-        _post(app, school_name="SMPN 1", email="a@b.c", phone="0812")
+        _post(app, school_name="SMPN 1", email="a@b.c", phone="081234567890")
         assert len(wired["notified"]) == 1
         _, _, log_at_notify = wired["notified"][0]
         assert any(entry[0] == "insert" and entry[1] == "audit_logs"

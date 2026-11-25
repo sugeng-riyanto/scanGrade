@@ -998,6 +998,8 @@ def _register_csrf_protection(app):
     def csrf_protect():
         if request.method not in ('POST', 'PUT', 'DELETE', 'PATCH'):
             return None
+        if request.endpoint == "public.demo_request":
+            request.max_content_length = 8192
         # Bearer token auth is CSRF-safe (requires preflight)
         auth = request.headers.get('Authorization', '')
         if auth.startswith('Bearer '):
