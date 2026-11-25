@@ -31,7 +31,7 @@ from app.services.question_types import (
     ambiguous_choice_keys, answer_letters,
     canonical_type, choice_mode, default_weights, describe_answer,
     essay_marker,
-    grade_answer, has_answer, is_essay, is_objective, key_mode_drift, key_state,
+    grade_answer, has_answer, is_essay, is_objective, key_has_answer, key_mode_drift, key_state,
     normalise_key,
     objective_result, question_kind, scheme_in,
 )
@@ -249,9 +249,14 @@ def _exam_publish_refusal(title, subject_id, class_ids, count, question_types, a
     if count < 1:
         missing.append(("Tambahkan minimal satu soal / Add at least one question", ""))
     else:
-        unkeyed = objective_result(question_types, answer_key, {}, count).unkeyed
+        unkeyed = []
+        for i in range(count):
+            index = str(i)
+            question_type = question_types.get(index, MCQ)
+            if is_objective(question_type) and not key_has_answer(question_type, answer_key.get(index)):
+                unkeyed.append(str(i + 1))
         if unkeyed:
-            numbers = ", ".join(str(i + 1) for i in unkeyed)
+            numbers = ", ".join(unkeyed)
             missing.append((f"Lengkapi kunci jawaban / Complete the answer key ({numbers})", ""))
     if not missing:
         return None
