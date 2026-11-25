@@ -4,7 +4,7 @@ import re
 import secrets
 import string
 import time
-from datetime import datetime, timezone, date
+from datetime import datetime, timezone, date, timedelta
 from urllib.parse import urlencode
 from app.decorators.year_lock import open_year_required
 
@@ -463,6 +463,7 @@ def dashboard():
 
     ctx = {
         "school": school,
+        "seb_export_date": datetime.now(timezone(timedelta(hours=7))).date().isoformat(),
         "student_count": students.count or 0,
         "teacher_count": teachers.count or 0,
         "class_count": classes.count or 0,

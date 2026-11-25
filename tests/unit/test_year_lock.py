@@ -32,6 +32,9 @@ ROUTE_FILES = sorted((ROOT / "app" / "routes").glob("*.py"))
 #: a write route avoids the lock, so an unjustified entry is a hole. Keyed by
 #: "<blueprint> <path>".
 EXEMPT = {
+    "seb_bp /admin-sekolah/seb-exit-codes":
+        "reads scheduled exams and records SEB access in the audit log; "
+        "no exam, sitting, answer, mark or academic-year record is changed",
     "scanmeet_bp /requests":
         "requests a school media package in scanmeet_plan_requests; never writes "
         "a paper, sitting, answer, mark or academic-year record",

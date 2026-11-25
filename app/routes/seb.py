@@ -29,16 +29,17 @@ from __future__ import annotations
 
 import io
 import re
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone
 
 from flask import (Blueprint, abort, flash, g, jsonify, redirect,
                    render_template, request, send_file, session, url_for)
 
 from app.services import (seb_access, seb_config_key, seb_crypto, seb_door_log,
                           seb_service)
-from app.utils.auth import get_supabase, login_required
+from app.utils.auth import admin_sekolah_required, get_supabase, login_required
 from app.utils.helpers import row_or_none
 from app.utils.logger import get_logger
+from app.utils.req_cache import school_classes
 
 seb_bp = Blueprint("seb", __name__)
 logger = get_logger("seb")
@@ -304,6 +305,120 @@ def reveal_password(exam_id):
                         "role": out.get("role"),
                         "on_behalf_of": out.get("on_behalf_of")})
     response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+WIB = timezone(timedelta(hours=7))
+
+
+@seb_bp.route("/admin-sekolah/seb-exit-codes", methods=["POST"])
+@admin_sekolah_required
+@_rate_limit("10 per minute")
+def daily_exit_codes():
+    school_id = g.get("user_school_id")
+    if not school_id or school_id == "None":
+        abort(403)
+    output = request.form.get("format")
+    try:
+        day = date.fromisoformat(request.form.get("date", ""))
+        start = datetime.combine(day, time.min, WIB)
+        end = start + timedelta(days=1)
+    except (ValueError, OverflowError):
+        abort(400)
+    if output not in {"xlsx", "whatsapp"}:
+        abort(400)
+
+    db = _supabase()
+    rows = []
+    offset = 0
+    while True:
+        query = (db.table("exams").select(f"{EXAM_COLUMNS}, subject")
+                 .eq("school_id", school_id).eq("is_published", True)
+                 .gte("start_at", start.astimezone(timezone.utc).isoformat())
+                 .lt("start_at", end.astimezone(timezone.utc).isoformat()))
+        if output == "xlsx":
+            query = query.eq("require_seb", True).not_.is_("seb_config_key", "null")
+        exams = (query.order("start_at").order("id").range(offset, offset + 199)
+                 .execute().data or [])
+        for exam in exams:
+            scheduled = datetime.fromisoformat(exam["start_at"]).astimezone(WIB)
+            title = " ".join(exam["title"].split())
+            subject = " ".join((exam.get("subject") or "").split())
+            code = None
+            if exam["require_seb"] and exam.get("seb_config_key"):
+                if not _verdict(exam, seb_access.ACCESS_VIEW_PASSWORD).get("ok"):
+                    abort(403)
+                credential = seb_service.credentials_for(db, exam["id"])
+                if credential:
+                    try:
+                        code = seb_service.reveal(credential, "quit")
+                    except seb_crypto.SebCryptoError:
+                        pass
+            if output == "xlsx" and not code:
+                abort(409)
+            rows.append((scheduled.strftime("%H:%M"), subject, title, code, exam))
+        if len(exams) < 200:
+            break
+        offset += len(exams)
+
+    if output == "whatsapp":
+        school = row_or_none(db.table("schools").select("name")
+                             .eq("id", school_id).maybe_single().execute()) or {}
+        school_name = " ".join((school.get("name") or "Sekolah").split())
+        class_names = {str(row["id"]): row["name"] for row in school_classes(school_id)}
+        messages = {
+            "id": [f"*Jadwal Ujian {school_name} | {day:%d/%m/%Y} (WIB)*", "",
+                   "Halo Bapak/Ibu Pengawas! Semoga hari ini menyenangkan.",
+                   "Berikut jadwal ujian hari ini. Kode keluar SEB khusus pengawas.", ""],
+            "en": [f"*{school_name} Exam Schedule | {day:%d/%m/%Y} (WIB)*", "",
+                   "Hello, proctors! We hope you're having a wonderful day.",
+                   "Here's today's exam schedule. SEB exit codes are for proctors only.", ""],
+        }
+        for hour, subject, title, code, exam in rows:
+            label = f"{subject} — {title}" if subject and subject.casefold() != title.casefold() else title
+            classes = sorted({class_names[str(cid)] for cid in exam.get("class_ids") or []
+                              if str(cid) in class_names}, key=str.casefold)
+            class_label = ", ".join(classes)
+            if code:
+                status_id, status_en = f"kode SEB: `{code}`", f"SEB exit code: `{code}`"
+            elif exam["require_seb"]:
+                status_id, status_en = "kode SEB belum tersedia", "SEB exit code unavailable"
+            else:
+                status_id, status_en = "tanpa SEB", "no SEB required"
+            prefix = f"• {hour} WIB — {label}"
+            messages["id"].append(f"{prefix} — Kelas: {class_label or 'belum tercatat'} — {status_id}")
+            messages["en"].append(f"{prefix} — Class: {class_label or 'unlisted'} — {status_en}")
+        if not rows:
+            messages["id"].append("Tidak ada ujian terjadwal pada tanggal ini.")
+            messages["en"].append("No exams are scheduled for this date.")
+        messages["id"].extend(["", "Terima kasih atas pendampingannya. Semoga ujian berjalan lancar!"])
+        messages["en"].extend(["", "Thank you for supporting our students. Wishing everyone a smooth exam day!"])
+        response = jsonify(text="\n".join(messages["id"]), english_text="\n".join(messages["en"]))
+    else:
+        from openpyxl import Workbook
+        from openpyxl.styles import Font
+
+        book = Workbook()
+        sheet = book.active
+        sheet.title = "Kode Keluar SEB"
+        sheet.append(["Tanggal", "Mulai (WIB)", "Ujian", "Kode Keluar SEB"])
+        for cell in sheet[1]:
+            cell.font = Font(bold=True)
+        for hour, _, title, code, _ in rows:
+            sheet.append([day.isoformat(), hour, title, code])
+            for cell in sheet[sheet.max_row]:
+                cell.data_type = "s"
+        for column, width in zip("ABCD", (14, 16, 52, 22)):
+            sheet.column_dimensions[column].width = width
+        sheet.freeze_panes = "A2"
+        sheet.auto_filter.ref = sheet.dimensions
+        buffer = io.BytesIO()
+        book.save(buffer)
+        buffer.seek(0)
+        response = send_file(buffer, as_attachment=True,
+                             download_name=f"kode-keluar-seb-{day.isoformat()}.xlsx",
+                             mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    response.headers["Cache-Control"] = "private, no-store"
     return response
 
 
