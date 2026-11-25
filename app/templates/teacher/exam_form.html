@@ -173,7 +173,7 @@
                 // see are shown; everything else lives behind this and stays
                 // fully editable. Nothing was removed — a collapsed control is
                 // still a control, and un-checking it always works.
-                advanced: false,
+                advanced: {{ 'false' if exam else 'true' }},
                 // The 'otomatis' badge is true while the value still came from
                 // the server default, and clears the moment the teacher touches
                 // it. (Single quotes, deliberately: this attribute is delimited
@@ -775,6 +775,21 @@
                    route with a placeholder, so the address is the server's own
                    `url_for` rather than a path spelled out in JavaScript. #}
                 <input type="hidden" name="draft_id" value="{{ exam.id if exam else '' }}">
+                {% if not exam %}
+                <div class="card p-5 space-y-2">
+                    <label class="flex items-center gap-2 font-bold text-surface-800">
+                        <input type="checkbox" name="require_seb" value="true" checked>
+                        <span x-text="t('Wajib menggunakan Safe Exam Browser','Require Safe Exam Browser')"></span>
+                    </label>
+                    <p class="text-sm text-surface-600"
+                       x-text="t('Nonaktifkan jika peserta menggunakan Android atau Chromebook. Setelah disimpan, unduh berkas .seb dari panel SEB.',
+                                 'Turn this off if students use Android or Chromebooks. After saving, download the .seb file from the SEB panel.')"></p>
+                    <a id="new-exam-seb-panel" hidden
+                       data-panel-url="{{ url_for('seb.panel', exam_id='SG_DRAFT_ID') }}"
+                       class="text-sm font-bold text-primary-600"
+                       x-text="t('Buka pengaturan SEB untuk draf ini','Open SEB settings for this draft')"></a>
+                </div>
+                {% endif %}
                 <div class="card p-6 space-y-4">
                     <div class="grid grid-cols-1 gap-3 sm:gap-4">
                         <div class="sm:col-span-2">
@@ -903,7 +918,7 @@
                             <p x-show="classes.length === 0" class="text-xs text-slate-400 italic" x-text="t('Pilih kelas dulu untuk melihat daftar murid.','Choose a class first to see its students.')"></p>
                             <div class="space-y-2">
                                 <template x-for="cls in classes" :key="cls.class_id">
-                                    <details class="rounded-xl border border-slate-200 bg-white" :open="classes.length === 1">
+                                    <details {% if not exam %}open{% endif %} class="rounded-xl border border-slate-200 bg-white"  {% if exam %}:open="classes.length === 1"{% endif %}>
                                         <summary class="cursor-pointer px-3 py-2 text-sm font-bold text-slate-700 flex items-center justify-between gap-2">
                                             <span x-text="cls.class_name + ' — ' + countIn(cls) + '/' + cls.students.length"></span>
                                             <button type="button" class="text-xs text-primary-600 hover:underline shrink-0" @click.prevent="toggleClass(cls)" x-text="t('Pilih semua / kosongkan','Select all / clear')"></button>
@@ -1203,7 +1218,7 @@
                                 </div>
                             </template>
                         </div>
-                        <details class="mt-2 rounded-xl border border-cyan-100 bg-cyan-50/60 px-3 py-2" x-show="(stimuli || []).length">
+                        <details {% if not exam %}open{% endif %} class="mt-2 rounded-xl border border-cyan-100 bg-cyan-50/60 px-3 py-2" x-show="(stimuli || []).length">
                             <summary class="text-[11px] font-extrabold text-cyan-700 cursor-pointer" x-text="t('Cara pakai & cara penilaian','How it works & how it is marked')"></summary>
                             <div class="mt-2 space-y-1 text-[11px] font-semibold text-cyan-700/90">
                                 <p x-text="t('Cara pakai: buat stimulus, tulis konteksnya, lalu pada tiap soal pilih stimulus itu di daftar Stimulus. Sub-soal bisa bertipe apa pun, termasuk Angka/Isian dan Matriks.',
@@ -1852,7 +1867,7 @@
                                         </div>
                                     </div>
 
-                                    <details class="rounded-xl border border-indigo-100 bg-indigo-50/60 px-3 py-2">
+                                    <details {% if not exam %}open{% endif %} class="rounded-xl border border-indigo-100 bg-indigo-50/60 px-3 py-2">
                                         <summary class="text-[11px] font-extrabold text-indigo-700 cursor-pointer" x-text="t('Cara pakai & cara penilaian','How it works & how it is marked')"></summary>
                                         <div class="mt-2 space-y-1 text-[11px] font-semibold text-indigo-700/90">
                                             <p x-text="t('Cara pakai: tulis soal yang jawabannya satu angka atau satu kata. Untuk angka, isi jawaban benar dan toleransi bila jawaban boleh bergeser (mis. 0,2). Untuk teks, tambahkan semua ejaan yang Anda terima.',
@@ -1931,7 +1946,7 @@
                                         </div>
                                     </template>
 
-                                    <details class="rounded-xl border border-fuchsia-100 bg-fuchsia-50/60 px-3 py-2">
+                                    <details {% if not exam %}open{% endif %} class="rounded-xl border border-fuchsia-100 bg-fuchsia-50/60 px-3 py-2">
                                         <summary class="text-[11px] font-extrabold text-fuchsia-700 cursor-pointer" x-text="t('Cara pakai & cara penilaian','How it works & how it is marked')"></summary>
                                         <div class="mt-2 space-y-1 text-[11px] font-semibold text-fuchsia-700/90">
                                             <p x-text="t('Cara pakai: tulis baris (pernyataan/item) dan opsi yang dipakai bersama semua baris. Pilih Satu pilihan bila tiap baris hanya punya satu jawaban benar, atau Banyak pilihan bila satu baris bisa punya beberapa.',
@@ -3580,6 +3595,9 @@ function deleteExam(id) {
     var form = document.querySelector('form[data-save-url]');
     if (!form || !window.SGExamAutosave) return;
     var idField = form.querySelector('[name="draft_id"]');
+    var sebChoice = form.querySelector('[name="require_seb"]');
+    var sebPanel = document.getElementById('new-exam-seb-panel');
+    var savedSebChoice;
     window.SGExamAutosave.wire({
         form: form,
         indicator: document.getElementById('autosave-status'),
@@ -3611,6 +3629,9 @@ function deleteExam(id) {
                            claiming it was written when we cannot read the answer
                            is exactly the lie this whole change is against. */
                         if (data === null) return { queued: true };
+                        if (reply.ok && data.exam_id && !state.id) {
+                            savedSebChoice = body.get('require_seb') === 'true';
+                        }
                         return { ok: reply.ok && data.ok !== false,
                                  exam_id: data.exam_id,
                                  error: data.error };
@@ -3625,6 +3646,12 @@ function deleteExam(id) {
                write that row. The edit address is the server url_for with the
                placeholder swapped, so no path is spelled out in JavaScript. */
             if (idField) idField.value = examId;
+            if (sebChoice && sebPanel) {
+                sebChoice.checked = savedSebChoice;
+                sebChoice.disabled = true;
+                sebPanel.href = sebPanel.dataset.panelUrl.replace('SG_DRAFT_ID', examId);
+                sebPanel.hidden = false;
+            }
             form.setAttribute('action',
                 form.getAttribute('data-save-url').replace('SG_DRAFT_ID', examId));
         },

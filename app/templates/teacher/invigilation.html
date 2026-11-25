@@ -79,6 +79,7 @@
                                 <i class="fas fa-key"></i>
                                 <span x-text="t('Kata sandi SEB','SEB password')"></span>
                             </a>
+                            {% with seb_exam_id=s.exam_id %}{% include "shared/_seb_exit_code.html" %}{% endwith %}
                             {% elif s.require_seb %}
                             <span data-seb-closed
                                   class="block mt-1 text-[11px] text-surface-400"

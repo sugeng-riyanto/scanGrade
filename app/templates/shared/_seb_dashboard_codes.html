@@ -1,0 +1,13 @@
+{% if seb_exams %}
+<section class="card p-5 mb-5">
+    <h2 class="font-extrabold text-surface-800" x-text="t('Kode keluar SEB ujian terbaru','SEB exit codes for recent exams')"></h2>
+    <ul class="divide-y divide-surface-100">
+        {% for exam in seb_exams %}
+        <li class="flex flex-wrap items-center justify-between gap-2 py-2">
+            <span class="text-sm font-semibold text-surface-700">{{ exam.title }}</span>
+            {% with seb_exam_id=exam.id %}{% include "shared/_seb_exit_code.html" %}{% endwith %}
+        </li>
+        {% endfor %}
+    </ul>
+</section>
+{% endif %}

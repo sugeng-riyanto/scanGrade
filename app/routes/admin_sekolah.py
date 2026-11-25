@@ -469,6 +469,10 @@ def dashboard():
         "subject_count": len(supabase.table("subjects").select("id", count="exact").eq("school_id", sid).execute().data or []),
         "active_year": active_year,
         "setup_done": bool(active_year and (classes.count or 0) > 0),
+        "seb_exams": (supabase.table("exams").select("id,title")
+                      .eq("school_id", sid).eq("require_seb", True)
+                      .not_.is_("seb_config_key", "null")
+                      .order("created_at", desc=True).limit(20).execute().data or []),
     }
     return render_template("admin_sekolah/dashboard.html", **ctx)
 

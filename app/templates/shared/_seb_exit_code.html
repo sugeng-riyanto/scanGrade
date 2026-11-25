@@ -1,0 +1,35 @@
+<span x-data="{
+          password: '', busy: false, failed: false,
+          async toggle(url) {
+              if (this.password) { this.password = ''; return; }
+              this.busy = true;
+              this.failed = false;
+              try {
+                  const body = new FormData();
+                  body.set('kind', 'quit');
+                  body.set('_csrf_token', document.querySelector('meta[name=csrf-token]').content);
+                  const response = await fetch(url, {
+                      method: 'POST', body, headers: { 'X-Requested-With': 'fetch' }
+                  });
+                  const result = await response.json();
+                  if (!response.ok || !result.ok || !result.password) {
+                      this.failed = true;
+                      return;
+                  }
+                  this.password = result.password;
+              } catch {
+                  this.failed = true;
+              } finally {
+                  this.busy = false;
+              }
+          }
+      }"
+      class="inline-flex flex-wrap items-center gap-2">
+    <button type="button" data-url="{{ url_for('seb.reveal_password', exam_id=seb_exam_id) }}"
+            @click="toggle($el.dataset.url)" :disabled="busy" :aria-expanded="Boolean(password)"
+            class="text-sm font-bold text-primary-600 hover:text-primary-700"
+            x-text="password ? t('Sembunyikan kode keluar','Hide exit code') : t('Tampilkan kode keluar','Show exit code')"></button>
+    <code x-show="password" x-cloak x-text="password" class="text-surface-800 select-all" aria-live="polite"></code>
+    <span x-show="failed" x-cloak role="status" class="text-sm text-rose-700"
+          x-text="t('Kode keluar tidak dapat ditampilkan.','Could not show the exit code.')"></span>
+</span>

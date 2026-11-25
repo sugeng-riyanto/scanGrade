@@ -27,6 +27,8 @@ period named, and a redirect back to the builder.
 """
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 TEACHER = ROOT / "app" / "routes" / "teacher.py"
 
@@ -60,8 +62,12 @@ class _Query:
         self.mode, self.payload = "insert", payload
         return self
 
-    def update(self, payload):
+    def update(self, payload, **kwargs):
         self.mode, self.payload = "update", payload
+        return self
+
+    def delete(self):
+        self.mode = "delete"
         return self
 
     def _matches(self, row):
@@ -74,8 +80,17 @@ class _Query:
             self.store.inserted.append((self.table, self.payload))
             row = dict(self.payload)
             row.setdefault("id", "new-1")
+            if self.table == "exams":
+                row.setdefault("require_seb", False)
+            self.store.rows.setdefault(self.table, []).append(row)
             return _Resp([row])
-        return _Resp([r for r in rows if self._matches(r)])
+        matched = [r for r in rows if self._matches(r)]
+        if self.mode == "update":
+            for row in matched:
+                row.update(self.payload)
+        if self.mode == "delete":
+            self.store.rows[self.table] = [r for r in rows if not self._matches(r)]
+        return _Resp(matched)
 
 
 class FakeSupabase:
@@ -240,17 +255,19 @@ def _raw(view):
 
 
 class TestTheCreateDoorRefusesAnOutsideWindow:
-    def _post(self, app, monkeypatch, start_at, end_at, *, school="s1"):
+    def _post(self, app, monkeypatch, start_at, end_at, *, school="s1", **form):
         from flask import g
         from app.routes import teacher
         from app.services import assessment_periods as ap
 
         sb = _sb()
         monkeypatch.setattr(teacher, "get_supabase", lambda: sb)
-        with app.test_request_context(
-                "/teacher/exams/new", method="POST",
-                data={"title": "UTS", "subject": "MTK", "total_questions": "5",
-                      "start_at": start_at, "end_at": end_at, "action": "save_draft"}):
+        data = {
+            "title": "UTS", "subject": "MTK", "total_questions": "5",
+            "start_at": start_at, "end_at": end_at, "action": "save_draft",
+            **form,
+        }
+        with app.test_request_context("/teacher/exams/new", method="POST", data=data):
             g.user_id = "t-1"
             g.user_role = "admin_sekolah"
             g.user_school_id = school
@@ -289,3 +306,32 @@ class TestTheCreateDoorRefusesAnOutsideWindow:
         # answered the insert), so the redirect is not the calendar refusal.
         assert [c for c in sb.inserted if c[0] == "exams"], (
             "the calendar blocked an inside window instead of letting it through")
+
+    @pytest.mark.parametrize("issued", [True, False])
+    def test_seb_draft_is_enabled_only_after_credential_issuance(
+        self, app, monkeypatch, issued,
+    ):
+        from app.routes import teacher
+
+        def issue(supabase, exam, *, start_url, actor_id):
+            assert exam["status"] == "draft" and not exam["is_published"]
+            assert exam["require_seb"] is False
+            assert start_url.endswith("/student/exams/new-1")
+            assert actor_id == "t-1"
+            if issued:
+                supabase.rows["exams"][0]["seb_config_key"] = "issued-key"
+            return {"ok": issued}
+
+        monkeypatch.setattr(teacher.seb_service, "issue", issue)
+        sb, result = self._post(
+            app, monkeypatch, "2026-09-03T09:00", "2026-09-04T09:00",
+            action="autosave", require_seb="true",
+        )
+        if issued:
+            assert result.get_json() == {"ok": True, "exam_id": "new-1"}
+            assert sb.rows["exams"][0]["require_seb"] is True
+            assert sb.rows["exams"][0]["seb_config_key"] == "issued-key"
+        else:
+            response, status = result
+            assert status == 400 and response.get_json()["error"] == "seb_issue_failed"
+            assert sb.rows["exams"] == []
