@@ -1,6 +1,8 @@
 """Public-facing routes — landing, pricing, demo request, capacity evidence."""
 
 import io
+import re
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from flask import (Blueprint, abort, current_app, jsonify, redirect,
                    render_template, request, send_file)
@@ -56,25 +58,36 @@ def pricing():
 def demo_request():
     from app.services import demo_leads
 
-    submitted = request.get_json(silent=True) if request.is_json else request.form
-    data = submitted or {}
     wants_json = request.is_json
 
     def fail(message: str, status: int = 400):
-        """The refusal in the shape the caller used."""
         if wants_json:
             return jsonify({"success": False, "message": message}), status
         return redirect("/?demo=invalid")
 
-    school_name = (data.get("school_name") or "").strip()
-    email = (data.get("email") or "").strip()
-    phone = (data.get("phone") or "").strip()
-    note = (data.get("message") or "").strip()
+    data = request.get_json(silent=True) if wants_json else request.form
+    if not isinstance(data, Mapping):
+        return fail("Data formulir tidak valid")
 
-    if not school_name:
-        return fail("Nama sekolah wajib diisi")
-    if not email or "@" not in email:
+    fields = {}
+    for key, limit in (("school_name", 120), ("email", 254), ("phone", 32), ("message", 1000)):
+        value = data.get(key, "")
+        if not isinstance(value, str) or len(value) > limit:
+            return fail("Data formulir tidak valid atau terlalu panjang")
+        fields[key] = value.strip()
+
+    school_name, email, phone, note = (
+        fields["school_name"], fields["email"], fields["phone"], fields["message"]
+    )
+    if (not school_name or any(not char.isprintable() for char in school_name)
+            or not any(char.isalpha() for char in school_name)
+            or re.search(r"://|www\.", school_name, re.IGNORECASE)):
+        return fail("Nama sekolah tidak valid")
+    if not re.fullmatch(r"[^\s@<>,;:\"\x00-\x1f\x7f]+@[^\s@<>,;:\"\x00-\x1f\x7f]+\.[^\s@<>,;:\"\x00-\x1f\x7f]+", email):
         return fail("Email tidak valid")
+    if phone and (not re.fullmatch(r"\+?[0-9(). -]+", phone)
+                  or not 7 <= sum(char.isdigit() for char in phone) <= 15):
+        return fail("Nomor WhatsApp tidak valid")
 
     # The request is recorded first, so a mail that fails still leaves the lead
     # somewhere a human can find it — the one part of this route that was already

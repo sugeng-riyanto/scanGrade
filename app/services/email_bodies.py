@@ -434,7 +434,7 @@ def demo_request(*, school_name, email, phone="", message="", submitted_at="") -
     the English half is what keeps the module's own contract honest ("every body is a
     pair", held by `tests/unit/test_email_bodies.py`).
     """
-    subject = _header_line(f"[ScanGrade] Permintaan Demo — {school_name}")
+    subject = "[ScanGrade] Permintaan Demo"
     rows = [("Sekolah", school_name), ("Email", email), ("WhatsApp", phone or "—")]
     if submitted_at:
         rows.append(("Diterima", submitted_at))
