@@ -2447,12 +2447,7 @@ def exam_list_context(*, school_admin):
             break
         query = supabase.table("exams").select(columns)
         query = query.eq("school_id", sid) if school_admin else query.eq("teacher_id", g.user_id)
-    offset = g.get("tz_offset", 7)
-    if sid:
-        school = row_or_none(supabase.table("schools").select("tz_offset")
-                             .eq("id", sid).maybe_single().execute()) or {}
-        if school.get("tz_offset") is not None:
-            offset = school["tz_offset"]
+    offset = exam_management.school_timezone_offset(supabase, sid, g.get("tz_offset", 7))
     exams = exam_management.order_exams(exams, offset)
     teachers = ({str(t["id"]): t["name"] for t in ta_service.staff_directory(supabase, sid)}
                 if school_admin else {})

@@ -358,6 +358,7 @@ window.sgSavePrefs = function (patch) {
                periodenya. #}
             <a href="/admin-sekolah/assessment-periods" class="nav-item {% if request.path == '/admin-sekolah/assessment-periods' %}active{% endif %}"><i class="fas fa-calendar-check"></i><span x-text="t('Periode Penilaian','Assessment Periods')"></span></a>
             {# Matriks pengawas ujian, di pintu admin: sekolah tanpa wakil kepala tetap bisa menugaskan pengawas. #}
+            <a href="{{ url_for('admin_sekolah.invigilation_exams') }}" class="nav-item {% if request.endpoint == 'admin_sekolah.invigilation_exams' %}active{% endif %}"{% if request.endpoint == 'admin_sekolah.invigilation_exams' %} aria-current="page"{% endif %}><i class="fas fa-file-alt"></i><span x-text="t('Ujian Sekolah','School Exams')"></span></a>
             <a href="/admin-sekolah/invigilation" class="nav-item {% if request.path == '/admin-sekolah/invigilation' %}active{% endif %}"><i class="fas fa-clipboard-check"></i><span x-text="t('Jadwal Pengawasan','Invigilation')"></span></a>
             <a href="/admin-sekolah/seb-refusals" class="nav-item {% if request.path == '/admin-sekolah/seb-refusals' %}active{% endif %}"><i class="fas fa-door-closed"></i><span x-text="t('Tidak Bisa Masuk','Could Not Get In')"></span></a>
             <div class="nav-section-title pt-2"><span x-text="t('Pengguna','Users')"></span></div>
@@ -718,6 +719,9 @@ window.sgSavePrefs = function (patch) {
                     {% for _crumb in _trail %}
                     {% set _pair = (_crumb_areas.get(_crumb.key) if _crumb.kind == 'area'
                                     else _crumb_labels.get(_crumb.key|lower)) %}
+                    {% if _crumb.path == url_for('admin_sekolah.invigilation_exams') %}
+                    {% set _pair = ('Ujian Sekolah', 'School Exams') %}
+                    {% endif %}
                     {% set _word = _pair[0] if _pair else _crumb.key|replace('-', ' ')|replace('_', ' ')|title %}
                     {% set _rest = '' if loop.last else 'hidden sm:inline-block' %}
                     <i class="fas fa-chevron-right text-[8px] text-surface-300 shrink-0 {{ _rest }}"></i>

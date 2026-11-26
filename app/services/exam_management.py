@@ -3,8 +3,21 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 
 from app.utils.exam_window import parse_dt
+from app.utils.helpers import row_or_none
 
 SITTING_LOCKED = "Siswa sudah mulai mengerjakan. Jadwal mulai, SEB, dan penghapusan dikunci."
+
+
+def school_timezone_offset(supabase, school_id, fallback=7):
+    if not school_id:
+        return fallback
+    try:
+        school = row_or_none(supabase.table("schools").select("tz_offset")
+                             .eq("id", school_id).maybe_single().execute()) or {}
+        offset = school.get("tz_offset")
+        return fallback if offset is None else int(offset)
+    except Exception:
+        return fallback
 
 
 def order_exams(exams, tz_offset, now=None):

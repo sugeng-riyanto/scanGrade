@@ -18,7 +18,7 @@ from app.services.question_types import (
     normalize_answer_map, objective_result, public_options, validate_answer_map,
 )
 from app.services.submission_service import finish_sitting, open_sitting
-from app.services import exam_media
+from app.services import exam_management, exam_media
 from app.services import exam_targets
 # Safe Exam Browser: the door a gated paper opens through (`verify`), and the
 # header name the client proves itself with — imported, not spelled, so the door
@@ -136,8 +136,12 @@ def _chart_points(rows):
     return points
 
 
-def _offerable(exam, student_class_id, draft_exam_ids, now=None, included_exam_ids=None):
-    """Should this exam appear on the student's list?
+def _offerable(exam, student_class_id, draft_exam_ids, now=None, included_exam_ids=None,
+               *, include_inactive=False):
+    """Does this exam match the pupil's assignments and the requested windows?
+
+    The Exams page includes scheduled and closed cards for planning.
+    The dashboard uses the default to show papers the pupil can open.
 
     Three different questions, and collapsing them is how a paper either vanished
     from the list or stayed on it for ever — the two answers are not the same:
@@ -150,11 +154,12 @@ def _offerable(exam, student_class_id, draft_exam_ids, now=None, included_exam_i
     * **unassigned** — the class rule, from `class_assignment_allows`, so an exam
       assigned to X-A is not offered to X-B.
     """
-    state = exam_window.window_state(exam, now)
-    if state == exam_window.BEFORE:
-        return False
-    if state == exam_window.CLOSED and exam.get("id") not in draft_exam_ids:
-        return False
+    if not include_inactive:
+        state = exam_window.window_state(exam, now)
+        if state == exam_window.BEFORE:
+            return False
+        if state == exam_window.CLOSED and exam.get("id") not in draft_exam_ids:
+            return False
     if not class_assignment_allows(exam, student_class_id):
         return False
     # A per-pupil paper is offered only to the pupils on its list. `None` means the
@@ -494,6 +499,7 @@ def exam_list():
     submitted_ids -= {s["exam_id"] for s in subs if s.get("status") == "retracted"}
     draft_ids = {s["exam_id"] for s in subs if s.get("status") == "draft"}
 
+    now = datetime.now(timezone.utc)
     exams = []
     try:
         # Only the columns the card renders: `select("*")` shipped the whole exam
@@ -523,10 +529,10 @@ def exam_list():
                     e["question_types"] = json.loads(e["question_types"])
                 except (json.JSONDecodeError, TypeError):
                     e["question_types"] = {}
-            # The window, and the same predicate the access guard applies. `not cids`
-            # — an exam the teacher never assigned — is no longer a match for anyone.
-            if _offerable(e, student_class_id, draft_ids, included_exam_ids=_included):
-                e["sg_window_state"] = exam_window.window_state(e)
+            # Assignment still decides visibility. The window decides the card action.
+            if _offerable(e, student_class_id, draft_ids, included_exam_ids=_included,
+                          include_inactive=True):
+                e["sg_window_state"] = exam_window.window_state(e, now)
                 e["sg_in_progress"] = e["id"] in draft_ids
                 exams.append(e)
     except Exception as e:
@@ -536,6 +542,8 @@ def exam_list():
     # only submitted/graded/published hide an exam (a draft still shows), and a
     # retracted one comes back into the list.
     exams = [e for e in exams if e["id"] not in submitted_ids]
+    offset = exam_management.school_timezone_offset(supabase, student_school_id, g.get("tz_offset", 7))
+    exams = exam_management.order_exams(exams, offset, now)
     resp = make_response(render_template("student/exam_list.html", exams=exams))
     resp.headers["Cache-Control"] = "private, max-age=30, stale-while-revalidate=60"
     return resp
