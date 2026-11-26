@@ -698,9 +698,9 @@
       "frozen": false
     },
     "teacher/exam_form.html": {
-      "pairs": 329,
+      "pairs": 346,
       "leftovers": 0,
-      "coverage": 100,
+      "coverage": 100.0,
       "frozen": false
     },
     "teacher/exam_preview.html": {
@@ -710,9 +710,9 @@
       "frozen": false
     },
     "teacher/exams.html": {
-      "pairs": 30,
-      "leftovers": 5,
-      "coverage": 85.7,
+      "pairs": 46,
+      "leftovers": 0,
+      "coverage": 100.0,
       "frozen": true
     },
     "teacher/grade_detail.html": {
@@ -903,6 +903,12 @@
     },
     "scanmeet/offers.html": {
       "pairs": 43,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
+    "shared/_admin_invigilation_tabs.html": {
+      "pairs": 3,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
