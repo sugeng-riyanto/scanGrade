@@ -364,6 +364,10 @@ def trail(path: str | None, role: str | None = None,
         pages.append({"kind": "page", "key": segment, "path": walk,
                       "href": None, "current": False})
 
+    if role == "admin_sekolah" and walk == "/admin-sekolah/invigilation/exams":
+        pages = [{"kind": "page", "key": "exams", "path": walk,
+                  "href": None, "current": False}]
+
     if area:
         crumbs.append({
             "kind": "area", "key": area[0], "path": area[1],

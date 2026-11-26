@@ -25,6 +25,7 @@ other school's exam as a leak the app does not have.
 """
 import inspect
 import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -225,6 +226,31 @@ class TestTheExamList:
                 allowed, reason = exam_sitting_allowed(
                     supa, exam, exam["id"], pupil["id"])
                 assert allowed, (pupil["full_name"], exam["title"], reason)
+
+    def test_dates_include_only_the_pupils_published_schedule(self, app, monkeypatch):
+        now = datetime.now(timezone.utc)
+        paper = EXAMS[0]
+        tables = _base_tables()
+        tables["exams"] = [
+            dict(paper, id="oldest", start_at=(now - timedelta(days=5)).isoformat(),
+                 end_at=(now - timedelta(days=4)).isoformat()),
+            dict(paper, id="upcoming", start_at=(now + timedelta(days=2)).isoformat()),
+            dict(paper, id="yesterday", start_at=(now - timedelta(days=1)).isoformat()),
+            dict(paper, id="today", start_at=now.isoformat()),
+            dict(paper, id="unpublished", is_published=False,
+                 start_at=(now + timedelta(days=1)).isoformat()),
+            dict(paper, id="other-class", class_ids=[CLASS_B],
+                 start_at=(now + timedelta(days=1)).isoformat()),
+        ]
+        context = _render(app, monkeypatch, studentmod.exam_list, PROFILES[0],
+                          supa=FakeSupabase(tables))
+        assert [(exam["id"], exam["date_group"], exam["sg_window_state"])
+                for exam in context["exams"]] == [
+                    ("today", "today", "open"),
+                    ("upcoming", "upcoming", "before"),
+                    ("yesterday", "previous", "open"),
+                    ("oldest", "previous", "closed"),
+                ]
 
     def test_json_string_class_ids_still_match(self, app, monkeypatch):
         """`exam-b` stores its classes as a JSON string; X-B must still see it."""
