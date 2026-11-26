@@ -320,7 +320,9 @@ class TestMarkingPage:
 
     def test_the_score_control_stays_in_view(self):
         page = self._page()
-        assert "sticky" in page.split("answer-body")[0], \
+        answer = page.index('class="answer-body')
+        score = page.index('class="essay-score-input')
+        assert 0 <= page.rfind('class="sticky top-0 ', 0, score) < score < answer, \
             "the score control must be sticky so it never scrolls away"
 
     def test_the_comment_bank_is_reachable_from_the_page(self):

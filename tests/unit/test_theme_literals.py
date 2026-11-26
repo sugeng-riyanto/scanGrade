@@ -59,9 +59,6 @@ PAPER_PAGES: dict[str, str] = {
     "teacher/grade_detail.html":
         "the marking desk — the same canvases and toolbar, seen from the teacher's "
         "side, with the annotation boxes over the student's sheet",
-    "teacher/grade_question.html":
-        "marking one question at a time — it carries the same canvas convention "
-        "as the marking desk",
     "student/result_detail.html":
         "the pupil's marked paper — the sheets and both kinds of annotation box",
     "teacher/preview_exam.html":

@@ -313,7 +313,7 @@ def run(app, monkeypatch, *, role="guru", user=OWNER, school=SCHOOL, door="panel
         seen["passed"] = {k: v for k, v in kwargs.items()
                           if k in ("has_credential", "can_manage",
                                    "file_is_current", "verdict", "back_url")}
-        return SimpleNamespace(name=template_name)
+        return template_name
 
     # The duty window is a property of the *decision* and `now` is its own argument;
     # the route passes none, so the clock is supplied here and nothing else is

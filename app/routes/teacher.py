@@ -1387,7 +1387,12 @@ def exam_form():
         # The admin's own matrix scopes both lists: a class is offered for a
         # subject only when the admin assigned that pair (`_builder_scope`).
         subjects, classes, classes_by_subject = _builder_scope(supabase, sid)
-        return render_template("teacher/exam_form.html", exam=None, subjects=subjects, classes=classes,
+        now = datetime.now(timezone(timedelta(hours=g.get("tz_offset", 7))))
+        default_start = now.replace(hour=7, minute=30, second=0, microsecond=0)
+        if default_start < now:
+            default_start += timedelta(days=1)
+        return render_template("teacher/exam_form.html", exam=None,
+                               default_exam_start=default_start.strftime("%Y-%m-%dT%H:%M"), subjects=subjects, classes=classes,
                                exam_teachers=teachers, school_admin=school_admin,
                                classes_by_subject=classes_by_subject,
                                grade_components=_grade_components_by_subject(supabase, sid),
@@ -4234,8 +4239,12 @@ def grade_question(exam_id, question_index):
         if isinstance(v, str):
             try: exam[f] = json.loads(v)
             except: exam[f] = {}
+    total_questions = int(exam.get("total_questions") or 0)
+    question_types = exam.get("question_types") or {}
+    objective_questions = [is_objective(question_types.get(str(i))) for i in range(total_questions)]
     return render_template("teacher/grade_question.html", exam=exam, exam_id=exam_id,
-                           question_index=min(question_index, max(0, int(exam.get("total_questions") or 0) - 1)))
+                           objective_questions=objective_questions,
+                           question_index=min(question_index, max(0, total_questions - 1)))
 
 
 def _review_flags_for(supabase, submission_ids):

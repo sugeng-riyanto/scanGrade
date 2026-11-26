@@ -1,0 +1,46 @@
+.exam-schedule-controls {
+    padding: .65rem;
+    border: 1px solid var(--border-strong);
+    border-radius: 1rem;
+    background: var(--bg-subtle);
+}
+
+.exam-schedule-controls label {
+    display: block;
+    min-width: 0;
+    font-size: .75rem;
+    font-weight: 700;
+}
+
+.exam-schedule-controls input,
+.exam-schedule-controls select {
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+    padding: .35rem .45rem;
+    border: 1px solid var(--border-strong);
+    border-radius: .65rem;
+    background-color: var(--bg-card);
+    color: var(--text);
+    font-size: .875rem;
+}
+
+.exam-schedule-time {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: .35rem;
+    margin-top: .4rem;
+}
+
+.exam-schedule-controls button {
+    min-height: 44px;
+    text-decoration: underline;
+    text-underline-offset: .2em;
+    font-size: .8rem;
+    font-weight: 700;
+}
+
+.exam-schedule-controls :is(input, select, button):focus-visible {
+    outline: 2px solid currentColor;
+    outline-offset: 2px;
+}
