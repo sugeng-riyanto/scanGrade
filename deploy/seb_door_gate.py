@@ -1554,6 +1554,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"   C0  require_seb=off       -> HTTP {seen.control} "
               f"(title in page: {seen.control_title})")
 
+        step = "clearing the control sitting on the throwaway exam"
+        # C0 opens a draft via the student's real exam page. Remove only that
+        # synthetic draft before changing SEB, the same restriction a live paper has.
+        rest.call("DELETE", f"submissions?exam_id=eq.{exam_id}"
+                             f"&student_id=eq.{pupil['id']}&status=eq.draft")
         step = "turning require_seb on"
         rest.gate(exam_id, run_key)
         step = "C1, a plain browser"
