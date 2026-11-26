@@ -6,7 +6,14 @@
 {# `_deny` sends a refused caller here too, and this page rendered no flash at all:
    the sentence was dropped and the reader landed somewhere with no explanation. Same
    block the other pages use, so a message looks the same wherever it lands. #}
-<div class="space-y-6" x-data="{ filter: 'all', dateFilter: 'all', search: '' }">
+<div class="space-y-6" x-data="{
+    filter: 'all', dateFilter: 'all', search: '',
+    matchesExam(card) {
+        return (this.filter === 'all' || card.status === this.filter || (this.filter === 'template' && card.template === 'true')) &&
+               (this.dateFilter === 'all' || card.dateGroup === this.dateFilter) &&
+               (!this.search.trim() || [card.title, card.teacher].some(value => value.toLowerCase().includes(this.search.trim().toLowerCase())));
+    }
+}">
     {% with messages = get_flashed_messages(with_categories=true) %}
     {% if messages %}
     {% for cat, msg in messages %}
@@ -127,16 +134,18 @@
         <input type="text" x-model="search" :placeholder="lang==='en'?'Search exams...':'Cari ujian...'" class="flex-1 px-4 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition">
     </div>
 
-    <!-- Exam Cards -->
+    {% set date_groups = dict(exams | groupby('date_group', default='unscheduled')) %}
+    {% for date_group in ['today', 'upcoming', 'previous', 'unscheduled'] %}
+    {% if date_group in date_groups %}
+    <section x-show="Array.from($el.querySelectorAll('[data-date-group]')).some(card => matchesExam(card.dataset))">
+        {% include "shared/_exam_date_heading.html" %}
     <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-        {% for exam in exams %}
+        {% for exam in date_groups[date_group] %}
         <div class="card card-hover relative"
              data-title="{{ exam.title or '' }}" data-teacher="{{ (teacher_names or {}).get(exam.teacher_id, '') }}"
-             data-date-group="{{ exam.date_group }}" data-status="{{ exam.status }}"
+             data-date-group="{{ date_group }}" data-status="{{ exam.status }}"
              data-template="{{ 'true' if exam.is_template else 'false' }}"
-             x-show="(filter === 'all' || $el.dataset.status === filter || (filter === 'template' && $el.dataset.template === 'true')) &&
-                     (dateFilter === 'all' || $el.dataset.dateGroup === dateFilter) &&
-                     (!search.trim() || [$el.dataset.title, $el.dataset.teacher].some(value => value.toLowerCase().includes(search.trim().toLowerCase())))">
+             x-show="matchesExam($el.dataset)">
             <div class="p-5">
                 <!-- Top row: icon + badges -->
                 <div class="flex items-start justify-between mb-3">
@@ -264,6 +273,10 @@
         </div>
         {% endfor %}
     </div>
+
+    </section>
+    {% endif %}
+    {% endfor %}
 
     {% if not exams %}
     <div class="card p-12 text-center text-slate-400">

@@ -755,23 +755,14 @@ def _needs_class_assignment(exam: dict) -> bool:
         and not exam_class_ids(exam)
 
 
-def _invalidate_teacher_dashboard() -> None:
-    """Drop this teacher's cached dashboard row **for the school they act in**.
-
-    The dashboard caches for 20 seconds, so without this a teacher saves an
-    answer key, comes back, and sees the page exactly as it was — which is what
-    "I filled it in and nothing changed" looked like from the outside.
-
-    The row is school-scoped (`req_cache.teacher_dashboard_key`), and so is this
-    invalidation: every writer here runs in the request's own school, which is the
-    page it dirties. The other school's cached page is not stale — nothing in this
-    request changed it — and dropping it would only cost that teacher a cold load
-    in the school they are not even in.
-    """
-    try:
-        cache_delete(teacher_dashboard_key(g.user_id, g.get("user_school_id")))
-    except Exception:
-        pass
+def _invalidate_teacher_dashboard(owner_id=None) -> None:
+    """Refresh the writer and the exam owner's dashboard in the acting school."""
+    school_id = g.get("user_school_id")
+    for user_id in dict.fromkeys((g.user_id, owner_id or g.user_id)):
+        try:
+            cache_delete(teacher_dashboard_key(user_id, school_id))
+        except Exception:
+            pass
 
 
 @teacher_bp.route("/dashboard")
@@ -1386,7 +1377,7 @@ def exam_form():
         if request.method == "GET":
             teachers = ta_service.staff_directory(supabase, sid)
         chosen = request.form.get("teacher_id") if request.method == "POST" else None
-        if chosen:
+        if chosen and chosen != g.user_id:
             if not ta_service.teacher_in_school(supabase, sid, chosen):
                 return _deny(NO_EXAM_ACCESS, _wants_json())
             teacher_id = chosen
@@ -1619,6 +1610,8 @@ def exam_form():
     # whatever the save is called (draft, save, publish). `school_id` here is the
     # school this request is *verified* in, so the allowance is charged to the tenant
     # the paper is actually filed under — see `filing_school_for_request` above.
+    if school_admin and draft_id and not draft_row:
+        return _deny(NO_EXAM_ACCESS, _wants_json())
     if not draft_row:
         allowed, refusal = check_feature_limit(school_id, "create_exam")
         if not allowed:
@@ -1680,7 +1673,6 @@ def exam_form():
             except Exception:
                 current_app.logger.exception("Could not clear incomplete SEB draft %s", exam_id)
             return _exam_save_refused(autosave, "seb_issue_failed")
-        _invalidate_teacher_dashboard()
     # Logged once, when the row is minted. An autosave that keeps writing the same
     # draft is not a new paper, and a "created" entry every few seconds would bury
     # the one that matters.
@@ -1692,6 +1684,8 @@ def exam_form():
     # to a *reported* save; an autosave answers JSON and writes the paper's own
     # fields, nothing else. The per-pupil roster sync waits for the explicit save
     # too: a background write every few seconds is the load it must not become.
+    if school_admin and autosave:
+        _invalidate_teacher_dashboard(teacher_id)
     if autosave:
         return jsonify({"ok": True, "exam_id": exam_id})
     _sync_exam_targets(supabase, exam_id, class_ids, request.form)
@@ -1756,7 +1750,7 @@ def exam_form():
         flash("✅ Ujian berhasil disimpan.", "success")
     # A new exam is a new row on the dashboard, including its own "no answer key"
     # card if it has MCQ questions.
-    _invalidate_teacher_dashboard()
+    _invalidate_teacher_dashboard(teacher_id)
     if action == "publish" and _wants_json():
         return jsonify({"ok": True, "redirect": url_for("teacher.my_exams")})
     return redirect(_exam_list_url() if action == "publish" else f"/teacher/exams/{exam_id}")
@@ -1856,7 +1850,7 @@ def exam_detail(exam_id):
                 return _deny(exam_management.SITTING_LOCKED, True)
             raise
         log_activity("delete", "exam", exam_id, user_id=g.user_id)
-        _invalidate_teacher_dashboard()
+        _invalidate_teacher_dashboard(exam_row["teacher_id"])
         return jsonify({"success": True})
     if request.method == "GET":
         exam_data = _normalise_exam_json(exam_row)
@@ -2165,6 +2159,8 @@ def exam_detail(exam_id):
                      old_data={"start_at": exam_row.get("start_at"), "total_points": old_points},
                      new_data={"start_at": start_at, "total_points": points},
                      user_id=g.user_id)
+    if autosave and g.get("user_role") == "admin_sekolah":
+        _invalidate_teacher_dashboard(exam_row["teacher_id"])
     if autosave:
         return jsonify({"ok": True, "exam_id": exam_id})
     _sync_exam_targets(supabase, exam_id, class_ids, request.form)
@@ -2212,7 +2208,7 @@ def exam_detail(exam_id):
                            "teacher_id": exam_row["teacher_id"]}, user_id=g.user_id)
     # Everything the dashboard shows about this exam just changed — its key, its
     # question types, its status — and that page is cached for 20 seconds.
-    _invalidate_teacher_dashboard()
+    _invalidate_teacher_dashboard(exam_row["teacher_id"])
     if action == "publish" and _wants_json():
         return jsonify({"ok": True, "redirect": _exam_list_url()})
     return redirect(_exam_list_url() if action in ("publish", "save_active") else f"/teacher/exams/{exam_id}")
@@ -2914,7 +2910,7 @@ def answer_keys(exam_id):
             except Exception:
                 logger.exception("could not recalculate exam %s after a key edit", exam_id)
             # The dashboard's warning is about this key, and that page is cached.
-            _invalidate_teacher_dashboard()
+            _invalidate_teacher_dashboard(exam.get("teacher_id"))
             flash("Kunci jawaban berhasil disimpan & nilai diperbarui!", "success")
         else:
             flash("Tidak ada perubahan pada kunci jawaban.", "success")
