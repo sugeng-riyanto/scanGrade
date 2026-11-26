@@ -126,6 +126,12 @@ def _off_calendar_message(period) -> str:
 NO_SUCH_EXAM = denials.NO_SUCH_EXAM
 
 
+def _exam_list_url():
+    if g.get("user_role") == "admin_sekolah":
+        return "/admin-sekolah/invigilation/exams"
+    return "/teacher/exams"
+
+
 def _deny(message, as_json, redirect_to="/teacher/exams"):
     if as_json:
         return jsonify({"error": message}), 403
@@ -2407,12 +2413,6 @@ def _upload_size(storage) -> int:
         return int(size)
     except Exception:
         return int(getattr(storage, "content_length", 0) or 0)
-
-
-def _exam_list_url():
-    if g.get("user_role") == "admin_sekolah":
-        return "/admin-sekolah/invigilation/exams"
-    return "/teacher/exams"
 
 
 @teacher_bp.route("/exams")
