@@ -34,9 +34,12 @@ from datetime import date, datetime, time, timedelta, timezone
 from flask import (Blueprint, abort, flash, g, jsonify, redirect,
                    make_response, render_template, request, send_file, session, url_for)
 
-from app.services import (seb_access, seb_config_key, seb_crypto, seb_door_log,
+from app.services import (exam_management, seb_access, seb_config_key, seb_crypto, seb_door_log,
                           seb_service)
-from app.utils.auth import admin_sekolah_required, get_supabase, login_required
+from app.utils.auth import (admin_sekolah_required, get_supabase, login_required,
+                            subscription_write_required)
+from app.decorators.year_lock import open_year_required
+from app.services.audit_service import log_activity
 from app.utils.helpers import row_or_none
 from app.utils.logger import get_logger
 from app.utils.req_cache import school_classes
@@ -220,49 +223,59 @@ def panel(exam_id):
 
 @seb_bp.route("/teacher/exams/<exam_id>/seb/enable", methods=["POST"])
 @login_required
+@subscription_write_required
+@open_year_required("exam_id")
 def enable(exam_id):
-    """Turn ``require_seb`` on — but only with the confirmation the brief demands.
-
-    The checkbox is checked **here**, on the server. It is the difference between a
-    guard and a suggestion: the field a crafted POST simply omits is the one that
-    protects the pupils a wrong toggle would lock out of their own exam.
-    """
-    exam = _load_exam(exam_id)
-    if not _may_configure(exam):
-        abort(403)
-    if not (request.form.get(CONFIRM_FIELD) or "").strip():
-        flash("seb_confirm_required", "error")
-        return redirect(url_for("seb.panel", exam_id=exam_id))
-
-    supabase = _supabase()
-    issued = seb_service.issue(supabase, exam, start_url=_start_url(exam_id),
-                               actor_id=g.get("user_id"))
-    if not issued.get("ok"):
-        flash("seb_issue_failed", "error")
-        return redirect(url_for("seb.panel", exam_id=exam_id))
-    _write_exam(supabase, exam_id, {"require_seb": True,
-                                    "seb_config_key": issued["config_key"]})
-    logger.info("SEB enabled for exam %s by %s", exam_id, g.get("user_id"))
-    flash("seb_enabled", "success")
-    return redirect(url_for("seb.panel", exam_id=exam_id))
+    return _set_required(exam_id, True)
 
 
 @seb_bp.route("/teacher/exams/<exam_id>/seb/disable", methods=["POST"])
 @login_required
+@subscription_write_required
+@open_year_required("exam_id")
 def disable(exam_id):
-    """Turn it off. The credential row survives, so turning it back on is one click.
+    return _set_required(exam_id, False)
 
-    Nothing is deleted, and that is on purpose: the audit log references the paper,
-    and a school that switches SEB off for one sitting and back on for the next
-    should not have to re-issue (and therefore re-print) anything.
-    """
+
+def _set_required(exam_id, enabled):
     exam = _load_exam(exam_id)
     if not _may_configure(exam):
         abort(403)
-    _write_exam(_supabase(), exam_id, {"require_seb": False})
-    logger.info("SEB disabled for exam %s by %s", exam_id, g.get("user_id"))
-    flash("seb_disabled", "success")
-    return redirect(url_for("seb.panel", exam_id=exam_id))
+
+    def respond(error=None, status=400):
+        if request.accept_mimetypes.best == "application/json":
+            if error:
+                return jsonify(error=error), status
+            return jsonify(ok=True, require_seb=enabled)
+        message = error or ("seb_enabled" if enabled else "seb_disabled")
+        flash(message, "error" if error else "success")
+        return redirect(url_for("seb.panel", exam_id=exam_id))
+
+    if enabled and not (request.form.get(CONFIRM_FIELD) or "").strip():
+        return respond("seb_confirm_required")
+    if bool(exam.get("require_seb")) == enabled:
+        return respond()
+
+    supabase = _supabase()
+    if exam_management.has_sittings(supabase, exam_id):
+        return respond(exam_management.SITTING_LOCKED, 409)
+
+    payload = {"require_seb": enabled}
+    if enabled:
+        credential = seb_service.credentials_for(supabase, exam_id)
+        key = seb_service.current_key(exam, credential)
+        if not key:
+            issued = seb_service.issue(supabase, exam, start_url=_start_url(exam_id),
+                                       actor_id=g.get("user_id"))
+            if not issued.get("ok"):
+                return respond("seb_issue_failed", 503)
+            key = issued["config_key"]
+        payload["seb_config_key"] = key
+    if not _write_exam(supabase, exam_id, payload):
+        return respond("Pengaturan SEB gagal disimpan.", 409)
+    log_activity("update", "exam", exam_id, old_data={"require_seb": not enabled},
+                 new_data={"require_seb": enabled}, user_id=g.user_id)
+    return respond()
 
 
 @seb_bp.route("/teacher/exams/<exam_id>/seb/reissue", methods=["POST"])

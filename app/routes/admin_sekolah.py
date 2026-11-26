@@ -4300,6 +4300,13 @@ def invigilation_page():
     )
 
 
+@admin_sekolah_bp.route("/invigilation/exams")
+@admin_sekolah_required
+def invigilation_exams():
+    from app.routes.teacher import render_exam_list
+    return render_exam_list(school_admin=True)
+
+
 @admin_sekolah_bp.route("/invigilation/save", methods=["POST"])
 @admin_sekolah_required
 @open_year_required("exam_id")

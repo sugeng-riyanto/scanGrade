@@ -778,6 +778,18 @@
                    route with a placeholder, so the address is the server's own
                    `url_for` rather than a path spelled out in JavaScript. #}
                 <input type="hidden" name="draft_id" value="{{ exam.id if exam else '' }}">
+                {% if school_admin and not exam %}
+                <div class="card p-5">
+                    <label for="exam-teacher" class="block text-sm font-bold mb-2"
+                           x-text="t('Guru pemilik ujian','Exam owner')"></label>
+                    <select id="exam-teacher" name="teacher_id" class="w-full rounded-xl border border-slate-200 px-3 py-2">
+                        <option value="" x-text="t('Akun saya','My account')"></option>
+                        {% for teacher in exam_teachers %}
+                        <option value="{{ teacher.id }}">{{ teacher.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                {% endif %}
                 {% if not exam %}
                 <div class="card p-5 space-y-2">
                     <label class="flex items-center gap-2 font-bold text-surface-800">
@@ -972,10 +984,15 @@
                         <div>
                             <label class="block text-sm font-extrabold text-slate-700 mb-1" x-text="t('Mulai (jadwal)','Starts (scheduled)')"></label>
             <input type="datetime-local" name="start_at" id="start_at_input"
-                   value="{% if exam and exam.start_at %}{{ (exam.start_at[:19] + '+00:00') | tz('%Y-%m-%dT%H:%M') }}{% endif %}"
+                   {% if sitting_started %}readonly{% endif %}
+                   value="{% if exam and exam.start_at %}{{ exam.start_at | tz('%Y-%m-%dT%H:%M') }}{% endif %}"
                    class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-500 font-bold transition">
+            {% if sitting_started %}
+            <p class="text-xs text-slate-600 mt-1" x-text="t('Siswa sudah mulai mengerjakan. Jadwal mulai dikunci.','Students have started. The start time is locked.')"></p>
+            {% else %}
             <p class="text-xs text-slate-400 mt-1" x-text="t('Kosongkan = langsung aktif','Leave empty = active immediately')"></p>
-            <script>!function(){var e=document.getElementById('start_at_input');if(e&&!e.value){var t=new Date();t.setMinutes(t.getMinutes()-t.getTimezoneOffset());e.value=t.toISOString().slice(0,16)}}();</script>
+            {% endif %}
+            {% if not exam %}<script>!function(){var e=document.getElementById('start_at_input');if(e&&!e.value){var t=new Date();t.setMinutes(t.getMinutes()-t.getTimezoneOffset());e.value=t.toISOString().slice(0,16)}}();</script>{% endif %}
                         </div>
                         <div>
                             <label class="block text-sm font-extrabold text-slate-700 mb-1" x-text="t('Jendela berakhir (batas mulai)','Assignment window end (last start)')"></label>
@@ -1052,22 +1069,34 @@
                    `_x_dataStack`. #}
                 <div class="card p-6" x-data="questionManager()"
                      x-init="window.addEventListener('pdf-applied', e => onPdfApplied(e.detail))">
-                    <div class="flex items-center justify-between mb-4">
+                    <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
                         <h2 class="text-lg font-extrabold text-slate-800" x-text="t('Soal & Kunci Jawaban','Questions & Answer Key')"></h2>
-                        <div class="flex items-center gap-2 px-3 py-1.5 rounded-xl text-sm font-extrabold"
-                             :class="totalPct === 100 ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-amber-50 text-amber-700 border border-amber-200'">
-                            <i :class="totalPct === 100 ? 'fas fa-check-circle' : 'fas fa-exclamation-triangle'"></i>
-                            <span x-text="totalPct === 100 ? t('Total 100 poin','100 points total') : totalPct + t(' / 100 poin',' / 100 points')"></span>
-                        </div>
+                        <span class="rounded-xl px-3 py-1.5 text-sm font-bold bg-emerald-50 text-emerald-700"
+                              x-text="pointsLimit + t(' poin total',' points total')"></span>
                     </div>
-
-                    <!-- ── the mark scheme ────────────────────────────────────────
-                         What each *type* is worth, and the paper's 100. The marks are
-                         the teacher's; the scaling to exactly 100 is shown rather than
-                         hidden, because the score a student sees is out of 100 either
-                         way. Nothing here is written for a paper that has no scheme:
-                         the button below is what turns one on, which is what keeps an
-                         older exam's already-published marks where they are. -->
+                    <div class="flex flex-wrap items-end gap-3 mb-4">
+                        <label class="text-sm font-bold">
+                            <span class="block mb-1" x-text="t('Total Poin','Total Points')"></span>
+                            <input required type="number" name="total_points" min="0.1" max="10000" step="0.1"
+                                   x-model.number="pointsLimit" data-saved-points="{{ exam.get('total_points', 100) if exam else 100 }}"
+                                   data-rescale-url="{{ url_for('teacher.rescale_exam_points', exam_id=exam.id) if exam else '' }}"
+                                   data-sitting-started="{{ 'true' if sitting_started else 'false' }}"
+                                   class="w-32 rounded-xl border border-slate-200 px-3 py-2">
+                        </label>
+                        <button type="button" @click="pointsLimit = 100; $nextTick(() => $el.form.dispatchEvent(new Event('change')))"
+                                class="tap-44 px-3 rounded-lg text-sm font-bold text-brand-700"
+                                x-text="t('Kembalikan ke 100','Reset to 100')"></button>
+                        {% if sitting_started %}
+                        <div x-show="pointsLimit !== initialPoints" class="w-full flex flex-wrap items-center gap-3">
+                            <p class="text-sm" x-text="t('Contoh','Example') + ' · 75% = ' +
+                                previewPoints(initialPoints * 0.75) + '/' + initialPoints + ' → ' +
+                                previewPoints(pointsLimit * 0.75) + '/' + pointsLimit"></p>
+                            <button type="button" @click="rescaleExamPoints($el, (id, en) => t(id, en))"
+                                    class="tap-44 px-3 rounded-lg bg-brand-600 text-white text-sm font-bold"
+                                    x-text="t('Hitung Ulang Nilai','Recalculate Scores')"></button>
+                        </div>
+                        {% endif %}
+                    </div>
                     <div x-show="_schemeOn" style="display:none" class="mb-4 p-3 sm:p-4 bg-white rounded-2xl border-2 border-primary-200">
                         <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
                             <label class="text-xs font-extrabold text-primary-700 flex items-center gap-1.5">
@@ -1079,7 +1108,7 @@
                                       x-text="t('Nilai mentah','Raw marks') + ' ' + schemeRawTotal()"></span>
                                 <i class="fas fa-arrow-right text-[10px] text-slate-400"></i>
                                 <span class="text-xs font-extrabold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200"
-                                      x-text="t('Total','Total') + ' ' + schemeTotal + ' / 100'"></span>
+                                      x-text="t('Total','Total') + ' ' + previewPoints(schemeTotal * pointsLimit / 100) + ' / ' + pointsLimit"></span>
                                 <button type="button" @click="resetSchemeMarks()"
                                         class="text-xs font-bold text-slate-500 hover:text-primary-700 underline"
                                         x-text="t('Kembalikan default','Reset to defaults')"></button>
@@ -1106,14 +1135,14 @@
                                     <span class="text-xs font-extrabold text-slate-700 tabular-nums"
                                           x-text="row.scaledEach + ' ' + t('poin/soal','marks each')"></span>
                                     <span class="ml-auto text-xs font-extrabold text-primary-700 tabular-nums"
-                                          x-text="row.scaledSubtotal + ' / 100'"></span>
+                                          x-text="row.scaledSubtotal + ' / ' + pointsLimit"></span>
                                 </div>
                             </template>
                         </div>
 
                         <p class="text-[10px] font-semibold text-slate-400 mt-2"
-                           x-text="t('Nilai mentah discaling agar total selalu tepat 100 — tiap soal dalam satu tipe bernilai sama.',
-                                     'Raw marks are scaled so the total is always exactly 100 — every question of a type is worth the same.')"></p>
+                           x-text="t('Poin disesuaikan dengan total ujian. Bobot relatif tiap tipe soal tetap sama.',
+                                     'Points are scaled to the exam total. Each question type keeps its relative weight.')"></p>
 
                         <label x-show="hasPartialTypes" class="flex items-start gap-2 mt-3 p-2.5 rounded-xl border-2 border-slate-200 cursor-pointer">
                             <input type="checkbox" x-model="_partialOn" class="mt-0.5">
@@ -2582,6 +2611,9 @@ function questionManager() {
                 return {v: c.v, id: l.id, en: l.en, icon: l.icon, btn: l.btn};
             });
         })(),
+        initialPoints: {{ (exam.get('total_points', 100) if exam else 100) | tojson }},
+        pointsLimit: {{ (exam.get('total_points', 100) if exam else 100) | tojson }},
+        previewPoints(value) { return Math.round(value * 100) / 100; },
         get objectiveCount() { return this.questions.filter(q => this.isObjectiveType(q.type)).length; },
         get essayCount() { return this.questions.filter(q => !this.isObjectiveType(q.type)).length; },
         get objectivePct() { return this._objectivePct != null ? +this._objectivePct : 50; },
@@ -2630,8 +2662,8 @@ function questionManager() {
                     type: t, kind: sgKind(t), count: idxs.length,
                     marks: self.marksOf(t),
                     rawSubtotal: Math.round(self.marksOf(t) * idxs.length * 100) / 100,
-                    scaledEach: idxs.length ? Math.round((sum / idxs.length) * 100) / 100 : 0,
-                    scaledSubtotal: Math.round(sum * 100) / 100,
+                    scaledEach: idxs.length ? self.previewPoints(sum / idxs.length * self.pointsLimit / 100) : 0,
+                    scaledSubtotal: self.previewPoints(sum * self.pointsLimit / 100),
                 });
             });
             return rows;
@@ -3650,6 +3682,37 @@ function deleteExam(id) {
     var publishing = false;
     var inFlight;
     var warning = document.getElementById('exam-publish-warning');
+    var points = form.elements.namedItem('total_points');
+    window.rescaleExamPoints = async function (button, translate) {
+        if (!points.reportValidity() || publishing) return;
+        if (!window.confirm(translate('Terapkan skala poin baru ke hasil ujian ini?',
+            'Apply the new point scale to this exam’s results?'))) return;
+        publishing = true;
+        button.disabled = true;
+        try {
+            await inFlight;
+            const body = new FormData();
+            body.set('total_points', points.value);
+            body.set('previous_total_points', points.dataset.savedPoints);
+            const reply = await fetch(points.dataset.rescaleUrl, {
+                method: 'POST', body, headers: {Accept: 'application/json'}
+            });
+            const data = await reply.json().catch(() => ({}));
+            if (!reply.ok || !data.ok) {
+                throw new Error(data.error || translate('Total poin gagal disimpan.', 'Could not save total points.'));
+            }
+            points.dataset.savedPoints = String(data.total_points);
+            const state = Alpine.$data(points);
+            state.initialPoints = data.total_points;
+            state.pointsLimit = data.total_points;
+            warning.hidden = true;
+        } catch (error) {
+            showWarning(error.message);
+        } finally {
+            publishing = false;
+            button.disabled = false;
+        }
+    };
     function showWarning(message, field) {
         warning.textContent = message;
         warning.hidden = false;
@@ -3667,6 +3730,13 @@ function deleteExam(id) {
             window.sgBusy?.clear(event.submitter);
             window.sgBusy?.finish();
             showWarning(invalid.validationMessage, invalid);
+            return;
+        }
+        if (points?.dataset.sittingStarted === 'true' && Number(points.value) !== Number(points.dataset.savedPoints)) {
+            window.sgBusy?.clear(event.submitter);
+            window.sgBusy?.finish();
+            showWarning(sgT('Gunakan tombol Hitung Ulang Nilai untuk menerapkan skala poin baru.',
+                'Use Recalculate Scores to apply the new point scale.'), points);
             return;
         }
         publishing = true;
@@ -3715,6 +3785,7 @@ function deleteExam(id) {
             /* The two fields the module owns belong to this request, not to the
                form the teacher is typing in: a draft id that is not there yet,
                and the verb that tells the save door not to navigate. */
+            if (points?.dataset.sittingStarted === 'true') body.delete('total_points');
             body.append('action', 'autosave');
             body.append('draft_id', state.id || '');
             inFlight = fetch(form.getAttribute('action'), {
@@ -3754,6 +3825,8 @@ function deleteExam(id) {
                write that row. The edit address is the server url_for with the
                placeholder swapped, so no path is spelled out in JavaScript. */
             if (idField) idField.value = examId;
+            var owner = form.elements.namedItem('teacher_id');
+            if (owner) owner.disabled = true;
             if (sebChoice && sebPanel) {
                 sebChoice.checked = savedSebChoice;
                 sebChoice.disabled = true;

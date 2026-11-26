@@ -36,7 +36,7 @@ from app.services.question_types import (
     objective_result, question_kind, scheme_in,
 )
 from app.services.essay_text import essay_answer_text
-from app.services import exam_scoring
+from app.services import exam_management, exam_scoring
 from app.services import mark_scheme
 from app.services import assignments as assignments_service
 from app.services import exam_media
@@ -1370,6 +1370,20 @@ def _recorded_violations_for_builder(supabase, exam_row, exam_id) -> int:
 @teacher_or_admin_required
 def exam_form():
     supabase = get_supabase()
+    school_admin = g.get("user_role") == "admin_sekolah"
+    teacher_id = g.user_id
+    teachers = []
+    if school_admin:
+        sid = g.get("user_school_id")
+        if not sid:
+            return _deny(NO_EXAM_ACCESS, _wants_json())
+        if request.method == "GET":
+            teachers = ta_service.staff_directory(supabase, sid)
+        chosen = request.form.get("teacher_id") if request.method == "POST" else None
+        if chosen:
+            if not ta_service.teacher_in_school(supabase, sid, chosen):
+                return _deny(NO_EXAM_ACCESS, _wants_json())
+            teacher_id = chosen
     if request.method == "GET":
         supabase = get_supabase()
         sid = g.get("user_school_id")
@@ -1377,6 +1391,7 @@ def exam_form():
         # subject only when the admin assigned that pair (`_builder_scope`).
         subjects, classes, classes_by_subject = _builder_scope(supabase, sid)
         return render_template("teacher/exam_form.html", exam=None, subjects=subjects, classes=classes,
+                               exam_teachers=teachers, school_admin=school_admin,
                                classes_by_subject=classes_by_subject,
                                grade_components=_grade_components_by_subject(supabase, sid),
                                option_letters=list(CHOICE_OPTIONS),
@@ -1536,7 +1551,7 @@ def exam_form():
     active_year_id = (ta_service.active_school_year(
         supabase, g.get("user_school_id")) or {}).get("id")
     data = {
-        "teacher_id": g.user_id,
+        "teacher_id": teacher_id,
         "school_id": school_id,
         "title": title,
         "subject": subject,
@@ -1585,7 +1600,7 @@ def exam_form():
     # A draft save writes the row the page already holds; a paper never saved mints
     # one. `_owned_draft` decides, so a `draft_id` naming another school's paper —
     # or a published one — is ignored rather than written.
-    draft_row = _owned_draft(supabase, draft_id, g.get("user_school_id"), g.user_id)
+    draft_row = _owned_draft(supabase, draft_id, g.get("user_school_id"), teacher_id)
     # A paper's school is decided when it is minted, and this door cannot move it. Not a
     # promise, an arrangement: `school_id` above comes from `filing_school_for_request`,
     # which answers the school this request is *verified* in and refuses a form field
@@ -1602,6 +1617,12 @@ def exam_form():
         allowed, refusal = check_feature_limit(school_id, "create_exam")
         if not allowed:
             return _exam_save_refused(autosave, refusal)
+    try:
+        points = exam_management.parse_points(request.form.get("total_points", 100))
+    except ValueError as exc:
+        return _exam_save_refused(autosave, str(exc))
+    if points != 100 or (draft_row and request.form.get("total_points")):
+        data["total_points"] = points
     # Keep the new paper private until its credentials and matching Config Key exist.
     setup_seb = not draft_row and request.form.get("require_seb") == "true"
     if setup_seb:
@@ -1621,6 +1642,8 @@ def exam_form():
             # calendar suite's "inside the window" case reaches exactly this line.
             exam_id = res.data[0]["id"]
     except Exception:
+        if "total_points" in data:
+            return _exam_save_refused(autosave, "Total poin gagal disimpan.")
         for key in ["question_weights", "question_texts", "question_stimuli", "anti_cheat_enabled", "penalty_per_violation", "max_violations", "auto_submit_on_max", "fullscreen_required", "randomize_questions", "randomize_options", "watermark_name", "block_copy_paste", "block_right_click", "block_screenshot", "allow_calculator", "lock_pending_resume", "resume_code_limit", "grade_component_type_id", "school_year_id", "subject_id", "class_ids", "start_at", "end_at", "assessment_period_id", "auto_submit_on_window_end", "is_template", "source_exam_id", "max_attempts", "publish_mode", "question_pages", "question_cognitive"]:
             data.pop(key, None)
         if draft_row:
@@ -1656,7 +1679,8 @@ def exam_form():
     # draft is not a new paper, and a "created" entry every few seconds would bury
     # the one that matters.
     if not draft_row:
-        log_activity("create", "exam", exam_id, new_data={"title": title, "subject": subject, "total_questions": total_questions}, user_id=g.user_id)
+        log_activity("create", "exam", exam_id, new_data={"title": title, "subject": subject, "total_questions": total_questions,
+                               "teacher_id": teacher_id, "start_at": start_at, "total_points": points}, user_id=g.user_id)
     # The builder's background save stops here. Everything below — the weight-gap
     # flash, the PDF re-upload, the publish side effects and the redirect — belongs
     # to a *reported* save; an autosave answers JSON and writes the paper's own
@@ -1729,7 +1753,7 @@ def exam_form():
     _invalidate_teacher_dashboard()
     if action == "publish" and _wants_json():
         return jsonify({"ok": True, "redirect": url_for("teacher.my_exams")})
-    return redirect("/teacher/exams" if action == "publish" else f"/teacher/exams/{exam_id}")
+    return redirect(_exam_list_url() if action == "publish" else f"/teacher/exams/{exam_id}")
 
 
 @teacher_bp.route("/api/exam-roster")
@@ -1817,7 +1841,15 @@ def exam_detail(exam_id):
     if err:
         return err
     if request.method == "DELETE":
-        supabase.table("exams").delete().eq("id", exam_id).execute()
+        if exam_management.has_sittings(supabase, exam_id):
+            return _deny(exam_management.SITTING_LOCKED, True)
+        try:
+            supabase.table("exams").delete().eq("id", exam_id).execute()
+        except Exception as exc:
+            if "exam_sitting_started" in str(exc):
+                return _deny(exam_management.SITTING_LOCKED, True)
+            raise
+        log_activity("delete", "exam", exam_id, user_id=g.user_id)
         _invalidate_teacher_dashboard()
         return jsonify({"success": True})
     if request.method == "GET":
@@ -1856,6 +1888,8 @@ def exam_detail(exam_id):
             supabase, exam_row, exam_id)
         return render_template("teacher/exam_form.html", exam=exam_data, subjects=subjects, classes=classes,
                                classes_by_subject=classes_by_subject,
+                               school_admin=g.get("user_role") == "admin_sekolah",
+                               sitting_started=exam_management.has_sittings(supabase, exam_id),
                                saved_targets=saved_targets,
                                component_gap=component_gap,
                                recorded_violations=recorded_violation_count,
@@ -2026,8 +2060,23 @@ def exam_detail(exam_id):
     # the class a pupil is in this year, and a closed year stays read-only.
     active_year_id = (ta_service.active_school_year(
         supabase, g.get("user_school_id")) or {}).get("id")
+    old_points = float(exam_row.get("total_points") or 100)
+    try:
+        points = exam_management.parse_points(request.form.get("total_points", old_points))
+    except ValueError as exc:
+        return _exam_save_refused(autosave, str(exc))
+    old_start = exam_window.parse_dt(exam_row.get("start_at"))
+    if old_start and old_start.replace(second=0, microsecond=0) == _start_dt:
+        start_at = exam_row["start_at"]
+        _start_dt = old_start
+    start_changed = old_start != _start_dt
+    points_changed = points != old_points
+    if (start_changed or points_changed) and exam_management.has_sittings(supabase, exam_id):
+        message = (exam_management.SITTING_LOCKED if start_changed else
+                   "Konfirmasi perubahan total poin melalui tombol Hitung Ulang Nilai.")
+        return _exam_save_refused(autosave, message)
     data = {
-        "teacher_id": g.user_id,
+        "teacher_id": exam_row["teacher_id"],
         "title": title,
         "subject": subject,
         "subject_id": subject_id,
@@ -2069,8 +2118,10 @@ def exam_detail(exam_id):
         "lock_pending_resume": lock_pending_resume,
         "resume_code_limit": resume_code_limit,
         "grade_component_type_id": grade_component_id,
-        "school_year_id": active_year_id,
+        "school_year_id": exam_row.get("school_year_id") or active_year_id,
     }
+    if points_changed:
+        data["total_points"] = points
     if filing_school_id:
         # A row that had no school gets one now, and it is the school this request
         # was verified in — the only repair an edit is allowed to make.
@@ -2092,6 +2143,8 @@ def exam_detail(exam_id):
     except Exception:
         if "seb_config_key" in data:
             return _exam_save_refused(autosave, "seb_issue_failed")
+        if points_changed or start_changed:
+            return _exam_save_refused(autosave, "Perubahan jadwal atau total poin gagal disimpan. Muat ulang untuk memeriksa apakah siswa sudah mulai.")
         for key in ["question_weights", "question_texts", "question_stimuli", "anti_cheat_enabled", "penalty_per_violation", "max_violations", "auto_submit_on_max", "fullscreen_required", "randomize_questions", "randomize_options", "watermark_name", "block_copy_paste", "block_right_click", "block_screenshot", "allow_calculator", "lock_pending_resume", "resume_code_limit", "grade_component_type_id", "school_year_id", "subject_id", "class_ids", "start_at", "end_at", "assessment_period_id", "auto_submit_on_window_end", "is_template", "source_exam_id", "max_attempts", "publish_mode", "question_pages", "question_cognitive"]:
             data.pop(key, None)
         supabase.table("exams").update(data, returning="minimal").eq("id", exam_id).execute()
@@ -2102,6 +2155,11 @@ def exam_detail(exam_id):
     # fields, nothing else. The per-pupil roster sync waits for the explicit save
     # too: a background write every few seconds is the load it must not become.
     if autosave:
+        if start_changed or points_changed:
+            log_activity("update", "exam", exam_id,
+                         old_data={"start_at": exam_row.get("start_at"), "total_points": old_points},
+                         new_data={"start_at": start_at, "total_points": points},
+                         user_id=g.user_id)
         return jsonify({"ok": True, "exam_id": exam_id})
     _sync_exam_targets(supabase, exam_id, class_ids, request.form)
     # Same warning as the create door — a save that leaves the paper outside its
@@ -2143,13 +2201,45 @@ def exam_detail(exam_id):
             current_app.logger.warning("PDF processing failed for exam %s: %s", exam_id, e)
 
     _recalculate_scores(exam_id)
-    log_activity("update", "exam", exam_id, new_data={"title": title, "status": data.get("status")}, user_id=g.user_id)
+    log_activity("update", "exam", exam_id, new_data={"title": title, "status": data.get("status"),
+                           "start_at": start_at, "total_points": points,
+                           "teacher_id": exam_row["teacher_id"]}, user_id=g.user_id)
     # Everything the dashboard shows about this exam just changed — its key, its
     # question types, its status — and that page is cached for 20 seconds.
     _invalidate_teacher_dashboard()
     if action == "publish" and _wants_json():
-        return jsonify({"ok": True, "redirect": url_for("teacher.my_exams")})
-    return redirect("/teacher/exams" if action in ("publish", "save_active") else f"/teacher/exams/{exam_id}")
+        return jsonify({"ok": True, "redirect": _exam_list_url()})
+    return redirect(_exam_list_url() if action in ("publish", "save_active") else f"/teacher/exams/{exam_id}")
+
+
+@teacher_bp.route("/exams/<exam_id>/total-points", methods=["POST"])
+@subscription_write_required
+@teacher_or_admin_required
+@open_year_required("exam_id")
+def rescale_exam_points(exam_id):
+    supabase = get_supabase()
+    exam, err = _guard_exam(supabase, exam_id, columns="id,teacher_id,school_id,total_points")
+    if err:
+        return err
+    try:
+        previous = exam_management.parse_points(request.form.get("previous_total_points"))
+        points = exam_management.parse_points(request.form.get("total_points"))
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 400
+    if previous != float(exam["total_points"]):
+        return jsonify(error="Total poin sudah diubah. Muat ulang halaman dan periksa kembali."), 409
+    updated = supabase.rpc("apply_exam_point_scale", {
+        "paper_id": exam_id, "previous_points": previous, "new_points": points,
+    }).execute().data
+    if not updated:
+        return jsonify(error="Total poin sudah diubah. Muat ulang halaman dan periksa kembali."), 409
+    # The stored grades are percentages. Every released point score is calculated
+    # from that percentage using the new denominator, so all results change together.
+    log_activity("update", "exam", exam_id,
+                 old_data={"total_points": previous}, new_data={"total_points": points},
+                 user_id=g.user_id)
+    _invalidate_teacher_dashboard()
+    return jsonify(ok=True, total_points=points)
 
 
 @teacher_bp.route("/exams/<exam_id>/preprocess-essays", methods=["POST"])
@@ -2319,24 +2409,52 @@ def _upload_size(storage) -> int:
         return int(getattr(storage, "content_length", 0) or 0)
 
 
+def _exam_list_url():
+    if g.get("user_role") == "admin_sekolah":
+        return "/admin-sekolah/invigilation/exams"
+    return "/teacher/exams"
+
+
 @teacher_bp.route("/exams")
 @teacher_or_admin_required
 def my_exams():
+    return render_exam_list(school_admin=g.get("user_role") == "admin_sekolah")
+
+
+def render_exam_list(*, school_admin):
     supabase = get_supabase()
-    # A teacher sees their own exams; an admin sees the school's. Previously this
-    # filtered by teacher_id for everyone, so an admin_sekolah — who is allowed on
-    # this page — got a permanently empty list, with no clue why.
-    # Cards and their warnings need metadata and the key, never the large
-    # question_canvas/question_texts/stimuli payload used by the editor.
+    sid = g.get("user_school_id")
+    if school_admin and not sid:
+        return _deny(NO_EXAM_ACCESS, True)
     columns = (
-        "id,title,subject,duration_minutes,total_questions,status,is_published,"
-        "is_template,start_at,anti_cheat_enabled,class_ids,question_types,answer_key"
+        "id,teacher_id,title,subject,duration_minutes,total_questions,status,is_published,"
+        "is_template,start_at,anti_cheat_enabled,require_seb,class_ids,question_types,answer_key"
     )
-    query = supabase.table("exams").select(columns).eq("teacher_id", g.user_id)
-    if g.get("user_role") == "admin_sekolah" and g.get("user_school_id"):
-        query = supabase.table("exams").select(columns).eq("school_id", g.get("user_school_id"))
-    res = query.order("created_at", desc=True).execute()
-    exams = res.data or []
+    query = supabase.table("exams").select(columns)
+    if school_admin:
+        query = query.eq("school_id", sid)
+    else:
+        query = query.eq("teacher_id", g.user_id)
+    exams = []
+    page_size = 500
+    while True:
+        offset = len(exams)
+        page = (query.order("created_at", desc=True).order("id")
+                .range(offset, offset + page_size - 1).execute().data or [])
+        exams.extend(page)
+        if len(page) < page_size:
+            break
+        query = supabase.table("exams").select(columns)
+        query = query.eq("school_id", sid) if school_admin else query.eq("teacher_id", g.user_id)
+    offset = g.get("tz_offset", 7)
+    if sid:
+        school = row_or_none(supabase.table("schools").select("tz_offset")
+                             .eq("id", sid).maybe_single().execute()) or {}
+        if school.get("tz_offset") is not None:
+            offset = school["tz_offset"]
+    exams = exam_management.order_exams(exams, offset)
+    teachers = ({str(t["id"]): t["name"] for t in ta_service.staff_directory(supabase, sid)}
+                if school_admin else {})
     # Which cards get the "no class" badge. Computed here rather than in the
     # template because `class_ids` arrives as jsonb — a JSON *string* is truthy in
     # Jinja, so `{% if not exam.class_ids %}` would miss exactly the empty case it
@@ -2354,7 +2472,7 @@ def my_exams():
     return render_template("teacher/exams.html", exams=exams,
                            unassigned_ids=unassigned_ids,
                            ambiguous_ids=ambiguous_ids,
-                           exam_quota=quota)
+                           exam_quota=quota, school_admin=school_admin, teacher_names=teachers)
 
 
 #: The three sizes a paper is checked at, and each one's two orientations. A real
@@ -2545,16 +2663,19 @@ def delete_exam(exam_id):
     _, err = _guard_exam(supabase, exam_id, as_json=_wants_json())
     if err:
         return err
-    supabase.table("violation_logs").delete(returning="minimal").eq("exam_id", exam_id).execute()
-    supabase.table("exam_access_codes").delete(returning="minimal").eq("exam_id", exam_id).execute()
-    supabase.table("analytics_cache").delete(returning="minimal").eq("exam_id", exam_id).execute()
-    supabase.table("submissions").delete(returning="minimal").eq("exam_id", exam_id).execute()
-    supabase.table("exams").delete(returning="minimal").eq("id", exam_id).execute()
+    if exam_management.has_sittings(supabase, exam_id):
+        return _deny(exam_management.SITTING_LOCKED, _wants_json(), _exam_list_url())
+    try:
+        supabase.table("exams").delete(returning="minimal").eq("id", exam_id).execute()
+    except Exception as exc:
+        if "exam_sitting_started" in str(exc):
+            return _deny(exam_management.SITTING_LOCKED, _wants_json(), _exam_list_url())
+        raise
     _invalidate_teacher_dashboard()
     log_activity("delete", "exam", exam_id, user_id=g.user_id)
     if request.headers.get("Accept", "") == "application/json" or request.is_json:
         return jsonify({"success": True})
-    return redirect("/teacher/exams")
+    return redirect(_exam_list_url())
 
 
 @teacher_bp.route("/exams/<exam_id>/duplicate", methods=["POST"])

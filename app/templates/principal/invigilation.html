@@ -15,6 +15,9 @@
 {% block page_title %}{{ 'Jadwal Pengawasan' if lang == 'id' else 'Invigilation' }}{% endblock %}
 {% block content %}
 <div class="space-y-6">
+    {% if role == 'admin_sekolah' %}
+    {% include "shared/_admin_invigilation_tabs.html" %}
+    {% endif %}
 
     <div class="rounded-2xl bg-sky-50 border border-sky-200 p-3 flex items-start gap-3">
         <i class="fas fa-clipboard-check text-sky-600 mt-0.5"></i>

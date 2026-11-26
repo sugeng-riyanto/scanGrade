@@ -1,0 +1,10 @@
+<nav class="flex flex-wrap gap-2" :aria-label="t('Pengawasan ujian','Exam invigilation')">
+    <a href="{{ url_for('admin_sekolah.invigilation_page') }}"
+       {% if request.endpoint == 'admin_sekolah.invigilation_page' %}aria-current="page"{% endif %}
+       class="tap-44 inline-flex items-center px-4 rounded-xl border border-slate-200 font-bold text-sm {{ 'bg-brand-50 text-brand-700' if request.endpoint == 'admin_sekolah.invigilation_page' else 'text-slate-700' }}"
+       x-text="t('Jadwal Pengawasan','Invigilation Schedule')"></a>
+    <a href="{{ url_for('admin_sekolah.invigilation_exams') }}"
+       {% if request.endpoint == 'admin_sekolah.invigilation_exams' %}aria-current="page"{% endif %}
+       class="tap-44 inline-flex items-center px-4 rounded-xl border border-slate-200 font-bold text-sm {{ 'bg-brand-50 text-brand-700' if request.endpoint == 'admin_sekolah.invigilation_exams' else 'text-slate-700' }}"
+       x-text="t('Ujian','Exams')"></a>
+</nav>
