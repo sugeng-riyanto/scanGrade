@@ -1387,7 +1387,12 @@ def exam_form():
         # The admin's own matrix scopes both lists: a class is offered for a
         # subject only when the admin assigned that pair (`_builder_scope`).
         subjects, classes, classes_by_subject = _builder_scope(supabase, sid)
-        return render_template("teacher/exam_form.html", exam=None, subjects=subjects, classes=classes,
+        now = datetime.now(timezone(timedelta(hours=g.get("tz_offset", 7))))
+        default_start = now.replace(hour=7, minute=30, second=0, microsecond=0)
+        if default_start < now:
+            default_start += timedelta(days=1)
+        return render_template("teacher/exam_form.html", exam=None,
+                               default_exam_start=default_start.strftime("%Y-%m-%dT%H:%M"), subjects=subjects, classes=classes,
                                exam_teachers=teachers, school_admin=school_admin,
                                classes_by_subject=classes_by_subject,
                                grade_components=_grade_components_by_subject(supabase, sid),

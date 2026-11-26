@@ -1,4 +1,31 @@
 {% extends "base.html" %}
+{% macro schedule_controls() %}
+<div data-schedule-controls hidden class="exam-schedule-controls">
+    <label>
+        <span x-text="t('Tanggal','Date')"></span>
+        <input type="date">
+    </label>
+    <div class="exam-schedule-time">
+        <label>
+            <span x-text="t('Jam','Hour')"></span>
+            <select>
+                {% for hour in range(1, 13) %}<option value="{{ hour }}">{{ '%02d' | format(hour) }}</option>{% endfor %}
+            </select>
+        </label>
+        <label>
+            <span x-text="t('Menit','Minute')"></span>
+            <select>
+                {% for minute in range(60) %}<option>{{ '%02d' | format(minute) }}</option>{% endfor %}
+            </select>
+        </label>
+        <label>
+            <span>AM / PM</span>
+            <select><option>AM</option><option>PM</option></select>
+        </label>
+    </div>
+    <button type="button" x-text="t('Kosongkan jadwal','Clear schedule')"></button>
+</div>
+{% endmacro %}
 {# The route always sends `builder_defaults`, but a page that reads it must not
    depend on that to render: a missing value falls back to an empty mapping, and
    the duration below then falls back to the app's own default hour rather than
@@ -984,22 +1011,27 @@
                     <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
                         <div>
                             <label class="block text-sm font-extrabold text-slate-700 mb-1" x-text="t('Mulai (jadwal)','Starts (scheduled)')"></label>
+            <div {% if not sitting_started %}data-exam-schedule{% endif %}>
             <input type="datetime-local" name="start_at" id="start_at_input"
                    {% if sitting_started %}readonly{% endif %}
-                   value="{% if exam and exam.start_at %}{{ exam.start_at | tz('%Y-%m-%dT%H:%M') }}{% endif %}"
+                   value="{% if exam and exam.start_at %}{{ exam.start_at | tz('%Y-%m-%dT%H:%M') }}{% elif not exam %}{{ default_exam_start | default('', true) }}{% endif %}"
                    class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-500 font-bold transition">
+            {% if not sitting_started %}{{ schedule_controls() }}{% endif %}
+            </div>
             {% if sitting_started %}
             <p class="text-xs text-slate-600 mt-1" x-text="t('Siswa sudah mulai mengerjakan. Jadwal mulai dikunci.','Students have started. The start time is locked.')"></p>
             {% else %}
             <p class="text-xs text-slate-400 mt-1" x-text="t('Kosongkan = langsung aktif','Leave empty = active immediately')"></p>
             {% endif %}
-            {% if not exam %}<script>!function(){var e=document.getElementById('start_at_input');if(e&&!e.value){var t=new Date();t.setMinutes(t.getMinutes()-t.getTimezoneOffset());e.value=t.toISOString().slice(0,16)}}();</script>{% endif %}
                         </div>
                         <div>
                             <label class="block text-sm font-extrabold text-slate-700 mb-1" x-text="t('Jendela berakhir (batas mulai)','Assignment window end (last start)')"></label>
+                            <div data-exam-schedule>
                             <input type="datetime-local" name="end_at" id="end_at_input"
                                    value="{% if exam and exam.end_at %}{{ (exam.end_at[:19] + '+00:00') | tz('%Y-%m-%dT%H:%M') }}{% endif %}"
                                    class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-500 font-bold transition">
+                            {{ schedule_controls() }}
+                            </div>
                             {# The two clocks, kept in step by one toggle. The arithmetic
                                and the two rules it obeys (`0` is Unlimited, and a
                                window a teacher already saved is never rewritten
@@ -1206,6 +1238,11 @@
                                 <span x-text="t('Tambah','Add') + ' ' + t(c.id, c.en)"></span>
                             </button>
                         </template>
+                        <button type="button" @click="addQuestionOf('pgk', false, 'multi')"
+                                class="flex items-center gap-2 px-3 py-2.5 rounded-xl font-bold text-sm border-2 transition bg-teal-50 hover:bg-teal-100 text-teal-700 border-teal-200">
+                            <i class="fas fa-square-check" aria-hidden="true"></i>
+                            <span x-text="t('Tambah Pilihan Ganda Kompleks','Add Select all that apply')"></span>
+                        </button>
                         <button type="button" @click="normalizeTo100()"
                                 class="flex items-center gap-2 bg-primary-50 hover:bg-primary-100 text-primary-700 px-3 py-2.5 rounded-xl font-bold text-sm border-2 border-primary-200 transition">
                             <i class="fas fa-balance-scale"></i>100%
@@ -3025,8 +3062,9 @@ function questionManager() {
             input.value = count;
             input.dispatchEvent(new Event('change', {bubbles: true}));
         },
-        addQuestionOf(type, bulk = false) {
+        addQuestionOf(type, bulk = false, pgkSelect = 'single') {
             const question = bulk ? this.blankBulkQuestion(type) : this.blankQuestion(type);
+            if (type === 'pgk') question.pgkSelect = pgkSelect;
             question._initial = JSON.stringify(question);
             this.questions.push(question);
         },
@@ -3642,6 +3680,8 @@ function deleteExam(id) {
     }
 }
 </script>
+<link rel="stylesheet" href="{{ asset_v('css/exam-schedule.css') }}">
+<script src="{{ asset_v('js/exam-schedule.js') }}"></script>
 <script src="{{ asset_v('js/exam-window.js') }}"></script>
 <script>
 /* One toggle, two clocks: the duration the form already collects, and the window

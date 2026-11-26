@@ -96,7 +96,12 @@
             // owns the value, and switching it off hands it back untouched.
             if (!follow.checked) return;
             var next = endFrom(start.value, duration.value);
-            if (next !== null) end.value = next;
+            if (next !== null) {
+                end.value = next;
+                if (typeof end.dispatchEvent === 'function') {
+                    end.dispatchEvent(new Event('schedule:refresh'));
+                }
+            }
         }
 
         start.addEventListener('change', recompute);
@@ -104,8 +109,7 @@
         duration.addEventListener('input', recompute);
         follow.addEventListener('change', recompute);
 
-        // The page sets `start_at` to "now" from an inline script further up, so
-        // the first pass waits a tick rather than reading an empty field. A
+        // The first pass waits for the form to finish initializing. A
         // saved window is left exactly as it was found: `recompute` only writes
         // when the toggle is on *and* the duration says something.
         if (fields.onLoad) setTimeout(recompute, 0);
