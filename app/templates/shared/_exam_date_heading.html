@@ -1,0 +1,11 @@
+<h2 class="mb-3 text-lg font-bold text-surface-800" :lang="lang" data-date-heading="{{ date_group }}">
+    {% if date_group == 'today' %}
+    <span x-text="t('Hari Ini','Today')">Hari Ini</span>
+    {% elif date_group == 'upcoming' %}
+    <span x-text="t('Akan Datang','Upcoming')">Akan Datang</span>
+    {% elif date_group == 'previous' %}
+    <span x-text="t('Sebelumnya','Previous')">Sebelumnya</span>
+    {% else %}
+    <span x-text="t('Tanpa Jadwal','Unscheduled')">Tanpa Jadwal</span>
+    {% endif %}
+</h2>

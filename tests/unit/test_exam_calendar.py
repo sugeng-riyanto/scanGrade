@@ -307,6 +307,44 @@ class TestTheCreateDoorRefusesAnOutsideWindow:
         assert [c for c in sb.inserted if c[0] == "exams"], (
             "the calendar blocked an inside window instead of letting it through")
 
+    def test_admin_autosaves_questions_to_the_selected_owner(self, app, monkeypatch):
+        import json
+
+        from flask import g
+        from app.routes import teacher
+
+        monkeypatch.setattr(teacher.ta_service, "teacher_in_school",
+                            lambda _db, sid, owner: (sid, owner) == ("s1", "guru-2"))
+        invalidated = []
+        monkeypatch.setattr(teacher, "_invalidate_teacher_dashboard", invalidated.append)
+        sb, response = self._post(
+            app, monkeypatch, "2026-09-03T09:00", "2026-09-04T09:00",
+            action="autosave", teacher_id="guru-2", total_questions="2",
+            question_types=json.dumps({"0": "mcq", "1": "mcq"}),
+            answer_key=json.dumps({"0": "A", "1": "B"}),
+        )
+        exam_id = response.get_json()["exam_id"]
+        assert sb.rows["exams"][0]["teacher_id"] == "guru-2"
+        assert sb.rows["exams"][0]["answer_key"] == {"0": "A", "1": "B"}
+
+        saved = sb.rows["exams"][0]
+        monkeypatch.setattr(teacher, "_guard_exam", lambda *args, **kwargs: (dict(saved), None))
+        path = f"/teacher/exams/{exam_id}"
+        with app.test_request_context(path, method="POST", data={
+            "action": "autosave", "title": "UTS", "subject": "MTK",
+            "start_at": "2026-09-03T09:00", "end_at": "2026-09-04T09:00",
+            "total_questions": "1", "question_types": json.dumps({"0": "mcq"}),
+            "answer_key": json.dumps({"0": "C"}), "teacher_id": "t-1",
+        }):
+            g.user_id, g.user_role, g.user_school_id = "t-1", "admin_sekolah", "s1"
+            assert _raw(teacher.exam_detail)(exam_id).get_json()["ok"]
+
+        assert len(sb.rows["exams"]) == 1
+        assert saved["teacher_id"] == "guru-2"
+        assert saved["total_questions"] == 1
+        assert saved["answer_key"] == {"0": "C"}
+        assert invalidated == ["guru-2", "guru-2"]
+
     @pytest.mark.parametrize("issued", [True, False])
     def test_seb_draft_is_enabled_only_after_credential_issuance(
         self, app, monkeypatch, issued,

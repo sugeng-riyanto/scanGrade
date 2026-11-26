@@ -40,12 +40,17 @@
             <option value="previous" x-text="t('Sebelumnya','Previous')"></option>
         </select>
     </label>
-    {% set groups = exams | selectattr('date_group', 'defined') | map(attribute='date_group') | unique | list %}
+    {% set date_groups = dict(exams | groupby('date_group', default='unscheduled')) %}
+    {% set groups = date_groups.keys() | list %}
     <p x-cloak x-show='dateFilter !== "all" && !{{ groups | tojson }}.includes(dateFilter)'
        class="text-sm text-surface-500" role="status"
        x-text="t('Tidak ada ujian untuk filter ini','No exams match this filter')"></p>
+    {% for date_group in ['today', 'upcoming', 'previous', 'unscheduled'] %}
+    {% if date_group in date_groups %}
+    <section x-show="dateFilter === 'all' || dateFilter === '{{ date_group }}'">
+        {% include "shared/_exam_date_heading.html" %}
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {% for e in exams %}
+        {% for e in date_groups[date_group] %}
         {# `question_types` is a jsonb column, and a jsonb column written with
            `json.dumps` comes back as a JSON *string*. Calling `.values()` on that
            raised `'str object' has no attribute 'values'` and took the whole page
@@ -54,8 +59,7 @@
         {% set qtypes = e.question_types if e.question_types is mapping else {} %}
         {% set has_essay = q_any_essay(qtypes.values()) %}
         {% set n = e.total_questions or 0 %}
-        <div data-date-group="{{ e.date_group | default('unscheduled') }}"
-             x-show="dateFilter === 'all' || $el.dataset.dateGroup === dateFilter"
+        <div data-date-group="{{ date_group }}"
              class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 border border-surface-100 hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
             <div class="p-5">
                 <div class="flex items-start justify-between mb-3">
@@ -108,6 +112,9 @@
         </div>
         {% endfor %}
     </div>
+    </section>
+    {% endif %}
+    {% endfor %}
     {% else %}
     <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 border border-surface-100 p-12 text-center text-surface-400">
         <div class="w-16 h-16 mx-auto rounded-full bg-surface-100 flex items-center justify-center mb-4"><i class="fas fa-inbox text-surface-300 text-3xl"></i></div>

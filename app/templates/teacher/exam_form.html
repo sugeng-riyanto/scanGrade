@@ -782,8 +782,9 @@
                 <div class="card p-5">
                     <label for="exam-teacher" class="block text-sm font-bold mb-2"
                            x-text="t('Guru pemilik ujian','Exam owner')"></label>
-                    <select id="exam-teacher" name="teacher_id" class="w-full rounded-xl border border-slate-200 px-3 py-2">
-                        <option value="" x-text="t('Akun saya','My account')"></option>
+                    <select required id="exam-teacher" name="teacher_id" class="w-full rounded-xl border border-slate-200 px-3 py-2">
+                        <option value="" x-text="t('Pilih pemilik ujian','Select an exam owner')"></option>
+                        <option value="{{ g.user_id }}" x-text="t('Akun saya','My account')"></option>
                         {% for teacher in exam_teachers %}
                         <option value="{{ teacher.id }}">{{ teacher.name }}</option>
                         {% endfor %}
@@ -3676,6 +3677,7 @@ function deleteExam(id) {
     var form = document.querySelector('form[data-save-url]');
     if (!form || !window.SGExamAutosave) return;
     var idField = form.querySelector('[name="draft_id"]');
+    var owner = form.elements.namedItem('teacher_id');
     var sebChoice = form.querySelector('[name="require_seb"]');
     var sebPanel = document.getElementById('new-exam-seb-panel');
     var savedSebChoice;
@@ -3777,7 +3779,7 @@ function deleteExam(id) {
     window.SGExamAutosave.wire({
         form: form,
         indicator: document.getElementById('autosave-status'),
-        paused: function () { return publishing; },
+        paused: function () { return publishing || (owner && !owner.value); },
         read: function () { return window.SGExamAutosave.collect(form); },
         send: function (state) {
             var body = new FormData();
@@ -3788,6 +3790,9 @@ function deleteExam(id) {
             if (points?.dataset.sittingStarted === 'true') body.delete('total_points');
             body.append('action', 'autosave');
             body.append('draft_id', state.id || '');
+            var choosingOwner = owner && !state.id;
+            if (choosingOwner) owner.disabled = true;
+            var savedOwner = false;
             inFlight = fetch(form.getAttribute('action'), {
                 method: 'POST',
                 body: body,
@@ -3809,6 +3814,7 @@ function deleteExam(id) {
                         if (data === null) return { queued: true };
                         if (reply.ok && data.exam_id && !state.id) {
                             savedSebChoice = body.get('require_seb') === 'true';
+                            savedOwner = true;
                         }
                         return { ok: reply.ok && data.ok !== false,
                                  exam_id: data.exam_id,
@@ -3817,7 +3823,10 @@ function deleteExam(id) {
             })
             /* Offline, DNS gone, connection reset mid-flight: `fetch` rejects and
                no verdict exists. The draft is queued, not marked as failed. */
-            .catch(function () { return { queued: true }; });
+            .catch(function () { return { queued: true }; })
+            .finally(function () {
+                if (choosingOwner && !savedOwner) owner.disabled = false;
+            });
             return inFlight;
         },
         adopt: function (examId) {
@@ -3825,7 +3834,6 @@ function deleteExam(id) {
                write that row. The edit address is the server url_for with the
                placeholder swapped, so no path is spelled out in JavaScript. */
             if (idField) idField.value = examId;
-            var owner = form.elements.namedItem('teacher_id');
             if (owner) owner.disabled = true;
             if (sebChoice && sebPanel) {
                 sebChoice.checked = savedSebChoice;

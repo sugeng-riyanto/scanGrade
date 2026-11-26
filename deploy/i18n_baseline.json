@@ -698,7 +698,7 @@
       "frozen": false
     },
     "teacher/exam_form.html": {
-      "pairs": 346,
+      "pairs": 347,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -911,6 +911,12 @@
       "pairs": 3,
       "leftovers": 0,
       "coverage": 100.0,
+      "frozen": false
+    },
+    "shared/_exam_date_heading.html": {
+      "pairs": 4,
+      "leftovers": 3,
+      "coverage": 57.1,
       "frozen": false
     }
   }
