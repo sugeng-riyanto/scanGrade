@@ -237,11 +237,16 @@ class TestTheWritersInvalidateTheCache:
     @pytest.mark.parametrize("path", sorted(WRITERS))
     def test_the_writer_drops_the_dashboard_cache(self, path):
         block = _route_block(path)
-        assert "_invalidate_teacher_dashboard()" in block, (
+        calls = {
+            "/exams/new": "_invalidate_teacher_dashboard(teacher_id)",
+            "/exams/<exam_id>": '_invalidate_teacher_dashboard(exam_row["teacher_id"])',
+            "/exams/<exam_id>/answer-keys": '_invalidate_teacher_dashboard(exam.get("teacher_id"))',
+        }
+        assert calls.get(path, "_invalidate_teacher_dashboard()") in block, (
             f"{path} changes what the dashboard shows ({WRITERS[path]}) but never "
             "drops the cached dashboard. The teacher saves, comes back within 20 "
             "seconds and sees the page as it was.\n  add "
-            "_invalidate_teacher_dashboard() after the write")
+            "the dashboard invalidation call after the write")
 
     def test_the_invalidation_is_one_named_helper(self):
         """One helper, so the next writer is a one-line call rather than a

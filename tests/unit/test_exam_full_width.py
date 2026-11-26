@@ -129,8 +129,12 @@ class TestTheExamPageUncapsItsOwnColumn:
             path.relative_to(TEMPLATES).as_posix()
             for path in TEMPLATES.rglob("*.html")
             if "sg-content" in path.read_text(encoding="utf-8", errors="replace"))
-        assert users == ["base.html", "student/take_exam.html"], (
-            "a template other than the exam page names the content hook: %s" % users)
+        assert users == ["base.html", "student/take_exam.html", "teacher/grade_question.html"], (
+            "unexpected template using the content hook: %s" % users)
+        grading = (TEMPLATES / "teacher/grade_question.html").read_text(encoding="utf-8")
+        assert re.findall(r"([^{}\n]+\.sg-content)\s*\{([^{}]+)\}", grading) == [
+            ("    .sg-grade-question .sg-content", " padding-inline: 12px; "),
+        ]
 
 
 # ── full width is the device's, not the bezel's ──────────────────────────────

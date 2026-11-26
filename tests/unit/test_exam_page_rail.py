@@ -598,11 +598,19 @@ def test_the_bigger_touch_targets_do_not_buy_their_size_with_rows():
     of the screen, where the same tools at 25px fitted in two. Raising a target
     is not a reason to charge the paper more room: on touch the row is swiped.
     """
-    for condition, body in _touch_blocks():
-        assert _declaration(body, ".draw-toolbar", "flex-wrap") == "nowrap !important", (
+    blocks = _touch_blocks()
+    shared = next(body for condition, body in blocks
+                  if condition.strip() == "(pointer: coarse) and (min-width: 641px)")
+    for condition, body in blocks:
+        wrap = _declaration(body, ".draw-toolbar", "flex-wrap")
+        if wrap is None:
+            wrap = _declaration(shared, ".draw-toolbar", "flex-wrap")
+        assert wrap == "nowrap !important", (
             f"the touch toolbar wraps again under `{condition}`, so the 44px tools "
             "stack into rows instead of scrolling")
-        assert (_declaration(body, ".draw-toolbar", "overflow-x") or "").startswith("auto"), (
+        overflow = (_declaration(body, ".draw-toolbar", "overflow-x")
+                    or _declaration(shared, ".draw-toolbar", "overflow-x"))
+        assert (overflow or "").startswith("auto"), (
             f"the touch toolbar stopped scrolling under `{condition}`, so a tool "
             "can be pushed off the row with no way to reach it")
 

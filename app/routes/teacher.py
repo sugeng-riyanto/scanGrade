@@ -4239,8 +4239,12 @@ def grade_question(exam_id, question_index):
         if isinstance(v, str):
             try: exam[f] = json.loads(v)
             except: exam[f] = {}
+    total_questions = int(exam.get("total_questions") or 0)
+    question_types = exam.get("question_types") or {}
+    objective_questions = [is_objective(question_types.get(str(i))) for i in range(total_questions)]
     return render_template("teacher/grade_question.html", exam=exam, exam_id=exam_id,
-                           question_index=min(question_index, max(0, int(exam.get("total_questions") or 0) - 1)))
+                           objective_questions=objective_questions,
+                           question_index=min(question_index, max(0, total_questions - 1)))
 
 
 def _review_flags_for(supabase, submission_ids):

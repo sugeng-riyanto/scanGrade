@@ -811,7 +811,7 @@
                            x-text="t('Guru pemilik ujian','Exam owner')"></label>
                     <select required id="exam-teacher" name="teacher_id" class="w-full rounded-xl border border-slate-200 px-3 py-2">
                         <option value="" x-text="t('Pilih pemilik ujian','Select an exam owner')"></option>
-                        <option value="{{ g.user_id }}" x-text="t('Akun saya','My account')"></option>
+                        <option value="{{ g.user_id or '' }}" x-text="t('Akun saya','My account')"></option>
                         {% for teacher in exam_teachers %}
                         <option value="{{ teacher.id }}">{{ teacher.name }}</option>
                         {% endfor %}
