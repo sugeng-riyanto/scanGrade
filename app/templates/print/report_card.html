@@ -208,6 +208,8 @@
 {% set pdf_pages = exam.get('pdf_page_urls', []) or [] %}
 {% set answers = submission.answers or {} %}
 {% set score = submission.final_score if submission.final_score is not none else (submission.score if submission.score is not none else 0) %}
+{% set points_limit = exam.get('total_points') or 100 %}
+{% set score_label = score if points_limit == 100 else '%g / %g'|format((score * points_limit / 100)|round(2), points_limit) %}
 {# Correctness and the answer key are part of a released result. The teacher's
    own copy prints them whatever the status, because they are the marking. #}
 {% set graded = submission.status in ('graded', 'published') %}
@@ -257,7 +259,7 @@
             </td>
             <td style="width: 40mm;">
                 <div class="score-card">
-                    <div class="val">{{ score }}</div>
+                    <div class="val">{{ score_label }}</div>
                     <div class="lbl">Nilai Akhir</div>
                 </div>
             </td>
@@ -277,7 +279,7 @@
             <td class="c-mcq"><div class="v">{{ submission.score if submission.score is not none else 0 }}</div><div class="l">Skor MCQ</div></td>
             <td class="c-pen"><div class="v">{{ submission.penalty if submission.penalty is not none else 0 }}</div><div class="l">Penalti</div></td>
             <td class="c-vio"><div class="v">{{ submission.violations if submission.violations is not none else 0 }}</div><div class="l">Pelanggaran</div></td>
-            <td class="c-fin"><div class="v">{{ score }}</div><div class="l">Nilai Akhir</div></td>
+            <td class="c-fin"><div class="v">{{ score_label }}</div><div class="l">Nilai Akhir</div></td>
         </tr>
     </table>
 

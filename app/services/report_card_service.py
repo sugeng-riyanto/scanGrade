@@ -31,7 +31,7 @@ SUBMISSION_FIELDS = (
     "final_score, status, is_published, started_at, submitted_at, graded_at, "
     "teacher_feedback, "
     "exams(id, title, subject, subject_id, teacher_id, school_id, total_questions, "
-    "question_types, answer_key, question_weights, pdf_page_urls)"
+    "question_types, answer_key, question_weights, pdf_page_urls, total_points)"
 )
 
 

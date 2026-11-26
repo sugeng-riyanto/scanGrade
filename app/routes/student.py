@@ -1491,7 +1491,7 @@ def result_detail(submission_id):
     supabase = get_supabase()
     try:
         res = supabase.table("submissions") \
-            .select("id, exam_id, student_id, answers, score, max_score, violations, penalty, final_score, status, is_published, started_at, submitted_at, graded_at, teacher_feedback, exams(id, title, subject, subject_id, answer_key, question_types, question_scoring, total_questions, pdf_page_urls, anti_cheat_enabled, penalty_per_violation)") \
+            .select("id, exam_id, student_id, answers, score, max_score, violations, penalty, final_score, status, is_published, started_at, submitted_at, graded_at, teacher_feedback, exams(id, title, subject, subject_id, answer_key, question_types, question_scoring, total_questions, pdf_page_urls, anti_cheat_enabled, penalty_per_violation, total_points)") \
             .eq("id", submission_id) \
             .eq("student_id", g.user_id) \
             .single() \
@@ -1599,7 +1599,7 @@ def download_result_pdf(submission_id):
     supabase = get_supabase()
     try:
         res = supabase.table("submissions") \
-            .select("id, exam_id, student_id, answers, score, max_score, violations, penalty, final_score, status, is_published, started_at, submitted_at, graded_at, teacher_feedback, exams(id, title, subject, subject_id, answer_key, question_types, question_scoring, total_questions, pdf_page_urls)") \
+            .select("id, exam_id, student_id, answers, score, max_score, violations, penalty, final_score, status, is_published, started_at, submitted_at, graded_at, teacher_feedback, exams(id, title, subject, subject_id, answer_key, question_types, question_scoring, total_questions, pdf_page_urls, total_points)") \
             .eq("id", submission_id) \
             .eq("student_id", g.user_id) \
             .single() \

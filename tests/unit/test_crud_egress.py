@@ -65,6 +65,9 @@ def test_exam_cards_request_metadata_and_keep_scope(app, monkeypatch, role, filt
     requests = []
 
     def serve(request):
+        if request.url.path.endswith("/schools"):
+            assert request.url.params["id"] == "eq.school-1"
+            return httpx.Response(200, json={"tz_offset": 7})
         requests.append(request)
         columns = set(request.url.params["select"].split(","))
         assert "*" not in columns
@@ -78,6 +81,7 @@ def test_exam_cards_request_metadata_and_keep_scope(app, monkeypatch, role, filt
     db.session = httpx.Client(base_url="https://db.invalid", transport=httpx.MockTransport(serve))
     monkeypatch.setattr(teacher, "get_supabase", lambda: RetryingClient(db))
     monkeypatch.setattr(teacher, "exam_quota", lambda sid: {})
+    monkeypatch.setattr(teacher.ta_service, "staff_directory", lambda *args: [])
     monkeypatch.setattr(teacher, "render_template", lambda name, **context: context)
     try:
         with app.test_request_context("/teacher/exams"):
@@ -91,10 +95,16 @@ def test_exam_cards_request_metadata_and_keep_scope(app, monkeypatch, role, filt
     assert not result["unassigned_ids"]
 
 
-def test_delete_exam_does_not_download_deleted_answers(app, monkeypatch):
+@pytest.mark.parametrize("started", [False, True])
+def test_delete_exam_does_not_download_deleted_answers(app, monkeypatch, started):
     calls = []
 
     def serve(request):
+        if request.method == "GET":
+            assert request.url.path.endswith("/submissions")
+            assert request.url.params["select"] == "id"
+            assert request.url.params["exam_id"] == "eq.exam-1"
+            return httpx.Response(200, json=[{"id": "sub-1"}] if started else [])
         assert request.method == "DELETE"
         assert "return=minimal" in request.headers["prefer"]
         expected_filter = "id" if request.url.path.endswith("/exams") else "exam_id"
@@ -115,6 +125,11 @@ def test_delete_exam_does_not_download_deleted_answers(app, monkeypatch):
             response = inspect.unwrap(teacher.delete_exam)("exam-1")
     finally:
         db.session.close()
-    assert response.get_json() == {"success": True}
-    assert calls == ["/violation_logs", "/exam_access_codes", "/analytics_cache",
-                     "/submissions", "/exams"]
+    if started:
+        body, status = response
+        assert status == 403
+        assert body.get_json()["error"] == teacher.exam_management.SITTING_LOCKED
+        assert not calls
+    else:
+        assert response.get_json() == {"success": True}
+        assert calls == ["/exams"]

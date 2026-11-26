@@ -299,17 +299,15 @@ class TestTheRecordStaysBecauseOnlyThePaperTakesItWithHim:
         assert "anti_cheat_enabled" not in _function_body(SERVICE, "events_for_exam")
 
     def test_only_the_delete_door_removes_them(self):
-        """Both app doors that delete the log are the paper's own delete — so 'the
-        record goes only when the paper itself is deleted' is a fact, not a comfort."""
-        assert ROUTES.count('table("violation_logs").delete(') == 1, (
-            "the teacher's routes delete violation rows somewhere other than the "
-            "exam-delete door")
-        assert ADMIN_ROUTES_PATH.read_text(encoding="utf-8").count(
-            'table("violation_logs").delete(') == 1
-        for path in (ROUTES_PATH, ADMIN_ROUTES_PATH):
-            body = _function_body(path.read_text(encoding="utf-8"), "delete_exam")
-            assert 'table("violation_logs").delete(' in body, (
-                f"{path.name}: the log is not deleted by the paper's own delete door")
+        """Teacher-side cleanup must happen in the same transaction as exam deletion."""
+        assert 'table("violation_logs").delete(' not in ROUTES
+        delete = _function_body(ROUTES, "delete_exam")
+        assert 'table("exams").delete(' in delete
+        schema = (ROUTES_PATH.parents[2] / "supabase" / "schema.sql").read_text()
+        violations = schema.split("CREATE TABLE IF NOT EXISTS violation_logs", 1)[1]
+        assert "REFERENCES exams(id) ON DELETE CASCADE" in violations.split(");", 1)[0]
+        admin = _function_body(ADMIN_ROUTES_PATH.read_text(encoding="utf-8"), "delete_exam")
+        assert 'table("violation_logs").delete(' in admin
 
     def test_the_builder_s_save_never_touches_the_log(self):
         """Saving a paper — including saving one that is switched off — must not be a

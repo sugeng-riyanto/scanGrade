@@ -165,8 +165,8 @@ def test_the_upload_endpoint_is_valid_js_on_a_paper_that_does_not_exist_yet(app)
 
 def test_a_paper_that_has_not_been_saved_yet_is_told_so_instead_of_offered_an_upload():
     html = source(EXAM_FORM)
-    block = re.search(r"\{\% if exam \%\}.*?\{\% else \%\}(.*?)\{\% endif \%\}",
-                      html, re.S)
+    media = html[html.index("<!-- What the save route reads."):]
+    block = re.search(r"\{% else %\}(.*?)\{% endif %\}", media, re.S)
     assert block, "the builder offers an upload for a paper that has no storage yet"
     assert "Save the exam draft first" in block.group(1), (
         "the builder gives a new paper no explanation for the missing upload control")

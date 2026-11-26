@@ -114,8 +114,10 @@ class TestTheScoresAreYearScoped:
 class TestPapersAreDatedAtTheWriteDoors:
     def test_the_builder_dates_a_paper_on_create_and_update(self):
         src = TEACHER.read_text(encoding="utf-8")
-        assert src.count('"school_year_id": active_year_id,') == 2, (
-            "both the create and the update door must date the paper")
+        create = src.split("def exam_form()", 1)[1].split("\n@teacher_bp.route", 1)[0]
+        detail = src.split("def exam_detail(", 1)[1].split("\n@teacher_bp.route", 1)[0]
+        assert '"school_year_id": active_year_id,' in create
+        assert '"school_year_id": exam_row.get("school_year_id") or active_year_id,' in detail
         assert src.count("active_year_id = (ta_service.active_school_year(") == 2
 
     def test_the_school_year_column_survives_the_legacy_fallback(self):

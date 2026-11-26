@@ -83,6 +83,8 @@
     {% set total_q = exam.get('total_questions', 0) %}
     {% set pdf_pages = exam.get('pdf_page_urls', []) or [] %}
     {% set score = submission.final_score if submission.final_score is not none else (submission.score if submission.score is not none else 0) %}
+    {% set points_limit = exam.get('total_points') or 100 %}
+    {% set score_label = score if points_limit == 100 else '%g / %g'|format((score * points_limit / 100)|round(2), points_limit) %}
     {% set is_hidden = submission.get('is_hidden', False) %}
     {% set answers = submission.answers or {} %}
 
@@ -92,7 +94,7 @@
     {% if released %}
     <div class="print-only print-header" style="display:none;">
         <div class="print-score-box">
-            <div class="score-val">{{ score if score is not none else '-' }}</div>
+            <div class="score-val">{{ score_label }}</div>
             <div class="score-label">Nilai Akhir</div>
         </div>
         <h1>{{ exam.get('title', 'Ujian') }}</h1>
@@ -139,7 +141,7 @@
                     <p class="text-sm font-bold text-slate-500" x-show="lang!=='en'">Belum dirilis</p>
                     <p class="text-sm font-bold text-slate-500" x-show="lang==='en'">Not released</p>
                     {% elif score is not none %}
-                    <p class="text-4xl font-extrabold {% if score >= 70 %}text-emerald-600{% else %}text-red-600{% endif %}">{{ score }}</p>
+                    <p class="text-4xl font-extrabold {% if score >= 70 %}text-emerald-600{% else %}text-red-600{% endif %}">{{ score_label }}</p>
                     <p class="text-sm font-bold text-slate-500" x-text="lang==='en'?'Final Score':'Nilai Akhir'"></p>
                     {% else %}
                     <p class="text-4xl font-extrabold text-slate-400">-</p>
@@ -181,7 +183,7 @@
                     <p class="text-amber-600 font-bold" x-text="lang==='en'?'Violations':'Pelanggaran'"></p>
                 </div>
                 <div class="bg-gradient-to-br from-orange-50 to-amber-50 p-3 rounded-xl border border-amber-100">
-                    <p class="text-orange-700 font-extrabold">{{ score if score is not none else (submission.final_score if submission.final_score is not none else '-') }}</p>
+                    <p class="text-orange-700 font-extrabold">{{ score_label }}</p>
                     <p class="text-orange-600 font-bold">Final</p>
                 </div>
             </div>

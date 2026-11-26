@@ -1,12 +1,12 @@
 {% set content_lang = 'id' %}
 {% extends "base.html" %}
-{% block title %}Ujian Saya - ScanGrade{% endblock %}
-{% block page_title %}Ujian Saya{% endblock %}
+{% block title %}{{ 'Ujian Sekolah' if school_admin else 'Ujian Saya' }} - ScanGrade{% endblock %}
+{% block page_title %}{{ 'Ujian Sekolah' if school_admin else 'Ujian Saya' }}{% endblock %}
 {% block content %}
 {# `_deny` sends a refused caller here too, and this page rendered no flash at all:
    the sentence was dropped and the reader landed somewhere with no explanation. Same
    block the other pages use, so a message looks the same wherever it lands. #}
-<div class="space-y-6" x-data="{ filter: 'all', search: '' }">
+<div class="space-y-6" x-data="{ filter: 'all', dateFilter: 'all', search: '' }">
     {% with messages = get_flashed_messages(with_categories=true) %}
     {% if messages %}
     {% for cat, msg in messages %}
@@ -71,10 +71,13 @@
     {% endif %}
     {% endif %}
 
+    {% if school_admin %}
+    {% include "shared/_admin_invigilation_tabs.html" %}
+    {% endif %}
     <!-- Header -->
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-            <h2 class="text-2xl font-extrabold text-slate-800" x-text="lang==='en'?'My Exams':'Ujian Saya'"></h2>
+            <h2 class="text-2xl font-extrabold text-slate-800" :lang="lang" x-text="{{ "t('Ujian Sekolah','School Exams')" if school_admin else "t('Ujian Saya','My Exams')" }}"></h2>
             <p class="text-sm text-slate-500 font-medium mt-0.5" :lang="lang" x-text="'{{ exams|length }} ' + t('ujian','exams')"></p>
         </div>
         <div class="flex flex-col sm:flex-row gap-2">
@@ -115,6 +118,12 @@
             <button @click="filter='closed'" :class="filter==='closed'?'bg-white shadow text-brand-600':'text-slate-500'" class="shrink-0 px-4 py-2 rounded-lg text-sm font-semibold transition" x-text="lang==='en'?'Closed':'Ditutup'"></button>
             <button @click="filter='template'" :class="filter==='template'?'bg-white shadow text-brand-600':'text-slate-500'" class="shrink-0 px-4 py-2 rounded-lg text-sm font-semibold transition"><i class="fas fa-copy mr-1"></i>Template</button>
         </div>
+        <select x-model="dateFilter" :lang="lang" :aria-label="t('Filter tanggal ujian','Filter by exam date')" class="px-4 py-2 border border-slate-200 rounded-xl text-sm">
+            <option value="all" x-text="t('Semua Tanggal','All dates')"></option>
+            <option value="today" x-text="t('Hari Ini','Today')"></option>
+            <option value="upcoming" x-text="t('Akan Datang','Upcoming')"></option>
+            <option value="previous" x-text="t('Sebelumnya','Previous')"></option>
+        </select>
         <input type="text" x-model="search" :placeholder="lang==='en'?'Search exams...':'Cari ujian...'" class="flex-1 px-4 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition">
     </div>
 
@@ -122,7 +131,12 @@
     <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
         {% for exam in exams %}
         <div class="card card-hover relative"
-             x-show="(filter==='all' || (filter==='template' && '{{ 'true' if exam.is_template else 'false' }}'==='true') || '{{ exam.status }}'===filter) && (!search || '{{ exam.title|lower }}'.includes(search.toLowerCase()))">
+             data-title="{{ exam.title or '' }}" data-teacher="{{ (teacher_names or {}).get(exam.teacher_id, '') }}"
+             data-date-group="{{ exam.date_group }}" data-status="{{ exam.status }}"
+             data-template="{{ 'true' if exam.is_template else 'false' }}"
+             x-show="(filter === 'all' || $el.dataset.status === filter || (filter === 'template' && $el.dataset.template === 'true')) &&
+                     (dateFilter === 'all' || $el.dataset.dateGroup === dateFilter) &&
+                     (!search.trim() || [$el.dataset.title, $el.dataset.teacher].some(value => value.toLowerCase().includes(search.trim().toLowerCase())))">
             <div class="p-5">
                 <!-- Top row: icon + badges -->
                 <div class="flex items-start justify-between mb-3">
@@ -163,9 +177,32 @@
 
                 <h3 class="font-bold text-slate-800 mb-1">{{ exam.title }}</h3>
                 <p class="text-sm text-slate-500 font-medium">{{ exam.subject or '-' }}</p>
+                {% if school_admin %}
+                <p class="text-sm text-slate-600 mt-1">
+                    <span :lang="lang" x-text="t('Nama Guru','Teacher')"></span> · {{ (teacher_names or {}).get(exam.teacher_id, '—') }}
+                </p>
+                {% endif %}
+                <div x-data="{ enabled: {{ 'true' if exam.require_seb else 'false' }}, busy: false, message: '', failed: false }"
+                     class="mt-3 flex flex-wrap items-center gap-2">
+                    <button type="button" role="switch" aria-label="Safe Exam Browser"
+                            :aria-checked="enabled.toString()" :disabled="busy"
+                            data-enable="{{ url_for('seb.enable', exam_id=exam.id) }}"
+                            data-disable="{{ url_for('seb.disable', exam_id=exam.id) }}"
+                            @click="updateExamSeb($el, $data, (id, en) => t(id, en))"
+                            class="tap-44 inline-flex items-center gap-2 text-sm font-semibold text-slate-700">
+                        <span class="relative inline-flex w-10 h-6 items-center rounded-full transition"
+                              :class="enabled ? 'bg-brand-600' : 'bg-slate-400'">
+                            <span class="absolute h-4 w-4 rounded-full bg-white transition"
+                                  :class="enabled ? 'left-5' : 'left-1'"></span>
+                        </span>
+                        <span x-text="enabled ? 'SEB On' : 'SEB Off'"></span>
+                    </button>
+                    <span role="status" class="text-xs" :class="failed ? 'text-red-700' : 'text-slate-600'"
+                          x-text="message"></span>
+                </div>
 
                 <div class="flex flex-wrap gap-3 mt-3 text-xs text-slate-500 font-semibold">
-                    <span><i class="fas fa-question-circle mr-1"></i>{{ exam.total_questions or 0 }} soal</span>
+                    <span><i class="fas fa-question-circle mr-1"></i>{{ exam.total_questions or 0 }} <span :lang="lang" x-text="t('soal','questions')"></span></span>
                     <span><i class="fas fa-clock mr-1"></i>{{ exam.duration_minutes }} min</span>
                     <span><i class="fas fa-users mr-1"></i>{{ exam.submission_count or 0 }}</span>
                     {% if exam.start_at %}
@@ -173,7 +210,7 @@
                        UTC, so `[:16]` showed a WIB teacher 00:50 for a 07:50 sitting.
                        The filter reads the reader's own offset (`g.tz_offset`), the
                        same one the builder form already formats its two clocks with. #}
-                    <span><i class="fas fa-calendar-alt mr-1"></i>{{ exam.start_at | tz('%Y-%m-%d %H:%M') }}</span>
+                    <span><i class="fas fa-calendar-alt mr-1"></i>{{ exam.local_start or (exam.start_at | tz('%Y-%m-%d %H:%M')) }}</span>
                     {% endif %}
                 </div>
 
@@ -204,7 +241,7 @@
                         <button type="submit" class="w-full py-2 rounded-lg font-semibold text-xs transition
                             {% if exam.status == 'active' %}bg-amber-50 text-amber-700 hover:bg-amber-100{% else %}bg-emerald-50 text-emerald-700 hover:bg-emerald-100{% endif %}">
                             <i class="fas {% if exam.status == 'active' %}fa-pause{% else %}fa-play{% endif %} mr-1"></i>
-                            <span x-text="exam.status === 'active' ? (lang==='en'?'Deactivate':'Nonaktifkan') : (lang==='en'?'Activate':'Aktifkan')"></span>
+                            <span x-text="{{ 'true' if exam.status == 'active' else 'false' }} ? (lang==='en'?'Deactivate':'Nonaktifkan') : (lang==='en'?'Activate':'Aktifkan')"></span>
                         </button>
                     </form>
                     <!-- Toggle Show/Hide -->
@@ -219,7 +256,7 @@
 
                 <!-- Delete (danger) -->
                 <div class="mt-2">
-                    <button onclick="deleteExam('{{ exam.id }}', '{{ exam.title }}')" class="w-full py-2 rounded-lg bg-red-50 text-red-600 font-semibold text-xs hover:bg-red-100 transition">
+                    <button type="button" data-exam-id="{{ exam.id }}" data-exam-title="{{ exam.title }}" @click="deleteExam($el.dataset.examId, $el.dataset.examTitle, (id, en) => t(id, en))" class="w-full py-2 rounded-lg bg-red-50 text-red-600 font-semibold text-xs hover:bg-red-100 transition">
                         <i class="fas fa-trash mr-1"></i><span x-text="lang==='en'?'Delete':'Hapus'"></span>
                     </button>
                 </div>
@@ -242,12 +279,40 @@
 {% endblock %}
 {% block scripts %}
 <script>
-function deleteExam(id, title) {
-    if (!confirm('Yakin hapus "' + title + '"? Semua jawaban siswa juga akan dihapus.')) return;
+async function updateExamSeb(button, state, t) {
+    const next = !state.enabled;
+    if (next && !window.confirm(t(
+        'Pastikan semua siswa memiliki perangkat yang mendukung SEB. Siswa dengan perangkat yang tidak mendukung tidak dapat masuk. Aktifkan SEB?',
+        'Confirm all students have a device that supports SEB. Students on unsupported devices cannot enter. Enable SEB?'))) return;
+    state.busy = true;
+    state.failed = false;
+    state.message = t('Menyimpan…', 'Saving…');
+    try {
+        const body = new URLSearchParams();
+        if (next) body.set('confirm_no_android', 'true');
+        const reply = await fetch(next ? button.dataset.enable : button.dataset.disable, {
+            method: 'POST', headers: {Accept: 'application/json'}, body
+        });
+        const data = await reply.json().catch(() => ({}));
+        if (!reply.ok || !data.ok) throw new Error(data.error === 'seb_issue_failed'
+            ? t('File SEB gagal dibuat.', 'Could not create the SEB file.')
+            : data.error || t('Pengaturan SEB gagal disimpan.', 'Could not save SEB settings.'));
+        state.enabled = data.require_seb;
+        state.message = t('Tersimpan', 'Saved');
+    } catch (error) {
+        state.failed = true;
+        state.message = error.message;
+    } finally {
+        state.busy = false;
+    }
+}
+
+function deleteExam(id, title, t) {
+    if (!confirm(t('Hapus ujian ini?', 'Delete this exam?') + '\n' + title)) return;
     fetch('/teacher/exams/' + id + '/delete', { method: 'POST', headers: {'Accept':'application/json','Content-Type':'application/json'} })
         .then(r => r.json())
-        .then(d => { if (d.success) location.reload(); else alert('Gagal: ' + (d.error || '?')); })
-        .catch(e => alert('Gagal: ' + e.message));
+        .then(d => { if (d.success) location.reload(); else alert(t('Gagal','Failed') + ': ' + (d.error || '?')); })
+        .catch(e => alert(t('Gagal','Failed') + ': ' + e.message));
 }
 </script>
 {% endblock %}
