@@ -52,6 +52,7 @@ EXPECTED: dict[str, list[tuple[str, list[str]]]] = {
                       "/admin-sekolah/subjects", "/admin-sekolah/grade-weights",
                       "/admin-sekolah/promote",
                       "/admin-sekolah/assessment-periods",
+                      "{{ url_for('admin_sekolah.invigilation_exams') }}",
                       "/admin-sekolah/invigilation",
                       # Who could not get in, ranked by class and by paper. It sits
                       # with the exam-day work (`/admin-sekolah/invigilation`), not
