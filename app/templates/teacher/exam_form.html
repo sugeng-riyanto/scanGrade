@@ -3683,9 +3683,9 @@ function deleteExam(id) {
     var inFlight;
     var warning = document.getElementById('exam-publish-warning');
     var points = form.elements.namedItem('total_points');
-    window.rescaleExamPoints = async function (button, translate) {
+    window.rescaleExamPoints = async function (button, t) {
         if (!points.reportValidity() || publishing) return;
-        if (!window.confirm(translate('Terapkan skala poin baru ke hasil ujian ini?',
+        if (!window.confirm(t('Terapkan skala poin baru ke hasil ujian ini?',
             'Apply the new point scale to this exam’s results?'))) return;
         publishing = true;
         button.disabled = true;
@@ -3699,7 +3699,7 @@ function deleteExam(id) {
             });
             const data = await reply.json().catch(() => ({}));
             if (!reply.ok || !data.ok) {
-                throw new Error(data.error || translate('Total poin gagal disimpan.', 'Could not save total points.'));
+                throw new Error(data.error || t('Total poin gagal disimpan.', 'Could not save total points.'));
             }
             points.dataset.savedPoints = String(data.total_points);
             const state = Alpine.$data(points);

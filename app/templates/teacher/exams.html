@@ -202,7 +202,7 @@
                 </div>
 
                 <div class="flex flex-wrap gap-3 mt-3 text-xs text-slate-500 font-semibold">
-                    <span><i class="fas fa-question-circle mr-1"></i>{{ exam.total_questions or 0 }} soal</span>
+                    <span><i class="fas fa-question-circle mr-1"></i>{{ exam.total_questions or 0 }} <span :lang="lang" x-text="t('soal','questions')"></span></span>
                     <span><i class="fas fa-clock mr-1"></i>{{ exam.duration_minutes }} min</span>
                     <span><i class="fas fa-users mr-1"></i>{{ exam.submission_count or 0 }}</span>
                     {% if exam.start_at %}
@@ -256,7 +256,7 @@
 
                 <!-- Delete (danger) -->
                 <div class="mt-2">
-                    <button type="button" data-exam-id="{{ exam.id }}" data-exam-title="{{ exam.title }}" @click="deleteExam($el.dataset.examId, $el.dataset.examTitle)" class="w-full py-2 rounded-lg bg-red-50 text-red-600 font-semibold text-xs hover:bg-red-100 transition">
+                    <button type="button" data-exam-id="{{ exam.id }}" data-exam-title="{{ exam.title }}" @click="deleteExam($el.dataset.examId, $el.dataset.examTitle, (id, en) => t(id, en))" class="w-full py-2 rounded-lg bg-red-50 text-red-600 font-semibold text-xs hover:bg-red-100 transition">
                         <i class="fas fa-trash mr-1"></i><span x-text="lang==='en'?'Delete':'Hapus'"></span>
                     </button>
                 </div>
@@ -279,14 +279,14 @@
 {% endblock %}
 {% block scripts %}
 <script>
-async function updateExamSeb(button, state, translate) {
+async function updateExamSeb(button, state, t) {
     const next = !state.enabled;
-    if (next && !window.confirm(translate(
+    if (next && !window.confirm(t(
         'Pastikan semua siswa memiliki perangkat yang mendukung SEB. Siswa dengan perangkat yang tidak mendukung tidak dapat masuk. Aktifkan SEB?',
         'Confirm all students have a device that supports SEB. Students on unsupported devices cannot enter. Enable SEB?'))) return;
     state.busy = true;
     state.failed = false;
-    state.message = translate('Menyimpan…', 'Saving…');
+    state.message = t('Menyimpan…', 'Saving…');
     try {
         const body = new URLSearchParams();
         if (next) body.set('confirm_no_android', 'true');
@@ -295,10 +295,10 @@ async function updateExamSeb(button, state, translate) {
         });
         const data = await reply.json().catch(() => ({}));
         if (!reply.ok || !data.ok) throw new Error(data.error === 'seb_issue_failed'
-            ? translate('File SEB gagal dibuat.', 'Could not create the SEB file.')
-            : data.error || translate('Pengaturan SEB gagal disimpan.', 'Could not save SEB settings.'));
+            ? t('File SEB gagal dibuat.', 'Could not create the SEB file.')
+            : data.error || t('Pengaturan SEB gagal disimpan.', 'Could not save SEB settings.'));
         state.enabled = data.require_seb;
-        state.message = translate('Tersimpan', 'Saved');
+        state.message = t('Tersimpan', 'Saved');
     } catch (error) {
         state.failed = true;
         state.message = error.message;
@@ -307,12 +307,12 @@ async function updateExamSeb(button, state, translate) {
     }
 }
 
-function deleteExam(id, title) {
-    if (!confirm('Yakin hapus "' + title + '"?')) return;
+function deleteExam(id, title, t) {
+    if (!confirm(t('Hapus ujian ini?', 'Delete this exam?') + '\n' + title)) return;
     fetch('/teacher/exams/' + id + '/delete', { method: 'POST', headers: {'Accept':'application/json','Content-Type':'application/json'} })
         .then(r => r.json())
-        .then(d => { if (d.success) location.reload(); else alert('Gagal: ' + (d.error || '?')); })
-        .catch(e => alert('Gagal: ' + e.message));
+        .then(d => { if (d.success) location.reload(); else alert(t('Gagal','Failed') + ': ' + (d.error || '?')); })
+        .catch(e => alert(t('Gagal','Failed') + ': ' + e.message));
 }
 </script>
 {% endblock %}
