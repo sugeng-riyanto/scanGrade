@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from flask import send_file
 from PIL import Image as PilImage
 import openpyxl
+from openpyxl.utils import get_column_letter
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
@@ -123,7 +124,7 @@ def export_to_xlsx(submissions: list, exam: dict = None) -> io.BytesIO:
     total_q = exam.get("total_questions", 0)
 
     # Headers
-    headers = ["No", "Nama Siswa", "NISN / ID", "Skor MCQ", "Penalti", "Nilai Final", "Status", "Waktu"]
+    headers = ["No", "Nama Siswa", "NISN / ID", "Skor MCQ", "Penalti", "Nilai Final", "Status", "Waktu", "Kelas"]
     for qi in range(total_q):
         # "Not MCQ" is not "essay": the three new objective types are marked by
         # the app, so their columns must not be labelled as written answers.
@@ -152,13 +153,14 @@ def export_to_xlsx(submissions: list, exam: dict = None) -> io.BytesIO:
 
         row_data = [
             i,
-            s.get("student_name", s.get("student_id", "")[:12]),
+            s.get("student_name") or (s.get("student_id") or "")[:12],
             _nisn_val(answers, ""),
             s.get("score", 0),
             s.get("penalty", 0),
             s.get("final_score", s.get("score", 0)),
             s.get("status", "submitted"),
             _format_dt(s.get("submitted_at", "")),
+            s.get("class_name") or "-",
         ]
 
         for qi in range(total_q):
@@ -189,12 +191,11 @@ def export_to_xlsx(submissions: list, exam: dict = None) -> io.BytesIO:
     ws.column_dimensions["C"].width = 32
     for col in range(4, 9):
         ws.column_dimensions[chr(64 + col)].width = 14
-    for qi in range(total_q):
-        col_idx = 9 + qi
-        if col_idx <= 26:
-            ws.column_dimensions[chr(64 + col_idx)].width = 12
-        else:
-            ws.column_dimensions[chr(64 + (col_idx // 26)) + chr(65 + (col_idx % 26))].width = 12
+    ws.column_dimensions["I"].width = 18
+    for col in range(10, len(headers) + 1):
+        ws.column_dimensions[get_column_letter(col)].width = 12
+    ws.freeze_panes = "C2"
+    ws.auto_filter.ref = ws.dimensions
 
     buf = io.BytesIO()
     wb.save(buf)
@@ -223,7 +224,7 @@ def export_to_pdf(submissions: list, exam_title: str = "Hasil Ujian", exam: dict
             except (json.JSONDecodeError, TypeError):
                 answers = {}
 
-        student_name = s.get("student_name", s.get("student_id", "")[:12])
+        student_name = s.get("student_name") or (s.get("student_id") or "")[:12]
         student_nisn = _nisn_val(s.get("answers", ""), "")
         score = s.get("score", 0)
         penalty = s.get("penalty", 0)
@@ -239,6 +240,8 @@ def export_to_pdf(submissions: list, exam_title: str = "Hasil Ujian", exam: dict
             y_start = 72
         else:
             y_start = 58
+        y_start += 14
+        c.drawString(40, height - y_start, f"Kelas: {s.get('class_name') or '-'}")
         c.drawString(300, height - y_start, f"Final: {final_score}")
         c.drawString(450, height - y_start, f"Penalti: {penalty}")
         c.line(40, height - y_start - 6, width - 40, height - y_start - 6)

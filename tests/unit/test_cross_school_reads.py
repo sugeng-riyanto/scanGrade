@@ -56,6 +56,7 @@ SCHOOLS = [{"id": "sch-A", "name": "SMA Harapan Bangsa"},
 #: one is a deliberate act with a reason, the way a route list should be: each of these is
 #: a report or a print of a paper, and each is GET-only (asserted below).
 READ_ROUTES = {
+    "accreditation_report",
     "bubble_sheet",            # the LJK
     "cheat_analysis",          # the pattern view (a 301 to the sessions page)
     "exam_preview",            # what a pupil will see

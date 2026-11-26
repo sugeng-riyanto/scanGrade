@@ -177,12 +177,10 @@
 
     <table class="data">
         <thead>
-            {# One numbering column, not two: the roster is sorted by final score, so
-               a separate "rank" column would only repeat it — and would misreport
-               ties as an order it cannot actually justify. #}
             <tr>
                 <th class="center" style="width:7%">No</th>
-                <th style="width:30%">Nama Siswa</th>
+                <th style="width:22%">Nama Siswa</th>
+                <th style="width:8%">Kelas</th>
                 <th class="center" style="width:13%">NISN</th>
                 <th class="center" style="width:9%">Skor MCQ</th>
                 <th class="center" style="width:8%">Penalti</th>
@@ -198,6 +196,7 @@
             <tr>
                 <td class="center">{{ loop.index }}</td>
                 <td>{{ s.student_name or (s.student_id or '-')[:8] }}{% if s.get('submitted_late') %} <span class="late">terlambat</span>{% endif %}</td>
+                <td>{{ s.get("class_name") or "-" }}</td>
                 <td class="center">{{ ans.get('_nisn') or '&mdash;'|safe }}</td>
                 <td class="center">{{ s.get('score') if s.get('score') is not none else 0 }}</td>
                 <td class="center {{ 'no' if (s.get('penalty') or 0) else 'muted' }}">{{ s.get('penalty') or 0 }}</td>
@@ -208,7 +207,7 @@
                 <td class="center status">{{ status_id.get(s.get('status'), s.get('status') or '-') }}</td>
             </tr>
         {% else %}
-            <tr><td colspan="8" class="empty">Belum ada nilai untuk ujian ini.</td></tr>
+            <tr><td colspan="9" class="empty">Belum ada nilai untuk ujian ini.</td></tr>
         {% endfor %}
         </tbody>
     </table>

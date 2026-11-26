@@ -22,6 +22,7 @@ from app.utils.exam_access import (
     managed_exam, EXAM_OK, EXAM_MISSING, EXAM_UNVERIFIABLE, EXAM_DENIED_ELSEWHERE,
 )
 from app.services.export_service import export_to_xlsx, export_to_pdf
+from app.services import result_order
 from app.services.answer_sheet_generator import generate_answer_sheet
 from app.services.question_types import (
     CHOICE_MODE_SINGLE, CHOICE_OPTIONS, KEY_MODE_LOST, KEY_MODE_NARROW, KEY_STALE,
@@ -3271,7 +3272,7 @@ def _teacher_exams(supabase, user_role, school_id):
     return query.execute().data or []
 
 
-def _exam_results(supabase, exam_id):
+def _exam_results(supabase, exam_id, *, school_id=None):
     """Every row the results page and the printed sheet both show.
 
     Returns ``(subs, scan_subs, online_subs, stats)``. Two renderings of one
@@ -3285,12 +3286,8 @@ def _exam_results(supabase, exam_id):
     a teacher who edits the exam's window after the sitting cannot change what a
     paper's result says about when it arrived.
     """
-    subs = supabase.table("submissions").select("*, profiles(full_name)") \
+    subs = supabase.table("submissions").select("*, profiles(full_name,class_id)") \
         .eq("exam_id", exam_id).execute().data or []
-
-    for s in subs:
-        if s.get("profiles"):
-            s["student_name"] = s.pop("profiles").get("full_name", "")
 
     # Deduplicate: keep latest per (student_id, source)
     seen = {}
@@ -3312,6 +3309,13 @@ def _exam_results(supabase, exam_id):
             s["_source"] = source
             seen[key] = s
     subs = list(seen.values())
+    if school_id:
+        subs = result_order.arrange(supabase, subs, school_id)
+    else:
+        for row in subs:
+            profile = row.pop("profiles", None)
+            if profile:
+                row["student_name"] = profile.get("full_name", "")
     scan_subs = [s for s in subs if s.get("_source") == "scan"]
     online_subs = [s for s in subs if s.get("_source") != "scan"]
 
@@ -3413,7 +3417,7 @@ def results_print():
 
     The results page prints as the app: a toolbar, a row of buttons and cards.
     What a school actually files is a sheet — exam identity, class statistics,
-    the ranked roster and somewhere to sign — so this renders that instead.
+    the class roster and somewhere to sign — so this renders that instead.
     """
     from app.services.report_card_service import print_stamp, profile_name, school_for
 
@@ -3432,8 +3436,8 @@ def results_print():
     from app.services.subject_lookup import annotate as annotate_subject
     annotate_subject(supabase, exam)
 
-    subs, scan_subs, online_subs, stats = _exam_results(supabase, exam_id)
-    roster = sorted(subs, key=_final_score, reverse=True)
+    subs, scan_subs, online_subs, stats = _exam_results(supabase, exam_id, school_id=exam.get("school_id"))
+    roster = subs
 
     return render_template(
         "teacher/print_exam_report.html",
@@ -5262,9 +5266,8 @@ def export_xlsx():
     exam, err = _guard_exam(supabase, exam_id, columns="*", access=ACCESS_READ)
     if err:
         return err
-    subs = supabase.table("submissions").select("*, profiles(full_name)").eq("exam_id", exam_id).execute().data or []
-    for s in subs:
-        s["student_name"] = (s.pop("profiles", None) or {}).get("full_name", s.get("student_id", "")[:12])
+    subs = supabase.table("submissions").select("*, profiles(full_name,class_id)").eq("exam_id", exam_id).execute().data or []
+    subs = result_order.arrange(supabase, subs, exam.get("school_id"))
     buf = export_to_xlsx(subs, exam)
     return send_file(buf, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                      as_attachment=True, download_name=f"nilai_{exam_id[:8]}.xlsx")
@@ -5278,9 +5281,8 @@ def export_pdf():
     exam, err = _guard_exam(supabase, exam_id, columns="*", access=ACCESS_READ)
     if err:
         return err
-    subs = supabase.table("submissions").select("*, profiles(full_name)").eq("exam_id", exam_id).execute().data or []
-    for s in subs:
-        s["student_name"] = (s.pop("profiles", None) or {}).get("full_name", s.get("student_id", "")[:12])
+    subs = supabase.table("submissions").select("*, profiles(full_name,class_id)").eq("exam_id", exam_id).execute().data or []
+    subs = result_order.arrange(supabase, subs, exam.get("school_id"))
     buf = export_to_pdf(subs, exam.get("title", "Hasil"), exam)
     return send_file(buf, mimetype="application/pdf", as_attachment=True,
                      download_name=f"nilai_{exam_id[:8]}.pdf")
@@ -6920,8 +6922,12 @@ def cheat_analysis(exam_id):
 def accreditation_report(exam_id):
     """Generate school accreditation report as PDF."""
     supabase = get_supabase()
-    exam = supabase.table("exams").select("title,subject,teacher_id,total_questions,passing_score").eq("id", exam_id).single().execute().data or {}
-    subs = supabase.table("submissions").select("score,final_score,status,student_id,profiles(full_name)").eq("exam_id", exam_id).in_("status", ["graded", "published"]).execute().data or []
+    exam, err = _guard_exam(supabase, exam_id,
+                            columns="id,title,subject,teacher_id,school_id,total_questions,passing_score",
+                            access=ACCESS_READ)
+    if err:
+        return err
+    subs = supabase.table("submissions").select("id,score,final_score,status,student_id,profiles(full_name,class_id)").eq("exam_id", exam_id).in_("status", ["graded", "published"]).execute().data or []
 
     from app.services.export_service import _wrap_text
     from reportlab.lib.pagesizes import A4
@@ -6973,23 +6979,24 @@ def accreditation_report(exam_id):
     story.append(t)
     story.append(Spacer(1, 20))
 
+    subs = result_order.arrange(supabase, subs, exam.get("school_id"))
+
     # Student list
     story.append(Paragraph("Daftar Nilai Siswa:", styles["Heading3"]))
-    student_data = [["No", "Nama", "Nilai", "Status"]]
+    student_data = [["No", "Kelas", "Nama", "Nilai", "Status"]]
     for i, s in enumerate(subs, 1):
-        profile = s.get("profiles") or {}
-        name = profile.get("full_name", s["student_id"][:12])
+        name = s["student_name"] or s["student_id"][:12]
         score = float(s.get("final_score") or s.get("score") or 0)
         passed_txt = "Lulus" if score >= (exam.get("passing_score", 70)) else "Remedial"
-        student_data.append([str(i), name, f"{score:.0f}", passed_txt])
+        student_data.append([str(i), s["class_name"] or "-", name, f"{score:.0f}", passed_txt])
 
-    t2 = Table(student_data, colWidths=[30, 200, 60, 80])
+    t2 = Table(student_data, colWidths=[30, 65, 200, 60, 80], repeatRows=1)
     t2.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#3b82f6")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
         ("FONTSIZE", (0, 0), (-1, -1), 9),
         ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-        ("ALIGN", (2, 0), (3, -1), "CENTER"),
+        ("ALIGN", (3, 0), (4, -1), "CENTER"),
     ]))
     story.append(t2)
     story.append(Spacer(1, 12))

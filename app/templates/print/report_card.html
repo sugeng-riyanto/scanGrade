@@ -247,6 +247,7 @@
             <td>
                 <table class="ident">
                     <tr><td class="k">Nama Siswa</td><td class="s">:</td><td><strong>{{ student_name or '-' }}</strong></td></tr>
+                    {% if card.get('class_name') %}<tr><td class="k">Kelas</td><td class="s">:</td><td>{{ card.class_name }}</td></tr>{% endif %}
                     {% if student_nisn %}<tr><td class="k">NISN</td><td class="s">:</td><td>{{ student_nisn }}</td></tr>{% endif %}
                     {% if student_nis %}<tr><td class="k">NIS</td><td class="s">:</td><td>{{ student_nis }}</td></tr>{% endif %}
                     <tr><td class="k">Mata Pelajaran</td><td class="s">:</td><td>{{ subject_label(exam) }}</td></tr>
