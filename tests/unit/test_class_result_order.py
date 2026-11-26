@@ -30,3 +30,6 @@ def test_xlsx_orders_by_class_then_name_and_keeps_unknown_class_last():
     assert [(row[8], row[1]) for row in exported[1:]] == [
         ("Grade 2A", "ana"), ("Grade 2A", "Zara"), ("Grade 10A", "Abel"), ("-", "Ari"),
     ]
+    assert sheet.row_dimensions[2].outlineLevel == 0
+    assert sheet.row_dimensions[3].outlineLevel == 1
+    assert sheet.row_dimensions[4].outlineLevel == 0

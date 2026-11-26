@@ -143,6 +143,7 @@ def export_to_xlsx(submissions: list, exam: dict = None) -> io.BytesIO:
         cell.alignment = Alignment(horizontal="center")
         cell.border = thin_border
 
+    has_classes = any(row.get("class_name") for row in submissions)
     for i, s in enumerate(submissions, 1):
         answers = s.get("answers") or {}
         if isinstance(answers, str):
@@ -181,6 +182,14 @@ def export_to_xlsx(submissions: list, exam: dict = None) -> io.BytesIO:
                 row_data.append(ans if ans else "✓")
                 row_data.append(text_content[:200] if text_content else "")
 
+        if has_classes:
+            previous_class = submissions[i - 2].get("class_name") if i > 1 else None
+            if i == 1 or s.get("class_name") != previous_class:
+                ws.cell(row=i + 1, column=9).font = Font(bold=True)
+                ws.cell(row=i + 1, column=9).fill = PatternFill(
+                    fill_type="solid", fgColor="E0E7FF")
+            else:
+                ws.row_dimensions[i + 1].outlineLevel = 1
         for col, val in enumerate(row_data, 1):
             cell = ws.cell(row=i + 1, column=col, value=val)
             cell.border = thin_border
@@ -194,6 +203,7 @@ def export_to_xlsx(submissions: list, exam: dict = None) -> io.BytesIO:
     ws.column_dimensions["I"].width = 18
     for col in range(10, len(headers) + 1):
         ws.column_dimensions[get_column_letter(col)].width = 12
+    ws.sheet_properties.outlinePr.summaryBelow = False
     ws.freeze_panes = "C2"
     ws.auto_filter.ref = ws.dimensions
 
@@ -216,7 +226,15 @@ def export_to_pdf(submissions: list, exam_title: str = "Hasil Ujian", exam: dict
     total_q = exam.get("total_questions", 0) if exam else 0
 
 
-    for s in submissions:
+    has_classes = any(row.get("class_name") for row in submissions)
+    previous_class = None
+    for index, s in enumerate(submissions):
+        class_name = s.get("class_name") or "-"
+        if has_classes and class_name != previous_class:
+            bookmark = f"class-{index}"
+            c.bookmarkPage(bookmark)
+            c.addOutlineEntry("Kelas: " + class_name, bookmark)
+            previous_class = class_name
         answers = s.get("answers") or {}
         if isinstance(answers, str):
             try:

@@ -191,6 +191,9 @@
         </thead>
         <tbody>
         {% for s in roster %}
+            {% if loop.changed(s.get('class_name') or '') %}
+            <tr><th colspan="9" scope="rowgroup">Kelas {{ s.get('class_name') or '-' }}</th></tr>
+            {% endif %}
             {% set ans = s.get('answers') if s.get('answers') is mapping else {} %}
             {% set final = s.get('final_score') if s.get('final_score') is not none else s.get('score') %}
             <tr>
