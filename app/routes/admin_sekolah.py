@@ -4303,8 +4303,10 @@ def invigilation_page():
 @admin_sekolah_bp.route("/invigilation/exams")
 @admin_sekolah_required
 def invigilation_exams():
-    from app.routes.teacher import render_exam_list
-    return render_exam_list(school_admin=True)
+    from app.routes.teacher import exam_list_context
+    if not _school_id():
+        return redirect(login_door_for(g.get("user_role"), request.path))
+    return render_template("teacher/exams.html", **exam_list_context(school_admin=True))
 
 
 @admin_sekolah_bp.route("/invigilation/save", methods=["POST"])

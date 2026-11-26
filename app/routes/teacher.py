@@ -2154,12 +2154,12 @@ def exam_detail(exam_id):
     # to a *reported* save; an autosave answers JSON and writes the paper's own
     # fields, nothing else. The per-pupil roster sync waits for the explicit save
     # too: a background write every few seconds is the load it must not become.
+    if autosave and (start_changed or points_changed):
+        log_activity("update", "exam", exam_id,
+                     old_data={"start_at": exam_row.get("start_at"), "total_points": old_points},
+                     new_data={"start_at": start_at, "total_points": points},
+                     user_id=g.user_id)
     if autosave:
-        if start_changed or points_changed:
-            log_activity("update", "exam", exam_id,
-                         old_data={"start_at": exam_row.get("start_at"), "total_points": old_points},
-                         new_data={"start_at": start_at, "total_points": points},
-                         user_id=g.user_id)
         return jsonify({"ok": True, "exam_id": exam_id})
     _sync_exam_targets(supabase, exam_id, class_ids, request.form)
     # Same warning as the create door — a save that leaves the paper outside its
@@ -2418,14 +2418,15 @@ def _exam_list_url():
 @teacher_bp.route("/exams")
 @teacher_or_admin_required
 def my_exams():
-    return render_exam_list(school_admin=g.get("user_role") == "admin_sekolah")
+    school_admin = g.get("user_role") == "admin_sekolah"
+    if school_admin and not g.get("user_school_id"):
+        return _deny(NO_EXAM_ACCESS, True)
+    return render_template("teacher/exams.html", **exam_list_context(school_admin=school_admin))
 
 
-def render_exam_list(*, school_admin):
+def exam_list_context(*, school_admin):
     supabase = get_supabase()
     sid = g.get("user_school_id")
-    if school_admin and not sid:
-        return _deny(NO_EXAM_ACCESS, True)
     columns = (
         "id,teacher_id,title,subject,duration_minutes,total_questions,status,is_published,"
         "is_template,start_at,anti_cheat_enabled,require_seb,class_ids,question_types,answer_key"
@@ -2469,10 +2470,8 @@ def render_exam_list(*, school_admin):
     # "0 ujian tersisa" on the page a teacher starts a paper from, rather than after a
     # save that failed. Two reads (the plan, then this year's papers), not one per row.
     quota = exam_quota(g.get("user_school_id"))
-    return render_template("teacher/exams.html", exams=exams,
-                           unassigned_ids=unassigned_ids,
-                           ambiguous_ids=ambiguous_ids,
-                           exam_quota=quota, school_admin=school_admin, teacher_names=teachers)
+    return dict(exams=exams, unassigned_ids=unassigned_ids, ambiguous_ids=ambiguous_ids,
+                exam_quota=quota, school_admin=school_admin, teacher_names=teachers)
 
 
 #: The three sizes a paper is checked at, and each one's two orientations. A real

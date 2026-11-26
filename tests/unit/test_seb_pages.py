@@ -224,7 +224,9 @@ def test_the_confirmation_checkbox_is_enforced_by_the_route_not_only_the_page():
     import pathlib
     source = (pathlib.Path(__file__).resolve().parents[2]
               / "app" / "routes" / "seb.py").read_text(encoding="utf-8")
-    body = source[source.index("def enable("):source.index("def disable(")]
+    enable = source[source.index("def enable("):source.index("def disable(")]
+    assert "_set_required(exam_id, True)" in enable
+    body = source[source.index("def _set_required("):source.index("def reissue(")]
     assert "CONFIRM_FIELD" in body
     assert body.index("CONFIRM_FIELD") < body.index("seb_service.issue(")
 

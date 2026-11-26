@@ -536,7 +536,7 @@ def test_one_refusal_helper_answers_both_a_json_and_a_browser_save():
     src = _routes()
     # The create door also reports SEB setup failures. The edit door reports
     # missing credentials and a failed config update before publishing a draft.
-    expected = {"exam_form": 6, "exam_detail": 6}
+    expected = {"exam_form": 8, "exam_detail": 9}
     for name, count in expected.items():
         assert _door_body(src, name).count("return _exam_save_refused(autosave,") == count, (
             f"{name}: every refusal has to answer an autosave with a sentence "
@@ -560,7 +560,7 @@ def test_the_autosave_stops_before_anything_that_is_not_a_draft_write():
 
 def test_the_create_door_writes_the_draft_the_page_holds_instead_of_a_second_row():
     src = _routes()
-    assert 'draft_row = _owned_draft(supabase, draft_id, g.get("user_school_id"), g.user_id)' in src
+    assert 'draft_row = _owned_draft(supabase, draft_id, g.get("user_school_id"), teacher_id)' in src
     assert src.count("        if draft_row:\n") == 2, (
         "the insert and its fallback both have to prefer the draft row")
 
