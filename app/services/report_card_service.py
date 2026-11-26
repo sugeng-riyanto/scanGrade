@@ -20,6 +20,7 @@ import json
 import logging
 from datetime import datetime, timedelta, timezone
 
+from app.services import result_order
 from app.services.subject_lookup import annotate as annotate_subject
 from app.utils.exam_access import exam_class_ids, result_released
 from app.utils.helpers import row_or_none
@@ -241,9 +242,8 @@ def load_report_cards(supabase, exam_id, class_id=None):
     **The cost does not scale with the class.** `load_report_card` reads a paper in
     four round-trips — the submission, the pupil, the school, the teacher — and
     looping it over a class of thirty is 120 round-trips inside one request, on a
-    box that serves 500 pupils with three workers. This reads the same rows in
-    three: the papers, then every profile they name at once (pupils and the
-    teacher in one call), then the letterhead.
+    box that serves 500 pupils with three workers. This batches the shared reads: the papers, then every profile they name at once (pupils and the
+    teacher in one call), then the letterhead and the class labels.
 
     ``class_id`` keeps only the papers whose owner is in that class. A pupil whose
     profile could not be read has no class to match, so a filtered set excludes
@@ -283,15 +283,22 @@ def load_report_cards(supabase, exam_id, class_id=None):
         for s in submissions
     })
 
+    exam_school = next((s["exam"]["school_id"] for s in submissions
+                        if (s.get("exam") or {}).get("school_id")), None)
+    class_labels = result_order.class_names(
+        supabase, (people.get(s.get("student_id")) or {} for s in submissions), exam_school)
     cards = []
     for submission in submissions:
         exam = submission["exam"] or {}
         student = people.get(submission.get("student_id")) or {}
         school = schools.get(str(exam.get("school_id") or student.get("school_id"))) or {}
         teacher = people.get(exam.get("teacher_id")) or {}
-        cards.append(build_card(submission, student, teacher.get("full_name"), school))
+        card = build_card(submission, student, teacher.get("full_name"), school)
+        card["class_name"] = class_labels.get(student.get("class_id"), "")
+        cards.append(card)
 
-    cards.sort(key=_SORT_KEY)
+    cards.sort(key=lambda card: (result_order.class_key(card["class_name"]),
+                                 _SORT_KEY(card)))
     return cards
 
 
