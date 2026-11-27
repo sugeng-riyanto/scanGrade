@@ -418,7 +418,7 @@ class TestTheExitCodesAreTheContract:
         page = "teacher/_results_table.html"
 
         def mutate(pages):
-            pages[page]["pairs"] += 5
+            pages[page]["pairs"] = cov.scan()[page]["pairs"] + 5
 
         monkeypatch.setattr(cov, "BASELINE", self._baseline(tmp_path, mutate))
         assert cov.main([]) == 1
