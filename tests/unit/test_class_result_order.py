@@ -17,8 +17,8 @@ def test_xlsx_orders_by_class_then_name_and_keeps_unknown_class_last():
     rows = [
         {"id": "3", "profiles": {"class_id": "ten", "full_name": "Abel"}},
         {"id": "4", "profiles": {"class_id": "unknown", "full_name": "Ari"}},
-        {"id": "1", "profiles": {"class_id": "two", "full_name": "Zara"}},
-        {"id": "2", "profiles": {"class_id": "two", "full_name": "ana"}},
+        {"id": "1", "score": 91, "final_score": 0, "profiles": {"class_id": "two", "full_name": "Zara"}},
+        {"id": "2", "score": 85, "final_score": 74, "profiles": {"class_id": "two", "full_name": "ana"}},
     ]
     ordered = arrange(db, rows, "school-a")
     db.table.assert_called_once_with("classes")
@@ -33,3 +33,4 @@ def test_xlsx_orders_by_class_then_name_and_keeps_unknown_class_last():
     assert sheet.row_dimensions[2].outlineLevel == 0
     assert sheet.row_dimensions[3].outlineLevel == 1
     assert sheet.row_dimensions[4].outlineLevel == 0
+    assert [row[5] for row in exported[1:3]] == [74, 0]

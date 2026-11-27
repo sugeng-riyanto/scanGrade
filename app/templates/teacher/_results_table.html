@@ -33,15 +33,56 @@
    only that column, so a graded or published paper is corrected without being
    re-graded. #}
 
+{% macro filter_values(s, index) -%}
+    {%- set answers = s.get('answers') if s.get('answers') is mapping else {} -%}
+    {%- set final = s.final_score if s.final_score is not none else s.score -%}
+    {{- [index, s.student_name or (s.student_id or '')[:12], s.get('class_name') or '?',
+         s.score if s.score is not none else '-', s.penalty or 0,
+         final if final is not none else '-', s.submitted_at|tz if s.submitted_at else '-',
+         s.status or '', answers.get('_nisn', '-')] | tojson | forceescape -}}
+{%- endmacro %}
+
+<section data-result-filters>
+    <div class="flex flex-wrap items-end gap-2 mb-4">
+        {% for field, label_id, label_en in ((0,'No','No'), (1,'Siswa','Student'),
+             (2,'Kelas','Class'), (3,'Skor','Score'), (4,'Penalti','Penalty'),
+             (5,'Nilai Akhir','Final Score'), (6,'Waktu','Time'), (7,'Status','Status'),
+             (8,'NISN','NISN')) if field != 8 or is_scan_section %}
+        <label class="block text-xs font-bold text-stone-600">
+            <span x-text="t('{{ label_id }}','{{ label_en }}')"></span>
+            {% if field == 2 %}
+            <select data-result-filter="{{ field }}" class="block border border-stone-200 rounded-lg px-2 py-2 text-sm">
+                <option value="" x-text="t('Semua kelas','All classes')"></option>
+                {% for name in sub_list | map(attribute='class_name', default='') | unique %}
+                <option value="{{ name or '?' }}">{{ name or '?' }}</option>
+                {% endfor %}
+            </select>
+            {% else %}
+            <input type="search" size="10" data-result-filter="{{ field }}"
+                   class="block border border-stone-200 rounded-lg px-2 py-2 text-sm"
+                   {% if field in (0,3,4,5,8) %}inputmode="decimal"{% endif %}>
+            {% endif %}
+        </label>
+        {% endfor %}
+        <button type="button" data-reset-result-filters class="font-bold text-sm px-2 py-2"
+                x-text="t('Reset filter','Reset filters')"></button>
+    </div>
+    <p hidden data-no-results role="status" class="text-sm text-stone-600"
+       x-text="t('Tidak ada hasil yang cocok','No matching results')"></p>
+
 <!-- Mobile cards -->
 <div class="mobile-only">
     <div class="space-y-3">
     {% for s in sub_list %}
+    {% if loop.changed(s.get('class_name') or '') %}
+    <h3 data-result-group class="font-extrabold text-stone-700">{{ s.get('class_name') or '' }}<span {% if s.get('class_name') %}hidden{% endif %} x-text="t('Kelas belum diketahui','Unknown class')"></span></h3>
+    {% endif %}
     {% set ans = s.get('answers', {}) if s.get('answers') is mapping else {} %}
-    <div class="border border-stone-200 rounded-xl p-3 space-y-2">
+    <div data-result-row="{{ filter_values(s, loop.index) }}" class="border border-stone-200 rounded-xl p-3 space-y-2">
         <div class="flex items-center justify-between gap-2">
             <span class="flex items-center gap-1.5 min-w-0">
                 <span class="font-extrabold text-stone-800 text-sm truncate">{{ s.student_name or s.student_id[:12] ~ '...' }}</span>
+                <span class="shrink-0 text-xs text-stone-600">{{ s.get('class_name') or '?' }}</span>
                 {% if s.submitted_late %}
                 <span class="shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-bold rounded bg-amber-100 text-amber-700 border border-amber-200"
                       :title="t('Jawaban tiba setelah tenggat waktu ujian','The answers arrived after the sitting deadline')">
@@ -57,7 +98,7 @@
         <div class="grid grid-cols-2 gap-1 text-center text-[10px]">
             <div class="bg-stone-50 rounded-lg p-1.5"><span class="text-stone-400">Skor</span><br><span class="font-extrabold text-stone-700">{{ s.score if s.score is not none else '-' }}</span></div>
             <div class="bg-stone-50 rounded-lg p-1.5"><span class="text-stone-400" x-text="t('Penalti','Penalty')"></span><br><span class="font-extrabold text-red-500">{{ s.penalty if s.penalty is not none else 0 }}</span></div>
-            <div class="bg-stone-50 rounded-lg p-1.5"><span class="text-stone-400">Final</span><br><span class="font-extrabold {% if (s.final_score or s.score or 0) >= 70 %}text-emerald-600{% else %}text-red-600{% endif %}">{{ s.final_score if s.final_score is not none else (s.score if s.score is not none else '-') }}</span></div>
+            <div class="bg-stone-50 rounded-lg p-1.5"><span class="text-stone-400">Final</span><br><span class="font-extrabold {% if (s.final_score if s.final_score is not none else (s.score or 0)) >= 70 %}text-emerald-600{% else %}text-red-600{% endif %}">{{ s.final_score if s.final_score is not none else (s.score if s.score is not none else '-') }}</span></div>
             <div class="bg-stone-50 rounded-lg p-1.5"><span class="text-stone-400">NISN</span><br><span class="font-extrabold text-violet-600 text-[9px]">{{ ans.get('_nisn', '-') if is_scan_section else '-' }}</span></div>
         </div>
         {% if s.away_count %}
@@ -116,6 +157,7 @@
             <tr class="text-left text-stone-500 border-b border-stone-200">
                 <th class="pb-3 font-extrabold w-8">#</th>
                 <th class="pb-3 font-extrabold" x-text="t('Siswa','Student')"></th>
+                <th class="pb-3 font-extrabold" x-text="t('Kelas','Class')"></th>
                 <th class="pb-3 font-extrabold text-center" x-text="t('Skor','Score')"></th>
                 <th class="pb-3 font-extrabold text-center" x-text="t('Penalti','Penalty')"></th>
                 <th class="pb-3 font-extrabold text-center">Final</th>
@@ -127,8 +169,11 @@
         </thead>
         <tbody>
             {% for s in sub_list %}
+        {% if loop.changed(s.get('class_name') or '') %}
+        <tr data-result-group><th colspan="{{ 10 if is_scan_section else 9 }}" class="text-left px-3 py-2 bg-stone-100">{{ s.get('class_name') or '' }}<span {% if s.get('class_name') %}hidden{% endif %} x-text="t('Kelas belum diketahui','Unknown class')"></span></th></tr>
+        {% endif %}
             {% set ans = s.get('answers', {}) if s.get('answers') is mapping else {} %}
-            <tr class="border-b border-stone-200 last:border-0 hover:bg-orange-50/30 transition">
+            <tr data-result-row="{{ filter_values(s, loop.index) }}" class="border-b border-stone-200 last:border-0 hover:bg-orange-50/30 transition">
                 <td class="py-3 font-bold text-stone-600">{{ loop.index }}</td>
                 <td class="py-3 font-extrabold text-stone-800">
                     {{ s.student_name or s.student_id[:12] ~ '...' }}
@@ -139,6 +184,7 @@
                     </span>
                     {% endif %}
                 </td>
+                <td class="py-3 font-bold text-stone-600">{{ s.get('class_name') or '?' }}</td>
                 <td class="py-3 font-bold text-stone-600 text-center">{{ s.score if s.score is not none else '-' }}</td>
                 <td class="py-3 font-bold text-red-600 text-center">{{ s.penalty if s.penalty is not none else 0 }}
                     {% if s.away_count %}
@@ -152,7 +198,7 @@
                     </span>
                     {% endif %}
                 </td>
-                <td class="py-3 font-extrabold text-center {% if (s.final_score or s.score or 0) >= 70 %}text-emerald-600{% else %}text-red-600{% endif %}">{{ s.final_score if s.final_score is not none else (s.score if s.score is not none else '-') }}</td>
+                <td class="py-3 font-extrabold text-center {% if (s.final_score if s.final_score is not none else (s.score or 0)) >= 70 %}text-emerald-600{% else %}text-red-600{% endif %}">{{ s.final_score if s.final_score is not none else (s.score if s.score is not none else '-') }}</td>
                 {% if is_scan_section %}<td class="py-3 text-center font-bold text-violet-600 text-xs">{{ ans.get('_nisn', '-') }}</td>{% endif %}
                 <td class="py-3 text-xs font-bold text-stone-500 text-center">{{ s.submitted_at|tz if s.submitted_at else '-' }}</td>
                 <td class="py-3 text-center">
@@ -196,3 +242,5 @@
     </table>
     </div>
 </div>
+
+</section>

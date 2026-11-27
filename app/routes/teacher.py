@@ -3398,14 +3398,14 @@ def results():
 
     # exam_id comes from the query string and the submissions used to be fetched
     # before any check, so another school's names and scores were rendered on demand.
-    _, err = _guard_exam(supabase, exam_id, as_json=_wants_json(),
+    guarded_exam, err = _guard_exam(supabase, exam_id, as_json=_wants_json(),
                          redirect_to="/teacher/results", access=ACCESS_READ)
     if err:
         return err
 
     exams = _teacher_exams(supabase, user_role, school_id)
     exam = next((e for e in exams if e["id"] == exam_id), {})
-    subs, scan_subs, online_subs, stats = _exam_results(supabase, exam_id)
+    subs, scan_subs, online_subs, stats = _exam_results(supabase, exam_id, school_id=guarded_exam.get("school_id"))
 
     return render_template("teacher/results.html", submissions=subs, stats=stats, exam_id=exam_id, exams=exams, exam=exam, scan_subs=scan_subs, online_subs=online_subs)
 
@@ -6947,7 +6947,7 @@ def accreditation_report(exam_id):
     story.append(Spacer(1, 12))
 
     # Stats
-    scores = [float(s.get("final_score") or s.get("score") or 0) for s in subs]
+    scores = [_final_score(s) for s in subs]
     avg = sum(scores) / len(scores) if scores else 0
     passed = sum(1 for s in scores if s >= (exam.get("passing_score", 70)))
     story.append(Paragraph(f"Jumlah Siswa: {len(subs)}", styles["Normal"]))
@@ -6986,7 +6986,7 @@ def accreditation_report(exam_id):
     student_data = [["No", "Kelas", "Nama", "Nilai", "Status"]]
     for i, s in enumerate(subs, 1):
         name = s["student_name"] or s["student_id"][:12]
-        score = float(s.get("final_score") or s.get("score") or 0)
+        score = _final_score(s)
         passed_txt = "Lulus" if score >= (exam.get("passing_score", 70)) else "Remedial"
         student_data.append([str(i), s["class_name"] or "-", name, f"{score:.0f}", passed_txt])
 
