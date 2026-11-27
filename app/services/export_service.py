@@ -158,7 +158,7 @@ def export_to_xlsx(submissions: list, exam: dict = None) -> io.BytesIO:
             _nisn_val(answers, ""),
             s.get("score", 0),
             s.get("penalty", 0),
-            s.get("final_score", s.get("score", 0)),
+            s["final_score"] if s.get("final_score") is not None else s.get("score", 0),
             s.get("status", "submitted"),
             _format_dt(s.get("submitted_at", "")),
             s.get("class_name") or "-",
@@ -246,7 +246,7 @@ def export_to_pdf(submissions: list, exam_title: str = "Hasil Ujian", exam: dict
         student_nisn = _nisn_val(s.get("answers", ""), "")
         score = s.get("score", 0)
         penalty = s.get("penalty", 0)
-        final_score = s.get("final_score", score)
+        final_score = s["final_score"] if s.get("final_score") is not None else score
 
         # Header
         c.setFont("Helvetica-Bold", 16)
