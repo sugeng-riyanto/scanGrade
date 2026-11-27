@@ -172,6 +172,7 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="{{ asset_v('js/result-filters.js') }}" defer></script>
 <script>
 function generateRemedial(examId) {
     if (!confirm('Generate soal remedial berdasarkan soal yang paling banyak salah?')) return;
