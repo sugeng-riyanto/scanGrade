@@ -469,3 +469,30 @@ class TestTheRepository:
         gate = GATE.read_text(encoding="utf-8")
         assert "the configuration was NOT measured" in text
         assert "the configuration was measured" in gate
+
+
+def test_idcloudhost_requires_authenticated_private_schema_reads(monkeypatch):
+    from unittest.mock import MagicMock
+
+    response = MagicMock(status=200)
+    response.__enter__.return_value = response
+    response.read.return_value = b"[]"
+    opener = MagicMock()
+    opener.open.return_value = response
+    monkeypatch.setattr(sr, "build_opener", lambda *_: opener)
+    config = sr.Config()
+    values = {"SUPABASE_URL": sr.IDCLOUDHOST_API, "SUPABASE_SERVICE_KEY": "fixture"}
+
+    sr._check_idcloudhost(values, config)
+
+    assert config.state == "idcloudhost"
+    for call, table in zip(opener.open.call_args_list, ("schools", "exams", "submissions"), strict=True):
+        request = call.args[0]
+        assert request.full_url == f"{sr.IDCLOUDHOST_API}/rest/v1/{table}?select=id&limit=0"
+        assert request.get_header("Authorization") == "Bearer fixture"
+
+    opener.reset_mock()
+    config = sr.Config()
+    sr._check_idcloudhost({**values, "SUPABASE_URL": "https://example.test"}, config)
+    assert config.findings
+    opener.open.assert_not_called()
