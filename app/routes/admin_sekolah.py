@@ -872,6 +872,12 @@ def _import_students(ws, sid, supabase, results):
                 nisn = cols[0]; nama = cols[1]; kelas = cols[2] if len(cols) > 2 else ""; email = cols[4] if len(cols) > 4 else ""; hp = ""
 
             if not nisn or not nama:
+                missing_fields = [label for label, value in (
+                    ("NISN", nisn), ("Nama Lengkap", nama)
+                ) if not value]
+                results["errors"].append(
+                    f"Baris {row_idx} (Murid): {', '.join(missing_fields)} wajib diisi."
+                )
                 continue
 
             # Resolve class_id
