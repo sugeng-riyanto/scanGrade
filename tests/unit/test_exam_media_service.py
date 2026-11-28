@@ -317,3 +317,22 @@ def test_a_range_header_reaches_storage(app, monkeypatch):
     assert captured["headers"]["Range"] == "bytes=0-9", (
         "the Range header never reached Storage, so seeking would re-download")
     assert captured["stream"] is True, "the upstream body was buffered in memory"
+
+
+
+def test_private_audio_and_video_get_separate_urls_for_the_same_exam(app):
+    marker = exam_media.PRIVATE_AUDIO_PREFIX + PATH
+    video = f"{EXAM}/3/clip.mp4"
+    original = {"3": {"audio": marker, "file": video, "kind": "video"}}
+    with app.app_context():
+        entry = exam_media.with_media_urls(original, subject=STUDENT, exam_id=EXAM)["3"]
+        audio_claim = exam_media.verify_media_token(entry["audio"].rsplit("/", 1)[-1])
+        video_claim = exam_media.verify_media_token(entry["url"].rsplit("/", 1)[-1])
+    assert audio_claim["p"] == PATH
+    assert video_claim["p"] == video
+    assert audio_claim["s"] == video_claim["s"] == STUDENT
+    assert original["3"]["audio"] == marker
+    assert exam_media.private_audio_path(marker, "another-exam") is None
+    assert exam_media.private_audio_path(
+        exam_media.PRIVATE_AUDIO_PREFIX + f"{EXAM}/3/../clip.mp3", EXAM
+    ) is None

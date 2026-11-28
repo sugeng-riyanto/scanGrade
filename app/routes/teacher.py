@@ -389,24 +389,28 @@ def _relocate_question_media(supabase, from_exam_id, to_exam_id, question_audio)
     prefix = f"{from_exam_id}/"
     relocated = {}
     for key, entry in question_audio.items():
-        if not (isinstance(entry, dict) and entry.get("file")):
+        if not isinstance(entry, dict):
             relocated[key] = entry
-            continue
-        source = str(entry["file"])
-        if not source.startswith(prefix):
-            relocated[key] = entry
-            continue
-        target = f"{to_exam_id}/{source[len(prefix):]}"
-        try:
-            exam_media.ensure_bucket(supabase)
-            supabase.storage.from_(exam_media.MEDIA_BUCKET).copy(source, target)
-        except Exception as exc:
-            current_app.logger.warning("could not copy question media %s -> %s: %s",
-                                       source, target, exc)
             continue
         copied = dict(entry)
-        copied["file"] = target
-        relocated[key] = copied
+        audio_path = exam_media.private_audio_path(entry.get("audio"), from_exam_id)
+        copy_failed = False
+        for field, source in (("file", entry.get("file")), ("audio", audio_path)):
+            if not isinstance(source, str) or not source.startswith(prefix):
+                continue
+            target = f"{to_exam_id}/{source[len(prefix):]}"
+            try:
+                exam_media.ensure_bucket(supabase)
+                supabase.storage.from_(exam_media.MEDIA_BUCKET).copy(source, target)
+            except Exception as exc:
+                current_app.logger.warning("could not copy question media %s -> %s: %s",
+                                           source, target, exc)
+                copy_failed = True
+                copied.pop(field, None)
+                continue
+            copied[field] = target if field == "file" else exam_media.PRIVATE_AUDIO_PREFIX + target
+        if not copy_failed or any(copied.get(field) for field in ("file", "audio", "youtube")):
+            relocated[key] = copied
     return relocated
 
 
