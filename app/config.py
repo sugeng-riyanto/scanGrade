@@ -164,6 +164,14 @@ def database_region() -> dict:
     test that sets `DIRECT_URL` for one case must not have to reload the module, and a
     dict handed back is a value a template can print without a helper.
     """
+    if env_str("SUPABASE_URL", "").rstrip("/") == "http://127.0.0.1:18083":
+        return {
+            "code": "idcloudhost-id",
+            "city": "",
+            "country": "Indonesia",
+            "label": "IDCloudHost (Indonesia)",
+            "short": "IDCloudHost (Indonesia)",
+        }
     found = _POOLER_REGION.search(env_str("DIRECT_URL", ""))
     code = found.group(1) if found else SUPABASE_REGION_DEFAULT
     city, country = REGION_PLACES.get(code, ("", ""))

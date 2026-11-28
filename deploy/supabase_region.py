@@ -79,6 +79,8 @@ import os
 import re
 import subprocess
 import sys
+from urllib.error import URLError
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -493,6 +495,45 @@ def _check_region_source(texts: dict[str, str], report: Report) -> None:
 # ── The configuration ─────────────────────────────────────────────────────────
 
 
+IDCLOUDHOST_API = "http://127.0.0.1:18083"
+
+
+class _NoRedirect(HTTPRedirectHandler):
+    """Keep the service key on the pinned private endpoint."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def _check_idcloudhost(values: dict[str, str], config: Config) -> None:
+    if values.get("SUPABASE_URL", "").rstrip("/") != IDCLOUDHOST_API:
+        config.findings.append("IDCloudHost requires the private ScanGrade API tunnel")
+        return
+    if any("supabase." in values.get(key, "").lower()
+           for key in ("DIRECT_URL", "DATABASE_URL")):
+        config.findings.append("IDCloudHost cannot use a Supabase Cloud SQL connection")
+        return
+    key = values.get("SUPABASE_SERVICE_KEY")
+    if not key:
+        config.findings.append("IDCloudHost database probe requires the service key")
+        return
+    opener = build_opener(ProxyHandler({}), _NoRedirect())
+    for table in ("schools", "exams", "submissions"):
+        request = Request(
+            f"{IDCLOUDHOST_API}/rest/v1/{table}?select=id&limit=0",
+            headers={"apikey": key, "Authorization": f"Bearer {key}"},
+        )
+        try:
+            with opener.open(request, timeout=8) as response:
+                if response.status != 200 or response.read(16).strip() != b"[]":
+                    config.findings.append(f"IDCloudHost schema probe failed for {table}")
+                    return
+        except (OSError, URLError):
+            config.findings.append(f"IDCloudHost API probe could not read {table}")
+            return
+    config.state = "idcloudhost"
+
+
 def _check_config(repo: Path, report: Report) -> None:
     """`.env` against both records — or the sentence saying it was not read."""
     config = report.config
@@ -503,6 +544,10 @@ def _check_config(repo: Path, report: Report) -> None:
         return
 
     values = parse_env(path)
+    if values.get("SCANGRADE_DATABASE_PROVIDER") == "idcloudhost" or values.get(
+        "SUPABASE_URL", "").rstrip("/") == IDCLOUDHOST_API:
+        _check_idcloudhost(values, config)
+        return
     unread: list[str] = []
 
     url = values.get("SUPABASE_URL", "")
@@ -583,6 +628,8 @@ def config_line(config: Config) -> str:
     `deploy/theme_gate.sh`'s test pins the phrase), because a sentence saying the
     `.env` agrees must not be printed by a run that read no `.env`.
     """
+    if config.state == "idcloudhost":
+        return "database: IDCloudHost private API verified with authenticated schema reads"
     if config.state == "measured":
         return ("supabase region: the configuration was measured — this "
                 f"checkout's {ENV_FILE} says SUPABASE_URL is {config.url_ref} and "
