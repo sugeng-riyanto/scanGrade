@@ -112,11 +112,10 @@ GRACE_RE = re.compile(r"graceSeconds:\s*(\d+)")
 #: Each marker is a fact about the page rather than a spelling of it: an `x-show`
 #: that no longer names the flag is a panel nothing would ever reveal, and a panel
 #: whose sentence was dropped is a blurred screen with nothing to read.
-FULLSCREEN_PANEL = 'x-show="fullscreenBlocked && !submitted"'
-FULLSCREEN_WORDS = "Ujian ini harus dikerjakan dalam layar penuh"
+WINDOWED_WORDS = "Layar penuh opsional."
 AWAY_PANEL = 'x-show="awayBlurred && !submitted"'
 AWAY_WORDS = "soal diburamkan sampai Anda kembali"
-FULLSCREEN_WATCH = "addEventListener('fullscreenchange'"
+FOCUS_WATCH = "addEventListener('blur'"
 AWAY_WATCH = "addEventListener('visibilitychange'"
 
 
@@ -636,24 +635,17 @@ def check_exam_sitting(session: requests.Session, base: str, res: Result) -> Non
 
     found = ANTI_CHEAT_RE.search(html)
     settings = json.loads(found.group(1)) if found else {}
-    if not settings.get("enabled") or not settings.get("fullscreen_required"):
-        res.fail(f"murid: the exam page arms anti-cheat as {found.group(1) if found else 'nowhere'}"
-                 " — both panels are revealed only when the exam asks for them",
-                 role="murid")
+    if settings.get("enabled") and not settings.get("fullscreen_required"):
+        res.ok("murid: the page enables anti-cheat with optional fullscreen")
     else:
-        res.ok("murid: the page asks for anti-cheat and fullscreen")
+        res.fail("murid: expected anti-cheat with optional fullscreen", role="murid")
 
-    missing = []
-    if FULLSCREEN_PANEL not in html or FULLSCREEN_WORDS not in html:
-        missing.append("fullscreen blocker")
-    if AWAY_PANEL not in html or AWAY_WORDS not in html:
-        missing.append("away blur")
-    if missing:
-        res.fail(f"murid: the exam page is missing the {' and the '.join(missing)}",
-                 role="murid")
+    if any(marker not in html for marker in (AWAY_PANEL, AWAY_WORDS, WINDOWED_WORDS)):
+        res.fail("murid: missing the away overlay or its exam rules", role="murid")
+    elif any(marker in html for marker in ("requestFullscreen", "fullscreenBlocked", "fullscreenchange")):
+        res.fail("murid: the page still enforces fullscreen", role="murid")
     else:
-        res.ok("murid: the fullscreen blocker and the away blur are on the page, "
-               "each with its words")
+        res.ok("murid: the away overlay and windowed exam rules are present")
 
     grace = GRACE_RE.search(html)
     if not grace or int(grace.group(1)) <= 0:
@@ -662,11 +654,10 @@ def check_exam_sitting(session: requests.Session, base: str, res: Result) -> Non
     else:
         res.ok(f"murid: the countdown reads {grace.group(1)}s — the service's own number")
 
-    if FULLSCREEN_WATCH not in html or AWAY_WATCH not in html:
-        res.fail("murid: the page does not watch fullscreenchange and "
-                 "visibilitychange, so nothing would set either panel", role="murid")
+    if FOCUS_WATCH not in html or AWAY_WATCH not in html:
+        res.fail("murid: the page does not watch window blur and visibility changes", role="murid")
     else:
-        res.ok("murid: the page watches fullscreenchange and visibilitychange")
+        res.ok("murid: the page watches window blur and visibility changes")
 
 
 def _list_read(session, base, acct, res):

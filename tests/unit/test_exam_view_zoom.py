@@ -326,12 +326,12 @@ def test_the_lightbox_takes_a_named_layer_rather_than_a_hand_picked_height():
         "the lightbox writes a stacking height by hand")
 
 
-def test_losing_fullscreen_takes_the_magnifier_with_it():
+def test_leaving_the_exam_takes_the_magnifier_with_it():
     """The viewer layer is above the blocker's scrim, so the blocker closes it."""
     exam = _exam()
-    block = exam[exam.index("this.fullscreenBlocked = true;"):][:400]
+    block = exam[exam.index("startAwayGrace(kind, trigger, since) {"):][:400]
     assert "this.closePageZoom()" in block, (
-        "the overlay survives the fullscreen blocker, so a blocked paper is still "
+        "the overlay survives the away panel, so a blocked paper is still "
         "readable through the magnifier")
 
 

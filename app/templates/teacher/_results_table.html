@@ -193,7 +193,7 @@
                        both from `leaving_summary`, so the badge and the per-paper
                        page it links to cannot disagree. #}
                     <span class="block text-[9px] font-bold text-stone-500 mt-0.5 whitespace-nowrap"
-                          :title="t('Kertas ini meninggalkan layar ujian — layar dikaburkan saat siswa berpindah jendela, tab, atau keluar dari layar penuh. Waktu terakhir ada di sini; rincian tiap kejadian ada di halaman koreksi kertas ini.','This paper left the exam screen — it is blurred when the student turns to another window or tab, or leaves fullscreen. The most recent time is here; every event is listed on the correction page for the paper.')">
+                          :title="t('Kertas ini meninggalkan layar ujian — layar dikaburkan saat siswa berpindah jendela atau tab. Waktu terakhir ada di sini; rincian tiap kejadian ada di halaman koreksi kertas ini.','This paper left the exam screen — it is blurred when the student turns to another window or tab. The most recent time is here; every event is listed on the correction page for the paper.')">
                         <i class="fas fa-eye-slash mr-0.5"></i>{{ s.away_count }}&times; &middot; {{ s.away_last_at|tz('%d %b %H:%M') }}
                     </span>
                     {% endif %}

@@ -161,16 +161,6 @@ class TestThePaperBlursBeforeAnythingIsCharged:
             assert body.index(guard) > blur, f"{guard} runs before the paper is blurred"
         assert body.index("this._chargeAway(kind, trigger);") > blur
 
-    def test_leaving_fullscreen_is_still_charged_on_sight(self):
-        """The boundary, and it is deliberate: that overlay is not silent — it
-        blocks the paper and names the one press that fixes it — so it is not the
-        accident the countdown exists for. It is also unreachable from a phone
-        call, which arrives as a hidden document and is owned by the visibility
-        handler (see `_hiddenAbsenceCharged`)."""
-        check = slice_between(source(EXAM_PAGE), "checkFullscreen() {",
-                              "async resumeFullscreen() {")
-        assert "this.handleViolation('fullscreen_exit');" in check
-        assert "startAwayGrace" not in check
 
     def test_a_submitted_paper_keeps_no_countdown_running(self):
         body = slice_between(source(EXAM_PAGE), "_executeSubmit() {", "this.saveToLocal();")
@@ -228,7 +218,7 @@ function fresh() {
     violationCount: 0, totalPenalty: 0, showViolationBanner: false,
     violationMessage: '', violationType: 'warning', _bannerCount: 0, _bannerKind: 'tab_switch',
     _applyViolationBanner: function () {}, _maybeAutoSubmit: function () {},
-    _csrfToken: function () { return 'csrf'; }, resumeFullscreen: async function () {},
+    _csrfToken: function () { return 'csrf'; }, closePageZoom: function () {},
   }, M, H);
 }
 
@@ -405,7 +395,7 @@ class TestTheCountdownItself:
         page = source(EXAM_PAGE)
         methods = slice_between(page, "        _graceChancesLeft() {",
                                 "        setupAntiCheat() {")
-        back = slice_between(page, "        async returnToExam() {",
+        back = slice_between(page, "        returnToExam() {",
                              "        _graceChancesLeft() {")
         handle = slice_between(
             page, "        handleViolation(vtype = 'tab_switch'",

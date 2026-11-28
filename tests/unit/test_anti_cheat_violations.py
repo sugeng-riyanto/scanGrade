@@ -150,29 +150,18 @@ def test_the_endpoint_lets_the_new_payload_past_the_guard(app):
 
 # ── which violations are charged ─────────────────────────────────
 
-def test_the_acts_that_count_are_tab_switch_and_leaving_fullscreen():
+def test_legacy_fullscreen_exits_are_excluded_from_penalty():
     """Everything the student can be *charged* for, and nothing they cannot."""
     supa = FakeSupabase([
         log(vtype="tab_switch"), log(vtype="fullscreen_exit"),
         log(vtype="tab_switch"), log(vtype="blur"),
     ])
 
-    assert count_penalized_violations(supa, "stu-1", "exam-1") == 3
+    assert count_penalized_violations(supa, "stu-1", "exam-1") == 2
 
 
-def test_the_penalized_set_is_exactly_these_three():
-    """Pinned so a fourth type cannot be charged by accident — and so a kind the
-    page only records (a right-click, a copy) cannot start costing points.
-
-    ``focus_lost`` is the third, and it is the one that had to be measured to be
-    believed: a windowed exam beside another window leaves ``document.hidden``
-    false, so the visibility path never fired and the window-blur handler logged a
-    console line and recorded nothing. The three are one act to a school — the
-    assessment stopped being the thing on screen — so they share the ladder.
-    """
-    assert set(PENALIZED_VIOLATION_TYPES) == {
-        "tab_switch", "fullscreen_exit", "focus_lost",
-    }
+def test_only_leaving_the_tab_or_window_can_be_penalized():
+    assert set(PENALIZED_VIOLATION_TYPES) == {"tab_switch", "focus_lost"}
 
 
 def test_other_students_and_exams_are_not_counted():
@@ -189,28 +178,10 @@ def test_a_lookup_failure_does_not_invent_a_penalty(app):
         assert count_penalized_violations(FakeSupabase([], fail=True), "stu-1", "exam-1") == 0
 
 
-def test_leaving_fullscreen_climbs_the_same_ladder_as_a_tab_switch():
-    """The first offence of either kind is the warning; the penalty starts at the
-    second. Leaving fullscreen is not a lesser act than switching tabs."""
-    supa = FakeSupabase([log(vtype="fullscreen_exit")])
-    first = count_penalized_violations(supa, "stu-1", "exam-1")
-    assert first == 1
-    assert calculate_graduated_penalty(first, EXAM) == {
-        "penalty": 0, "warning": True, "auto_submit": False,
-        "current_penalty_this_violation": 0,
-    }
-
-    supa = FakeSupabase([log(vtype="fullscreen_exit"), log(vtype="fullscreen_exit")])
-    second = count_penalized_violations(supa, "stu-1", "exam-1")
-    assert second == 2
-    assert calculate_graduated_penalty(second, EXAM)["penalty"] == float(
-        EXAM["penalty_per_violation"])
-
-
 def test_the_two_kinds_share_one_counter():
-    """A tab switch after a fullscreen exit is the student's second offence, not
+    """A tab switch after a window blur is the student's second offence, not
     their first — the ladder counts acts, not per-type totals."""
-    supa = FakeSupabase([log(vtype="fullscreen_exit"), log(vtype="tab_switch")])
+    supa = FakeSupabase([log(vtype="focus_lost"), log(vtype="tab_switch")])
 
     count = count_penalized_violations(supa, "stu-1", "exam-1")
 
@@ -340,8 +311,8 @@ def _call(client, payload, monkeypatch, supabase):
 def test_count_endpoint_returns_the_penalty(app, monkeypatch):
     from app.routes import api as apimod
 
-    # One tab switch plus two fullscreen exits: all three are charged now.
-    rows = [log(), log(vtype="fullscreen_exit"), log(vtype="fullscreen_exit")]
+    # A legacy fullscreen event leaves the three absences as the charged count.
+    rows = [log(), log(vtype="focus_lost"), log(), log(vtype="fullscreen_exit")]
     supa = FakeSupabase(rows)
 
     class _Exams:
@@ -427,94 +398,6 @@ def _src():
     return TEMPLATE.read_text(encoding="utf-8")
 
 
-def test_the_fullscreen_state_is_sampled_not_only_listened_for():
-    """The defect this whole change is about.
-
-    Restoring a window down and minimising it are the acts a student uses to put
-    something else on screen, and neither reliably fires `fullscreenchange` or
-    even `resize` — so a listener-only check reported nothing and the exam looked
-    clean. The state has to be sampled as well.
-    """
-    src = _src()
-
-    assert "document.addEventListener('fullscreenchange', check);" in src
-    assert "window.addEventListener('resize'" in src, "a resize must re-check"
-    assert "this._fsWatch = setInterval(check, 2000);" in src, \
-        "the state must also be sampled — no event covers every way out"
-    assert "this.watchFullscreen();" in src, "and the watcher has to be armed"
-
-
-def test_losing_fullscreen_covers_the_exam_until_it_comes_back():
-    """A page cannot maximise a window, so blocking is what 'not allowed' means.
-
-    It also has to be recoverable in one click: the overlay is the only thing on
-    screen, and the click that dismisses it is the user gesture the browser
-    requires before it will grant fullscreen again.
-    """
-    src = _src()
-
-    assert 'x-show="fullscreenBlocked && !submitted"' in src, \
-        "the overlay must disappear with the exam, not outlive the submission"
-    assert "resumeFullscreen()" in src, "and offer the way back"
-    assert "this.requestExamFullscreen();" in src
-    assert "this.fullscreenBlocked = false;" in src, \
-        "only regaining fullscreen may clear it"
-
-
-def test_a_device_without_the_fullscreen_api_is_not_failed_for_it():
-    """iPhone Safari has no Fullscreen API, and a permissions policy can switch it
-    off. Neither is a student's doing, and neither can be fixed by them — so the
-    check stands down rather than blocking an exam they cannot start."""
-    src = _src()
-
-    assert "_fsSupported()" in src
-    assert "document.fullscreenEnabled !== false" in src
-    assert "!this.antiCheat.fullscreen_required || !this._fsSupported()" in src, \
-        "the guard has to be in the check itself, not only where it is armed"
-
-
-def test_one_minimise_is_charged_once():
-    """A minimise makes the document hidden, which the visibility handler already
-    charges. Sampling the fullscreen state while hidden would bill the same act a
-    second time, and an over-charged student is as wrong as an uncaught one.
-    """
-    src = _src()
-
-    assert "// A hidden document is a minimise or a tab switch" in src
-    assert "this._hiddenAbsenceCharged = true;" in src
-    assert "if (this._hiddenAbsenceCharged) {" in src, \
-        "the overlay must be able to go up without charging again"
-
-
-def test_starting_the_exam_is_not_itself_a_violation():
-    """agreeExam() asks for fullscreen on the click that arms the watcher, and the
-    request resolves a moment later. Without a grace window the student's first
-    act of starting is charged."""
-    src = _src()
-
-    assert "_fsGraceMs" in src
-    assert "!this._sawFullscreen && (Date.now() - this._fsArmedAt) < this._fsGraceMs" in src
-
-
-def test_a_reload_does_not_bill_the_browser_dropping_fullscreen():
-    """Measured in the browser: Chrome keeps fullscreen across a same-origin
-    reload, so the new document's first sample is already *in* fullscreen — and
-    the browser then drops it on its own. Treating that as the student having
-    established fullscreen and then left it charged a reload, which is the very
-    action the page supports for crash recovery.
-
-    So arriving in fullscreen must not arm the charge; only a fullscreen reached
-    from outside may.
-    """
-    src = _src()
-
-    assert "_fsWasAbsent: false," in src
-    assert "if (this._fsWasAbsent) this._sawFullscreen = true;" in src, \
-        "an inherited fullscreen must not count as one the student established"
-    assert "this._fsWasAbsent = true;" in src, \
-        "and reaching fullscreen later has to be recognised as such"
-
-
 def test_the_violation_is_recorded_as_the_act_it_was():
     """The teacher's report can only tell a fullscreen exit from a tab switch if
     the client names the right type, so the type travels with the request — and
@@ -523,7 +406,6 @@ def test_the_violation_is_recorded_as_the_act_it_was():
     src = _src()
 
     assert "handleViolation(vtype = 'tab_switch', trigger = null, awaySeconds = null)" in src
-    assert "this.handleViolation('fullscreen_exit');" in src
     assert "this.startAwayGrace('focus_lost', 'window_blur', gone);" in src, \
         "the window-blur path has to name its own act, or the report cannot"
     assert "this.startAwayGrace('tab_switch', 'visibilitychange', gone);" in src, \
@@ -533,18 +415,6 @@ def test_the_violation_is_recorded_as_the_act_it_was():
         "the act the page saw and the seconds it measured both travel with it"
     assert "this.handleViolation(kind || 'tab_switch', trigger, away)" in src, \
         "and the charge carries the very absence the countdown was opened for"
-
-
-def test_the_terms_say_fullscreen_is_required():
-    """The reason the old behaviour was indefensible: the page charged nothing for
-    something it also never asked for. The agreement now says what is required.
-    """
-    src = _src()
-
-    assert "Wajib layar penuh." in src
-    assert "menghentikan ujian" in src
-    assert "keluar dari layar penuh" in src, \
-        "and the ladder must name the acts that are counted"
 
 
 def test_the_visible_window_that_loses_focus_blurs_the_paper_under_the_same_guards():
@@ -566,8 +436,6 @@ def test_the_visible_window_that_loses_focus_blurs_the_paper_under_the_same_guar
         "a hidden document belongs to the visibility handler: one absence, one charge"
     assert "if (!this._isFocusTab || this.submitted || document.hidden) return;" in handler, \
         "raised after the guard, never before it"
-    assert "if (this.fullscreenBlocked) return;" in handler, \
-        "an absence the fullscreen overlay already charged is not billed twice"
     assert "}, 1500);" in handler, \
         "the same debounce as the hidden path, so a moment's inattention is nothing"
     assert "this.startAwayGrace('focus_lost', 'window_blur', gone);" in handler, \
@@ -582,22 +450,6 @@ def test_the_visible_window_that_loses_focus_blurs_the_paper_under_the_same_guar
 # something else on screen. The paper behind is still there to be read, which is
 # exactly why it stops being readable — so it is blurred behind the panel, both
 # for losing fullscreen and for leaving the exam.
-
-def test_a_restored_window_blurs_the_paper_rather_than_hiding_it():
-    """Leaving fullscreen already covered the paper; a 95% scrim *hides* it.
-
-    The ask was a blur: the exam is visibly still there and unreadable. A
-    `backdrop-*` utility is what does that, and it has to be on the fullscreen
-    panel — the one that answers a restore-down — not on some other element.
-    """
-    src = _src()
-
-    fullscreen_panel = src.split('x-show="fullscreenBlocked && !submitted"', 1)[1]
-    fullscreen_panel = fullscreen_panel.split('>', 1)[0]
-    assert "backdrop-blur" in fullscreen_panel, \
-        "the fullscreen panel has to blur the paper, not cover it"
-    assert "bg-surface-900/95 backdrop-blur-sm" not in src, \
-        "a 95% scrim is a hide, which is what a blur replaced"
 
 
 def test_leaving_the_exam_blurs_the_paper_too():
@@ -655,14 +507,7 @@ def test_the_second_tab_of_the_same_exam_does_not_blur_the_tab_in_front():
         "so the blur is never raised outside the guarded funnel"
 
 
-def test_one_click_clears_the_blur_and_re_enters_fullscreen():
-    """Leaving the exam usually drops fullscreen as well, so clearing the blur on
-    its own would meet the fullscreen panel on the next click. One gesture has to
-    do both — and that gesture is the one the browser requires.
-    """
-    src = _src()
-
-    body = src.split("async returnToExam() {", 1)[1].split("\n        },", 1)[0]
-    assert "this.awayBlurred = false;" in body, "the panel has to come down"
-    assert "await this.resumeFullscreen();" in body, \
-        "and the same click re-enters fullscreen when that was lost too"
+def test_one_click_returns_to_the_exam():
+    body = _src().split("returnToExam() {", 1)[1].split("\n        },", 1)[0]
+    assert "this.endAway();" in body
+    assert "this.awayBlurred = false;" in body

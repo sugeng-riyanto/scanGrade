@@ -828,13 +828,13 @@ class TestTheScoringGuideIsTrue:
         saying it while the other says something else is the failure."""
         from app.services.anti_cheat_service import PENALIZED_VIOLATION_TYPES
         assert set(PENALIZED_VIOLATION_TYPES) == {
-            "tab_switch", "fullscreen_exit", "focus_lost",
+            "tab_switch", "focus_lost",
         }
         teacher_tab, student_tab = GUIDE.split("x-show=\"tab==='student'\"", 1)
         for name, tab in (("teacher", teacher_tab), ("student", student_tab)):
             assert "berpindah tab" in tab, \
                 f"the {name} tab stopped naming what is charged"
-            assert "keluar dari layar penuh" in tab, \
+            assert "keluar dari layar penuh" not in tab, \
                 f"the {name} tab names only part of what is charged"
             assert "meninggalkan jendela ujian" in tab, \
                 f"the {name} tab does not name the act the away-blur records"

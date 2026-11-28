@@ -1,20 +1,20 @@
 # Anti-Cheat System
 
+Layar penuh opsional di semua perangkat. Keluar dari layar penuh, rotasi, dan perubahan ukuran jendela tidak dihitung sebagai pelanggaran. Perpindahan fokus dan visibilitas tetap dipantau.
+
 ## Yang Dimonitor
 
 | Event | Deteksi | Aksi |
 |-------|---------|------|
-| **Pindah tab** | `visibilitychange` + timer 1.5s | Layar soal dikaburkan + penalti bertahap |
-| **Keluar layar penuh** | `fullscreenchange` + sampling tiap 2 detik | Overlay memblokir + tangga penalti yang sama |
+| **Pindah tab, aplikasi, atau minimize** | `visibilitychange` + timer 1.5s | Layar soal dikaburkan + penalti bertahap |
 | **Beralih ke jendela lain** (`focus_lost`) | `window` blur + timer 1.5s, hanya saat halaman **tidak** hidden | Layar soal dikaburkan + tangga penalti yang sama |
 | **Rotasi layar** | `matchMedia("(orientation: portrait)")` + `orientationchange` | Dicatat (`orientation_shift`), **tidak** dihukum — lihat [Rotasi layar](#rotasi-layar-bukan-pelanggaran) |
 | **Klik kanan** | `contextmenu` | Diblokir |
 | **Copy/Paste** | `copy`, `cut`, `paste` event | Diblokir |
 
-Ketiga peristiwa pertama menaiki **satu tangga** (`PENALIZED_VIOLATION_TYPES`): dari sudut pandang sekolah ketiganya perbuatan yang sama — ujian tidak lagi menjadi hal yang dilihat. Satu absence tetap satu charge:
+Pindah tab dan meninggalkan fokus jendela mengikuti satu tangga penalti (`PENALIZED_VIOLATION_TYPES`). Satu kejadian dihitung sekali:
 
 - dokumen **hidden** ditangani jalur `visibilitychange` saja (jalur blur jendela berhenti saat `document.hidden`);
-- blur jendela tidak dihitung bila overlay layar penuh sudah menagih absence yang sama (`fullscreenBlocked`);
 - hanya **tab yang sedang dilihat** (`_isFocusTab`) yang mengaburkan dan menagih.
 
 Sebelum ini jalur blur jendela hanya menulis satu baris `console.log`: browser yang di-restore-down dan ditinggalkan ke jendela lain tidak terdeteksi sama sekali (`document.hidden` bernilai false).
@@ -34,12 +34,11 @@ Kenapa terbatas: kesempatan tanpa batas berarti jendela bebas berulang — lihat
 
 Yang menjaga satu absence tetap satu charge:
 
-- hitungan mundur yang sedang berjalan **adalah** absence itu — tiga detektor tidak bisa membuka tiga hitungan untuk satu perbuatan;
+- hitungan mundur yang sedang berjalan **adalah** absence itu — dua detektor tidak bisa membuka dua hitungan untuk satu perbuatan;
 - `awayCharged` mencegah hitungan yang sama ditagih dua kali (termasuk oleh tick berikutnya);
 - `endAway()` mereset penanda begitu siswa kembali, sehingga absence berikutnya adalah kejadian baru;
 - saat hitungan habis, halaman **membaca ulang** apakah siswa sudah kembali (`document.hasFocus()`), bukan mengandalkan event fokus yang mungkin tidak terkirim oleh browser.
 
-Batas yang disengaja: **keluar dari layar penuh tetap memblokir soal seketika**. Pada browser tablet, penagihan menunggu jendela rotasi singkat agar urutan event browser tidak menjadi penalti palsu; pada desktop penagihan tetap langsung. Panel itu tidak senyap — ia memblokir soal dan menyebut tombol yang harus ditekan — dan panggilan telepon datang sebagai dokumen *hidden*, yang ditangani jalur `visibilitychange` (bukan sampler fullscreen), sehingga tidak mungkin tertagih dua kali.
 
 Angka 10 dan 2 hanya hidup di `app/services/anti_cheat_service.py`. Halaman ujian (`graceSeconds`/`graceChances`), layar ketentuan yang disetujui murid, panduan `/guide/skor` (kedua tab) dan tutorial murid semuanya membacanya — halaman yang menjanjikan angka berbeda dari yang dihitungnya adalah bentuk defect kelas ini.
 
@@ -68,7 +67,6 @@ Guru dapat mengatur saat membuat/mengedit ujian:
 | Penalti per Pelanggaran | 5 | Poin dikurangi |
 | Maks Pelanggaran | 5 | Sebelum auto-submit |
 | Auto Submit | ✅ | Kumpulkan otomatis |
-| Wajib Layar Penuh | ✅ | F11 required |
 | Blokir Copy-Paste | ✅ | Clipboard diblokir |
 | Blokir Klik Kanan | ✅ | Context menu diblokir |
 | Watermark Nama | ✅ | Nama siswa di overlay |
@@ -122,74 +120,11 @@ Jam yang ditampilkan adalah `created_at` dari server, bukan waktu yang dihitung 
 
 ## Diverifikasi setiap rilis
 
-Dua panel ini hidup di satu halaman (`student/take_exam.html`) dan di tempat lain
-mana pun, jadi rilis yang menjatuhkannya tidak terlihat oleh pemeriksaan halaman
-biasa: `/student/exams` tetap menjawab 200 sementara pengawasannya hilang. Karena
-itu Gate 4 di auto-deploy membuka **ujian demo** sebagai murid dan membaca panel-panel
-itu dari halaman yang disajikan:
-
-| Yang diperiksa | Kenapa itu yang diperiksa |
-|---|---|
-| halaman ujian yang benar (`data-exam-id`) | halaman error juga menjawab 200 |
-| `antiCheat.enabled` **dan** `fullscreen_required` | dengan salah satunya mati, kedua panel tidak akan pernah muncul walau markup-nya utuh |
-| keberadaan kedua panel **beserta kalimatnya** | panel tanpa teks adalah layar buram tanpa penjelasan |
-| angka hitung mundur dari server | angka yang ditulis ulang di JS bisa berbeda dari `AWAY_GRACE_SECONDS` |
-| `fullscreenchange` dan `visibilitychange` | tanpa keduanya, tidak ada yang menyetel flag panel |
-
-Ujian yang dibuka adalah **fixture** (`deploy/demo_exam_fixture.py`), bukan ujian
-apa pun yang kebetulan ada: ujian sungguhan boleh punya anti-cheat mati, dan gagal
-rilis karena setelan guru bukanlah hal yang diperiksa. Fixture itu disegarkan
-sebelum pemeriksaan pada setiap rilis (`python manage.py demo-exam`) sehingga selalu
-dapat dikerjakan: ditugaskan ke semua kelas sekolah demo, tanpa jendela waktu,
-anti-cheat dan fullscreen menyala, dan percobaan lama di-`retracted` supaya demo
-yang sudah mengumpulkan tidak menyembunyikannya. Yang bisa dilihat lewat HTTP
-hanyalah dokumen yang dikirim — render-nya sendiri diverifikasi lewat preview.
+Gate 4 membuka ujian demo sebagai murid dan memeriksa halaman ujian, konfigurasi anti-cheat, panel absen, hitung mundur dari server, serta pemantau visibilitas dan fokus. Gate juga memeriksa bahwa halaman tidak meminta atau mewajibkan fullscreen.
 
 ## Rotasi layar bukan pelanggaran
 
-Laporan dari laboratorium tablet: murid yang memutar layar ikut turun tangga
-penalti yang sama dengan murid yang benar-benar meninggalkan ujian. Sebabnya
-mekanis, bukan misterius — sejumlah browser tablet **melepas status fullscreen
-sebagai efek samping rotasi**, dan tidak ada apa pun di deteksi dulu yang tahu
-bahwa orientasi baru saja berubah. Jadi `checkFullscreen()` melihat "tidak
-fullscreen" dan menagih `fullscreen_exit` untuk sebuah putaran.
-
-Halaman memantau orientasi fisik melalui sudut Screen Orientation API atau
-orientasi legacy. Event `orientationchange`, perubahan Screen Orientation API,
-dan `matchMedia` dibaca bersama; perubahan rasio viewport saja (misalnya keyboard
-atau split-screen) bukan bukti perangkat diputar. Bila API sudut tidak tersedia,
-hanya event native `orientationchange` yang menjadi fallback. Aturannya:
-
-| Kejadian | Hasil |
-|----------|-------|
-| Fullscreen lepas **di dalam** jendela rotasi | Overlay tetap naik saat itu juga, **nol** penalti, satu baris `orientation_shift` dicatat |
-| Fullscreen kembali sendiri sebelum jendela tutup | Tidak ada penalti; timer penagihan yang tertunda dibatalkan |
-| Fullscreen lepas **sebelum** sinyal rotasi pada Android/iPadOS | Overlay langsung naik; penagihan ditunda sebentar menggunakan `ROTATION_GRACE_SECONDS`. Sinyal rotasi fisik dalam jendela membatalkan penagihan |
-| Fullscreen lepas pada Android/iPadOS tanpa rotasi | Ditagih satu kali setelah jendela pendek; overlay tetap memblokir |
-| Tetap di luar fullscreen setelah jendela tutup, di perangkat yang fullscreen-nya bertahan saat rotasi | Ditagih `fullscreen_exit` seperti biasa — absen yang melewati penjelasannya |
-| Tetap di luar fullscreen setelah jendela tutup, di perangkat yang fullscreen-nya **dilepas** rotasi (iPadOS dan browser Android sentuh) | Dicatat, **tidak** ditagih: menagihnya sama dengan menghukum murid karena perangkatnya |
-
-Tiga sifat yang menjaga perbaikan ini agar tidak menjadi celah baru:
-
-* **Overlay selalu lebih dulu.** Jendela rotasi hanya memaafkan *penalti*, tidak
-  pernah *soal*: kertas tetap terkunci begitu absen terlihat, sama seperti di luar
-  jendela. Kalau cabang rotasi ini pernah pindah ke atas `fullscreenBlocked = true`,
-  murid bisa menggoyang tablet untuk membaca soal dari jendela biasa.
-* **Jendelanya pendek dan berbatas** (`ROTATION_GRACE_SECONDS`, dari service dan
-  diteruskan route — bukan angka yang ditulis di halaman). Ia harus menutup animasi
-  rotasi perangkat dan `fullscreenchange` browser; selebihnya menjadi jendela bebas.
-* **Debounce hanya menghitung baris yang ditagih.** Sebelum ini, satu baris
-  informasi membuat `validate_violation_log` menjawab `rate_limited` untuk keluar
-  sungguhan tepat setelahnya — jadi perbaikan rotasi sempat membuka bypass itu
-  sendiri. Baris `orientation_shift` juga **tidak** lewat `handleViolation`:
-  tidak menambah hitungan lokal, tidak memunculkan banner, tidak memicu
-  auto-submit. Server yang memutuskan apa yang dihitung, dan `orientation_shift`
-  ada di luar `PENALIZED_VIOLATION_TYPES` sehingga tampil di laporan guru tanpa
-  menjadi satu anak tangga.
-
-Dijaga oleh `tests/unit/test_rotation_vs_exit.py`, yang menjalankan metode asli
-yang diiris dari template di bawah node: rotasi murni tidak menagih apa pun,
-tetapi absen yang melewati jendela tetap ditagih di platform yang seharusnya.
+Perubahan orientasi perangkat dicatat sebagai `orientation_shift` di linimasa sesi. Perubahan ukuran viewport saja tidak menghasilkan peristiwa rotasi. Catatan historis `fullscreen_exit` tetap tersedia di laporan. Perhitungan penalti dari log hanya memakai `tab_switch` dan `focus_lost`.
 
 ## False Positive Handling
 
@@ -262,26 +197,3 @@ perangkat lunak pada jam yang sama.
   tidak terlihat.
 - Teknik anti-deteksi (mis. spoofing renderer) tetap bisa mengelabui sinyal ini —
   ini konteks, bukan kontrol.
-
-### Regresi tablet Android dan urutan event
-
-Penyiapan perbaikan 30 Oktober 2026 mereproduksi dua jalur salah dari kode
-halaman: Android ditagih setelah rotasi karena pengecualian hanya mengenali iPad,
-dan kedua platform ditagih jika event fullscreen datang lebih dahulu. Kini
-keduanya dipisahkan dengan timer yang dibatalkan saat orientasi terkonfirmasi
-atau fullscreen kembali. Timer yang menunggu tidak menagih halaman tersembunyi,
-ujian yang selesai, atau tab yang sudah kehilangan kepemilikan sesi.
-
-Pengecualian platform tidak berarti fullscreen boleh dilepas: soal tetap
-tertutup sampai siswa menekan tombol kembali ke fullscreen. Keluar aplikasi
-tetap melewati deteksi visibility dan kebijakan kesempatan kembali yang ada.
-Callback blur memeriksa ulang fokus aktual sebelum memulai countdown, sehingga
-fokus yang sudah pulih tanpa event focus tidak menghasilkan absen palsu.
-
-Tes tambahan di `tests/unit/test_tablet_rotation_order.py` mengeksekusi handler
-asli dengan jam/browser simulasi: dua urutan event Android/iPad, keluar sungguhan,
-resize tanpa rotasi, fokus pulih, dan berpindah aplikasi ketika rotasi. Ini bukti
-regresi kode, bukan bukti perangkat nyata. Sebelum sign-off tablet, uji Chrome
-dan Samsung Internet pada tablet Android serta Safari iPad: putar berulang,
-kembali fullscreen, munculkan keyboard, lalu pindah aplikasi. Catat versi OS,
-browser, dan log pelanggaran. Perubahan ini tidak menghapus penalti lama.

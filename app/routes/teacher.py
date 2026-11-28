@@ -1508,7 +1508,7 @@ def exam_form():
     penalty_per_violation = int(request.form.get("penalty_per_violation", 5))
     max_violations = int(request.form.get("max_violations", 5))
     auto_submit_on_max = request.form.get("auto_submit_on_max") == "true"
-    fullscreen_required = request.form.get("fullscreen_required") == "true"
+    fullscreen_required = False
     randomize_questions = request.form.get("randomize_questions", "false") == "true"
     randomize_options = request.form.get("randomize_options", "false") == "true"
     watermark_name = request.form.get("watermark_name") == "true"
@@ -2014,7 +2014,7 @@ def exam_detail(exam_id):
     penalty_per_violation = int(request.form.get("penalty_per_violation", 5))
     max_violations = int(request.form.get("max_violations", 5))
     auto_submit_on_max = request.form.get("auto_submit_on_max") == "true"
-    fullscreen_required = request.form.get("fullscreen_required") == "true"
+    fullscreen_required = False
     randomize_questions = request.form.get("randomize_questions", "false") == "true"
     randomize_options = request.form.get("randomize_options", "false") == "true"
     watermark_name = request.form.get("watermark_name") == "true"
@@ -2540,7 +2540,7 @@ def exam_preview_paper(exam_id):
     `test_exam_preview.py` asserts against a supabase that records every call.
     """
     from app.services.anti_cheat_service import (
-        AWAY_GRACE_CHANCES, AWAY_GRACE_SECONDS, ROTATION_GRACE_SECONDS,
+        AWAY_GRACE_CHANCES, AWAY_GRACE_SECONDS,
     )
 
     supabase = get_supabase()
@@ -2601,7 +2601,6 @@ def exam_preview_paper(exam_id):
         window_end=None,
         away_grace_seconds=AWAY_GRACE_SECONDS,
         away_grace_chances=AWAY_GRACE_CHANCES,
-        rotation_grace_seconds=ROTATION_GRACE_SECONDS,
         student_name=(g.get("user_name") or ""),
         student_class_label="",
         student_key=g.user_id,

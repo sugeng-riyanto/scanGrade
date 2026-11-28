@@ -639,8 +639,8 @@ def _blocker_layers() -> list[str]:
     blocker and the away-blur are the two the strip has to outrank.
     """
     found = [name for show, name in _panels()
-             if "fullscreenBlocked" in show or "awayBlurred" in show]
-    assert len(found) >= 2, (
+             if "awayBlurred" in show]
+    assert found, (
         "the two blocking panels are not recognisable any more, so this test would "
         "be comparing against nothing")
     return found
@@ -848,8 +848,8 @@ def test_the_blocking_panels_leave_the_language_to_the_strip():
     one choice, and each one needed a comment to explain why it was there — the
     strip is now the one place the language lives while the paper is blocked."""
     blockers = [(show, block) for show, block in _panel_blocks()
-                if "fullscreenBlocked" in show or "awayBlurred" in show]
-    assert len(blockers) >= 2, (
+                if "awayBlurred" in show]
+    assert blockers, (
         "the two blocking panels are not recognisable any more, so this test would "
         "be checking nothing")
     for show, block in blockers:
@@ -987,14 +987,13 @@ def test_the_blockers_cover_the_exam_bar_these_controls_normally_live_in():
     keep a second copy of every control."""
     assert _blocker_layers(), "a blocker no longer covers the page"
     assert all("!submitted" in show for show, _ in _panels()
-               if "fullscreenBlocked" in show or "awayBlurred" in show), (
+               if "awayBlurred" in show), (
         "a blocker stopped standing down once the paper is submitted")
 
 
 BLOCKED_STATE = """
 const obj = {{
   submitted: {submitted},
-  fullscreenBlocked: {blocked},
   awayBlurred: {away},
 {getter},
 }};
@@ -1002,13 +1001,12 @@ console.log(JSON.stringify({{ blocked: obj.paperBlocked }}));
 """
 
 
-def _paper_blocked(*, submitted=False, blocked=False, away=False):
+def _paper_blocked(*, submitted=False, away=False):
     assert "        get paperBlocked()" in source(EXAM_PAGE), (
         "the page has no `paperBlocked`, so no markup can ask whether the paper "
         "is standing behind a panel")
     return _node(BLOCKED_STATE.format(
         submitted=str(bool(submitted)).lower(),
-        blocked=str(bool(blocked)).lower(),
         away=str(bool(away)).lower(),
         getter=_method("get paperBlocked"),
     ))["blocked"]
@@ -1016,18 +1014,16 @@ def _paper_blocked(*, submitted=False, blocked=False, away=False):
 
 @needs_node
 def test_either_panel_blocks_and_submitting_stops_blocking():
-    assert _paper_blocked(blocked=True) is True, "the fullscreen blocker does not pin the strip"
     assert _paper_blocked(away=True) is True, (
         "the away-blur is the same blocked paper and the strip stays reachable there too")
     assert _paper_blocked() is False, "an answerable paper lifts the strip"
-    assert _paper_blocked(submitted=True, blocked=True) is False, (
+    assert _paper_blocked(submitted=True, away=True) is False, (
         "a submitted paper keeps a lifted strip over the result")
 
 
 LIFTED_STATE = """
 const obj = {{
   submitted: {submitted},
-  fullscreenBlocked: {blocked},
   awayBlurred: {away},
   showExamAgreement: {agreement},
 {blocked_getter},
@@ -1038,7 +1034,7 @@ console.log(JSON.stringify({{ lifted: obj.stripLifted, foremost: obj.stripForemo
 """
 
 
-def _strip_lifted(*, submitted=False, blocked=False, away=False, agreement=False):
+def _strip_lifted(*, submitted=False, away=False, agreement=False):
     for name in ("get stripLifted()", "get stripForemost()"):
         assert "        " + name in source(EXAM_PAGE), f"the page has no `{name}`"
     # `stripLifted` is `paperBlocked || stripForemost`, so the object needs the
@@ -1046,7 +1042,6 @@ def _strip_lifted(*, submitted=False, blocked=False, away=False, agreement=False
     # blocker would appear to lift nothing at all.
     return _node(LIFTED_STATE.format(
         submitted=str(bool(submitted)).lower(),
-        blocked=str(bool(blocked)).lower(),
         away=str(bool(away)).lower(),
         agreement=str(bool(agreement)).lower(),
         blocked_getter=_method("get paperBlocked"),
@@ -1064,5 +1059,5 @@ def test_the_agreement_lifts_the_strip_at_its_own_layer():
         "an answerable paper lifts the strip")
     assert _strip_lifted(submitted=True, agreement=True) == {"lifted": False, "foremost": False}, (
         "a submitted paper keeps a lifted strip over the result")
-    assert _strip_lifted(blocked=True) == {"lifted": True, "foremost": False}, (
+    assert _strip_lifted(away=True) == {"lifted": True, "foremost": False}, (
         "a blocker lifts the strip at its own layer, not at the agreement's")

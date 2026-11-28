@@ -1191,7 +1191,7 @@ def test_the_language_control_is_reachable_while_the_paper_is_open():
     needs it. The exam carries its own control in all three places."""
     buttons = len(re.findall(r"""@click="setLang\(lang === 'id' \? 'en' : 'id'\)""", _exam()))
 
-    assert buttons >= 3, (
+    assert buttons >= 2, (
         f"the exam has {buttons} language control(s); it needs one in the exam bar, "
-        "one in the fullscreen overlay and one in the agreement modal, because each "
-        "of the latter two covers the bar")
+        "and one in the agreement modal, because it "
+        "covers the bar")
