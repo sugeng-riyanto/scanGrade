@@ -458,7 +458,7 @@ def test_every_url_that_accepts_a_password_keeps_the_per_ip_backstop(endpoint):
     """
     source = inspect.getsource(getattr(routes_auth, endpoint))
 
-    assert '_rate_limit("300 per minute")' in source, (
+    assert '_rate_limit("300 per minute", per_method=True)' in source, (
         f"{endpoint} lost the per-IP flood backstop")
 
 

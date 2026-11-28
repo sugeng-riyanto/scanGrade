@@ -20,11 +20,11 @@ from app.utils.auth_messages import auth_error, rate_limit_error
 logger = logging.getLogger(__name__)
 
 # Safe rate-limit decorator — no-op if Flask-Limiter not available or LOAD_TEST mode
-def _rate_limit(n):
+def _rate_limit(n, *, per_method=False):
     import os
     if os.environ.get("LOAD_TEST") == "true":
         return lambda f: f
-    return limiter.limit(n) if limiter else (lambda f: f)
+    return limiter.limit(n, per_method=per_method) if limiter else (lambda f: f)
 
 auth_bp = Blueprint("auth", __name__)
 
@@ -631,7 +631,7 @@ def _sign_in():
 # backstop and not the brute-force defence — that is the per-ACCOUNT counter below,
 # because a school shares one NAT'd address and a per-IP attempt limit throttled
 # whole classes.
-@_rate_limit("300 per minute")
+@_rate_limit("300 per minute", per_method=True)
 def sign_in():
     """The sign-in page, and the only place a password is checked."""
     if request.method == "GET":
@@ -642,7 +642,7 @@ def sign_in():
 # ─── LOGIN (the admin door, now an alias) ────────────
 
 @auth_bp.route("/login", methods=["GET", "POST"])
-@_rate_limit("300 per minute")
+@_rate_limit("300 per minute", per_method=True)
 def login():
     """The admin door, kept answering for the links and cards that still name it.
 
@@ -661,7 +661,7 @@ def login():
 # This door used to carry no per-IP limit at all, so a script could POST it as fast
 # as the network allowed while only the per-account counter — which needs a correct
 # identifier to key on — stood in the way. It has the same backstop as the other.
-@_rate_limit("300 per minute")
+@_rate_limit("300 per minute", per_method=True)
 def login_user():
     """The teacher/student door, kept answering — see `login`."""
     if request.method == "POST":
