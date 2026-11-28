@@ -1114,17 +1114,17 @@ html.dark body.sg-exam[data-exam-tone] .sg-content { background: var(--bg-subtle
     </div>
 
     <style>
-        .sg-submit-panel { position: fixed; inset: 0; display: grid; place-items: center; padding: 1rem; background: #172b4d66; }
-        .sg-submit-card { background: #fff; color: #172b4d; width: min(100%, 28rem); padding: clamp(1.25rem, 5vw, 2rem); border-radius: 1.25rem; text-align: center; box-shadow: 0 12px 40px #172b4d33; }
-        .sg-submit-card h2 { color: #172b4d; font-size: 1.5rem; font-weight: 800; margin-bottom: .5rem; }
-        .sg-submit-card p { color: #172b4d; margin: .5rem 0; }
+        .sg-submit-panel { inset: 0; display: grid; place-items: center; padding: 1rem; background: #172b4d66; }
+        .sg-submit-card { background: var(--bg-card); color: var(--paper-ink); width: min(100%, 28rem); padding: clamp(1.25rem, 5vw, 2rem); border-radius: 1.25rem; text-align: center; box-shadow: 0 12px 40px #172b4d33; }
+        .sg-submit-card h2 { font-size: 1.5rem; font-weight: 800; margin-bottom: .5rem; }
+        .sg-submit-card p { margin: .5rem 0; }
         .sg-submit-symbol { display: block; margin: 0 auto 1rem; color: #0f766e; font-size: 2rem; }
         .sg-submit-spinner { width: 2rem; height: 2rem; border: .2rem solid #cce9e6; border-top-color: #0f766e; border-radius: 50%; animation: sg-submit-spin .9s linear infinite; }
-        .sg-submit-action { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; margin-top: 1rem; padding: .5rem 1.25rem; border-radius: .75rem; background: #0f766e; color: #fff; font-weight: 700; }
+        .sg-submit-action { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; margin-top: 1rem; padding: .5rem 1.25rem; border-radius: .75rem; background: #0f766e; color: var(--on-accent); font-weight: 700; }
         @keyframes sg-submit-spin { to { transform: rotate(360deg); } }
         @media (prefers-reduced-motion: reduce) { .sg-submit-spinner { animation: none; } }
     </style>
-    <div x-show="submitPanel" x-cloak class="sg-submit-panel sg-layer-gate" role="dialog" aria-modal="true"
+    <div x-show="submitPanel" x-cloak class="fixed sg-submit-panel sg-layer-gate" role="dialog" aria-modal="true"
          aria-labelledby="sg-submit-title" tabindex="-1" x-ref="submitPanel">
         <div class="sg-submit-card">
             <div role="status" aria-live="polite" aria-atomic="true">
