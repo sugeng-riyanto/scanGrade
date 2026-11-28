@@ -180,6 +180,19 @@ def media_url(path: str, *, subject: str, exam_id: str,
 
 # ── what the page is handed ─────────────────────────────────────────────────
 
+PRIVATE_AUDIO_PREFIX = "scangrade-storage:"
+
+
+def private_audio_path(value, exam_id: str) -> str | None:
+    """Resolve an additional audio file scoped to this exam's private directory."""
+    if not isinstance(value, str) or not value.startswith(PRIVATE_AUDIO_PREFIX):
+        return None
+    path = value[len(PRIVATE_AUDIO_PREFIX):]
+    if re.fullmatch(re.escape(str(exam_id)) + r"/[0-9]+/[A-Za-z0-9][A-Za-z0-9._-]*", path):
+        return path
+    return None
+
+
 def with_media_urls(question_audio, *, subject: str, exam_id: str,
                     ttl: int = TOKEN_TTL_SECONDS) -> dict:
     """The paper's media as the page needs it: a hosted file gains ``url``.
@@ -191,13 +204,17 @@ def with_media_urls(question_audio, *, subject: str, exam_id: str,
     """
     handed: dict = {}
     for key, entry in (question_audio or {}).items():
-        if isinstance(entry, dict) and entry.get("file"):
-            copied = dict(entry)
-            copied["url"] = media_url(str(entry["file"]), subject=subject,
-                                      exam_id=exam_id, ttl=ttl)
-            handed[key] = copied
-        else:
+        if not isinstance(entry, dict):
             handed[key] = entry
+            continue
+        copied = dict(entry)
+        if copied.get("file"):
+            copied["url"] = media_url(str(copied["file"]), subject=subject,
+                                      exam_id=exam_id, ttl=ttl)
+        audio_path = private_audio_path(copied.get("audio"), exam_id)
+        if audio_path:
+            copied["audio"] = media_url(audio_path, subject=subject, exam_id=exam_id, ttl=ttl)
+        handed[key] = copied
     return handed
 
 
