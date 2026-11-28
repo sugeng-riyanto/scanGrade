@@ -273,6 +273,7 @@ const sgLS = key => key;
 const sgT = (_id, en) => en;
 const alert = () => {};
 const window = {location: {href: '/exam'}};
+Object.defineProperty(globalThis, 'navigator', {value: {onLine: true}});
 const state = new Map();
 const localStorage = {
     removeItem: key => state.delete(key),
@@ -286,7 +287,7 @@ const app = {
 };
 async function check(response, shouldClear) {
     state.set('exam_draft_', 'draft');
-    window.location.href = '/exam';
+    state.set('exam_pending_submit_', 'pending');
     global.fetch = async (_url, options) => {
         if (options.headers.Accept !== 'application/json') throw new Error('Missing Accept');
         return response;
@@ -294,8 +295,8 @@ async function check(response, shouldClear) {
     app._doSubmit({'0': 'A'});
     await new Promise(resolve => setImmediate(resolve));
     if (state.has('exam_draft_') === shouldClear) throw new Error('Incorrect draft handling');
-    if ((window.location.href === '/student/results') !== shouldClear) {
-        throw new Error('Incorrect navigation');
+    if (app.submitPanel !== (shouldClear ? 'done' : 'retry')) {
+        throw new Error('Incorrect progress state');
     }
     if (state.has('exam_pending_submit_') === shouldClear) {
         throw new Error('Incorrect pending submission handling');

@@ -1049,9 +1049,11 @@ html.dark body.sg-exam[data-exam-tone] .sg-content { background: var(--bg-subtle
                 <div class="w-16 h-16 bg-gradient-to-br from-primary-500 to-primary-600 rounded-full flex items-center justify-center mx-auto mb-3 shadow-lg shadow-primary-500/20">
                     <i class="fas fa-file-contract text-3xl text-white"></i>
                 </div>
-                <h2 class="text-xl font-extrabold text-surface-800" x-text="t('Ketentuan Ujian','Exam Rules')"></h2>
+                <h2 class="text-xl font-extrabold text-surface-800" x-text="t('Siap memulai?', 'Ready to begin?')"></h2>
+                <p class="text-sm text-surface-700 mt-2" x-text="t(...examEncouragement)"></p>
                 <p class="text-xs text-surface-400 font-semibold mt-1">{{ exam.title }}</p>
             </div>
+            <h3 class="text-sm font-extrabold text-surface-800 mb-2" x-text="t('Ketentuan Ujian','Exam Rules')"></h3>
             <div class="bg-surface-50 rounded-2xl p-4 mb-4 text-xs leading-relaxed text-surface-700 font-semibold space-y-2">
                 <p><i class="fas fa-hourglass-half text-primary-500 mr-1.5"></i><span x-text="t('Durasi','Duration')"></span>: <strong x-text="durationUnlimited ? t('Tak terbatas','Unlimited') : durationMinutes + ' ' + t('menit','minutes')"></strong></p>
                 <p><i class="fas fa-list-ol text-primary-500 mr-1.5"></i><span x-text="t('Jumlah soal','Questions')"></span>: <strong>{{ exam.total_questions }}</strong></p>
@@ -1108,6 +1110,35 @@ html.dark body.sg-exam[data-exam-tone] .sg-content { background: var(--bg-subtle
                 <i class="fas fa-check-circle mr-1.5"></i><span x-text="t('Saya Setuju & Mulai Ujian','I agree & start the exam')"></span>
             </button>
             <p class="text-center text-[10px] text-surface-400 font-bold mt-3" x-text="t('Dengan menyetujui, Anda siap mengikuti ujian sesuai ketentuan di atas','By agreeing you are ready to take the exam under the rules above')"></p>
+        </div>
+    </div>
+
+    <style>
+        .sg-submit-panel { position: fixed; inset: 0; z-index: 10000; display: grid; place-items: center; padding: 1rem; background: #172b4d66; }
+        .sg-submit-card { background: #fff; color: #172b4d; width: min(100%, 28rem); padding: clamp(1.25rem, 5vw, 2rem); border-radius: 1.25rem; text-align: center; box-shadow: 0 12px 40px #172b4d33; }
+        .sg-submit-card h2 { color: #172b4d; font-size: 1.5rem; font-weight: 800; margin-bottom: .5rem; }
+        .sg-submit-card p { color: #172b4d; margin: .5rem 0; }
+        .sg-submit-symbol { display: block; margin: 0 auto 1rem; color: #0f766e; font-size: 2rem; }
+        .sg-submit-spinner { width: 2rem; height: 2rem; border: .2rem solid #cce9e6; border-top-color: #0f766e; border-radius: 50%; animation: sg-submit-spin .9s linear infinite; }
+        .sg-submit-action { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; margin-top: 1rem; padding: .5rem 1.25rem; border-radius: .75rem; background: #0f766e; color: #fff; font-weight: 700; }
+        @keyframes sg-submit-spin { to { transform: rotate(360deg); } }
+        @media (prefers-reduced-motion: reduce) { .sg-submit-spinner { animation: none; } }
+    </style>
+    <div x-show="submitPanel" x-cloak class="sg-submit-panel" role="dialog" aria-modal="true"
+         aria-labelledby="sg-submit-title" tabindex="-1" x-ref="submitPanel">
+        <div class="sg-submit-card">
+            <div role="status" aria-live="polite" aria-atomic="true">
+                <span x-show="submitPanel === 'sending'" class="sg-submit-symbol sg-submit-spinner" aria-hidden="true"></span>
+                <span x-show="submitPanel === 'done'" class="sg-submit-symbol" aria-hidden="true">&#10003;</span>
+                <h2 id="sg-submit-title" x-text="submitPanel === 'done' ? t('Selesai!', 'All done!') : t('Satu langkah lagi.', 'One last step.')"></h2>
+                <p x-show="submitPanel === 'sending'" x-text="t('Jawabanmu sedang dikirim.', 'We’re sending your answers.')"></p>
+                <p x-show="submitPanel === 'offline'" x-text="t('Pengiriman dilanjutkan saat kamu kembali online.', 'We’ll try again when you’re back online.')"></p>
+                <p x-show="submitPanel === 'retry'" x-text="t('Pengumpulan belum terkonfirmasi. Coba lagi atau panggil pengawas, ya.', 'Submission is still unconfirmed. Try again or ask your proctor for help.')"></p>
+                <p x-show="submitPanel !== 'done'" x-text="submitDraftStored ? t('Jawabanmu tersimpan di perangkat ini. Tetap buka halaman ini, ya.', 'Your answers are saved on this device. Please keep this page open.') : t('Tetap buka halaman ini, ya.', 'Please keep this page open.')"></p>
+                <p x-show="submitPanel === 'done'" x-text="t('Ujianmu sudah dikumpulkan. Terima kasih!', 'Your exam has been submitted. Thank you!')"></p>
+            </div>
+            <button type="button" x-show="submitPanel === 'retry'" class="sg-submit-action" @click="_doSubmit(submitAnswers)" x-text="t('Coba lagi', 'Try again')"></button>
+            <a x-show="submitPanel === 'done'" class="sg-submit-action" href="/student/results" x-text="t('Lihat hasil', 'View results')"></a>
         </div>
     </div>
 
@@ -3305,6 +3336,14 @@ function examApp(duration, totalQ) {
             sure: false,
         },
         // Agreement widget
+        examEncouragement: [
+            ['Tarik napas. Kamu bisa. Kerjakan satu soal demi satu.', 'Deep breath. Shoulders down. You’ve got this, one question at a time.'],
+            ['Kalau gugup, tarik napas dan mulai dari yang kamu tahu.', 'Feeling a little nervous? That’s okay. Take a breath and start with what you know.'],
+            ['Misi pertama sederhana. Baca soal pertama.', 'Your first mission is simple: read the first question. The rest can wait its turn.'],
+        ][Math.floor(Math.random() * 3)],
+        submitPanel: '',
+        submitDraftStored: false,
+        submitAnswers: null,
         showExamAgreement: (function() { try { return !localStorage.getItem(sgLS('sg_agreed_')); } catch(e) { return true; } })(),
         agreed: false,
         examRules: {{ (exam.get('exam_rules') or '') | tojson | safe }},
@@ -6237,7 +6276,8 @@ function examApp(duration, totalQ) {
                     const parsed = JSON.parse(pendingSubmit);
                     if (navigator.onLine) {
                         this.submitted = true;
-                        this._doSubmit(parsed.answers_json);
+                        this.submitDraftStored = true;
+                    this._doSubmit(parsed.answers_json);
                         return;
                     }
                 }
@@ -6339,12 +6379,18 @@ function examApp(duration, totalQ) {
             this.saveToLocal();
             if (window.markExamSubmitted) window.markExamSubmitted();
             const answers = this.getAnswers();
-            if (!navigator.onLine) {
+            this.submitAnswers = answers;
+            this.submitPanel = navigator.onLine ? 'sending' : 'offline';
+            this.$nextTick(() => this.$refs.submitPanel?.focus());
+            try {
                 localStorage.setItem(sgLS('exam_pending_submit_'), JSON.stringify({ answers_json: answers, timestamp: Date.now() }));
+                this.submitDraftStored = true;
+            } catch (error) {
+                this.submitDraftStored = false;
+            }
+            if (!navigator.onLine) {
                 this.syncStatus = 'offline';
                 this.setSyncLabel('waiting');
-                alert(sgT('Internet terputus. Jawaban tersimpan lokal dan akan otomatis dikirim saat internet kembali tersedia. JANGAN TUTUP halaman ini.','No connection. Your answers are saved locally and will be sent automatically once the internet is back. DO NOT CLOSE this page.'));
-                this.submitted = false;
                 this._startOfflineSubmitPoll();
                 return;
             }
@@ -6358,18 +6404,15 @@ function examApp(duration, totalQ) {
             this._offlinePollTimer = setInterval(() => {
                 if (navigator.onLine) {
                     clearInterval(this._offlinePollTimer);
-                    const pending = localStorage.getItem(sgLS('exam_pending_submit_'));
-                    if (pending) {
-                        const parsed = JSON.parse(pending);
-                        this.syncStatus = 'saving';
-                        this.setSyncLabel('sendingAnswers');
-                        this.submitted = true;
-                        this._doSubmit(parsed.answers_json);
+                    if (this.submitAnswers !== null) {
+                        this._doSubmit(this.submitAnswers);
                     }
                 }
             }, 3000);
         },
         _doSubmit(answers) {
+            this.submitAnswers = answers;
+            this.submitPanel = 'sending';
             this.syncStatus = 'saving';
             this.setSyncLabel('sending');
             fetch('/student/exams/{{ exam.id }}/submit', {
@@ -6380,27 +6423,24 @@ function examApp(duration, totalQ) {
             .then(async r => {
                 const data = await r.json();
                 if (r.ok && data.success === true) {
-                    localStorage.removeItem(sgLS('exam_pending_submit_'));
-                    localStorage.removeItem(sgLS('exam_draft_'));
-                    localStorage.removeItem(sgLS('exam_rev_'));
-                    window.location.href = '/student/results';
+                    this.submitPanel = 'done';
+                    this.submitAnswers = null;
+                    try {
+                        localStorage.removeItem(sgLS('exam_pending_submit_'));
+                        localStorage.removeItem(sgLS('exam_draft_'));
+                        localStorage.removeItem(sgLS('exam_rev_'));
+                    } catch (error) {
+                        // The server has already confirmed the submission.
+                    }
                     return;
                 }
-                localStorage.setItem(sgLS('exam_pending_submit_'), JSON.stringify({ answers_json: answers, timestamp: Date.now() }));
-                alert(sgT('Gagal kirim: ','Send failed: ') + (data.error || sgT('coba lagi','try again')));
-                this.submitted = false;
-                this.submitting = false;
+                this.submitPanel = 'retry';
                 this.syncStatus = 'error';
                 this.setSyncLabel('sendFailed');
             })
-            .catch(e => {
-                this.submitted = false;
-                this.submitting = false;
-                this.syncStatus = 'offline';
-                this.setSyncLabel('offline');
-                localStorage.setItem(sgLS('exam_pending_submit_'), JSON.stringify({ answers_json: answers, timestamp: Date.now() }));
-                alert(sgT('Internet terputus. Jawaban tersimpan dan akan otomatis dikirim saat internet kembali. JANGAN TUTUP halaman ini.','No connection. Your answers are saved and will be sent automatically once the internet is back. DO NOT CLOSE this page.'));
-                this._startOfflineSubmitPoll();
+            .catch(() => {
+                this.submitPanel = navigator.onLine ? 'retry' : 'offline';
+                if (!navigator.onLine) this._startOfflineSubmitPoll();
             });
         },
         applyBoxFont(box) {
