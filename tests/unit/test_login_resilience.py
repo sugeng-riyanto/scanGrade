@@ -125,7 +125,7 @@ def _no_real_sleep(monkeypatch):
     monkeypatch.setattr(authmod.time, "sleep", lambda *_: None)
     # Force the LOCAL pacing path: the Redis slot queue needs a live server, and
     # a test must not depend on one (nor silently change rate when one is up).
-    monkeypatch.setattr(authmod, "_pace_signin_redis", lambda interval: False)
+    monkeypatch.setattr(authmod, "_pace_signin_redis", lambda interval, max_delay: False)
     authmod._next_slot[0] = 0.0
 
 
@@ -167,6 +167,7 @@ class TestSigninPacing:
         """
         delays = []
         monkeypatch.setattr(authmod, "_LOGIN_SIGNIN_RATE", 2.0)  # one slot per 0.5s
+        monkeypatch.setattr(authmod, "_LOGIN_WAIT_BUDGET", 1)
         monkeypatch.setattr(authmod.time, "sleep", lambda d: delays.append(d))
         authmod._next_slot[0] = 0.0
 
@@ -200,7 +201,7 @@ class TestSigninPacing:
         monkeypatch.setattr(authmod, "_LOGIN_SIGNIN_RATE", 8.0)
         seen = []
         monkeypatch.setattr(authmod, "_pace_signin_redis",
-                            lambda interval: seen.append(interval) or True)
+                            lambda interval, max_delay: seen.append(interval) or True)
         monkeypatch.setattr(authmod.time, "sleep",
                             lambda d: pytest.fail("Redis reserved the slot; no local wait"))
         authmod._next_slot[0] = 0.0
@@ -286,3 +287,20 @@ class TestLoginRouteFailureHandling:
         assert r.status_code == 200
         assert b"Email atau password salah" not in r.data
         assert seen == []
+
+
+
+def test_full_local_queue_does_not_reserve_another_slot(monkeypatch):
+    monkeypatch.setattr(authmod, "_LOGIN_SIGNIN_RATE", 2)
+    queued = authmod.time.monotonic() + 20
+    authmod._next_slot[0] = queued
+    with pytest.raises(authmod._LoginQueueFull):
+        authmod._pace_signin()
+    assert authmod._next_slot[0] == queued
+
+
+def test_transport_failure_is_not_retried():
+    client = _Client([TimeoutError("auth response timed out"), "ok"])
+    with pytest.raises(TimeoutError):
+        authmod._sign_in_with_retry(client, "a@b.c", "pw")
+    assert client.auth.calls == 1
