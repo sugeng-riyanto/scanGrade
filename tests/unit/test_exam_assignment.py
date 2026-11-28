@@ -138,6 +138,13 @@ def _base_tables():
     }
 
 
+@pytest.fixture(autouse=True)
+def fresh_card_cache(monkeypatch):
+    from app.utils import kv_cache
+    monkeypatch.setattr(kv_cache, "_local", {})
+    monkeypatch.setattr(kv_cache, "_redis", lambda: None)
+
+
 def _render(app, monkeypatch, route_func, pupil, supa=None, path="/student/exams"):
     """Run a student route with the pupil's session, capturing the template context."""
     from flask import g
@@ -272,20 +279,21 @@ class TestTheStudentDashboard:
                           path="/student/dashboard")
             assert "Tanpa kelas" not in _titles(ctx["available_exams"])
 
-    def test_the_student_pages_select_the_column_they_filter_on(self):
-        """The same trap as the list, pinned statically for both pages.
+    def test_dashboard_and_exam_list_share_the_school_cards(self, app, monkeypatch):
+        supa = FakeSupabase(_base_tables())
 
-        `class_ids` has to be in the column list of every query whose result is
-        filtered by it. Reading it off a row that never carried it is silent:
-        `.get()` returns None, and None means "unassigned" — which is how a
-        filter becomes a no-op.
-        """
-        for func in (studentmod.dashboard, studentmod.exam_list):
-            queries = [line for line in inspect.getsource(func).splitlines()
-                       if 'table("exams").select(' in line]
-            assert queries, f"{func.__name__} reads exams"
-            for line in queries:
-                assert "class_ids" in line, line.strip()
+        dashboard = _render(app, monkeypatch, studentmod.dashboard, PROFILES[0],
+                            supa=supa, path="/student/dashboard")
+        listing = _render(app, monkeypatch, studentmod.exam_list, PROFILES[1], supa=supa)
+
+        assert _titles(dashboard["available_exams"]) == ["Untuk X-A"]
+        assert _titles(listing["exams"]) == ["Untuk X-B"]
+        assert len(supa.selects["exams"]) == 1
+        assert "class_ids" in supa.selects["exams"][0]
+        cached = studentmod._published_exam_cards(supa, SCHOOL)
+        assert all("sg_window_state" not in card and "sg_in_progress" not in card
+                   for card in cached)
+        assert _titles(studentmod._published_exam_cards(supa, "school-B")) == ["Sekolah lain"]
 
 
 # ── the teacher has to be able to see the void ───────────────────
