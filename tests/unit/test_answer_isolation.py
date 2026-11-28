@@ -255,3 +255,57 @@ def test_the_helper_is_the_only_place_the_namespace_is_built(prefix):
     """`sgLS` appends the student, so a hand-built key cannot slip past it."""
     source = PAGE.read_text(encoding="utf-8")
     assert f"function sgLS(prefix) {{ return prefix + SG_EXAM + '__' + SG_STUDENT; }}" in source
+
+
+def test_submit_keeps_local_answers_until_server_confirms():
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node is required to exercise the browser submit handler")
+    page = PAGE.read_text(encoding="utf-8")
+    method = page.split("        _doSubmit(answers) {", 1)[1].split(
+        "        applyBoxFont(box) {", 1
+    )[0]
+    script = """
+const sgLS = key => key;
+const sgT = (_id, en) => en;
+const alert = () => {};
+const window = {location: {href: '/exam'}};
+const state = new Map();
+const localStorage = {
+    removeItem: key => state.delete(key),
+    setItem: (key, value) => state.set(key, value),
+};
+const app = {
+    setSyncLabel() {},
+    _startOfflineSubmitPoll() {},
+    _doSubmit(answers) {
+""" + method + """
+};
+async function check(response, shouldClear) {
+    state.set('exam_draft_', 'draft');
+    window.location.href = '/exam';
+    global.fetch = async (_url, options) => {
+        if (options.headers.Accept !== 'application/json') throw new Error('Missing Accept');
+        return response;
+    };
+    app._doSubmit({'0': 'A'});
+    await new Promise(resolve => setImmediate(resolve));
+    if (state.has('exam_draft_') === shouldClear) throw new Error('Incorrect draft handling');
+    if ((window.location.href === '/student/results') !== shouldClear) {
+        throw new Error('Incorrect navigation');
+    }
+    if (state.has('exam_pending_submit_') === shouldClear) {
+        throw new Error('Incorrect pending submission handling');
+    }
+}
+(async () => {
+    await check({ok: true, json: async () => { throw new SyntaxError('HTML'); }}, false);
+    await check({ok: false, json: async () => ({error: 'Session required'})}, false);
+    await check({ok: true, json: async () => ({success: true})}, true);
+})().catch(error => { console.error(error); process.exitCode = 1; });
+"""
+    result = subprocess.run([node, "-e", script], capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0, result.stderr

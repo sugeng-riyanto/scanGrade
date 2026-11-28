@@ -6374,28 +6374,24 @@ function examApp(duration, totalQ) {
             this.setSyncLabel('sending');
             fetch('/student/exams/{{ exam.id }}/submit', {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
+                headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
                 body: JSON.stringify({answers_json: answers})
             })
-            .then(r => {
-                if (r.ok) {
+            .then(async r => {
+                const data = await r.json();
+                if (r.ok && data.success === true) {
                     localStorage.removeItem(sgLS('exam_pending_submit_'));
                     localStorage.removeItem(sgLS('exam_draft_'));
                     localStorage.removeItem(sgLS('exam_rev_'));
                     window.location.href = '/student/results';
-                } else {
-                    return r.json().then(d => {
-                        if (r.status === 409) {
-                            window.location.href = '/student/results';
-                        } else {
-                            alert(sgT('Gagal kirim: ','Send failed: ') + (d.error || sgT('coba lagi','try again')));
-                            this.submitted = false;
-                            this.submitting = false;
-                            this.syncStatus = 'error';
-                            this.setSyncLabel('sendFailed');
-                        }
-                    });
+                    return;
                 }
+                localStorage.setItem(sgLS('exam_pending_submit_'), JSON.stringify({ answers_json: answers, timestamp: Date.now() }));
+                alert(sgT('Gagal kirim: ','Send failed: ') + (data.error || sgT('coba lagi','try again')));
+                this.submitted = false;
+                this.submitting = false;
+                this.syncStatus = 'error';
+                this.setSyncLabel('sendFailed');
             })
             .catch(e => {
                 this.submitted = false;
