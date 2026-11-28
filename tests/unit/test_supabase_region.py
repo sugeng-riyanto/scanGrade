@@ -454,7 +454,13 @@ class TestTheRepository:
 
     def test_the_configuration_half_is_measured_or_says_it_is_not(self):
         report = sr.scan(ROOT)
-        if (ROOT / ".env").is_file():
+        env_path = ROOT / ".env"
+        values = sr.parse_env(env_path)
+        if (values.get("SCANGRADE_DATABASE_PROVIDER") == "idcloudhost"
+                or values.get("SUPABASE_URL", "").rstrip("/") == sr.IDCLOUDHOST_API):
+            assert report.offenders() == [], report.offenders()
+            assert report.config.state == "idcloudhost"
+        elif env_path.is_file():
             assert report.config.state in ("measured", "partly"), report.config.reason
             if report.config.measured:
                 assert report.config.url_ref == sr.REF
