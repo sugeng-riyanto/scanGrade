@@ -1224,21 +1224,13 @@ def submit_exam(exam_id):
         question_types, exam.get("answer_key"), answers, total_q,
         exam.get("question_scoring")).score
 
-    # Device mismatch detection: bandingkan IP/UA dengan first sync
+    # A student can switch networks mid-exam. Compare the browser signal only.
     flags = []
     if isinstance(answers, dict):
         device_info = answers.get("_device_info", {})
         if device_info:
-            current_ip = request.remote_addr or ""
             current_ua = request.headers.get("User-Agent", "")
-            expected_ip = device_info.get("ip_address", "")
             expected_ua = device_info.get("user_agent", "")
-            if current_ip and expected_ip and current_ip != expected_ip:
-                flags.append({
-                    "type": "device_mismatch",
-                    "detail": f"IP berubah: {expected_ip} → {current_ip}",
-                    "timestamp": int(time.time()),
-                })
             if current_ua and expected_ua and current_ua != expected_ua:
                 flags.append({
                     "type": "device_mismatch",
