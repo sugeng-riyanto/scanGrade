@@ -170,8 +170,14 @@ def _offerable(exam, student_class_id, draft_exam_ids, now=None, included_exam_i
     return True
 
 
-def _rate_limit(n):
-    return limiter.limit(n) if limiter else (lambda f: f)
+def _rate_limit(n, *, key_func=None):
+    return limiter.limit(n, key_func=key_func) if limiter else (lambda f: f)
+
+
+def _sitting_rate_key():
+    # These views run inside login_required. Limit each authenticated student
+    # independently because an entire school can share one public IP.
+    return f"student:{g.user_id}"
 
 
 def _published_exam_cards(supabase, school_id):
@@ -780,7 +786,7 @@ def take_exam(exam_id):
 
 @student_bp.route("/attempt-status/<exam_id>", methods=["GET"])
 @login_required
-@_rate_limit("60 per minute")
+@_rate_limit("60 per minute", key_func=_sitting_rate_key)
 def attempt_status(exam_id):
     """The server's own answer about this sitting — the one source of truth.
 
@@ -808,7 +814,7 @@ def attempt_status(exam_id):
 
 @student_bp.route("/heartbeat/<exam_id>", methods=["POST"])
 @login_required
-@_rate_limit("30 per minute")
+@_rate_limit("30 per minute", key_func=_sitting_rate_key)
 def attempt_heartbeat(exam_id):
     """Record one liveness ping while the paper is open. Never locks anything.
 

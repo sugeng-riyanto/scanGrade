@@ -395,3 +395,16 @@ class TestItIsWired:
         assert "/student/attempt-status/" in src, (
             "the page never re-reads the server clock, so a device clock could stand in"
         )
+
+
+def test_sitting_rate_key_distinguishes_students_behind_one_ip(app):
+    from flask import g
+    from app.routes.student import _sitting_rate_key
+
+    with app.test_request_context(environ_base={"REMOTE_ADDR": "192.0.2.1"}):
+        g.user_id = "pupil-a"
+        first = _sitting_rate_key()
+        g.user_id = "pupil-b"
+        assert _sitting_rate_key() != first
+        g.user_id = "pupil-a"
+        assert _sitting_rate_key() == first
