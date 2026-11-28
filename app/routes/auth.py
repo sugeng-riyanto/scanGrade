@@ -309,20 +309,26 @@ _next_slot = [0.0]
 # (3 workers x 8/s = 24/s), which is the very stampede this exists to prevent.
 # GET and SET are atomic inside the script, so two workers can never claim the
 # same slot; the key expires on its own so a stale slot can't stall a restart.
+class _LoginQueueFull(Exception):
+    status = 429
+
+
 _PACE_LUA = """
 local key = KEYS[1]
 local now = tonumber(ARGV[1])
 local interval = tonumber(ARGV[2])
 local ttl = tonumber(ARGV[3])
+local max_delay = tonumber(ARGV[4])
 local slot = tonumber(redis.call('GET', key))
 if not slot or slot < now then slot = now end
+if slot - now > max_delay then return '-1' end
 redis.call('SET', key, slot + interval, 'EX', ttl)
 return tostring(slot)
 """
 _PACE_REDIS_KEY = "rl:login:pace"
 
 
-def _pace_signin_redis(interval):
+def _pace_signin_redis(interval, max_delay):
     """Reserve the next sign-in slot in Redis and wait for it.
 
     Returns False if Redis is unusable, so the caller can fall back to local
@@ -335,26 +341,35 @@ def _pace_signin_redis(interval):
         if conn is None:
             return False
         slot = float(conn.eval(_PACE_LUA, 1, _PACE_REDIS_KEY,
-                               time.time(), interval, 120))
+                               time.time(), interval, max(120, int(max_delay) + 2), max_delay))
     except Exception as e:
         logger.debug("Redis login pacing unavailable (%s) — pacing locally", e)
         return False
+    if slot < 0:
+        raise _LoginQueueFull("login rate limit queue is full")
     delay = slot - time.time()
     if delay > 0:
         time.sleep(delay)
     return True
 
 
-def _pace_signin():
+def _pace_signin(deadline=None):
     """Claim the next outbound sign-in slot, keeping us under the ceiling."""
     if _LOGIN_SIGNIN_RATE <= 0:
         return
     interval = 1.0 / _LOGIN_SIGNIN_RATE
-    if _pace_signin_redis(interval):
+    if deadline is None:
+        deadline = time.monotonic() + _LOGIN_WAIT_BUDGET
+    if _pace_signin_redis(interval, max(0, deadline - time.monotonic())):
         return
+    # Preserve the aggregate target if Redis is unavailable.
+    workers = max(1, int(os.environ.get("GUNICORN_WORKERS", "1")))
+    interval *= workers
     with _pace_lock:
         now = time.monotonic()
         slot = max(now, _next_slot[0])
+        if slot > max(now, deadline):
+            raise _LoginQueueFull("login rate limit queue is full")
         _next_slot[0] = slot + interval
     delay = slot - time.monotonic()
     if delay > 0:
@@ -400,12 +415,14 @@ def _sign_in_with_retry(supabase_auth, email, password):
 
     deadline = time.monotonic() + _LOGIN_WAIT_BUDGET
     while True:
-        _pace_signin()
+        _pace_signin(deadline)
         try:
             return supabase_auth.auth.sign_in_with_password(
                 {"email": email, "password": password})
         except Exception as e:
-            if not _is_transient_auth_error(e):
+            # A timed-out request may still be working upstream. Only retry an
+            # explicit rate-limit refusal, which tells us no sign-in was accepted.
+            if getattr(e, "status", None) != 429 or not _is_transient_auth_error(e):
                 raise
             if time.monotonic() >= deadline:
                 raise
