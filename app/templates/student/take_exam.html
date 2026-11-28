@@ -61,7 +61,7 @@
 /* App-level content zoom. `--sg-exam-scale` is set on this box from the script
    at the bottom of the page; `zoom` restyles the paper's own elements and changes
    no window dimension, which is what keeps a press of A+ off the anti-cheat
-   ladder's `resize` / `fullscreenchange` signals. The lightbox below is a sibling
+   exam page's visibility and focus signals. The lightbox below is a sibling
    of this box, so a magnified paper never magnifies the lightbox. */
 .sg-exam-zoom { zoom: var(--sg-exam-scale, 1); }
 .exam-stage { display: block; }
@@ -581,7 +581,7 @@ html.dark body.sg-exam[data-exam-tone] .sg-content { background: var(--bg-subtle
     <!-- sit strip -->
     <!-- Who is sitting this paper, and the controls a sitting needs. The chrome
          that normally carries a name is hidden for the exam, and the terms modal
-         and the fullscreen blocker cover what is left, so the paper carries its
+         and the away panel cover what is left, so the paper carries its
          own identity — and the switches a student reaches for during a two-hour
          paper: the theme, the language, the connection, the alert level, the
          microphone and the battery. -->
@@ -725,7 +725,7 @@ html.dark body.sg-exam[data-exam-tone] .sg-content { background: var(--bg-subtle
                 <span x-text="syncLabel"></span>
             </div>
             <!-- The language control lives here as well as in the navbar. Both the
-                 terms modal and the fullscreen blocker cover the whole page, so the
+                 terms modal and the away panel cover the whole page, so the
                  navbar's button is unreachable at exactly the moment a student who
                  reads English needs it. This one is always in the exam's own bar. -->
             <button type="button" @click="setLang(lang === 'id' ? 'en' : 'id')"
@@ -795,44 +795,7 @@ html.dark body.sg-exam[data-exam-tone] .sg-content { background: var(--bg-subtle
         </div>
     </div>
 
-    <!-- Fullscreen is mandatory for the whole exam, so losing it blurs the paper
-         behind this panel — a restored window is still there to be read, which is
-         exactly why it has to be unreadable. This is not a nudge: a page cannot
-         resize or maximise a window, and "the
-         window is maximised" is not something a page can detect — only fullscreen
-         is reported exactly. Blocking is therefore what "not allowed" has to mean,
-         and it is also fairer than a silent points deduction: the student sees
-         immediately that nothing is being answered, and gets one click to fix it.
-         It hides itself when fullscreen comes back, or when the exam is submitted. -->
-    <div x-show="fullscreenBlocked && !submitted" x-cloak
-         class="fixed inset-0 sg-layer-scrim bg-surface-900/45 backdrop-blur-xl flex items-center justify-center p-6"
-         @click.self="resumeFullscreen()">
-        <div class="relative max-w-md w-full bg-white rounded-2xl p-6 text-center shadow-2xl border border-surface-200">
-            <div class="w-14 h-14 mx-auto rounded-2xl bg-amber-100 text-amber-600 flex items-center justify-center text-2xl">
-                <i class="fas fa-expand"></i>
-            </div>
-            <h2 class="mt-4 text-lg font-extrabold text-surface-800" x-text="t('Kembalikan ke Layar Penuh','Return to Fullscreen')"></h2>
-            <p class="mt-1 text-sm text-surface-500 font-medium"
-               x-text="t('Ujian ini harus dikerjakan dalam layar penuh. Jendela yang diperkecil, di-restore, atau keluar dari layar penuh berhenti di sini.','This exam has to be taken in fullscreen. A window that is shrunk, restored, or leaves fullscreen stops here.')"></p>
-            <p x-show="violationCount > 0" class="mt-3 text-xs font-bold text-amber-700"
-               x-text="t('Pelanggaran','Violations') + ': ' + violationCount + (totalPenalty > 0 ? ' · ' + t('total penalti','total penalty') + ': -' + totalPenalty + ' ' + t('poin','points') : '')"></p>
-            <button type="button" @click="resumeFullscreen()"
-                    class="mt-5 w-full bg-primary-600 hover:bg-primary-700 text-white py-3 rounded-xl font-extrabold shadow-lg transition">
-                <i class="fas fa-expand mr-1"></i> <span x-text="t('Masuk Layar Penuh','Enter Fullscreen')"></span>
-            </button>
-            <p x-show="fullscreenRetryFailed" class="mt-3 text-xs font-bold text-amber-700"
-               x-text="t('Browser menolak layar penuh — tekan F11, atau hubungi pengawas.','The browser refused fullscreen — press F11, or call your proctor.')"></p>
-            <p class="mt-3 text-[11px] text-surface-400 font-semibold"
-               x-text="t('Waktu ujian tetap berjalan selama layar ini tampil.','The exam clock keeps running while this screen is up.')"></p>
-        </div>
-    </div>
-
-    <!-- Leaving the exam blurs the paper the same way losing fullscreen does,
-         and for the same reason: a restored window and a new tab are both ways
-         to put something else on screen, and a page cannot close a tab or pull a
-         window forward — so the paper stops being readable until the student
-         returns and says so. One absence is one charge (the visibility handler),
-         and one click both clears this and re-enters fullscreen if that was lost. -->
+    <!-- Blur the paper until the student returns to the exam. -->
     <div x-show="awayBlurred && !submitted" x-cloak
          class="fixed inset-0 sg-layer-scrim bg-surface-900/45 backdrop-blur-xl flex items-center justify-center p-6">
         <div class="relative max-w-md w-full bg-white rounded-2xl p-6 text-center shadow-2xl border border-surface-200">
@@ -1072,7 +1035,7 @@ html.dark body.sg-exam[data-exam-tone] .sg-content { background: var(--bg-subtle
     <!-- Agreement Modal -->
     <div x-show="showExamAgreement && !submitted" class="sg-layer-modal fixed inset-0 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
         <div class="relative bg-white rounded-3xl shadow-2xl max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto">
-            <!-- Same reason as the fullscreen overlay: this modal covers the exam
+            <!-- Same reason as the away panel: this modal covers the exam
                  bar, and it is the *first* thing a student sees on this exam. A
                  language switch reachable only after agreeing is not reachable. -->
             <div class="absolute top-3 right-3">
@@ -1096,7 +1059,7 @@ html.dark body.sg-exam[data-exam-tone] .sg-content { background: var(--bg-subtle
                     <div>
                         <p class="font-extrabold text-surface-800 mb-1"><i class="fas fa-exclamation-triangle text-amber-500 mr-1.5"></i><span x-text="t('Sistem Anti-Cheat','Anti-cheat system')"></span>:</p>
                         <ul class="space-y-0.5 ml-5 list-disc text-surface-500">
-                            <li><span x-text="t('Yang dihitung','Counted')"></span>: <strong x-text="t('berpindah tab/aplikasi','switching tab or app')"></strong> <span x-text="t('dan','and')"></span> <strong x-text="t('keluar dari layar penuh','leaving fullscreen')"></strong><span x-text="t(', termasuk meninggalkan jendela ujian untuk jendela lain &mdash; layar soal dikaburkan','; leaving the exam window for another window counts too — the paper is blurred')"></span></li>
+                            <li x-text="t('Berpindah tab atau aplikasi, meminimalkan browser, dan meninggalkan jendela ujian dapat memicu penalti.','Switching tabs or apps, minimizing the browser, and leaving the exam window can trigger penalties.')"></li>
                             <!-- The second chance, on the screen the student agrees to,
                                  with the numbers the countdown actually uses. A rule
                                  discovered mid-exam is not a rule the student
@@ -1112,9 +1075,7 @@ html.dark body.sg-exam[data-exam-tone] .sg-content { background: var(--bg-subtle
                         </ul>
                     </div>
                 </template>
-                <template x-if="antiCheat.fullscreen_required">
-                    <p><i class="fas fa-expand text-primary-500 mr-1.5"></i><strong x-text="t('Wajib layar penuh.','Fullscreen required.')"></strong> <span x-text="t('Jendela yang diperkecil, di-restore, atau keluar dari layar penuh akan','A window that is shrunk or restored, or that leaves fullscreen, will')"></span> <strong x-text="t('menghentikan ujian','stop the exam')"></strong> <span x-text="t('sampai kembali ke layar penuh.','until fullscreen returns.')"></span></p>
-                </template>
+                <p><i class="fas fa-expand text-primary-500 mr-1.5"></i><span x-text="t('Layar penuh opsional. Tetap di halaman ujian untuk menghindari penalti.','Fullscreen is optional. Stay on the exam page to avoid penalties.')"></span></p>
                 <template x-if="antiCheat.block_right_click">
                     <p><i class="fas fa-mouse-pointer text-primary-500 mr-1.5"></i><span x-text="t('Klik kanan dinonaktifkan','Right-click is disabled')"></span></p>
                 </template>
@@ -3266,40 +3227,7 @@ function examApp(duration, totalQ) {
         _tabId: Math.random().toString(36).slice(2),
         _isFocusTab: true,
         otherTabOpen: false,
-        // Fullscreen enforcement. `fullscreenBlocked` drives the overlay that
-        // covers the exam until the window is fullscreen again; `_sawFullscreen`
-        // is what keeps the request made by agreeExam() from being charged while
-        // it is still resolving.
-        fullscreenBlocked: false,
-        fullscreenRetryFailed: false,
-        _sawFullscreen: false,
-        // Whether this document has ever sampled *not* being in fullscreen.
-        // A reload keeps fullscreen, so a page can arrive already in it — the
-        // browser restoring the window is not the student leaving the exam.
-        _fsWasAbsent: false,
-        _fsArmedAt: 0,
-        _fsGraceMs: 4000,
-        _fsWatch: null,
-        _fsResizeTimer: null,
-        // Set when a minimise/tab-away was already charged, so the overlay that
-        // follows it is not billed a second time.
-        _hiddenAbsenceCharged: false,
-        // ─── A rotated screen is not a pupil who left ─────────────────────────
-        // Several tablet browsers drop the fullscreen state as a side effect of
-        // rotating, and nothing in this ladder used to know a rotation had
-        // happened — so turning the screen was billed as leaving the exam.
-        // `_rotationGraceUntil` is the window in which a fullscreen loss belongs
-        // to the transition rather than to the pupil; `_rotationForgiven`
-        // remembers that this absence began that way, so the window's end can
-        // decide whether it outlived the explanation. The overlay goes up either
-        // way — the grace forgives a penalty, never a question.
-        rotationGraceMs: {{ rotation_grace_seconds }} * 1000,
-        _rotationGraceUntil: 0,
-        _rotationTimer: null,
-        _rotationForgiven: false,
-        _rotationWatch: null,
         _lastScreenOrientation: null,
-        _fsLossTimer: null,
         // The student has left the exam — a new tab, another app, a minimise.
         // The paper is blurred behind a panel until they come back and dismiss
         // it, so a window nobody is watching is not a window anybody can read.
@@ -3362,7 +3290,6 @@ function examApp(duration, totalQ) {
             'penalty_per_violation': exam.get('penalty_per_violation', 5) if exam.get('penalty_per_violation') is not none else 5,
             'max_violations': exam.get('max_violations', 5) if exam.get('max_violations') is not none else 5,
             'auto_submit_on_max': exam.get('auto_submit_on_max', True) if exam.get('auto_submit_on_max') is not none else True,
-            'fullscreen_required': exam.get('fullscreen_required', True) if exam.get('fullscreen_required') is not none else True,
             'randomize_questions': exam.get('randomize_questions', False) if exam.get('randomize_questions') is not none else False,
             'randomize_options': exam.get('randomize_options', False) if exam.get('randomize_options') is not none else False,
             'watermark_name': exam.get('watermark_name', True) if exam.get('watermark_name') is not none else True,
@@ -3600,7 +3527,7 @@ function examApp(duration, totalQ) {
                 {% else %}
                 // The preview draws the watermark (it is part of what a teacher
                 // came to see) but arms nothing: no tab watch, no anti-cheat
-                // ladder, no fullscreen blocker.
+                // ladder, no away panel.
                 if (this.antiCheat.watermark_name) this.startWatermark();
                 {% endif %}
             });
@@ -3771,163 +3698,6 @@ function examApp(duration, totalQ) {
             const meta = document.querySelector('meta[name="csrf-token"]');
             return meta ? meta.getAttribute('content') : '';
         },
-        // Recorded for the teacher, never counted toward the ladder.
-        // ─── Fullscreen is mandatory for the whole exam ──────────────────────
-        // A page cannot resize or maximise the window, and neither can it detect
-        // "maximised": there is no such API, only the browser zoom-sensitive
-        // outerWidth/outerHeight. Fullscreen is the one state the browser reports
-        // exactly, so that is what the exam requires — and it is also strictly
-        // stronger, since it hides the taskbar, the tab strip and every other
-        // window.
-        //
-        // Leaving it is one of the two acts that count (see
-        // PENALIZED_VIOLATION_TYPES on the server) and it covers all three ways
-        // out the teacher would care about: Esc, restore-down, and minimise.
-        _fsElement() {
-            return document.fullscreenElement || document.webkitFullscreenElement || null;
-        },
-        _fsSupported() {
-            const el = document.documentElement;
-            const request = el.requestFullscreen || el.webkitRequestFullscreen;
-            // iPhone Safari has no Fullscreen API at all, and a permissions policy
-            // can switch it off (`fullscreenEnabled === false`, or the webkit
-            // spelling where that is what exists). Where the browser cannot do it
-            // the check stands down, rather than failing a student for something
-            // they have no way to fix.
-            return !!request
-                && document.fullscreenEnabled !== false
-                && document.webkitFullscreenEnabled !== false;
-        },
-        async requestExamFullscreen() {
-            const el = document.documentElement;
-            const request = el.requestFullscreen || el.webkitRequestFullscreen;
-            if (!request) return false;
-            try {
-                await request.call(el, { navigationUI: 'hide' });
-                return true;
-            } catch (e) {
-                // Safari's webkit spelling rejects the options object on some
-                // versions; the bare call is the one a gesture already unlocked.
-                try { await request.call(el); return true; }
-                catch (e2) { return false; }
-            }
-        },
-        watchFullscreen() {
-            const check = () => this.checkFullscreen();
-            document.addEventListener('fullscreenchange', check);
-            document.addEventListener('webkitfullscreenchange', check);
-            // Neither event is guaranteed for a restored or minimised window: some
-            // browsers fire only `resize`, some fire nothing at all, and a window
-            // manager drag can leave `resize` until the drag ends. So the state is
-            // also sampled. Two seconds is short enough that nothing can be read
-            // or answered from a restored window, and a sample costs one property
-            // read.
-            window.addEventListener('resize', () => {
-                clearTimeout(this._fsResizeTimer);
-                this._fsResizeTimer = setTimeout(check, 400);
-            });
-            this._fsWatch = setInterval(check, 2000);
-        },
-        checkFullscreen() {
-            if (this.submitted) {
-                if (this._fsWatch) { clearInterval(this._fsWatch); this._fsWatch = null; }
-                return;
-            }
-            if (!this._antiCheatArmed || !this.antiCheat.enabled) return;
-            if (!this.antiCheat.fullscreen_required || !this._fsSupported()) return;
-            if (!this._isFocusTab) return;   // the tab in front is the one that counts
-            // A hidden document is a minimise or a tab switch, and the visibility
-            // path below already charges for that. Charging here as well would
-            // bill one minimise twice, which is the unfairness this whole ladder
-            // has to avoid to stay usable.
-            if (document.hidden) return;
-
-            if (this._fsElement()) {
-                clearTimeout(this._fsLossTimer);
-                this._fsLossTimer = null;
-                // Reaching fullscreen from outside is the student establishing it.
-                // Arriving *already* in fullscreen is not: a reload keeps the
-                // state, and the browser drops it again on its own once the new
-                // document is live. Treating that as established billed a reload
-                // — an act the exam page explicitly supports for crash recovery —
-                // as leaving the exam. Only a fullscreen the student reached from
-                // outside starts counting, so pressing Esc afterwards is charged
-                // while a reload is not.
-                if (this._fsWasAbsent) this._sawFullscreen = true;
-                this.fullscreenBlocked = false;
-                this.fullscreenRetryFailed = false;
-                this._hiddenAbsenceCharged = false;
-                return;
-            }
-            this._fsWasAbsent = true;
-
-            // agreeExam() asks for fullscreen on the same click that arms this,
-            // and the request resolves a moment later. Charging before it lands
-            // would penalise the act of starting the exam.
-            if (!this._sawFullscreen && (Date.now() - this._fsArmedAt) < this._fsGraceMs) return;
-
-            // The overlay goes up either way: being out of fullscreen is not
-            // allowed, whether or not this particular absence was already billed.
-            //
-            // One absence costs one violation however many times it is sampled.
-            // This is sampled every two seconds *and* re-checked on every
-            // fullscreenchange and resize, so charging per call billed a single
-            // Esc press several times over and walked the student to auto-submit
-            // in seconds. The flag is cleared the moment fullscreen is regained,
-            // which is what makes the next absence a new one.
-            if (this.fullscreenBlocked) return;
-            this.fullscreenBlocked = true;
-            // The blocker covers the paper, so it covers the magnifier too.
-            this.closePageZoom();
-            // A page that was *loaded* outside fullscreen has nothing to charge.
-            // A reload, a crash recovery, or a request the browser denied all land
-            // here, and none of them is an act of leaving the exam — the exam page
-            // explicitly supports recovering a session, so billing that would
-            // punish using a supported feature. It is still blocked (the exam
-            // cannot be worked from a windowed browser), and the one click that
-            // raises the overlay is exactly the gesture that grants fullscreen
-            // again, so the way out is one press away.
-            if (!this._sawFullscreen) return;
-            if (this._hiddenAbsenceCharged) {
-                this._hiddenAbsenceCharged = false;
-                return;
-            }
-            // A rotation can take fullscreen away as a side effect, and on some
-            // devices that is the *only* reason it went. While the transition is
-            // in flight this absence is not the pupil's: it is recorded (once,
-            // for the teacher's log) and `_endRotationWindow()` decides when the
-            // screen has settled whether it outlived its explanation. The overlay
-            // is already up — `fullscreenBlocked` was set above — so forgiving the
-            // penalty here cannot expose a question.
-            if (this._isRotationWindow()) {
-                if (!this._rotationForgiven) {
-                    this._rotationForgiven = true;
-                    this.recordNotCharged('orientation_shift',
-                                          'rotation_while_out_of_fullscreen');
-                }
-                return;
-            }
-            if (this._platformLosesFullscreenOnRotation()) {
-                // Tablet browsers can emit fullscreenchange BEFORE the rotation
-                // signal. Block immediately, but let that bounded transition
-                // identify itself before charging. A resize alone cannot do so.
-                this._fsLossTimer = setTimeout(() => {
-                    this._fsLossTimer = null;
-                    if (this.submitted || !this.antiCheat.enabled ||
-                        !this.antiCheat.fullscreen_required || !this._isFocusTab ||
-                        document.hidden || this._fsElement() || !this.fullscreenBlocked) return;
-                    this.handleViolation('fullscreen_exit');
-                }, this.rotationGraceMs);
-                return;
-            }
-            this.handleViolation('fullscreen_exit');
-        },
-        // ─── Orientation: the transition, told apart from the act ────────────
-        //
-        // Browser event order differs: listen to native orientation and media
-        // signals, but verify the device angle before forgiving a loss. A window
-        // resize or keyboard opening can change the CSS aspect ratio without a
-        // device turn, and must not cancel a genuine fullscreen-exit charge.
         watchOrientation() {
             this._lastScreenOrientation = this._screenOrientation();
             const shift = (event) => {
@@ -3968,90 +3738,10 @@ function examApp(duration, totalQ) {
             // reading the log should be able to see the screen was turned, not
             // infer it from a penalty that should not be there.
             this._ev('orientation_shift');
-            if (!this.antiCheat.enabled) return;
-            if (this._fsLossTimer != null) {
-                clearTimeout(this._fsLossTimer);
-                this._fsLossTimer = null;
-                // The pending fullscreen loss has now been explained by a real
-                // device turn. Keep the overlay and file just one uncharged row.
-                if (this.fullscreenBlocked && !this._rotationForgiven) {
-                    this._rotationForgiven = true;
-                    this.recordNotCharged('orientation_shift',
-                                          'rotation_while_out_of_fullscreen');
-                }
-            }
-            this._rotationGraceUntil = Date.now() + this.rotationGraceMs;
-            // Most browsers will let the page back in now, having taken it away
-            // themselves; one that will not resolves false and the overlay's own
-            // button is the gesture that grants it.
-            this._tryAutoRefullscreen();
-            clearTimeout(this._rotationTimer);
-            this._rotationTimer = setTimeout(() => this._endRotationWindow(),
-                                             this.rotationGraceMs + 100);
         },
-        _isRotationWindow() {
-            return this._rotationGraceUntil > 0 && Date.now() < this._rotationGraceUntil;
-        },
-        _endRotationWindow() {
-            this._rotationGraceUntil = 0;
-            if (!this._rotationForgiven) return;
-            this._rotationForgiven = false;
-            if (this.submitted) return;
-            if (this._fsElement()) return;          // it came back: nothing happened
-            // A hidden document or a tab that no longer owns the sitting is billed
-            // by its own handler; charging it here would bill one absence twice.
-            if (!this._isFocusTab || document.hidden) return;
-            if (this._platformLosesFullscreenOnRotation()) {
-                // The device drops fullscreen on a turn and cannot give it back
-                // without a fresh gesture, which a rotation is not. Charging would
-                // be billing the pupil for their tablet; the row is already in the
-                // log (see checkFullscreen) and the overlay's button is the way
-                // back. The paper stays blocked either way, so this forgives a
-                // penalty and nothing else.
-                return;
-            }
-            // Everywhere else the rotation cannot be the whole explanation: the
-            // state either came back by itself or the absence is the pupil's.
-            this.handleViolation('fullscreen_exit', 'rotation');
-        },
-        // Whether this platform's fullscreen is *dropped by a rotation* rather than
-        // kept across it, and cannot be re-entered without a fresh gesture. Android
-        // tablet browsers can do this too; an automatic request can be denied for
-        // lacking user activation. The overlay remains mandatory on both platforms.
-        _platformLosesFullscreenOnRotation() {
-            let ua = '', platform = '', touch = 0;
-            try {
-                ua = navigator.userAgent || '';
-                platform = navigator.platform || '';
-                touch = navigator.maxTouchPoints || 0;
-            } catch (e) { return false; }
-            return /iPad|iPhone|iPod/.test(ua) || (platform === 'MacIntel' && touch > 1)
-                || (/Android/.test(ua) && touch > 0);
-        },
-        _tryAutoRefullscreen() {
-            if (this.submitted) return;
-            if (!this.antiCheat.enabled || !this.antiCheat.fullscreen_required) return;
-            if (!this._fsSupported() || this._fsElement()) return;
-            Promise.resolve(this.requestExamFullscreen()).catch(() => {});
-        },
-        async resumeFullscreen() {
-            this.fullscreenRetryFailed = false;
-            const granted = await this.requestExamFullscreen();
-            if (!granted) this.fullscreenRetryFailed = true;
-            // Re-read rather than assume: some browsers resolve the promise without
-            // the element actually becoming fullscreen.
-            this.checkFullscreen();
-        },
-        // The one way back from the away-blur. The click is also the user gesture
-        // the browser needs, so it re-requests fullscreen when that was dropped
-        // while the student was away — otherwise they would clear one panel only
-        // to meet the other, and the second click would be the one that grants it.
-        async returnToExam() {
+        returnToExam() {
             this.endAway();
             this.awayBlurred = false;
-            if (this.antiCheat.fullscreen_required && this._fsSupported() && !this._fsElement()) {
-                await this.resumeFullscreen();
-            }
         },
         // ─── The second chance ─────────────────────────────────────────────────
         //
@@ -4070,8 +3760,7 @@ function examApp(duration, totalQ) {
         //     seen, so the grace can only forgive a penalty and never expose a
         //     question;
         //   * **one absence, one charge** — a countdown already running *is* this
-        //     absence (the visibility path, the window-blur path and the fullscreen
-        //     sampler must not each open one for the same act), and an absence that
+        //     absence (the visibility and window-blur handlers share it), and an absence that
         //     has already been charged cannot be charged again;
         //   * **the chances are counted, not assumed** — `graceUsed` is spent on
         //     each forgiven return, and once they are gone the absence is charged
@@ -4087,6 +3776,7 @@ function examApp(duration, totalQ) {
         startAwayGrace(kind, trigger, since) {
             if (this.submitted || !this.antiCheat.enabled) return;
             if (!this._isFocusTab) return;   // the tab in front is the one that counts
+            this.closePageZoom();
             this.awayBlurred = true;
             if (this.graceLeft > 0) return;  // a countdown is already this absence
             if (this.awayCharged) return;    // this absence has already cost a point
@@ -4191,7 +3881,7 @@ function examApp(duration, totalQ) {
         // alone, so the metrics that need the pupil's own view — offline time,
         // answer changes, per-question dwell — had no source at all and read as
         // `NULL` on every dashboard. This buffer is that source. It decides
-        // nothing: the server records, locking stays fullscreen/tab-switch, and the
+        // nothing: the server records, locking stays tab-switch/window-blur, and the
         // penalties stay with the ladder that already owns them.
         //
         // Two rules keep it honest. The numbers start at 1,000,000 so they cannot
@@ -4292,10 +3982,6 @@ function examApp(duration, totalQ) {
                     this._blurTimer = setTimeout(() => {
                         if (!this._isFocusTab || this.submitted) return;
                         if (!document.hidden) return;
-                        // A minimise is handled here, and only here: checkFullscreen()
-                        // skips a hidden document so the same absence is not billed
-                        // twice, and reads this flag when it raises the overlay.
-                        this._hiddenAbsenceCharged = true;
                         // The blur, then the countdown — not the charge. This is
                         // the shape a phone call takes, and it is the absence the
                         // second chance exists for. Same fairness rule as before:
@@ -4307,19 +3993,15 @@ function examApp(duration, totalQ) {
                     if (this._blurTimer) { clearTimeout(this._blurTimer); this._blurTimer = null; }
                     // Back at the paper. A countdown still running is one the
                     // student beat, so it is spent here rather than waited out.
-                    this.endAway();
+                    if (this._awayIsOver()) this.endAway();
                     this.claimExamFocus();
-                    // Coming back to a window that is not fullscreen has to be
-                    // caught here: the state changed while the page was hidden and
-                    // the sample interval was not running.
-                    this.checkFullscreen();
                 }
             });
             // ─── The window is still on screen, and is no longer the one being
             //     looked at ───
             // This is the case the page could not see at all. A restored-down
             // browser beside another window leaves `document.hidden` false, so
-            // neither the visibility path nor the fullscreen check fired when the
+            // the visibility path alone did not fire when the
             // student turned to something else — the paper sat legible next to it
             // and nothing was recorded. The same panel the hidden path raises goes
             // up here, charged on the same ladder, after the same debounce, so a
@@ -4356,31 +4038,18 @@ function examApp(duration, totalQ) {
                     if (!this._isFocusTab || this.submitted || document.hidden) return;
                     if (document.hasFocus()) return; // focus may return without a focus event
                     if (examTouchScrollAt > gone) return;
-                    // Not while the fullscreen panel is up: that absence is already
-                    // charged, and the paper behind it is already unreadable.
-                    if (this.fullscreenBlocked) return;
                     this.startAwayGrace('focus_lost', 'window_blur', gone);
                 }, 1500);
             });
             window.addEventListener('focus', () => {
+                if (document.hidden) return;
                 if (this._awayTimer) { clearTimeout(this._awayTimer); this._awayTimer = null; }
                 if (this._blurTimer) { clearTimeout(this._blurTimer); this._blurTimer = null; }
                 // The student is back in the exam window: the absence is over, so
                 // nothing is left to time out.
                 this.endAway();
             });
-            // Fullscreen: mandatory and blocking. This used to be a banner that
-            // promised no penalty, which is why a window restored or minimised
-            // during an exam was not caught by anything at all.
-            this._fsArmedAt = Date.now();
-            // Installed whenever the ladder is armed, not only when fullscreen is
-            // required: the timeline should show a turned screen on every paper,
-            // because it is what makes an absence beside it readable.
             this.watchOrientation();
-            if (this.antiCheat.fullscreen_required && this._fsSupported()) {
-                this.watchFullscreen();
-                this.checkFullscreen();
-            }
             if (this.antiCheat.block_right_click) {
                 document.addEventListener('contextmenu', (e) => e.preventDefault());
             }
@@ -4437,8 +4106,7 @@ function examApp(duration, totalQ) {
         // the page actually saw (`visibilitychange`, `window_blur`);
         // `awaySeconds` is how long the student was actually gone, and it is the
         // only evidence of the countdown that exists on the server's side — null
-        // means this absence was charged the moment it was seen (the fullscreen
-        // panel, or a student out of second chances). Every charged kind climbs
+        // means this absence was charged when it was seen. Every charged kind climbs
         // the one ladder (see PENALIZED_VIOLATION_TYPES), and the teacher's report
         // can only tell them apart if the client names the right one — so the kind
         // is what the report prints and the trigger is the detail behind it.
@@ -4497,37 +4165,6 @@ function examApp(duration, totalQ) {
                 // or by seedViolationCount() after a reload.
             });
         },
-        // A row the teacher can read that is not a rung on the ladder.
-        //
-        // It goes to the same endpoint — one record, one place to look — but
-        // through none of `handleViolation`: the local count, the banner and the
-        // auto-submit *are* the ladder, and a rotation is not on it. The response
-        // is deliberately ignored for the same reason; there is nothing in it that
-        // this row could change, and reconciling the ladder from it would be the
-        // double-count this function exists to avoid. The server decides what
-        // counts: a kind outside PENALIZED_VIOLATION_TYPES is stored and never
-        // charged (see `_as_event`).
-        recordNotCharged(kind, trigger) {
-            if (this.submitted) return;
-            const token = this._csrfToken();
-            try {
-                fetch('/api/violation/log', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json', 'X-CSRF-Token': token},
-                    keepalive: true,
-                    body: JSON.stringify({
-                        _csrf_token: token,
-                        logs: [{
-                            exam_id: '{{ exam.id }}',
-                            violation_type: kind,
-                            timestamp: Date.now() / 1000,
-                            metadata: {violation_count: this.violationCount, trigger: trigger,
-                                       charged: false},
-                        }],
-                    }),
-                }).catch(() => {});
-            } catch (e) { /* evidence, never the paper */ }
-        },
         _applyViolationBanner(n, kind = 'tab_switch') {
             if (n <= 0) return;
             this._bannerCount = n;
@@ -4549,8 +4186,7 @@ function examApp(duration, totalQ) {
             }
             const n = this._bannerCount;
             const base = this.antiCheat.penalty_per_violation || 5;
-            const act = this._bannerKind === 'fullscreen_exit' ? sgT('keluar dari layar penuh','left fullscreen')
-                : this._bannerKind === 'focus_lost' ? sgT('meninggalkan jendela ujian','left the exam window')
+            const act = this._bannerKind === 'focus_lost' ? sgT('meninggalkan jendela ujian','left the exam window')
                 : sgT('berpindah tab','switched tab');
             if (n === 1) {
                 this.violationMessage = sgT('PERINGATAN! Anda ','WARNING! You ') + act + sgT('. Pelanggaran berikutnya akan dikenakan penalti.','. The next violation carries a penalty.');
@@ -4703,7 +4339,7 @@ function examApp(duration, totalQ) {
         // ─── Reading size (`app/static/js/exam-view.js`) ─────────────────────
         // The scale is written to one CSS custom property on the exam stage. It is
         // *not* the browser's zoom and it is not a viewport change: the anti-cheat
-        // ladder watches `resize`, `fullscreenchange` and `visibilitychange`, and a
+        // ladder watches window focus and document visibility, and a
         // custom property raises none of them — so a pupil cannot be charged for
         // making the text bigger, and pinch-zoom is left alone on top of it.
         _view() {
@@ -4748,7 +4384,7 @@ function examApp(duration, totalQ) {
                         document.getElementById('sg-exam-lightbox-img'), src);
         },
         // The magnified page sits on the maximized-viewer layer, which is above
-        // the fullscreen blocker's scrim — so losing fullscreen has to take the
+        // the away panel's scrim — so leaving the exam has to take the
         // magnifier with it. Otherwise a pupil who left the exam could carry on
         // reading the paper through the overlay while the answers behind it were
         // blocked, which is the one thing the blocker exists to stop.
@@ -4853,14 +4489,14 @@ function examApp(duration, totalQ) {
         // and a bare method name is a truthy function object — `!chromeHidden` then reads
         // as false for ever, which hid the whole column instead of showing it.
         // True while a panel stands between the student and the paper: the
-        // fullscreen blocker or the away-blur. Both cover the exam bar, so the
-        // strip is lifted above them — otherwise a student who lost fullscreen is
+        // away panel, which covers the exam bar. The
+        // strip is lifted above it — otherwise a student who left the exam is
         // asked to fix it in a language they may not read, on a page that will not
         // say who they are, with no way to quiet the alerts.
         get paperBlocked() {
-            return !this.submitted && (this.fullscreenBlocked || this.awayBlurred);
+            return !this.submitted && this.awayBlurred;
         },
-        // The strip is lifted for the two blockers, and for the terms agreement:
+        // The strip is lifted for the away panel and for the terms agreement:
         // the agreement is the first screen of the sitting, and the language control
         // it needs is on this row, so the strip has to be reachable through it too.
         get stripLifted() {
@@ -6938,15 +6574,12 @@ function examApp(duration, totalQ) {
             this.showExamAgreement = false;
             try { localStorage.setItem(sgLS('sg_agreed_'), '1'); } catch(e) {}
             {% if not preview %}
-            // Ask for fullscreen first — this click is the user gesture the
-            // browser requires — then arm, which is what starts watching it.
-            this.requestExamFullscreen();
             // The exam has started: this is when the anti-cheat may begin watching.
             this.armAntiCheat();
             {% else %}
             // This card still appears in a preview when the browser has not agreed
             // before, and dismissing it is the whole of what it may do here: a
-            // preview never asks for fullscreen and never arms a watcher.
+            // preview never arms a watcher.
             {% endif %}
         },
         toggleCalculator() { this.showGraph = false; this.showCalculator = !this.showCalculator; },

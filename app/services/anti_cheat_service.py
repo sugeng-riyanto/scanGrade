@@ -43,70 +43,9 @@ TIMESTAMP_TOLERANCE = 900
 AWAY_GRACE_SECONDS = 10
 AWAY_GRACE_CHANCES = 2
 
-# Leaving the exam counts, however it is left.
-#
-# `tab_switch` is switching tabs or apps. `fullscreen_exit` is leaving the
-# required fullscreen state — pressing Esc, restoring the window down, or
-# minimising it — which the exam page now blocks behind an overlay rather than
-# only announcing. Both are the same act from the school's point of view
-# (the assessment is no longer on the screen it was put on), so they share the
-# one ladder: a student's first offence of either kind is the warning, and the
-# penalty starts from the second.
-#
-# `fullscreen_exit` used to be recorded but not counted, because the page
-# promised it carried no penalty. That promise is gone: fullscreen is mandatory
-# during an assessed exam, and the page says so on its agreement screen. Rows
-# written under the old policy are indistinguishable in the table, which is why
-# the reason lives here rather than in a migration note.
-# `focus_lost` is the third, and it is the one the away-blur exists for: the
-# exam window is still *on* the screen, it is just no longer the window the
-# student is attending to — a restored-down browser beside another application,
-# or a click on the desktop. The paper is blurred in that state, and the blur
-# used to be the whole of it: the window-blur handler logged a line to the
-# console and recorded nothing, so a student could read the paper off a windowed
-# exam for a whole sitting with no charge and, more to the point for the school,
-# no record that it happened. It is charged on the same ladder as a tab switch,
-# because from the school's point of view it is the same act: the assessment is
-# no longer the thing being looked at. One absence is still one charge — the
-# fullscreen overlay and the hidden-document path each own their own case, and
-# the guards below keep one absence from being billed by two of them.
-PENALIZED_VIOLATION_TYPES = ("tab_switch", "fullscreen_exit", "focus_lost")
-
-# ── A rotated screen is not a pupil who left ─────────────────────────────────
-#
-# Reported from a tablet lab: a pupil who turned the screen was walked down the
-# same ladder as a pupil who left the exam. Rotating *does* drop the fullscreen
-# state on several tablet browsers — it is a side effect of the transition, not
-# an act — and the page charged it as `fullscreen_exit` because nothing in the
-# detection knew an orientation change had just happened.
-#
-# So the page now watches the orientation itself, and a fullscreen loss that
-# lands inside this window is treated as the transition's rather than the
-# pupil's: the overlay still goes up at once (the protection never waits — the
-# same rule the away-grace above rests on), but nothing is charged. What happens
-# when the window closes is the part that stops this being a free window:
-#
-#   * **it came back on its own** — every browser that can re-enter without a
-#     fresh gesture — and nothing happened at all;
-#   * **it did not, on a platform that holds fullscreen across a rotation** — the
-#     absence outlived its explanation, so it is charged as the real exit it is;
-#   * **it did not, on a platform whose fullscreen a rotation *drops* and which
-#     cannot re-enter without a fresh gesture** (iPadOS Safari) — charging there
-#     would bill a pupil for their device. It is recorded instead, as
-#     `orientation_shift`: present in the teacher's record, absent from the
-#     ladder.
-#
-# The window is deliberately short. It has to cover a device's rotation
-# animation and the browser's own `fullscreenchange`, and anything longer would
-# be a window in which a pupil could keep the paper on screen by rocking the
-# tablet.
-ROTATION_GRACE_SECONDS = 1.5
-
-#: A rotation the page saw while the paper was out of fullscreen. Recorded, never
-#: counted: `_as_event` marks any kind outside PENALIZED_VIOLATION_TYPES as
-#: `charged: False`, so it appears in the teacher's record with its own label and
-#: adds nothing to the ladder. Kept as a name rather than a literal because three
-#: files spell it — the page sends it, the report labels it, the tests pin it.
+# Fullscreen exits remain visible in historical reports. The penalty ladder
+# counts absences from the exam tab or window.
+PENALIZED_VIOLATION_TYPES = ("tab_switch", "focus_lost")
 ORIENTATION_SHIFT = "orientation_shift"
 
 #: How a recorded kind reads to a teacher, as an (Indonesian, English) pair.
@@ -436,7 +375,7 @@ def calculate_graduated_penalty(
 
     Args:
         violation_count: Charged violations, per PENALIZED_VIOLATION_TYPES — a tab
-            switch or leaving fullscreen, both counted by
+            switch or a window blur, both counted by
             count_penalized_violations().
         exam_settings: Dict with anti_cheat settings from exam record.
 

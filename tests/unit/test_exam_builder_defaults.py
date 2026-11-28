@@ -33,7 +33,7 @@ INVENTORY_FIELDS = (
     "total_questions", "question_types", "answer_key", "question_weights",
     "question_pages", "question_audio", "question_cognitive",
     "penalty_per_violation", "max_violations",
-    "fullscreen_required", "watermark_name", "block_copy_paste",
+    "watermark_name", "block_copy_paste",
     "block_right_click", "auto_submit_on_max", "allow_calculator",
     "block_screenshot", "randomize_questions", "randomize_options", "action",
 )
@@ -184,7 +184,7 @@ class TestDisclosureRemovedNothing:
     def test_the_same_checkbox_can_always_be_un_checked(self):
         src = TEMPLATE.read_text(encoding="utf-8")
         # The anti-cheat switches stay real checkboxes even behind the expander.
-        for field in ("fullscreen_required", "block_copy_paste", "randomize_options"):
+        for field in ("block_copy_paste", "randomize_options"):
             assert f'type="checkbox"' in src
             assert field in src
 
@@ -202,7 +202,7 @@ class TestStructureAndIndicators:
         src = TEMPLATE.read_text(encoding="utf-8")
         assert "penalty_per_violation" in src and "max_violations" in src
         assert "acDetail" not in src, "an anti-cheat switch is behind an expander again"
-        for field in ("fullscreen_required", "allow_calculator", "block_screenshot"):
+        for field in ("allow_calculator", "block_screenshot"):
             assert f'name="{field}"' in src
 
     def test_the_auto_fill_badge_exists_and_clears_on_touch(self):

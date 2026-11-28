@@ -2879,11 +2879,10 @@ def _markers() -> dict:
     smoke = _smoke_module()
     template = TAKE_EXAM.read_text(encoding="utf-8")
     markers = {
-        "FULLSCREEN_PANEL": smoke.FULLSCREEN_PANEL,
-        "FULLSCREEN_WORDS": smoke.FULLSCREEN_WORDS,
+        "WINDOWED_WORDS": smoke.WINDOWED_WORDS,
         "AWAY_PANEL": smoke.AWAY_PANEL,
         "AWAY_WORDS": smoke.AWAY_WORDS,
-        "FULLSCREEN_WATCH": smoke.FULLSCREEN_WATCH,
+        "FOCUS_WATCH": smoke.FOCUS_WATCH,
         "AWAY_WATCH": smoke.AWAY_WATCH,
     }
     missing = [name for name, marker in markers.items() if marker not in template]
@@ -2910,14 +2909,13 @@ def _sitting(exam_id: str = EXAM_ID, **overrides) -> str:
     """A sitting page carrying the template's own markers and an armed config."""
     parts = {
         "open": f'<div x-data="examApp(60, 5)" data-exam-id="{exam_id}">',
-        "config": 'antiCheat: {"enabled": true, "penalty_per_violation": 5, '
-                  '"fullscreen_required": true},',
+        "config": 'antiCheat: {"enabled": true, "penalty_per_violation": 5},',
         "grace": "graceSeconds: 10,",
         **_markers(),
     }
     parts.update(overrides)
-    order = ("open", "config", "grace", "FULLSCREEN_PANEL", "FULLSCREEN_WORDS",
-             "AWAY_PANEL", "AWAY_WORDS", "FULLSCREEN_WATCH", "AWAY_WATCH")
+    order = ("open", "config", "grace", "WINDOWED_WORDS",
+             "AWAY_PANEL", "AWAY_WORDS", "FOCUS_WATCH", "AWAY_WATCH")
     return ("<html><body>" + "".join(parts[name] for name in order)
             + "</body></html>")
 
@@ -2967,8 +2965,8 @@ def test_smoke_opens_the_demo_exam_and_reads_both_panels():
 
 
 @pytest.mark.parametrize("case", [
-    "FULLSCREEN_PANEL", "FULLSCREEN_WORDS", "AWAY_PANEL", "AWAY_WORDS",
-    "FULLSCREEN_WATCH", "AWAY_WATCH",
+    "WINDOWED_WORDS", "AWAY_PANEL", "AWAY_WORDS",
+    "FOCUS_WATCH", "AWAY_WATCH",
 ])
 def test_the_exam_check_bites_when_the_page_loses_a_panel(case):
     """Each marker is one way the supervision can silently disappear."""
@@ -2981,8 +2979,7 @@ def test_the_exam_check_bites_when_the_page_loses_a_panel(case):
     # Anti-cheat off: the whole ladder is gated on it, so neither panel would ever
     # be revealed however intact the markup is.
     ('"enabled": true', '"enabled": false'),
-    # Fullscreen not required: the blocker is gated on this one.
-    ('"fullscreen_required": true', '"fullscreen_required": false'),
+    ('"penalty_per_violation": 5', '"penalty_per_violation": 5, "fullscreen_required": true'),
     # No countdown: the away blur would be an instant fine, which is not what the
     # page promises a student.
     ("graceSeconds: 10", "graceSeconds: 0"),

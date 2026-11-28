@@ -2063,7 +2063,6 @@
                     recorded_violations: {{ recorded_violations|default(0) }},
                     penalty_per_violation: {{ exam.get('penalty_per_violation', 5) if exam else 5 }},
                     max_violations: {{ exam.get('max_violations', 5) if exam else 5 }},
-                    fullscreen_required: {{ 'true' if (exam.get('fullscreen_required') if exam else True) else 'false' }},
                     watermark_name: {{ 'true' if (exam.get('watermark_name') if exam else True) else 'false' }},
                     block_copy_paste: {{ 'true' if (exam.get('block_copy_paste') if exam else True) else 'false' }},
                     block_right_click: {{ 'true' if (exam.get('block_right_click') if exam else True) else 'false' }},
@@ -2142,15 +2141,8 @@
                         <span x-text="t('Penalti','Penalty') + ' ' + penalty_per_violation"></span>
                         <span>&middot;</span>
                         <span x-text="t('Maks pelanggaran','Max violations') + ' ' + max_violations"></span>
-                        <span>&middot;</span>
-                        <span :class="fullscreen_required ? 'text-emerald-600 font-bold' : 'text-slate-400'" x-text="'Fullscreen ' + (fullscreen_required ? 'on' : 'off')"></span>
                     </div>
                     <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs sm:text-sm">
-                        <label class="flex items-center gap-2 p-2.5 rounded-xl border-2 cursor-pointer transition"
-                               :class="fullscreen_required ? 'border-primary-300 bg-primary-50' : 'border-slate-200'">
-                            <input type="checkbox" x-model="fullscreen_required" name="fullscreen_required" value="true" class="w-4 h-4 text-primary-600 rounded">
-                            <span class="font-bold text-slate-700" x-text="t('Wajib Fullscreen','Fullscreen required')"></span>
-                        </label>
                         <label class="flex items-center gap-2 p-2.5 rounded-xl border-2 cursor-pointer transition"
                                :class="watermark_name ? 'border-primary-300 bg-primary-50' : 'border-slate-200'">
                             <input type="checkbox" x-model="watermark_name" name="watermark_name" value="true" class="w-4 h-4 text-primary-600 rounded">
