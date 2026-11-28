@@ -33,7 +33,7 @@ from app.services import teacher_assignments as ta_service
 from app.utils.rate_limiter import limiter
 from app.utils.req_cache import (active_whiteboards_for, class_row, memo,
                                  school_features, subjects_for_class,
-                                 teachers_for_class)
+                                 teachers_for_class, ttl)
 from app.decorators.year_lock import open_year_required
 
 student_bp = Blueprint("student", __name__)
@@ -170,8 +170,30 @@ def _offerable(exam, student_class_id, draft_exam_ids, now=None, included_exam_i
     return True
 
 
-def _rate_limit(n):
-    return limiter.limit(n) if limiter else (lambda f: f)
+def _rate_limit(n, *, key_func=None):
+    return limiter.limit(n, key_func=key_func) if limiter else (lambda f: f)
+
+
+def _sitting_rate_key():
+    # These views run inside login_required. Limit each authenticated student
+    # independently because an entire school can share one public IP.
+    return f"student:{g.user_id}"
+
+
+def _published_exam_cards(supabase, school_id):
+    """Reuse school-wide card metadata briefly during simultaneous exam entry."""
+    def load():
+        query = supabase.table("exams").select(
+            "id,title,subject,start_at,end_at,auto_submit_on_window_end,class_ids,"
+            "target_mode,question_types,total_questions,duration_minutes,school_year_id"
+        ).eq("is_published", True).eq("status", "active")
+        if school_id:
+            query = query.eq("school_id", school_id)
+        return read_with_retry(query.order("created_at", desc=True).execute).data or []
+
+    rows = ttl(f"student:published-exam-cards:{school_id}", 5, load) if school_id else load()
+    # Rendering attaches per-student state. The in-process cache shares objects.
+    return [dict(row) for row in rows]
 
 
 @student_bp.route("/dashboard")
@@ -229,13 +251,7 @@ def dashboard():
     draft_ids = {s["exam_id"] for s in subs if s.get("status") == "draft"}
 
     try:
-        query = supabase.table("exams").select("id,title,subject,start_at,end_at,auto_submit_on_window_end,class_ids,target_mode,question_types,total_questions,duration_minutes,school_year_id").eq("is_published", True).eq("status", "active")
-        if student_school_id:
-            query = query.eq("school_id", student_school_id)
-        # Same rule as the door the pupil walks through (`exam_sitting_allowed`),
-        # from the same function: an exam is offered to the classes the teacher
-        # assigned it to, and to nobody else.
-        all_exams = read_with_retry(query.execute).data or []
+        all_exams = _published_exam_cards(supabase, student_school_id)
         # The per-pupil lists, in one query for the whole page.
         _target_ids = [e["id"] for e in all_exams if e.get("target_mode") == "students"]
         _included = exam_targets.included_exam_ids(supabase, g.user_id, _target_ids) \
@@ -502,17 +518,7 @@ def exam_list():
     now = datetime.now(timezone.utc)
     exams = []
     try:
-        # Only the columns the card renders: `select("*")` shipped the whole exam
-        # row — which carries question_canvas JSON — to every student's browser
-        # context, and made the response bigger to parse for nothing.
-        # `class_ids` belongs in this column list: the filter below reads it, and
-        # leaving it out made every row look unassigned. `not cids` then matched
-        # every exam in the school, so a pupil in X-B was shown the papers for X-A
-        # and XI-A and had all three refused one click later.
-        query = supabase.table("exams").select("id,title,subject,class_ids,target_mode,question_types,total_questions,duration_minutes,start_at,end_at,auto_submit_on_window_end").eq("is_published", True).eq("status", "active")
-        if student_school_id:
-            query = query.eq("school_id", student_school_id)
-        all_exams = read_with_retry(lambda: query.order("created_at", desc=True).execute()).data or []
+        all_exams = _published_exam_cards(supabase, student_school_id)
         _target_ids = [e["id"] for e in all_exams if e.get("target_mode") == "students"]
         _included = exam_targets.included_exam_ids(supabase, g.user_id, _target_ids) \
             if _target_ids else set()
@@ -780,7 +786,7 @@ def take_exam(exam_id):
 
 @student_bp.route("/attempt-status/<exam_id>", methods=["GET"])
 @login_required
-@_rate_limit("60 per minute")
+@_rate_limit("60 per minute", key_func=_sitting_rate_key)
 def attempt_status(exam_id):
     """The server's own answer about this sitting — the one source of truth.
 
@@ -808,7 +814,7 @@ def attempt_status(exam_id):
 
 @student_bp.route("/heartbeat/<exam_id>", methods=["POST"])
 @login_required
-@_rate_limit("30 per minute")
+@_rate_limit("30 per minute", key_func=_sitting_rate_key)
 def attempt_heartbeat(exam_id):
     """Record one liveness ping while the paper is open. Never locks anything.
 
